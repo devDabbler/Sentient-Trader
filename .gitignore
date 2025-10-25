@@ -65,4 +65,14 @@ logs/
 trading_signals.log
 
 # Databases
-data/*.db
+# data/*.db
+
+# Excluded directories
+tests/
+documentation/
+examples/
+demos/
+scripts/
+
+# Cursor
+.cursorignore

@@ -13,3 +13,4 @@ matplotlib
 ib_insync>=0.9.86
 discord.py>=2.3.0
 pyqlib
+supabase>=2.0.0
