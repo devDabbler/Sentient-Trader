@@ -822,7 +822,7 @@ class AdvancedOpportunityScanner:
                     signals.append("Merger-related news detected")
             
             # News volume spike
-            if analysis.news and len(analysis.news) > 5:  # More than 5 recent news items
+            if analysis.recent_news and len(analysis.recent_news) > 5:  # More than 5 recent news items
                 merger_score += 5
                 signals.append("High news activity")
             
