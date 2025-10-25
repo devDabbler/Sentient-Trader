@@ -73,6 +73,7 @@ documentation/
 examples/
 demos/
 scripts/
+archive/
 
 # Cursor
 .cursorignore
