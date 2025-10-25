@@ -27,6 +27,7 @@ This platform transforms options trading by combining real-time market data, tec
 - 📅 **Catalyst Detection** - Automatic earnings and event tracking
 - 🔔 **Smart Alerts** - Discord notifications for My Tickers setups + real-time position monitoring
 - 🎯 **Option Alpha Integration** - Direct webhook support for automated execution
+- 🚀 **Advanced Scanner** - 200+ ticker universe, buzzing stock detection, reverse merger candidates, penny stock risk analysis
 
 ---
 
@@ -842,6 +843,273 @@ for trade in trades:
 - Use LLM risk analysis to set appropriate stop losses
 - Diversify across multiple high-confidence opportunities
 - Backtest before deploying new strategies
+
+---
+
+## 🚀 Advanced Opportunity Scanner
+
+The **Advanced Opportunity Scanner** is a powerful tool for discovering top trading opportunities with customizable filters. Perfect for catching buzzing stocks and obscure plays before they rocket!
+
+### **Key Features:**
+
+- **Multiple Scan Types**:
+  - 🎯 All Opportunities - Comprehensive scan
+  - 📈 Options Plays - High IV and volume setups
+  - 💰 Penny Stocks (<$5) - Low-price high-potential plays
+  - 💥 Breakouts - EMA reclaims and technical breakouts
+  - 🚀 Momentum Plays - Strong price movers
+  - 🔥 Buzzing Stocks - Unusual activity detection
+
+- **Advanced Filtering**:
+  - Price range ($0.10 to $500+)
+  - Volume surge detection (2x, 3x, 5x avg)
+  - Momentum filters (% change thresholds)
+  - Score and confidence minimums
+  - Technical filters (Power Zone, EMA Reclaim, Timeframe Alignment)
+  - RSI range selection
+  - IV Rank filters for options
+
+- **Buzzing Stock Detection**:
+  - Unusual volume analysis (3x+ surge)
+  - Volatility spike detection
+  - Consecutive price moves
+  - Gap move identification
+  - Combined buzz score (0-100)
+  - Reverse merger candidate detection
+
+- **Penny Stock Risk Analysis**:
+  - Reverse split history tracking (3-year lookback)
+  - Automatic dilution risk warnings
+  - Split frequency severity assessment
+  - Critical for sub-$1 micro-pennies
+
+- **Extended Universe**:
+  - 200+ tickers including obscure plays
+  - Large cap tech, growth stocks, meme stocks
+  - EV/clean energy, biotech/pharma
+  - Crypto-related, AI/tech emerging
+  - Cannabis, small cap high volatility
+  - SPACs and special situations
+
+### **Quick Filter Presets:**
+
+- **High Confidence Only** (Score ≥70) - Most reliable setups
+- **Ultra-Low Price** (<$1) - Maximum upside potential
+- **Penny Stocks** ($1-$5) - Classic penny stock range
+- **Volume Surge** (>2x avg) - Strong interest plays
+- **Strong Momentum** (>5% change) - Active movers
+- **Power Zone Stocks** - EMA 8>21 setups
+- **EMA Reclaim Setups** - High-probability entries
+
+### **Usage in App:**
+
+1. Navigate to **🚀 Advanced Scanner** tab
+2. Select scan type (Options, Penny Stocks, Buzzing, etc.)
+3. Choose a quick filter preset or customize advanced filters
+4. Set number of results (5-50)
+5. Click **🔍 Scan Markets**
+6. Review opportunities with:
+   - Score, price, volume metrics
+   - Breakout and buzzing indicators
+   - Risk/confidence levels
+   - Sector and market cap info
+7. Export results to CSV for further analysis
+8. Add promising tickers to **⭐ My Tickers** for alerts
+
+### **Programmatic Usage:**
+
+```python
+from services.advanced_opportunity_scanner import (
+    AdvancedOpportunityScanner, 
+    ScanFilters, 
+    ScanType
+)
+
+# Initialize scanner
+scanner = AdvancedOpportunityScanner(use_ai=True)
+
+# Create filters
+filters = ScanFilters(
+    min_price=1.0,
+    max_price=5.0,
+    min_volume_ratio=2.0,  # 2x average volume
+    min_score=65.0,
+    require_power_zone=True,
+    min_rsi=30,
+    max_rsi=70
+)
+
+# Scan for penny stock breakouts
+opportunities = scanner.scan_opportunities(
+    scan_type=ScanType.PENNY_STOCKS,
+    top_n=20,
+    filters=filters,
+    use_extended_universe=True
+)
+
+# Display results
+for opp in opportunities:
+    print(f"{opp.ticker}: Score {opp.score:.1f} | ${opp.price:.2f} ({opp.change_pct:+.1f}%)")
+    print(f"  Reason: {opp.reason}")
+    if opp.is_breakout:
+        print(f"  💥 BREAKOUT: {', '.join(opp.breakout_signals)}")
+    if opp.is_buzzing:
+        print(f"  🔥 BUZZING: {', '.join(opp.buzz_reasons)}")
+```
+
+### **Buzzing Stocks Detection:**
+
+```python
+# Scan for stocks showing unusual activity
+buzzing = scanner.scan_buzzing_stocks(
+    top_n=20,
+    lookback_days=5,
+    min_buzz_score=50.0
+)
+
+for stock in buzzing:
+    print(f"{stock.ticker}: Buzz Score {stock.buzz_score:.0f}")
+    print(f"  {', '.join(stock.buzz_reasons)}")
+```
+
+### **What Makes a Stock "Buzzing"?**
+
+The buzz detection algorithm scores stocks 0-100 based on:
+
+- **Volume Surge (40 pts)**: Recent volume 2-3x+ average
+- **Volatility Spike (30 pts)**: Price swings 1.5-2x+ normal
+- **Consecutive Moves (20 pts)**: Multiple days of >2% moves
+- **Gap Moves (10 pts)**: Gap up/down >3-5%
+
+**Buzz Score Interpretation:**
+- **75-100**: Extremely hot - Major attention
+- **60-74**: Very buzzing - Strong interest
+- **50-59**: Buzzing - Elevated activity
+- **<50**: Normal activity
+
+### **Reverse Split Tracking (Penny Stocks):**
+
+The scanner automatically detects reverse stock splits in penny stocks, especially critical for sub-$1 micro-pennies. Reverse splits often indicate financial distress and can be warning signs of dilution risk.
+
+**What's Tracked:**
+- **Reverse Split History**: Last 3 years of reverse splits with dates and ratios
+- **Recent Reverse Splits**: Flags splits within last 12 months
+- **Risk Warnings**: Automatic severity assessment based on split frequency
+
+**Warning Levels:**
+- ⚠️ **HIGH RISK**: 3+ reverse splits in 3 years - Extreme caution advised
+- ⚠️ **CAUTION**: 2 reverse splits in 3 years - High dilution risk
+- ⚠️ **Recent**: Reverse split within last year - Monitor closely
+- **Previous**: Historical split detected - Note for context
+
+**Example Output:**
+```
+MULN: Score 65.2 | $0.45 (+8.3%)
+  ⚠️ 3 reverse splits in 3y - HIGH RISK
+  Split History: 1:10 on 2024-03-15, 1:25 on 2023-08-22, 1:15 on 2022-11-10
+```
+
+**Why This Matters:**
+- Companies with multiple reverse splits often dilute shareholders repeatedly
+- Sub-$1 stocks with split history have higher bankruptcy risk
+- Pattern indicates inability to maintain listing requirements
+- Useful for risk assessment before entering penny stock positions
+
+**Usage in Scan Results:**
+- Prominently displayed in red error boxes for penny stocks
+- Included in CSV export with split count and warning
+- Filters opportunities by reverse split risk tolerance
+
+### **Reverse Merger Candidate Detection:**
+
+The scanner identifies potential reverse merger candidates using speculation, sentiment analysis, and corporate indicators. Reverse mergers involve shell companies merging with private companies to go public faster than traditional IPOs.
+
+**Detection Algorithm (Score 0-100):**
+
+**1. Shell Company Indicators (40 points)**
+- Micro-cap (<$50M) = 20 pts, Small-cap (<$100M) = 10 pts
+- Low average volume (<100k) = 10 pts (low liquidity)
+- No/minimal revenue = 10 pts (shell characteristic)
+
+**2. Recent Unusual Activity (30 points)**
+- Massive volume spike (>5x) = 20 pts
+- Unusual volume (>3x) = 10 pts  
+- Large price move (>20%) = 10 pts
+
+**3. Sentiment & News Indicators (30 points)**
+- High speculation sentiment + micro-cap = 15 pts
+- Merger-related news keywords detected = 15 pts
+  - Keywords: "merger", "acquisition", "reverse merger", "SPAC", "combination", "transaction", "deal", "takeover", "agreement"
+- High news activity (>5 recent items) = 5 pts
+
+**Merger Candidate Threshold:**
+- Score ≥50 = Flagged as merger candidate
+- Score 50-69 = Possible merger play
+- Score 70-100 = Strong merger candidate signals
+
+**Example Output:**
+```
+PHUN: Score 72.5 | $0.85 (+25.7%)
+  🔄 Reverse Merger Candidate (Score: 72)
+  🔄 Merger Signals: Micro-cap $45.2M, Massive volume 8.2x, 
+      Merger-related news detected, High speculation sentiment
+```
+
+**Why This Matters:**
+- Reverse mergers can lead to explosive price movements (50-500%+)
+- Early detection before merger announcement = profit opportunity
+- High speculation activity often precedes major corporate events
+- Buzzing stocks + merger signals = potential multi-bagger plays
+
+**Integration with Buzzing Scanner:**
+- Merger candidate detection is automatically run on buzzing stocks
+- If buzzing stock is also merger candidate, buzz score receives +10 bonus
+- Merger candidate signals appear in buzzing reasons list
+- Creates "double signal" for highest-probability speculative plays
+
+**Usage:**
+```python
+# Filter for merger candidates
+opportunities = scanner.scan_opportunities(
+    scan_type=ScanType.PENNY_STOCKS,
+    filters=ScanFilters(max_price=2.0, min_volume_ratio=3.0)
+)
+
+# Check for merger candidates
+merger_candidates = [o for o in opportunities if o.is_merger_candidate]
+
+for candidate in merger_candidates:
+    print(f"{candidate.ticker}: Merger Score {candidate.merger_score:.0f}")
+    print(f"  Signals: {', '.join(candidate.merger_signals)}")
+```
+
+**Risk Disclaimer:**
+- Merger candidates are **highly speculative** plays
+- Many shell companies never complete mergers
+- High volatility and dilution risk
+- Due diligence essential - verify news sources
+- Position size should be minimal (1-2% of portfolio max)
+- Set tight stop losses (10-15%)
+
+### **Best Practices:**
+
+1. **Start Broad**: Use "All Opportunities" to see overall market
+2. **Refine**: Apply quick filters to narrow focus
+3. **Cross-Reference**: Compare with your existing analysis
+4. **Monitor Buzzing**: Check daily for emerging plays
+5. **Backtest**: Validate setups with historical data
+6. **Combine with Alerts**: Add top finds to My Tickers for notifications
+7. **Export**: Save results for review and comparison
+
+### **Integration with Other Features:**
+
+- **Works with My Tickers**: Add discoveries to watchlist
+- **Feeds into Analysis**: Click "Full Analysis" for deep dive
+- **Complements ML Scanner**: Use together for maximum confidence
+- **Alert Ready**: Set up alerts on discovered opportunities
+- **CSV Export**: Export for spreadsheet analysis or backtesting
+
+---
 
 ## Design notes & limitations
 

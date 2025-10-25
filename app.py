@@ -1,4 +1,11 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="Sentient Trader",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 import io
 import requests
 import pandas as pd
@@ -31,6 +38,7 @@ from services.top_trades_scanner import TopTradesScanner, TopTrade
 from services.ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrade
 from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
+from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, ScanType, OpportunityResult
 
 # Add caching for better performance with new Streamlit features
 @st.cache_data(ttl=60)  # Cache for 1 minute for more real-time data
@@ -1612,13 +1620,7 @@ def main():
         # Older streamlit versions or bare mode - allow execution but continue.
         pass
 
-    st.set_page_config(
-        page_title="Sentient Trader",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
+        
     # Custom CSS for enhanced visual appeal with new Streamlit features
     st.markdown("""
     <style>
@@ -1870,7 +1872,7 @@ def main():
                 with c3:
                     st.metric("Confidence", f"{conf:.2f}" if isinstance(conf, (int, float)) else conf)
 
-                if st.button("🔎 Open Strategy Analyzer", use_container_width=True):
+                if st.button("🔎 Open Strategy Analyzer", width="stretch"):
                     # Set a flag so the main tabs can react (we can't switch tabs programmatically reliably)
                     st.session_state.goto_strategy_analyzer = True
                     st.rerun()
@@ -1880,10 +1882,11 @@ def main():
             st.info("Run a strategy analysis to see a quick summary here.")
     
     # Main tabs - Reorganized for clarity
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
         "🏠 Dashboard",
         "🔥 Top Options Trades",
         "💰 Top Penny Stocks",
+        "🚀 Advanced Scanner",
         "⭐ My Tickers",
         "🔍 Stock Intelligence", 
         "🎯 Strategy Advisor", 
@@ -1931,7 +1934,7 @@ def main():
         with col3:
             st.write("")
             st.write("")
-            analyze_btn = st.button("🔍 Analyze Stock", type="primary", use_container_width=True)
+            analyze_btn = st.button("🔍 Analyze Stock", type="primary", width="stretch")
         
         # Quick examples with style descriptions
         st.caption("**Examples:** AAPL (blue chip) | SNDL (penny stock) | SPY (ETF) | TSLA (volatile) | Any OTC stock")
@@ -2151,7 +2154,7 @@ def main():
                     confirm_col1, confirm_col2 = st.columns(2)
                     
                     with confirm_col1:
-                        if st.button("✅ Place Order", type="primary", use_container_width=True, key="modal_place_order"):
+                        if st.button("✅ Place Order", type="primary", width="stretch", key="modal_place_order"):
                             with st.spinner("Placing order..."):
                                 try:
                                     # Determine if we can use bracket orders
@@ -2243,7 +2246,7 @@ def main():
                                     logger.error(f"Quick trade error: {e}", exc_info=True)
                     
                     with confirm_col2:
-                        if st.button("❌ Cancel", use_container_width=True, key="modal_cancel"):
+                        if st.button("❌ Cancel", width="stretch", key="modal_cancel"):
                             st.session_state.show_quick_trade = False
                             st.session_state.selected_recommendation = None
                             st.rerun()
@@ -3448,7 +3451,7 @@ def main():
                                     st.button(
                                         f"🚀 Execute This Trade", 
                                         key=f"execute_{i}", 
-                                        use_container_width=True, 
+                                        width="stretch", 
                                         type="primary",
                                         on_click=execute_trade_callback
                                     )
@@ -3460,12 +3463,12 @@ def main():
                     action_col1, action_col2 = st.columns(2)
                     
                     with action_col1:
-                        if st.button("🎯 Get More Strategy Ideas", use_container_width=True):
+                        if st.button("🎯 Get More Strategy Ideas", width="stretch"):
                             st.session_state.goto_strategy_advisor = True
                             st.rerun()
                     
                     with action_col2:
-                        if st.button("📊 View in Strategy Analyzer", use_container_width=True):
+                        if st.button("📊 View in Strategy Analyzer", width="stretch"):
                             st.session_state.analyzer_ticker = analysis.ticker
                             st.rerun()
                     
@@ -3507,7 +3510,7 @@ def main():
         with col4:
             st.write("")
             st.write("")
-            scan_btn = st.button("🔍 Scan Markets", type="primary", use_container_width=True)
+            scan_btn = st.button("🔍 Scan Markets", type="primary", width="stretch")
         
         if scan_btn:
             with st.status("🔍 Scanning markets for top options trades...", expanded=True) as status:
@@ -3558,8 +3561,7 @@ def main():
                             label="📥 Download Report (CSV)",
                             data=csv_data.encode('utf-8-sig'),
                             file_name=f"ai_options_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            use_container_width=True
+                            mime="text/csv"
                         )
                         
                         st.divider()
@@ -3720,7 +3722,7 @@ def main():
         with col4:
             st.write("")
             st.write("")
-            scan_penny_btn = st.button("🔍 Scan Penny Stocks", type="primary", use_container_width=True)
+            scan_penny_btn = st.button("🔍 Scan Penny Stocks", type="primary", width="stretch")
         
         if scan_penny_btn:
             with st.status("🔍 Scanning for top penny stocks...", expanded=True) as status:
@@ -3771,8 +3773,7 @@ def main():
                             label="📥 Download Report (CSV)",
                             data=csv_data.encode('utf-8-sig'),
                             file_name=f"ai_penny_stocks_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            use_container_width=True
+                            mime="text/csv"
                         )
                         
                         st.divider()
@@ -3909,6 +3910,299 @@ def main():
             st.info(f"💡 Showing {len(st.session_state.top_penny_trades)} previously scanned penny stocks. Click 'Scan Penny Stocks' to refresh with real-time data.")
     
     with tab4:
+        st.header("🚀 Advanced Opportunity Scanner")
+        st.write("**Find top stocks & options with powerful filters.** Catch buzzing stocks and obscure plays before they rocket!")
+        
+        # Initialize scanner
+        if 'advanced_scanner' not in st.session_state:
+            st.session_state.advanced_scanner = AdvancedOpportunityScanner(use_ai=True)
+        
+        scanner = st.session_state.advanced_scanner
+        
+        # Scan configuration
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📊 Scan Type")
+            scan_type_display = st.selectbox(
+                "What to scan for:",
+                options=[
+                    "🎯 All Opportunities",
+                    "📈 Options Plays", 
+                    "💰 Penny Stocks (<$5)",
+                    "💥 Breakouts",
+                    "🚀 Momentum Plays",
+                    "🔥 Buzzing Stocks"
+                ],
+                help="Select the type of opportunities to find"
+            )
+            
+            scan_type_map = {
+                "🎯 All Opportunities": ScanType.ALL,
+                "📈 Options Plays": ScanType.OPTIONS,
+                "💰 Penny Stocks (<$5)": ScanType.PENNY_STOCKS,
+                "💥 Breakouts": ScanType.BREAKOUTS,
+                "🚀 Momentum Plays": ScanType.MOMENTUM,
+                "🔥 Buzzing Stocks": ScanType.BUZZING
+            }
+            scan_type = scan_type_map[scan_type_display]
+            
+            num_results = st.slider("Number of results", 5, 50, 20, 5)
+        
+        with col2:
+            st.subheader("🎚️ Quick Filters")
+            use_extended_universe = st.checkbox("Use Extended Universe (200+ tickers)", value=True, 
+                                               help="Includes obscure plays and emerging stocks")
+            
+            # Quick filter presets
+            quick_filter = st.selectbox(
+                "Filter Preset:",
+                options=[
+                    "None - Show All",
+                    "High Confidence Only (Score ≥70)",
+                    "Ultra-Low Price (<$1)",
+                    "Penny Stocks ($1-$5)",
+                    "Volume Surge (>2x avg)",
+                    "Strong Momentum (>5% change)",
+                    "Power Zone Stocks Only",
+                    "EMA Reclaim Setups"
+                ]
+            )
+        
+        # Advanced Filters (Expandable)
+        with st.expander("🔧 Advanced Filters", expanded=False):
+            fcol1, fcol2, fcol3 = st.columns(3)
+            
+            with fcol1:
+                st.markdown("**Price Filters**")
+                min_price = st.number_input("Min Price ($)", min_value=0.0, value=None, step=0.1, key="adv_min_price")
+                max_price = st.number_input("Max Price ($)", min_value=0.0, value=None, step=1.0, key="adv_max_price")
+                
+                st.markdown("**Volume Filters**")
+                min_volume = st.number_input("Min Volume", min_value=0, value=None, step=100000, key="adv_min_vol")
+                min_volume_ratio = st.number_input("Min Volume Ratio (x avg)", min_value=0.0, value=None, step=0.5, key="adv_vol_ratio")
+            
+            with fcol2:
+                st.markdown("**Momentum Filters**")
+                min_change = st.number_input("Min Change %", value=None, step=1.0, key="adv_min_change")
+                max_change = st.number_input("Max Change %", value=None, step=1.0, key="adv_max_change")
+                
+                st.markdown("**Score Filters**")
+                min_score = st.slider("Min Score", 0, 100, 50, 5, key="adv_min_score")
+                min_confidence = st.number_input("Min Confidence Score", min_value=0, max_value=100, value=None, step=5, key="adv_min_conf")
+            
+            with fcol3:
+                st.markdown("**Technical Filters**")
+                require_power_zone = st.checkbox("Require Power Zone (8>21 EMA)", key="adv_power")
+                require_reclaim = st.checkbox("Require EMA Reclaim", key="adv_reclaim")
+                require_alignment = st.checkbox("Require Timeframe Alignment", key="adv_align")
+                
+                st.markdown("**RSI Filters**")
+                rsi_range = st.slider("RSI Range", 0, 100, (0, 100), key="adv_rsi")
+        
+        # Build filters object
+        filters = ScanFilters(
+            min_price=min_price,
+            max_price=max_price,
+            min_volume=min_volume,
+            min_volume_ratio=min_volume_ratio,
+            min_change_pct=min_change,
+            max_change_pct=max_change,
+            min_score=min_score,
+            min_confidence_score=min_confidence,
+            require_power_zone=require_power_zone,
+            require_ema_reclaim=require_reclaim,
+            require_timeframe_alignment=require_alignment,
+            min_rsi=rsi_range[0] if rsi_range[0] > 0 else None,
+            max_rsi=rsi_range[1] if rsi_range[1] < 100 else None
+        )
+        
+        # Apply quick filter presets
+        if quick_filter == "High Confidence Only (Score ≥70)":
+            filters.min_score = 70.0
+        elif quick_filter == "Ultra-Low Price (<$1)":
+            filters.max_price = 1.0
+        elif quick_filter == "Penny Stocks ($1-$5)":
+            filters.min_price = 1.0
+            filters.max_price = 5.0
+        elif quick_filter == "Volume Surge (>2x avg)":
+            filters.min_volume_ratio = 2.0
+        elif quick_filter == "Strong Momentum (>5% change)":
+            filters.min_change_pct = 5.0
+        elif quick_filter == "Power Zone Stocks Only":
+            filters.require_power_zone = True
+        elif quick_filter == "EMA Reclaim Setups":
+            filters.require_ema_reclaim = True
+        
+        # Scan button
+        st.divider()
+        scan_col1, scan_col2 = st.columns([1, 3])
+        with scan_col1:
+            scan_button = st.button("🔍 Scan Markets", type="primary", width="stretch", key="advanced_scan_button")
+        with scan_col2:
+            if scan_type == ScanType.BUZZING:
+                st.info("💡 **Buzzing scan** detects unusual volume, volatility, and price action")
+            else:
+                st.info(f"💡 Scanning for **{scan_type_display}** with {quick_filter}")
+        
+        # Execute scan
+        if scan_button:
+            with st.status("🔍 Scanning markets...", expanded=True) as status:
+                try:
+                    st.write(f"Analyzing {scan_type_display}...")
+                    
+                    # Perform scan
+                    if scan_type == ScanType.BUZZING:
+                        opportunities = scanner.scan_buzzing_stocks(top_n=num_results)
+                    else:
+                        opportunities = scanner.scan_opportunities(
+                            scan_type=scan_type,
+                            top_n=num_results,
+                            filters=filters,
+                            use_extended_universe=use_extended_universe
+                        )
+                    
+                    # Store results
+                    st.session_state.adv_scan_results = opportunities
+                    st.session_state.adv_scan_type = scan_type_display
+                    
+                    status.update(label=f"✅ Found {len(opportunities)} opportunities!", state="complete")
+                    st.success(f"✅ Scan complete! Found {len(opportunities)} {scan_type_display}")
+                    
+                except Exception as e:
+                    status.update(label="❌ Scan failed", state="error")
+                    st.error(f"Error during scan: {str(e)}")
+                    logger.error(f"Advanced scan error: {e}", exc_info=True)
+        
+        # Display results
+        if 'adv_scan_results' in st.session_state and st.session_state.adv_scan_results:
+            opportunities = st.session_state.adv_scan_results
+            scan_summary = scanner.get_scan_summary(opportunities)
+            
+            st.divider()
+            st.subheader(f"📊 Results: {st.session_state.adv_scan_type}")
+            
+            # Summary metrics
+            mcol1, mcol2, mcol3, mcol4, mcol5, mcol6, mcol7 = st.columns(7)
+            with mcol1:
+                st.metric("Total", scan_summary['total'])
+            with mcol2:
+                st.metric("Avg Score", f"{scan_summary['avg_score']:.1f}")
+            with mcol3:
+                st.metric("High Confidence", scan_summary['high_confidence'])
+            with mcol4:
+                st.metric("Breakouts", scan_summary['breakouts'])
+            with mcol5:
+                st.metric("Buzzing", scan_summary['buzzing'])
+            with mcol6:
+                reverse_split_count = scan_summary.get('reverse_split_stocks', 0)
+                st.metric("⚠️ Rev Splits", reverse_split_count)
+            with mcol7:
+                merger_count = scan_summary.get('merger_candidates', 0)
+                st.metric("🔄 Mergers", merger_count)
+            
+            # Results table
+            st.markdown("### 📋 Top Opportunities")
+            
+            for i, opp in enumerate(opportunities, 1):
+                with st.expander(f"#{i} {opp.ticker} - Score: {opp.score:.1f} | ${opp.price:.2f} ({opp.change_pct:+.1f}%)", expanded=(i <= 3)):
+                    rcol1, rcol2, rcol3 = st.columns([2, 2, 1])
+                    
+                    with rcol1:
+                        st.markdown(f"**{opp.ticker}**")
+                        st.write(f"💰 **Price:** ${opp.price:.2f} ({opp.change_pct:+.1f}%)")
+                        st.write(f"📊 **Volume:** {opp.volume:,} ({opp.volume_ratio:.1f}x avg)")
+                        if opp.market_cap:
+                            st.write(f"💼 **Market Cap:** ${opp.market_cap:.1f}M")
+                        if opp.sector:
+                            st.write(f"🏢 **Sector:** {opp.sector}")
+                    
+                    with rcol2:
+                        st.write(f"🎯 **Score:** {opp.score:.1f}/100")
+                        st.write(f"✅ **Confidence:** {opp.confidence}")
+                        st.write(f"⚠️ **Risk:** {opp.risk_level}")
+                        if opp.trend:
+                            st.write(f"📈 **Trend:** {opp.trend}")
+                        if opp.rsi:
+                            st.write(f"📉 **RSI:** {opp.rsi:.1f}")
+                    
+                    with rcol3:
+                        if opp.is_breakout:
+                            st.success("💥 BREAKOUT")
+                        if opp.is_buzzing:
+                            st.warning(f"🔥 BUZZING\n{opp.buzz_score:.0f}")
+                        if opp.is_merger_candidate:
+                            st.info(f"🔄 MERGER\n{opp.merger_score:.0f}")
+                    
+                    st.markdown(f"**Reason:** {opp.reason}")
+                    
+                    # Reverse split warning (prominent for penny stocks)
+                    if opp.reverse_split_warning:
+                        st.error(f"⚠️ **{opp.reverse_split_warning}**")
+                        if opp.reverse_splits:
+                            split_history = ", ".join([f"{s['ratio_str']} on {s['date']}" for s in opp.reverse_splits[:3]])
+                            st.caption(f"Split History: {split_history}")
+                    
+                    if opp.breakout_signals:
+                        st.info(f"🎯 **Breakout Signals:** {', '.join(opp.breakout_signals)}")
+                    
+                    if opp.buzz_reasons:
+                        st.warning(f"🔥 **Buzz Reasons:** {', '.join(opp.buzz_reasons)}")
+                    
+                    if opp.is_merger_candidate and opp.merger_signals:
+                        st.info(f"🔄 **Merger Signals:** {', '.join(opp.merger_signals)}")
+                    
+                    # Action buttons
+                    acol1, acol2 = st.columns(2)
+                    with acol1:
+                        if st.button(f"📊 Full Analysis", key=f"analyze_{opp.ticker}_{i}"):
+                            st.info(f"Switch to '🔍 Stock Intelligence' tab and analyze {opp.ticker}")
+                    with acol2:
+                        if st.button(f"⭐ Add to My Tickers", key=f"add_{opp.ticker}_{i}"):
+                            if 'ticker_manager' not in st.session_state:
+                                st.session_state.ticker_manager = TickerManager()
+                            st.session_state.ticker_manager.add_ticker(opp.ticker, "Advanced Scanner")
+                            st.success(f"✅ Added {opp.ticker} to My Tickers!")
+            
+            # Export option
+            st.divider()
+            export_col1, export_col2 = st.columns([1, 3])
+            with export_col1:
+                if st.button("📥 Export to CSV"):
+                    df = pd.DataFrame([{
+                        'Ticker': o.ticker,
+                        'Score': o.score,
+                        'Price': o.price,
+                        'Change %': o.change_pct,
+                        'Volume': o.volume,
+                        'Volume Ratio': o.volume_ratio,
+                        'Confidence': o.confidence,
+                        'Risk': o.risk_level,
+                        'Trend': o.trend,
+                        'RSI': o.rsi,
+                        'Breakout': o.is_breakout,
+                        'Buzzing': o.is_buzzing,
+                        'Reverse Split Warning': o.reverse_split_warning if o.reverse_split_warning else '',
+                        'Reverse Splits Count': len(o.reverse_splits),
+                        'Merger Candidate': o.is_merger_candidate,
+                        'Merger Score': o.merger_score,
+                        'Reason': o.reason
+                    } for o in opportunities])
+                    
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        csv,
+                        f"advanced_scan_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        "text/csv"
+                    )
+            with export_col2:
+                st.caption(f"💡 Export {len(opportunities)} opportunities to CSV for further analysis")
+        
+        else:
+            st.info("👆 Configure your scan settings and click 'Scan Markets' to find opportunities")
+    
+    with tab5:
         st.header("⭐ My Tickers")
         st.write("Manage your saved tickers and watchlists.")
         
@@ -4007,7 +4301,7 @@ def main():
                                     pass
 
                 with col2:
-                    if st.button("🗑️ Remove", key=f"remove_{ticker['ticker']}", use_container_width=True):
+                    if st.button("🗑️ Remove", key=f"remove_{ticker['ticker']}", width="stretch"):
                         if tm.remove_ticker(ticker['ticker']):
                             st.success(f"🗑️ Removed {ticker['ticker']}!")
                             st.rerun()
@@ -4089,7 +4383,7 @@ def main():
             st.subheader("🧠 Bulk ML Analysis")
             st.write("Run ML-enhanced analysis on all your saved tickers at once.")
             
-            if st.button("🚀 Analyze All My Tickers", type="primary", use_container_width=True):
+            if st.button("🚀 Analyze All My Tickers", type="primary", width="stretch"):
                 log_stream = io.StringIO()
                 st_handler = logging.StreamHandler(log_stream)
                 st_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
@@ -4145,12 +4439,12 @@ def main():
                 else:
                     st.warning("No results to display after analysis.")
     
-    with tab5:
+    with tab6:
         st.header("🔍 Stock Intelligence")
         st.write("Analyze stocks in-depth with AI-powered insights. Use Dashboard tab for quick analysis.")
         st.info("💡 Tip: Use the Dashboard tab for comprehensive stock intelligence and analysis.")
     
-    with tab6:
+    with tab7:
         st.header("🎯 Intelligent Strategy Advisor")
         st.write("Get personalized strategy recommendations based on comprehensive analysis.")
         
@@ -4203,7 +4497,7 @@ def main():
                 st.write(f"• IV Rank: {analysis.iv_rank}%")
                 st.write(f"• Sentiment: {('Positive' if analysis.sentiment_score > 0.2 else 'Negative' if analysis.sentiment_score < -0.2 else 'Neutral')}")
 
-            if st.button("🚀 Generate Strategy Recommendations", type="primary", use_container_width=True):
+            if st.button("🚀 Generate Strategy Recommendations", type="primary", width="stretch"):
                 with st.spinner("Analyzing optimal strategies..."):
                     recommendations = StrategyAdvisor.get_recommendations(
                         analysis=analysis,
@@ -4301,7 +4595,7 @@ def main():
                     else:
                         st.warning("No suitable strategies found. Try adjusting your parameters.")
     
-    with tab7:
+    with tab8:
         st.header("📊 Generate Trading Signal")
         
         if 'selected_strategy' in st.session_state:
@@ -4487,7 +4781,7 @@ def main():
         with m4:
             st.metric("Mode", "📝 Paper" if paper_mode else "🔴 Live")
     
-    with tab8:
+    with tab9:
         st.header("📜 Signal History")
         
         if st.session_state.signal_history:
@@ -4607,7 +4901,7 @@ def main():
         else:
             st.info("No signals generated yet")
     
-    with tab9:
+    with tab10:
         st.header("📚 Complete Strategy Guide")
         
         for i, (strategy_key, strategy_info) in enumerate(StrategyAdvisor.STRATEGIES.items()):
@@ -5134,7 +5428,7 @@ def main():
                     st.info("No calculations yet — run one above to populate history.")
     
     
-    with tab10:
+    with tab11:
         # Initialize Tradier client
         from src.integrations.tradier_client import create_tradier_client_from_env
         if 'tradier_client' not in st.session_state:
@@ -5416,7 +5710,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 else:
                     st.code(f"{var}={value}")
     
-    with tab11:
+    with tab12:
         st.header("📈 IBKR Day Trading / Scalping")
         st.write("Connect to Interactive Brokers for live day trading and scalping. Real-time positions, orders, and execution.")
         
@@ -5470,7 +5764,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             col_conn1, col_conn2 = st.columns(2)
             
             with col_conn1:
-                if st.button("🔗 Connect to IBKR", type="primary", use_container_width=True):
+                if st.button("🔗 Connect to IBKR", type="primary", width="stretch"):
                     try:
                         with st.status("Connecting to Interactive Brokers...") as status:
                             st.write("Initializing connection...")
@@ -5497,7 +5791,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                         st.error(f"Connection error: {e}")
             
             with col_conn2:
-                if st.button("🔌 Disconnect", use_container_width=True):
+                if st.button("🔌 Disconnect", width="stretch"):
                     if st.session_state.ibkr_client:
                         st.session_state.ibkr_client.disconnect()
                         st.session_state.ibkr_client = None
@@ -5552,7 +5846,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 # Current Positions
                 st.subheader("📊 Current Positions")
                 
-                if st.button("🔄 Refresh Positions", use_container_width=True):
+                if st.button("🔄 Refresh Positions", width="stretch"):
                     st.rerun()
                 
                 try:
@@ -5572,7 +5866,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             })
                         
                         positions_df = pd.DataFrame(positions_data)
-                        st.dataframe(positions_df, use_container_width=True)
+                        st.dataframe(positions_df, width="stretch")
                         
                         # Quick flatten buttons
                         st.write("**Quick Actions:**")
@@ -5617,7 +5911,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             })
                         
                         orders_df = pd.DataFrame(orders_data)
-                        st.dataframe(orders_df, use_container_width=True)
+                        st.dataframe(orders_df, width="stretch")
                         
                         # Cancel orders
                         col_cancel1, col_cancel2 = st.columns(2)
@@ -5671,7 +5965,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                         order_stop_price = st.number_input("Stop Price", min_value=0.01, value=10.0, step=0.01, key="order_stop")
                 
                 # Place order button
-                if st.button("🚀 Place Order", type="primary", use_container_width=True):
+                if st.button("🚀 Place Order", type="primary", width="stretch"):
                     if not order_symbol:
                         st.error("Please enter a symbol")
                     else:
@@ -5719,7 +6013,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 with col2:
                     st.write("")
                     st.write("")
-                    if st.button("📈 Get Quote", use_container_width=True):
+                    if st.button("📈 Get Quote", width="stretch"):
                         if market_symbol:
                             try:
                                 market_data = client.get_market_data(market_symbol)
@@ -5753,7 +6047,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                        "4. Set the port number (7497 for paper, 7496 for live)\n"
                        "5. Click 'Connect to IBKR' above")
     
-    with tab12:
+    with tab13:
         st.header("⚡ Scalping & Day Trading Dashboard")
         st.write("Quick entry/exit interface for stock day trading and scalping. Works with both Tradier and IBKR.")
         st.info("💡 **Perfect for:** Blue chips, penny stocks, runners, and high-momentum plays. Get instant scalping signals!")
@@ -5781,7 +6075,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             with col_scalp3:
                 st.write("")
                 st.write("")
-                scalp_analyze_btn = st.button("⚡ Get Scalp Signal", type="primary", use_container_width=True)
+                scalp_analyze_btn = st.button("⚡ Get Scalp Signal", type="primary", width="stretch")
             
             if scalp_analyze_btn and scalp_ticker:
                 with st.status(f"⚡ Analyzing {scalp_ticker} for scalping...", expanded=True) as scalp_status:
@@ -5907,7 +6201,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             # Quick action buttons
                             action_col1, action_col2 = st.columns(2)
                             with action_col1:
-                                if st.button(f"📋 Copy {signal} Order to Form", use_container_width=True):
+                                if st.button(f"📋 Copy {signal} Order to Form", width="stretch"):
                                     st.session_state['scalp_prefill_symbol'] = scalp_ticker
                                     st.session_state['scalp_prefill_side'] = signal
                                     st.session_state['scalp_prefill_entry'] = entry_price
@@ -5916,7 +6210,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                                     st.success("✅ Copied to order form below!")
                             
                             with action_col2:
-                                if st.button("🔄 Refresh Signal", use_container_width=True):
+                                if st.button("🔄 Refresh Signal", width="stretch"):
                                     st.rerun()
                         
                         else:
@@ -5956,7 +6250,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     help="OpenRouter is free!"
                 )
             
-            if st.button("🧠 Generate AI Signals", type="primary", use_container_width=True):
+            if st.button("🧠 Generate AI Signals", type="primary", width="stretch"):
                 symbols_list = [s.strip().upper() for s in ai_symbols.split(',') if s.strip()]
                 
                 if not symbols_list:
@@ -6099,12 +6393,12 @@ TRADIER_API_URL=https://sandbox.tradier.com
                                         col_exec1, col_exec2 = st.columns(2)
                                         
                                         with col_exec1:
-                                            if st.button(f"✅ Execute {signal.signal} Order", key=f"exec_{signal.symbol}_{idx}", type="primary", use_container_width=True):
+                                            if st.button(f"✅ Execute {signal.signal} Order", key=f"exec_{signal.symbol}_{idx}", type="primary", width="stretch"):
                                                 st.session_state[f'execute_signal_{signal.symbol}'] = signal
                                                 st.success(f"Ready to execute! Go to order entry below to place {signal.signal} order for {signal.symbol}")
                                         
                                         with col_exec2:
-                                            if st.button(f"📋 Copy to Order Form", key=f"copy_{signal.symbol}_{idx}", use_container_width=True):
+                                            if st.button(f"📋 Copy to Order Form", key=f"copy_{signal.symbol}_{idx}", width="stretch"):
                                                 # Pre-fill order form
                                                 st.session_state['ai_prefill_symbol'] = signal.symbol
                                                 st.session_state['ai_prefill_qty'] = signal.position_size
@@ -6165,7 +6459,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 col_init1, col_init2 = st.columns(2)
                 
                 with col_init1:
-                    if st.button("🔗 Connect to Tradier", type="primary", use_container_width=True):
+                    if st.button("🔗 Connect to Tradier", type="primary", width="stretch"):
                         try:
                             from src.integrations.tradier_client import create_tradier_client_from_env
                             client = create_tradier_client_from_env()
@@ -6247,7 +6541,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             col_order1, col_order2, col_order3 = st.columns(3)
             
             with col_order1:
-                if st.button("🚀 Market Order", type="primary", use_container_width=True, key="market_tradier"):
+                if st.button("🚀 Market Order", type="primary", width="stretch", key="market_tradier"):
                     if scalp_symbol:
                         try:
                             with st.spinner(f"Placing market order: {scalp_side} {scalp_quantity} {scalp_symbol}..."):
@@ -6269,7 +6563,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             
             with col_order2:
                 limit_price = st.number_input("Limit $", min_value=0.01, value=100.0, step=0.01, key="limit_price_tradier")
-                if st.button("📊 Limit Order", use_container_width=True, key="limit_tradier"):
+                if st.button("📊 Limit Order", width="stretch", key="limit_tradier"):
                     if scalp_symbol:
                         try:
                             order = tradier_client.place_equity_order(
@@ -6289,7 +6583,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             
             with col_order3:
                 stop_price = st.number_input("Stop $", min_value=0.01, value=100.0, step=0.01, key="stop_price_tradier")
-                if st.button("🛑 Stop Order", use_container_width=True, key="stop_tradier"):
+                if st.button("🛑 Stop Order", width="stretch", key="stop_tradier"):
                     if scalp_symbol:
                         try:
                             order = tradier_client.place_equity_order(
@@ -6315,7 +6609,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             col_pos1, col_pos2 = st.columns([3, 1])
             
             with col_pos2:
-                if st.button("🔄 Refresh", use_container_width=True, key="refresh_pos_tradier"):
+                if st.button("🔄 Refresh", width="stretch", key="refresh_pos_tradier"):
                     st.rerun()
             
             try:
@@ -6380,7 +6674,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     
                     # Remove hidden column before display
                     display_df = df_positions.drop(columns=['_pnl_raw'])
-                    st.dataframe(display_df, use_container_width=True, height=300)
+                    st.dataframe(display_df, width="stretch", height=300)
                     
                     # Quick close buttons
                     st.write("**Quick Actions:**")
@@ -6391,7 +6685,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             symbol = pos['symbol']
                             qty = int(float(pos.get('quantity', 0)))
                             
-                            if st.button(f"❌ Close {symbol}", key=f"close_{symbol}_tradier", use_container_width=True):
+                            if st.button(f"❌ Close {symbol}", key=f"close_{symbol}_tradier", width="stretch"):
                                 side = 'sell' if qty > 0 else 'buy'
                                 try:
                                     order = tradier_client.place_equity_order(
@@ -6446,7 +6740,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     
                     if orders_data:
                         df_orders = pd.DataFrame(orders_data)
-                        st.dataframe(df_orders, use_container_width=True)
+                        st.dataframe(df_orders, width="stretch")
                         
                         # Cancel orders
                         col_cancel1, col_cancel2 = st.columns([2, 1])
@@ -6523,7 +6817,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 col_order1, col_order2, col_order3 = st.columns(3)
                 
                 with col_order1:
-                    if st.button("🚀 Market Order", type="primary", use_container_width=True, key="market_ibkr"):
+                    if st.button("🚀 Market Order", type="primary", width="stretch", key="market_ibkr"):
                         try:
                             order = ibkr_client.place_market_order(scalp_symbol_ibkr, scalp_side_ibkr, scalp_quantity_ibkr)
                             if order:
@@ -6535,7 +6829,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 
                 with col_order2:
                     limit_price_ibkr = st.number_input("Limit $", min_value=0.01, value=100.0, step=0.01, key="limit_price_ibkr")
-                    if st.button("📊 Limit Order", use_container_width=True, key="limit_ibkr"):
+                    if st.button("📊 Limit Order", width="stretch", key="limit_ibkr"):
                         try:
                             order = ibkr_client.place_limit_order(scalp_symbol_ibkr, scalp_side_ibkr, scalp_quantity_ibkr, limit_price_ibkr)
                             if order:
@@ -6547,7 +6841,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 
                 with col_order3:
                     stop_price_ibkr = st.number_input("Stop $", min_value=0.01, value=100.0, step=0.01, key="stop_price_ibkr")
-                    if st.button("🛑 Stop Order", use_container_width=True, key="stop_ibkr"):
+                    if st.button("🛑 Stop Order", width="stretch", key="stop_ibkr"):
                         try:
                             order = ibkr_client.place_stop_order(scalp_symbol_ibkr, scalp_side_ibkr, scalp_quantity_ibkr, stop_price_ibkr)
                             if order:
@@ -6565,7 +6859,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 col_pos1, col_pos2 = st.columns([3, 1])
                 
                 with col_pos2:
-                    if st.button("🔄 Refresh", use_container_width=True, key="refresh_pos_ibkr"):
+                    if st.button("🔄 Refresh", width="stretch", key="refresh_pos_ibkr"):
                         st.rerun()
                 
                 try:
@@ -6584,14 +6878,14 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             })
                         
                         df_positions = pd.DataFrame(positions_data)
-                        st.dataframe(df_positions, use_container_width=True, height=300)
+                        st.dataframe(df_positions, width="stretch", height=300)
                         
                         # Quick close
                         st.write("**Quick Actions:**")
                         cols = st.columns(min(len(positions), 4))
                         for idx, pos in enumerate(positions[:4]):
                             with cols[idx]:
-                                if st.button(f"❌ Close {pos.symbol}", key=f"close_{pos.symbol}_ibkr", use_container_width=True):
+                                if st.button(f"❌ Close {pos.symbol}", key=f"close_{pos.symbol}_ibkr", width="stretch"):
                                     if ibkr_client.flatten_position(pos.symbol):
                                         st.success(f"✅ Closing {pos.symbol}")
                                         time.sleep(1)
@@ -6610,7 +6904,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             time.sleep(5)
             st.rerun()
     
-    with tab13:
+    with tab14:
         st.header("🤖 Strategy Analyzer")
         st.write("Analyze Option Alpha bot configs using an LLM provider. Choose provider, model and optionally provide an API key to run analysis.")
 
@@ -6745,7 +7039,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             st.metric("Estimated Risk", f"${estimated_risk:.0f}")
                             st.metric("AI Confidence", f"{ai_confidence:.2f}")
                         
-                        if st.button("📊 Load into Signal Generator", type="primary", use_container_width=True):
+                        if st.button("📊 Load into Signal Generator", type="primary", width="stretch"):
                             # Store strategy parameters in session state for Signal Generator tab
                             st.session_state.selected_ticker = apply_ticker.upper()
                             st.session_state.selected_strategy = apply_strategy
