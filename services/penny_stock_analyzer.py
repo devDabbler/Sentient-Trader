@@ -1,0 +1,624 @@
+"""
+Penny Stock Scoring and Analysis Module
+
+This module provides comprehensive scoring algorithms for penny stocks,
+including momentum, valuation, catalyst, and composite scores.
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Dict, Tuple, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
+import yfinance as yf
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StockScores:
+    """Container for all stock scores"""
+    momentum_score: float
+    valuation_score: float
+    catalyst_score: float
+    composite_score: float
+    confidence_level: str
+    reasoning: str
+    risk_narrative: str
+
+
+class PennyStockScorer:
+    """Calculates comprehensive scores for penny stocks"""
+    
+    # Scoring weights
+    SCORE_WEIGHTS = {
+        'MOMENTUM': 0.35,
+        'VALUATION': 0.25,
+        'CATALYST': 0.20,
+        'TECHNICAL': 0.10,
+        'NEWS_SENTIMENT': 0.10
+    }
+    
+    # Confidence thresholds
+    CONFIDENCE_THRESHOLDS = {
+        'VERY_HIGH': 80,
+        'HIGH': 65,
+        'MEDIUM': 50,
+        'LOW': 35
+    }
+    
+    @staticmethod
+    def calculate_momentum_score(data: Dict) -> float:
+        """
+        Calculate momentum score (0-100) based on price action, volume, and technical indicators
+        
+        Args:
+            data: Dictionary containing stock data
+                - pct_change: Price change percentage
+                - volume: Current volume
+                - avg_volume: Average volume
+                - rsi: RSI indicator
+                - technical_score: Technical analysis score
+                - buzz: Social buzz level ('high', 'med', 'low')
+        
+        Returns:
+            Momentum score from 0 to 100
+        """
+        score = 50  # Base score
+        
+        # Price momentum (30 points)
+        pct_change = data.get('pct_change', 0)
+        if pct_change > 0.20:
+            score += 30
+        elif pct_change > 0.10:
+            score += 20
+        elif pct_change > 0.05:
+            score += 10
+        elif pct_change > 0:
+            score += 5
+        elif pct_change < -0.10:
+            score -= 20
+        elif pct_change < -0.05:
+            score -= 10
+        
+        # Volume vs average (25 points)
+        volume = data.get('volume', 0)
+        avg_volume = data.get('avg_volume', 0)
+        if avg_volume > 0:
+            vol_ratio = volume / avg_volume
+            if vol_ratio > 3:
+                score += 25
+            elif vol_ratio > 2:
+                score += 20
+            elif vol_ratio > 1.5:
+                score += 15
+            elif vol_ratio > 1:
+                score += 10
+            elif vol_ratio < 0.5:
+                score -= 15
+        
+        # Social buzz (20 points)
+        buzz = str(data.get('buzz', '')).lower()
+        if buzz == 'high':
+            score += 20
+        elif buzz in ['med', 'medium']:
+            score += 10
+        elif buzz == 'low':
+            score += 5
+        
+        # Technical score (15 points)
+        tech_score = data.get('technical_score', 50)
+        score += (tech_score - 50) * 0.3
+        
+        # RSI consideration (10 points)
+        rsi = data.get('rsi', 50)
+        if rsi < 30:
+            score += 10  # Oversold = opportunity
+        elif rsi > 70:
+            score -= 5  # Overbought = caution
+        
+        return max(0, min(100, round(score)))
+    
+    @staticmethod
+    def calculate_valuation_score(data: Dict) -> float:
+        """
+        Calculate valuation score (0-100) based on fundamentals
+        
+        Args:
+            data: Dictionary containing stock data
+                - pe_ratio: Price to earnings ratio
+                - revenue_growth: Revenue growth percentage
+                - profit_margin: Profit margin percentage
+                - analyst_rating: Analyst rating string
+                - cash_debt: Cash/debt status
+        
+        Returns:
+            Valuation score from 0 to 100
+        """
+        score = 50  # Base score
+        data_points = 0
+        
+        # P/E Ratio (25 points)
+        pe_ratio = data.get('pe_ratio', -1)
+        if pe_ratio > 0:
+            data_points += 1
+            if pe_ratio < 10:
+                score += 25  # Very cheap
+            elif pe_ratio < 15:
+                score += 20
+            elif pe_ratio < 20:
+                score += 15
+            elif pe_ratio < 30:
+                score += 5
+            elif pe_ratio > 50:
+                score -= 15  # Expensive
+        
+        # Revenue Growth (25 points)
+        revenue_growth = data.get('revenue_growth', None)
+        if revenue_growth is not None:
+            data_points += 1
+            if revenue_growth > 50:
+                score += 25
+            elif revenue_growth > 30:
+                score += 20
+            elif revenue_growth > 15:
+                score += 15
+            elif revenue_growth > 5:
+                score += 10
+            elif revenue_growth < -10:
+                score -= 20
+        
+        # Profit Margin (20 points)
+        profit_margin = data.get('profit_margin', None)
+        if profit_margin is not None:
+            data_points += 1
+            if profit_margin > 20:
+                score += 20
+            elif profit_margin > 10:
+                score += 15
+            elif profit_margin > 5:
+                score += 10
+            elif profit_margin > 0:
+                score += 5
+            elif profit_margin < -20:
+                score -= 20
+        
+        # Analyst Rating (15 points)
+        rating = str(data.get('analyst_rating', '')).lower()
+        if 'strong buy' in rating:
+            score += 15
+        elif 'buy' in rating:
+            score += 10
+        elif 'hold' in rating:
+            score += 0
+        elif 'sell' in rating:
+            score -= 10
+        
+        # Cash/Debt situation (15 points)
+        cash_debt = str(data.get('cash_debt', '')).lower()
+        if 'strong' in cash_debt or 'excellent' in cash_debt:
+            score += 15
+        elif 'good' in cash_debt or 'positive' in cash_debt:
+            score += 10
+        elif 'weak' in cash_debt or 'poor' in cash_debt:
+            score -= 15
+        
+        # If we have very few data points, reduce confidence
+        if data_points < 2:
+            score = 50  # Not enough data for valuation
+        
+        return max(0, min(100, round(score)))
+    
+    @staticmethod
+    def calculate_catalyst_score(data: Dict) -> float:
+        """
+        Calculate catalyst score (0-100) based on news, events, and insider activity
+        
+        Args:
+            data: Dictionary containing stock data
+                - news_sentiment: News sentiment string
+                - news_count: Number of news articles
+                - catalyst: Catalyst description
+                - insider: Insider activity
+        
+        Returns:
+            Catalyst score from 0 to 100
+        """
+        score = 50  # Base score
+        
+        # News sentiment (35 points)
+        news_sentiment = str(data.get('news_sentiment', '')).lower()
+        news_count = data.get('news_count', 0)
+        
+        if 'very positive' in news_sentiment:
+            score += 35
+        elif 'positive' in news_sentiment:
+            score += 25
+        elif 'neutral' in news_sentiment:
+            score += 0
+        elif 'very negative' in news_sentiment:
+            score -= 35
+        elif 'negative' in news_sentiment:
+            score -= 20
+        
+        # News volume bonus (10 points)
+        if news_count > 10:
+            score += 10
+        elif news_count > 5:
+            score += 7
+        elif news_count > 2:
+            score += 5
+        elif news_count == 0:
+            score -= 10
+        
+        # Catalyst field (30 points)
+        catalyst = str(data.get('catalyst', '')).lower()
+        if len(catalyst) > 20:
+            if 'fda' in catalyst or 'approval' in catalyst:
+                score += 30
+            elif 'earnings' in catalyst or 'revenue' in catalyst:
+                score += 25
+            elif 'partnership' in catalyst or 'deal' in catalyst:
+                score += 25
+            elif 'merger' in catalyst or 'acquisition' in catalyst:
+                score += 25
+            elif 'contract' in catalyst or 'award' in catalyst:
+                score += 20
+            elif 'launch' in catalyst or 'release' in catalyst:
+                score += 15
+            else:
+                score += 10  # Generic catalyst
+        
+        # Insider activity (15 points)
+        insider = str(data.get('insider', '')).lower()
+        if 'buy' in insider or 'accumulation' in insider:
+            score += 15
+        elif 'sell' in insider or 'distribution' in insider:
+            score -= 15
+        
+        # Verified status (10 points)
+        verified = data.get('verified', '')
+        if verified == '✅':
+            score += 10
+        elif verified == '⚠️':
+            score += 5
+        elif verified == '❌':
+            score -= 10
+        
+        return max(0, min(100, round(score)))
+    
+    @classmethod
+    def calculate_composite_score(cls, momentum: float, valuation: float, 
+                                  catalyst: float, technical: float, 
+                                  news_sentiment: str) -> float:
+        """
+        Calculate composite score with weighted components
+        
+        Args:
+            momentum: Momentum score (0-100)
+            valuation: Valuation score (0-100)
+            catalyst: Catalyst score (0-100)
+            technical: Technical score (0-100)
+            news_sentiment: News sentiment string
+        
+        Returns:
+            Composite score from 0 to 100
+        """
+        # Convert news sentiment to numeric score
+        news_score = 50
+        sentiment = str(news_sentiment).lower()
+        if 'very positive' in sentiment:
+            news_score = 90
+        elif 'positive' in sentiment:
+            news_score = 70
+        elif 'neutral' in sentiment:
+            news_score = 50
+        elif 'very negative' in sentiment:
+            news_score = 10
+        elif 'negative' in sentiment:
+            news_score = 30
+        
+        composite = (
+            momentum * cls.SCORE_WEIGHTS['MOMENTUM'] +
+            valuation * cls.SCORE_WEIGHTS['VALUATION'] +
+            catalyst * cls.SCORE_WEIGHTS['CATALYST'] +
+            technical * cls.SCORE_WEIGHTS['TECHNICAL'] +
+            news_score * cls.SCORE_WEIGHTS['NEWS_SENTIMENT']
+        )
+        
+        return round(composite)
+    
+    @classmethod
+    def get_confidence_level(cls, composite_score: float) -> str:
+        """Get confidence level from composite score"""
+        if composite_score >= cls.CONFIDENCE_THRESHOLDS['VERY_HIGH']:
+            return 'VERY HIGH'
+        if composite_score >= cls.CONFIDENCE_THRESHOLDS['HIGH']:
+            return 'HIGH'
+        if composite_score >= cls.CONFIDENCE_THRESHOLDS['MEDIUM']:
+            return 'MEDIUM'
+        if composite_score >= cls.CONFIDENCE_THRESHOLDS['LOW']:
+            return 'LOW'
+        return 'VERY LOW'
+    
+    @staticmethod
+    def generate_confidence_reasoning(data: Dict, scores: Dict[str, float]) -> str:
+        """Generate detailed confidence reasoning"""
+        reasons = []
+        
+        # Momentum factors
+        if scores['momentum'] >= 70:
+            reasons.append('Strong momentum')
+        elif scores['momentum'] <= 30:
+            reasons.append('Weak momentum')
+        
+        # Valuation factors
+        if scores['valuation'] >= 70:
+            reasons.append('Attractive valuation')
+        elif scores['valuation'] <= 30:
+            reasons.append('Overvalued')
+        
+        # Catalyst factors
+        if scores['catalyst'] >= 70:
+            reasons.append('Strong catalysts')
+        elif scores['catalyst'] <= 30:
+            reasons.append('Limited catalysts')
+        
+        # Technical factors
+        tech_score = data.get('technical_score', 50)
+        if tech_score >= 70:
+            reasons.append('Bullish technicals')
+        elif tech_score <= 30:
+            reasons.append('Bearish technicals')
+        
+        # Risk factors
+        risk = data.get('risk', '')
+        if risk == 'H' or risk == 'High':
+            reasons.append('High risk profile')
+        
+        # News sentiment
+        sentiment = str(data.get('news_sentiment', '')).lower()
+        if 'positive' in sentiment:
+            reasons.append('Positive news flow')
+        elif 'negative' in sentiment:
+            reasons.append('Negative news')
+        
+        # Analyst support
+        rating = str(data.get('analyst_rating', '')).lower()
+        if 'buy' in rating:
+            reasons.append('Analyst support')
+        
+        if not reasons:
+            return 'Insufficient data for high confidence'
+        
+        return '; '.join(reasons)
+    
+    @staticmethod
+    def generate_risk_narrative(data: Dict, scores: Dict[str, float]) -> str:
+        """Generate risk narrative"""
+        risks = []
+        opportunities = []
+        
+        # Risk factors
+        risk = data.get('risk', '')
+        if risk in ['H', 'High']:
+            risks.append('High general risk')
+        
+        dilution = str(data.get('dilution', '')).lower()
+        if dilution == 'high':
+            risks.append('Dilution risk')
+        
+        float_m = data.get('float_m', 0)
+        if float_m < 10:
+            risks.append('Low float (high volatility)')
+        elif float_m > 500:
+            risks.append('Large float (limited upside)')
+        
+        profit_margin = data.get('profit_margin', 0)
+        if profit_margin is not None and profit_margin < 0:
+            risks.append('Unprofitable')
+        
+        pe_ratio = data.get('pe_ratio', -1)
+        if pe_ratio > 50:
+            risks.append('High P/E ratio')
+        
+        # Opportunities
+        if scores.get('momentum', 0) >= 70:
+            opportunities.append('Strong momentum')
+        if scores.get('catalyst', 0) >= 70:
+            opportunities.append('Major catalysts')
+        
+        revenue_growth = data.get('revenue_growth', 0)
+        if revenue_growth is not None and revenue_growth > 30:
+            opportunities.append('Rapid revenue growth')
+        
+        rsi = data.get('rsi', 50)
+        if rsi < 30:
+            opportunities.append('Oversold (potential bounce)')
+        
+        # Construct narrative
+        narrative = ''
+        if risks:
+            narrative += f"RISKS: {', '.join(risks)}. "
+        if opportunities:
+            narrative += f"OPPORTUNITIES: {', '.join(opportunities)}."
+        
+        return narrative if narrative else 'Balanced risk/reward profile'
+    
+    @classmethod
+    def calculate_all_scores(cls, data: Dict) -> StockScores:
+        """
+        Calculate all scores for a stock
+        
+        Args:
+            data: Dictionary containing all stock data
+        
+        Returns:
+            StockScores object with all calculated scores
+        """
+        # Calculate individual scores
+        momentum = cls.calculate_momentum_score(data)
+        valuation = cls.calculate_valuation_score(data)
+        catalyst = cls.calculate_catalyst_score(data)
+        
+        # Calculate composite score
+        technical = data.get('technical_score', 50)
+        news_sentiment = data.get('news_sentiment', 'Neutral')
+        composite = cls.calculate_composite_score(
+            momentum, valuation, catalyst, technical, news_sentiment
+        )
+        
+        # Create scores dict for reasoning generation
+        scores = {
+            'momentum': momentum,
+            'valuation': valuation,
+            'catalyst': catalyst,
+            'composite': composite
+        }
+        
+        # Generate insights
+        confidence = cls.get_confidence_level(composite)
+        reasoning = cls.generate_confidence_reasoning(data, scores)
+        risk_narrative = cls.generate_risk_narrative(data, scores)
+        
+        return StockScores(
+            momentum_score=momentum,
+            valuation_score=valuation,
+            catalyst_score=catalyst,
+            composite_score=composite,
+            confidence_level=confidence,
+            reasoning=reasoning,
+            risk_narrative=risk_narrative
+        )
+
+
+class PennyStockAnalyzer:
+    """Comprehensive penny stock analysis"""
+    
+    def __init__(self):
+        self.scorer = PennyStockScorer()
+    
+    def analyze_stock(self, ticker: str, existing_data: Optional[Dict] = None) -> Dict:
+        """
+        Perform comprehensive analysis on a penny stock
+        
+        Args:
+            ticker: Stock ticker symbol
+            existing_data: Optional pre-fetched data to avoid redundant API calls
+        
+        Returns:
+            Dictionary with complete analysis
+        """
+        try:
+            # Fetch stock data
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            hist = stock.history(period='3mo')
+            
+            if hist.empty:
+                logger.warning(f"No historical data for {ticker}")
+                return {'error': 'No data available'}
+            
+            # Calculate basic metrics
+            current_price = hist['Close'].iloc[-1]
+            prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+            pct_change = (current_price - prev_close) / prev_close if prev_close else 0
+            
+            # Calculate technical indicators
+            rsi = self._calculate_rsi(hist['Close'])
+            
+            # Prepare data dictionary
+            data = {
+                'ticker': ticker,
+                'price': current_price,
+                'pct_change': pct_change,
+                'volume': int(hist['Volume'].iloc[-1]) if 'Volume' in hist else 0,
+                'avg_volume': int(hist['Volume'].mean()) if 'Volume' in hist else 0,
+                'rsi': rsi,
+                'technical_score': self._calculate_technical_score(hist),
+                'pe_ratio': info.get('trailingPE', info.get('forwardPE', None)),
+                'revenue_growth': info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else None,
+                'profit_margin': info.get('profitMargins', 0) * 100 if info.get('profitMargins') else None,
+                'market_cap': info.get('marketCap', 0),
+                'float_m': info.get('floatShares', 0) / 1_000_000 if info.get('floatShares') else 0,
+            }
+            
+            # Merge with existing data if provided
+            if existing_data:
+                data.update(existing_data)
+            
+            # Calculate all scores
+            scores = self.scorer.calculate_all_scores(data)
+            
+            # Combine everything
+            result = {
+                **data,
+                'momentum_score': scores.momentum_score,
+                'valuation_score': scores.valuation_score,
+                'catalyst_score': scores.catalyst_score,
+                'composite_score': scores.composite_score,
+                'confidence_level': scores.confidence_level,
+                'reasoning': scores.reasoning,
+                'risk_narrative': scores.risk_narrative,
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing {ticker}: {e}")
+            return {'ticker': ticker, 'error': str(e)}
+    
+    @staticmethod
+    def _calculate_rsi(prices: pd.Series, period: int = 14) -> float:
+        """Calculate RSI indicator"""
+        try:
+            prices = pd.to_numeric(prices, errors='coerce').dropna()
+            delta = prices.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            return round(rsi.iloc[-1], 2)
+        except:
+            return 50.0
+    
+    @staticmethod
+    def _calculate_technical_score(hist: pd.DataFrame) -> float:
+        """Calculate overall technical score"""
+        try:
+            score = 50
+            
+            # Moving averages
+            close = hist['Close']
+            ma20 = close.rolling(20).mean()
+            ma50 = close.rolling(50).mean()
+            
+            current_price = close.iloc[-1]
+            
+            # Price vs MA20
+            if not ma20.empty and not pd.isna(ma20.iloc[-1]):
+                if current_price > ma20.iloc[-1]:
+                    score += 15
+                else:
+                    score -= 10
+            
+            # Price vs MA50
+            if not ma50.empty and not pd.isna(ma50.iloc[-1]):
+                if current_price > ma50.iloc[-1]:
+                    score += 15
+                else:
+                    score -= 10
+            
+            # Volume trend
+            vol = hist['Volume']
+            if len(vol) > 20:
+                recent_vol = vol.iloc[-5:].mean()
+                avg_vol = vol.iloc[-20:].mean()
+                if recent_vol > avg_vol * 1.5:
+                    score += 20
+            
+            return max(0, min(100, round(score)))
+        except:
+            return 50.0
