@@ -1,3 +1,17 @@
+# CRITICAL: Apply Windows async fix BEFORE any other imports
+import sys
+if sys.platform == 'win32':
+    import asyncio
+    # Ensure ProactorEventLoop for subprocess support
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    # Apply nest_asyncio to allow nested event loops (fixes Streamlit conflicts)
+    try:
+        import nest_asyncio
+        nest_asyncio.apply()
+    except ImportError:
+        print("WARNING: nest_asyncio not installed - social sentiment may fail")
+        print("Install with: pip install nest-asyncio")
+
 import streamlit as st
 
 st.set_page_config(
@@ -22,6 +36,7 @@ import os
 import sys
 from io import TextIOWrapper
 from dotenv import load_dotenv
+from analyzers.comprehensive import ComprehensiveAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +54,7 @@ from services.ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrad
 from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, ScanType, OpportunityResult
+from analyzers.comprehensive import ComprehensiveAnalyzer
 
 # Add caching for better performance with new Streamlit features
 @st.cache_data(ttl=60)  # Cache for 1 minute for more real-time data
@@ -737,431 +753,6 @@ class NewsAnalyzer:
         
         return catalysts
 
-class ComprehensiveAnalyzer:
-    """Combines all analysis into a complete stock evaluation"""
-    
-    @staticmethod
-    def analyze_stock(ticker: str, trading_style: str = "OPTIONS") -> Optional[StockAnalysis]:
-        """Perform complete stock analysis"""
-        try:
-            # Use cached data for better performance
-            hist, info = get_cached_stock_data(ticker)
-            
-            if hist.empty:
-                return None
-            
-            current_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
-            change_pct = ((current_price / prev_close - 1) * 100)
-            
-            # Technical indicators
-            rsi = TechnicalAnalyzer.calculate_rsi(hist['Close'])
-            macd_signal, macd_value = TechnicalAnalyzer.calculate_macd(hist['Close'])
-            support, resistance = TechnicalAnalyzer.calculate_support_resistance(hist['Close'])
-            iv_rank, iv_percentile = TechnicalAnalyzer.calculate_iv_metrics(ticker)
-
-            # New indicators
-            ema8_series = TechnicalAnalyzer.ema(hist['Close'], 8)
-            ema21_series = TechnicalAnalyzer.ema(hist['Close'], 21)
-            dem_series = TechnicalAnalyzer.demarker(hist, period=14)
-            ema_ctx = TechnicalAnalyzer.detect_ema_power_zone_and_reclaim(hist, ema8_series, ema21_series)
-            fib_targets = TechnicalAnalyzer.compute_fib_extensions_from_swing(hist)
-            
-            # Volume analysis
-            current_volume = int(hist['Volume'].iloc[-1])
-            avg_volume = int(hist['Volume'].mean())
-            
-            # Determine trend
-            if change_pct > 2:
-                trend = "STRONG UPTREND"
-            elif change_pct > 0.5:
-                trend = "UPTREND"
-            elif change_pct < -2:
-                trend = "STRONG DOWNTREND"
-            elif change_pct < -0.5:
-                trend = "DOWNTREND"
-            else:
-                trend = "SIDEWAYS"
-            if ema_ctx.get("power_zone") and trend == "SIDEWAYS":
-                trend = "UPTREND"
-            
-            # News and catalysts
-            news = NewsAnalyzer.get_stock_news(ticker)
-            sentiment_score, sentiment_signals = NewsAnalyzer.analyze_sentiment(news)
-            catalysts = NewsAnalyzer.get_catalysts(ticker)
-            
-            # Earnings information
-            earnings_date = None
-            earnings_days_away = None
-            for catalyst in catalysts:
-                if catalyst['type'] == 'Earnings Report':
-                    earnings_date = catalyst['date']
-                    earnings_days_away = catalyst['days_away']
-                    break
-            
-            # Calculate confidence score
-            confidence_score = ComprehensiveAnalyzer._calculate_confidence(
-                rsi, macd_signal, iv_rank, sentiment_score, len(catalysts), earnings_days_away
-            )
-            
-            # Generate recommendation based on trading style
-            recommendation = ComprehensiveAnalyzer._generate_recommendation(
-                rsi, macd_signal, trend, iv_rank, sentiment_score, earnings_days_away, trading_style,
-                ema_ctx=ema_ctx, demarker_value=(dem_series.iloc[-1] if not dem_series.empty else None),
-                fib_targets=fib_targets
-            )
-            
-            return StockAnalysis(
-                ticker=ticker.upper(),
-                price=round(current_price, 2),
-                change_pct=round(change_pct, 2),
-                volume=current_volume,
-                avg_volume=avg_volume,
-                rsi=rsi,
-                macd_signal=macd_signal,
-                trend=trend,
-                support=support,
-                resistance=resistance,
-                iv_rank=iv_rank,
-                iv_percentile=iv_percentile,
-                earnings_date=earnings_date,
-                earnings_days_away=earnings_days_away,
-                recent_news=news,
-                catalysts=catalysts,
-                sentiment_score=sentiment_score,
-                sentiment_signals=sentiment_signals,
-                confidence_score=confidence_score,
-                recommendation=recommendation,
-                ema8=float(ema8_series.iloc[-1]) if not ema8_series.empty else None,
-                ema21=float(ema21_series.iloc[-1]) if not ema21_series.empty else None,
-                demarker=float(dem_series.iloc[-1]) if not dem_series.empty else None,
-                fib_targets=fib_targets,
-                ema_power_zone=bool(ema_ctx.get("power_zone")),
-                ema_reclaim=bool(ema_ctx.get("is_reclaim"))
-            )
-            
-        except Exception as e:
-            logger.error(f"Error analyzing {ticker}: {e}")
-            return None
-    
-    @staticmethod
-    def _calculate_confidence(rsi: float, macd_signal: str, iv_rank: float, 
-                            sentiment: float, catalyst_count: int, 
-                            earnings_days: Optional[int]) -> float:
-        """Calculate overall confidence score for trading this stock"""
-        score = 50  # Base score
-        
-        # RSI contribution
-        if 30 <= rsi <= 70:
-            score += 15  # Neutral RSI is good
-        elif rsi < 30:
-            score += 10  # Oversold can be opportunity
-        elif rsi > 70:
-            score += 5   # Overbought is risky
-        
-        # MACD contribution
-        if macd_signal in ["BULLISH", "BEARISH"]:
-            score += 10
-        
-        # IV Rank contribution
-        if iv_rank > 50:
-            score += 15  # High IV is good for selling premium
-        elif iv_rank < 30:
-            score += 10  # Low IV is good for buying options
-        
-        # Sentiment contribution
-        score += sentiment * 10  # -10 to +10
-        
-        # Catalyst contribution
-        if catalyst_count > 0:
-            score += min(catalyst_count * 5, 15)
-        
-        # Earnings risk
-        if earnings_days is not None and earnings_days <= 7:
-            score -= 20  # High risk around earnings
-        
-        return min(100, max(0, score))
-    
-    @staticmethod
-    def _generate_recommendation(rsi: float, macd_signal: str, trend: str,
-                                iv_rank: float, sentiment: float,
-                                earnings_days: Optional[int], 
-                                trading_style: str = "OPTIONS",
-                                ema_ctx: Dict[str, object] | None = None,
-                                demarker_value: float | None = None,
-                                fib_targets: Dict[str, float] | None = None) -> str:
-        """Generate trading recommendation based on selected trading style"""
-        
-        if trading_style == "DAY_TRADE":
-            return ComprehensiveAnalyzer._generate_day_trade_recommendation(
-                rsi, macd_signal, trend, sentiment, earnings_days, ema_ctx=ema_ctx
-            )
-        elif trading_style == "SWING_TRADE":
-            return ComprehensiveAnalyzer._generate_swing_trade_recommendation(
-                rsi, macd_signal, trend, sentiment, earnings_days,
-                ema_ctx=ema_ctx, demarker_value=demarker_value, fib_targets=fib_targets
-            )
-        elif trading_style == "SCALP":
-            return ComprehensiveAnalyzer._generate_scalp_recommendation(
-                rsi, macd_signal, trend, sentiment
-            )
-        elif trading_style == "BUY_HOLD":
-            return ComprehensiveAnalyzer._generate_buy_hold_recommendation(
-                rsi, macd_signal, trend, sentiment, earnings_days
-            )
-        else:  # OPTIONS
-            return ComprehensiveAnalyzer._generate_options_recommendation(
-                rsi, macd_signal, trend, iv_rank, sentiment, earnings_days
-            )
-    
-    @staticmethod
-    def _generate_day_trade_recommendation(rsi: float, macd_signal: str, trend: str,
-                                          sentiment: float, earnings_days: Optional[int],
-                                          ema_ctx: Dict[str, object] | None = None) -> str:
-        """Generate day trading recommendation for intraday equity trades"""
-        recommendations = []
-        
-        # Trend-based entry
-        if "UPTREND" in trend or "STRONG UPTREND" in trend:
-            if rsi < 70:
-                recommendations.append("📈 BUY on pullbacks to support levels")
-                recommendations.append("Target: Resistance levels for quick profit (0.5-2%)")
-            else:
-                recommendations.append("⚠️ Overbought - Wait for pullback or avoid")
-        elif "DOWNTREND" in trend or "STRONG DOWNTREND" in trend:
-            if rsi > 30:
-                recommendations.append("📉 SHORT on bounces to resistance")
-                recommendations.append("Target: Support levels for quick profit (0.5-2%)")
-            else:
-                recommendations.append("⚠️ Oversold - Wait for bounce or avoid shorting")
-        else:  # SIDEWAYS
-            recommendations.append("↔️ Range-bound: BUY near support, SELL near resistance")
-            recommendations.append("Use tight stops (0.3-0.5%) for range trading")
-        
-        # RSI signals
-        if rsi < 30:
-            recommendations.append("🟢 RSI oversold → Look for bounce/reversal entry")
-        elif rsi > 70:
-            recommendations.append("🔴 RSI overbought → Look for rejection/reversal short")
-        
-        # MACD confirmation
-        if macd_signal == "BULLISH":
-            recommendations.append("✅ MACD bullish → Momentum favors longs")
-        elif macd_signal == "BEARISH":
-            recommendations.append("❌ MACD bearish → Momentum favors shorts")
-
-        # EMA Power Zone filter
-        if ema_ctx and ema_ctx.get("power_zone"):
-            recommendations.append("✅ 8>21 EMA Power Zone → Favor long setups")
-        
-        # Risk management
-        recommendations.append("🛡️ Stop Loss: 0.5-1% | Take Profit: 1-3% | Exit by market close")
-        
-        # Earnings warning
-        if earnings_days is not None and earnings_days <= 1:
-            recommendations.append("⚠️ EARNINGS TODAY/TOMORROW → Avoid day trading (high volatility risk)")
-        
-        return "\n".join(recommendations) if recommendations else "Insufficient data for day trade recommendation"
-    
-    @staticmethod
-    def _generate_swing_trade_recommendation(rsi: float, macd_signal: str, trend: str,
-                                            sentiment: float, earnings_days: Optional[int],
-                                            ema_ctx: Dict[str, object] | None = None,
-                                            demarker_value: float | None = None,
-                                            fib_targets: Dict[str, float] | None = None) -> str:
-        """Generate swing trading recommendation for multi-day equity holds"""
-        recommendations = []
-        
-        # Trend-based strategy
-        if "UPTREND" in trend or "STRONG UPTREND" in trend:
-            recommendations.append("📈 LONG BIAS: Enter on dips, hold for 3-10 days")
-            recommendations.append("Entry: Near support or after consolidation breakout")
-            recommendations.append("Target: 5-15% gain to resistance levels")
-        elif "DOWNTREND" in trend or "STRONG DOWNTREND" in trend:
-            recommendations.append("📉 SHORT BIAS: Enter on rallies, hold for 3-10 days")
-            recommendations.append("Entry: Near resistance or after breakdown")
-            recommendations.append("Target: 5-15% profit to support levels")
-        else:
-            recommendations.append("↔️ NEUTRAL: Wait for breakout direction before entering")
-        
-        # EMA power zone and reclaim context
-        if ema_ctx:
-            if ema_ctx.get("power_zone"):
-                recommendations.append("✅ 8>21 EMA and price above both → Power Zone active")
-            if ema_ctx.get("is_reclaim"):
-                _reasons = ema_ctx.get("reasons", [])
-                reasons = "; ".join([str(x) for x in _reasons]) if isinstance(_reasons, list) else ""
-                recommendations.append(f"✅ EMA Reclaim confirmed ({reasons})")
-
-        # DeMarker for precision
-        if demarker_value is not None:
-            if demarker_value <= 0.30 and ("UPTREND" in trend):
-                recommendations.append("🟢 DeMarker ≤ 0.30 in uptrend → High-probability pullback entry")
-            elif demarker_value >= 0.70 and ("DOWNTREND" in trend):
-                recommendations.append("🔴 DeMarker ≥ 0.70 in downtrend → High-probability short entry")
-
-        # RSI for swing entries
-        if rsi < 40 and "UPTREND" in trend:
-            recommendations.append("🟢 Good swing entry: RSI pullback in uptrend")
-        elif rsi > 60 and "DOWNTREND" in trend:
-            recommendations.append("🔴 Good short entry: RSI bounce in downtrend")
-        
-        # MACD trend confirmation
-        if macd_signal == "BULLISH":
-            recommendations.append("✅ MACD confirms uptrend → Hold longs, avoid shorts")
-        elif macd_signal == "BEARISH":
-            recommendations.append("❌ MACD confirms downtrend → Hold shorts, avoid longs")
-        
-        # Sentiment factor
-        if sentiment > 0.3:
-            recommendations.append("📰 Positive sentiment → Supports bullish swing trades")
-        elif sentiment < -0.3:
-            recommendations.append("📰 Negative sentiment → Supports bearish swing trades")
-        
-        # Fibonacci targets
-        if fib_targets:
-            t1 = fib_targets.get("T1_1272")
-            t2 = fib_targets.get("T2_1618")
-            t3 = fib_targets.get("T3_2618") or fib_targets.get("T3_200")
-            fib_lines = []
-            if t1:
-                fib_lines.append(f"🎯 T1 (127.2%): ${t1:.2f} → Take 25%")
-            if t2:
-                fib_lines.append(f"🎯 T2 (161.8%): ${t2:.2f} → Take 50%")
-            if t3:
-                fib_lines.append(f"🎯 T3 (200-261.8%): ${t3:.2f} → Trail remaining")
-            if fib_lines:
-                recommendations.append("📐 Fibonacci Targets:")
-                recommendations.extend(fib_lines)
-                recommendations.append("🧭 Move stop to breakeven after T1, trail below 21 EMA thereafter")
-        else:
-            recommendations.append("🛡️ Stop Loss: 3-5% | Take Profit: 8-15% | Hold time: 3-10 days")
-        
-        # Earnings consideration
-        if earnings_days is not None and earnings_days <= 7:
-            recommendations.append("⚠️ EARNINGS SOON → Close position before earnings or use wider stops")
-        
-        return "\n".join(recommendations) if recommendations else "Insufficient data for swing trade recommendation"
-    
-    @staticmethod
-    def _generate_scalp_recommendation(rsi: float, macd_signal: str, trend: str, sentiment: float) -> str:
-        """Generate scalping recommendation for very short-term trades"""
-        recommendations = []
-        
-        recommendations.append("⚡ SCALPING STRATEGY (seconds to minutes):")
-        
-        # Momentum-based scalping
-        if "STRONG UPTREND" in trend:
-            recommendations.append("🚀 Strong momentum UP → Scalp long on dips (0.1-0.5% targets)")
-            recommendations.append("Entry: Quick pullbacks | Exit: Immediate resistance")
-        elif "STRONG DOWNTREND" in trend:
-            recommendations.append("💥 Strong momentum DOWN → Scalp short on bounces (0.1-0.5% targets)")
-            recommendations.append("Entry: Quick bounces | Exit: Immediate support")
-        else:
-            recommendations.append("⚠️ Low momentum → Scalping difficult, wait for clear direction")
-        
-        # RSI for quick reversals
-        if rsi < 25:
-            recommendations.append("🟢 Extreme oversold → Quick bounce scalp opportunity")
-        elif rsi > 75:
-            recommendations.append("🔴 Extreme overbought → Quick rejection scalp opportunity")
-        
-        # Risk management for scalping
-        recommendations.append("🛡️ TIGHT STOPS: 0.1-0.3% | Target: 0.2-0.5% | Hold: Seconds to 5 minutes")
-        recommendations.append("⚡ Requires: Level 2 data, fast execution, high volume stocks")
-        recommendations.append("⚠️ High risk: Only for experienced traders with proper tools")
-        
-        return "\n".join(recommendations)
-    
-    @staticmethod
-    def _generate_buy_hold_recommendation(rsi: float, macd_signal: str, trend: str,
-                                         sentiment: float, earnings_days: Optional[int]) -> str:
-        """Generate buy and hold recommendation for long-term investing"""
-        recommendations = []
-        
-        recommendations.append("📊 LONG-TERM INVESTMENT ANALYSIS:")
-        
-        # Overall trend assessment
-        if "UPTREND" in trend or "STRONG UPTREND" in trend:
-            recommendations.append("✅ Positive long-term trend → Good for accumulation")
-            if rsi < 50:
-                recommendations.append("🟢 STRONG BUY: Uptrend + pullback = ideal entry point")
-            else:
-                recommendations.append("🟡 BUY: Uptrend continues, consider dollar-cost averaging")
-        elif "DOWNTREND" in trend or "STRONG DOWNTREND" in trend:
-            recommendations.append("⚠️ Negative trend → Wait for reversal or avoid")
-            recommendations.append("🔴 HOLD/AVOID: Downtrend not ideal for new positions")
-        else:
-            recommendations.append("🟡 NEUTRAL: Consolidating, wait for breakout direction")
-        
-        # Value assessment using RSI
-        if rsi < 30:
-            recommendations.append("💰 Potentially undervalued (oversold) → Good accumulation zone")
-        elif rsi > 70:
-            recommendations.append("💸 Potentially overvalued (overbought) → Consider waiting")
-        
-        # Sentiment for long-term
-        if sentiment > 0.3:
-            recommendations.append("📰 Strong positive sentiment → Supports long-term bullish case")
-        elif sentiment < -0.3:
-            recommendations.append("📰 Negative sentiment → Research fundamental concerns")
-        
-        # Long-term strategy
-        recommendations.append("📈 Strategy: Dollar-cost average over time, ignore short-term noise")
-        recommendations.append("🎯 Target: 20%+ annual returns | Hold time: 6+ months to years")
-        recommendations.append("💡 Consider: Selling covered calls for income if you accumulate shares")
-        
-        # Earnings note
-        if earnings_days is not None and earnings_days <= 14:
-            recommendations.append("📅 Earnings soon → Good time to review fundamentals")
-        
-        return "\n".join(recommendations)
-    
-    @staticmethod
-    def _generate_options_recommendation(rsi: float, macd_signal: str, trend: str,
-                                        iv_rank: float, sentiment: float,
-                                        earnings_days: Optional[int]) -> str:
-        """Generate options trading recommendation"""
-        recommendations = []
-        
-        # IV-based strategies
-        if iv_rank > 60:
-            recommendations.append("High IV → Consider SELLING premium (puts, calls, iron condors)")
-        elif iv_rank < 40:
-            recommendations.append("Low IV → Consider BUYING options (calls, puts, spreads)")
-        
-        # Trend-based strategies
-        if "UPTREND" in trend:
-            if iv_rank > 50:
-                recommendations.append("Uptrend + High IV → Sell puts or bull put spreads")
-            else:
-                recommendations.append("Uptrend + Low IV → Buy calls or bull call spreads")
-        elif "DOWNTREND" in trend:
-            if iv_rank > 50:
-                recommendations.append("Downtrend + High IV → Sell calls or bear call spreads")
-            else:
-                recommendations.append("Downtrend + Low IV → Buy puts or bear put spreads")
-        else:
-            if iv_rank > 50:
-                recommendations.append("Sideways + High IV → Iron condors or strangles")
-        
-        # RSI-based
-        if rsi < 30:
-            recommendations.append("RSI oversold → Potential bullish reversal opportunity")
-        elif rsi > 70:
-            recommendations.append("RSI overbought → Potential bearish reversal opportunity")
-        
-        # Earnings warning
-        if earnings_days is not None and earnings_days <= 7:
-            recommendations.append("⚠️ EARNINGS SOON → High risk! Consider waiting or use defined-risk strategies")
-        
-        # Sentiment
-        if sentiment > 0.3:
-            recommendations.append("Positive news sentiment → Bullish bias")
-        elif sentiment < -0.3:
-            recommendations.append("Negative news sentiment → Bearish bias")
-        
-        return " | ".join(recommendations) if recommendations else "Insufficient data for recommendation"
 
 class StrategyAdvisor:
     """Intelligent strategy recommendation engine"""
@@ -1882,10 +1473,8 @@ def main():
             st.info("Run a strategy analysis to see a quick summary here.")
     
     # Main tabs - Reorganized for clarity
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
         "🏠 Dashboard",
-        "🔥 Top Options Trades",
-        "💰 Top Penny Stocks",
         "🚀 Advanced Scanner",
         "⭐ My Tickers",
         "🔍 Stock Intelligence", 
@@ -3479,445 +3068,41 @@ def main():
             st.info("💡 Previous analysis is displayed. Enter a new ticker and click Analyze to update.")
     
     with tab2:
-        st.header("🔥 Top Options Trades")
-        st.write("Discover **high-quality** options trading opportunities with AI-enhanced analysis. Only shows plays rated 5.0/10 or higher.")
-        
-        # Initialize scanners
-        if 'ai_scanner' not in st.session_state:
-            st.session_state.ai_scanner = AIConfidenceScanner()
-        if 'ml_scanner' not in st.session_state:
-            st.session_state.ml_scanner = MLEnhancedScanner()
-        
-        # ML toggle
-        use_ml = st.checkbox("🧠 Enable ML Analysis (Qlib)", value=False, key="use_ml_options", 
-                            help="Combine 158 alpha factors from Qlib ML with LLM reasoning for maximum confidence")
-        
-        # Show ML explanation when enabled
-        if use_ml:
-            with st.expander("ℹ️ What is ML Analysis? (Click to learn more)", expanded=False):
-                st.markdown(st.session_state.ml_scanner.get_ml_summary_explanation())
-        
-        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-        with col1:
-            top_n = st.slider("Number of trades to scan", 5, 20, 10)
-        with col2:
-            min_rating = st.slider("Min AI Rating", 0.0, 10.0, 3.0, 0.5, help="Only show plays with this rating or higher (lower = more results)")
-        with col3:
-            if use_ml:
-                min_score = st.slider("Min Ensemble Score", 0.0, 100.0, 70.0, 5.0, help="Minimum ML+LLM+Quant ensemble score")
-            else:
-                min_score = st.slider("Min Quant Score", 0.0, 100.0, 20.0, 5.0, help="Minimum quantitative score threshold (lower = more results)")
-        with col4:
-            st.write("")
-            st.write("")
-            scan_btn = st.button("🔍 Scan Markets", type="primary", width="stretch")
-        
-        if scan_btn:
-            with st.status("🔍 Scanning markets for top options trades...", expanded=True) as status:
-                st.write("📊 Analyzing market data (real-time via Yahoo Finance)...")
-                if use_ml:
-                    st.write("🧠 Running ML analysis with 158 alpha factors...")
-                st.write(f"🤖 Running AI confidence analysis (filtering for {min_rating}+ rating)...")
-                st.write("⚡ Calculating entry/exit levels and strategies...")
-                
-                try:
-                    if use_ml:
-                        # Use ML-enhanced scanner
-                        trades = st.session_state.ml_scanner.scan_top_options_with_ml(
-                            top_n=top_n,
-                            min_ensemble_score=min_score
-                        )
-                    else:
-                        # Use standard AI scanner
-                        trades = st.session_state.ai_scanner.scan_top_options_with_ai(
-                            top_n=top_n, 
-                            min_ai_rating=min_rating,
-                            min_score=min_score
-                        )
-                    
-                    if trades:
-                        status.update(label=f"✅ Found {len(trades)} quality opportunities!", state="complete")
-                        st.session_state.top_options_trades = trades
-                        
-                        # Display summary
-                        avg_rating = sum(t.ai_rating for t in trades) / len(trades) if trades else 0
-                        high_conf = len([t for t in trades if t.ai_confidence in ['HIGH', 'VERY HIGH']])
-                        st.success(f"✅ Found {len(trades)} **quality** opportunities! Avg AI Rating: {avg_rating:.1f}/10 | High Confidence: {high_conf}")
-                        
-                        # Real-time indicator
-                        st.info(f"📡 **Real-time data** fetched at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (market hours may affect accuracy)")
-                        
-                        # Download button with UTF-8 BOM for Excel compatibility
-                        if use_ml and hasattr(trades[0], 'ml_prediction_score'):
-                            csv_data = "\ufeffTicker,Ensemble Score,ML Score,AI Rating,AI Confidence,Quant Score,Price,Change %,Volume Ratio,Risk Level,Ensemble Confidence,AI Reasoning,AI Risks,Reason\n"
-                            for trade in trades:
-                                csv_data += f'"{trade.ticker}",{trade.combined_score:.1f},{trade.ml_prediction_score:.1f},{trade.ai_rating},"{trade.ai_confidence}",{trade.score},${trade.price},{trade.change_pct:+.2f}%,{trade.volume_ratio}x,"{trade.risk_level}","{trade.ensemble_confidence}","{trade.ai_reasoning}","{trade.ai_risks}","{trade.reason}"\n'
-                        else:
-                            csv_data = "\ufeffTicker,AI Rating,AI Confidence,Quant Score,Price,Change %,Volume Ratio,Risk Level,AI Reasoning,AI Risks,Reason\n"
-                            for trade in trades:
-                                csv_data += f'"{trade.ticker}",{trade.ai_rating},"{trade.ai_confidence}",{trade.score},${trade.price},{trade.change_pct:+.2f}%,{trade.volume_ratio}x,"{trade.risk_level}","{trade.ai_reasoning}","{trade.ai_risks}","{trade.reason}"\n'
-                        
-                        st.download_button(
-                            label="📥 Download Report (CSV)",
-                            data=csv_data.encode('utf-8-sig'),
-                            file_name=f"ai_options_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                        
-                        st.divider()
-                        
-                        for i, trade in enumerate(trades, 1):
-                            # Color-code based on rating
-                            if trade.ai_rating >= 8.0:
-                                emoji = "🟢"
-                            elif trade.ai_rating >= 6.5:
-                                emoji = "🟡"
-                            else:
-                                emoji = "🟠"
-                            
-                            # Display header with ML metrics if available
-                            if use_ml and hasattr(trade, 'combined_score'):
-                                header = f"{emoji} #{i} **{trade.ticker}** - Ensemble: {trade.combined_score:.1f}/100 | ML: {trade.ml_prediction_score:.1f} | AI: {trade.ai_rating:.1f}/10 | {trade.ensemble_confidence}"
-                            else:
-                                header = f"{emoji} #{i} **{trade.ticker}** - AI: {trade.ai_rating:.1f}/10 | Score: {trade.score:.1f}/100 | {trade.ai_confidence}"
-                            
-                            with st.expander(header, expanded=(i==1)):
-                                # Top metrics row - add ML metric if available
-                                if use_ml and hasattr(trade, 'combined_score'):
-                                    col_a, col_b, col_c, col_d, col_e = st.columns(5)
-                                else:
-                                    col_a, col_b, col_c, col_d = st.columns(4)
-                                
-                                with col_a:
-                                    st.metric("💵 Current Price", f"${trade.price:.2f}", 
-                                             f"{trade.change_pct:+.2f}%", delta_color="normal")
-                                
-                                with col_b:
-                                    st.metric("📊 Volume Activity", f"{trade.volume_ratio:.1f}x",
-                                             "Above Average" if trade.volume_ratio > 1.5 else "Normal")
-                                
-                                with col_c:
-                                    st.metric("🎯 AI Rating", f"{trade.ai_rating:.1f}/10", 
-                                             trade.ai_confidence)
-                                
-                                with col_d:
-                                    st.metric("⚠️ Risk Level", trade.risk_level,
-                                             "Manage Carefully" if trade.risk_level in ['H', 'M-H'] else "Standard")
-                                
-                                # Add ML metric if available
-                                if use_ml and hasattr(trade, 'combined_score'):
-                                    with col_e:
-                                        st.metric("🧠 ML Score", f"{trade.ml_prediction_score:.1f}/100",
-                                                 f"{trade.ml_features_count} factors")
-                                
-                                st.divider()
-                                
-                                # Unified Confidence Summary (when ML is enabled)
-                                if use_ml and hasattr(trade, 'combined_score'):
-                                    with st.expander("📊 **UNIFIED CONFIDENCE ANALYSIS** - See complete breakdown", expanded=True):
-                                        st.markdown(st.session_state.ml_scanner.get_unified_confidence_summary(trade))
-                                    st.divider()
-                                
-                                # Trading Strategy Section
-                                st.markdown("### 🎯 Suggested Trading Strategies")
-                                
-                                # Calculate support/resistance based on price
-                                support = trade.price * 0.97
-                                resistance = trade.price * 1.03
-                                
-                                if trade.change_pct > 2:
-                                    strategy_text = f"""**BULLISH SETUP** 🚀
-- **Calls**: Buy slightly OTM calls (strike ~${trade.price * 1.02:.2f}) for momentum play
-- **Bull Call Spread**: Buy call at ${trade.price:.2f}, sell call at ${resistance:.2f}
-- **Sell Puts**: If confident, sell cash-secured puts at ${support:.2f} for premium
-"""
-                                elif trade.change_pct < -2:
-                                    strategy_text = f"""**BEARISH SETUP** 📉
-- **Puts**: Buy slightly OTM puts (strike ~${trade.price * 0.98:.2f}) for downside play
-- **Bear Put Spread**: Buy put at ${trade.price:.2f}, sell put at ${support:.2f}
-- **Sell Calls**: If confident in decline, sell OTM calls at ${resistance:.2f}
-"""
-                                else:
-                                    strategy_text = f"""**NEUTRAL/RANGE SETUP** ⚖️
-- **Iron Condor**: Sell calls at ${resistance:.2f}, sell puts at ${support:.2f}
-- **Straddle/Strangle**: Buy both calls & puts if expecting volatility spike
-- **Theta Plays**: Sell premium via covered calls or cash-secured puts
-"""
-                                st.info(strategy_text)
-                                
-                                # Entry/Exit Levels
-                                st.markdown("### 📍 Key Price Levels (Estimated)")
-                                col_e1, col_e2, col_e3 = st.columns(3)
-                                with col_e1:
-                                    st.markdown(f"**🟢 Entry Zone**\n${support:.2f} - ${trade.price:.2f}")
-                                with col_e2:
-                                    st.markdown(f"**🎯 Target**\n${resistance:.2f} (+{((resistance/trade.price - 1) * 100):.1f}%)")
-                                with col_e3:
-                                    st.markdown(f"**🛑 Stop Loss**\n${support * 0.98:.2f} (-{((1 - support * 0.98/trade.price) * 100):.1f}%)")
-                                
-                                st.divider()
-                                
-                                # Analysis sections
-                                col_info1, col_info2 = st.columns(2)
-                                
-                                with col_info1:
-                                    st.markdown("**📊 Quantitative Signals**")
-                                    st.write(trade.reason or "N/A")
-                                    
-                                    if trade.ai_reasoning:
-                                        st.markdown("**🤖 AI Analysis**")
-                                        st.info(trade.ai_reasoning)
-                                
-                                with col_info2:
-                                    if trade.ai_risks:
-                                        st.markdown("**⚠️ Risk Assessment**")
-                                        st.warning(trade.ai_risks)
-                                    
-                                    # Additional context
-                                    st.markdown("**ℹ️ Trade Context**")
-                                    context = f"Volume: {trade.volume:,} ({trade.volume_ratio:.1f}x avg)\n"
-                                    context += f"Momentum: {'Strong' if abs(trade.change_pct) > 3 else 'Moderate' if abs(trade.change_pct) > 1 else 'Weak'}\n"
-                                    context += f"Confidence: {trade.confidence} (Quant) / {trade.ai_confidence} (AI)"
-                                    st.text(context)
-                    else:
-                        status.update(label="⚠️ No quality opportunities found", state="error")
-                        st.warning(f"No opportunities found meeting minimum criteria (AI Rating ≥ {min_rating}, Score ≥ {min_score}). Try lowering the minimum rating or check if markets are open.")
-                        
-                except Exception as e:
-                    status.update(label="❌ Scan failed", state="error")
-                    st.error(f"Error during scan: {str(e)[:100]}")
-        
-        elif 'top_options_trades' in st.session_state and st.session_state.top_options_trades:
-            st.info(f"💡 Showing {len(st.session_state.top_options_trades)} previously scanned trades. Click 'Scan Markets' to refresh with real-time data.")
-    
-    with tab3:
-        st.header("💰 Top Penny Stocks")
-        st.write("Find **high-potential** penny stock opportunities with comprehensive AI analysis. Only shows plays rated 5.0/10 or higher.")
-        
-        # Initialize scanners
-        if 'ai_scanner' not in st.session_state:
-            st.session_state.ai_scanner = AIConfidenceScanner()
-        if 'ml_scanner' not in st.session_state:
-            st.session_state.ml_scanner = MLEnhancedScanner()
-        
-        # ML toggle
-        use_ml_penny = st.checkbox("🧠 Enable ML Analysis (Qlib)", value=False, key="use_ml_penny", 
-                                   help="Combine 158 alpha factors from Qlib ML with LLM reasoning for maximum confidence")
-        
-        # Show ML explanation when enabled
-        if use_ml_penny:
-            with st.expander("ℹ️ What is ML Analysis? (Click to learn more)", expanded=False):
-                st.markdown(st.session_state.ml_scanner.get_ml_summary_explanation())
-        
-        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
-        with col1:
-            top_n_penny = st.slider("Number of penny stocks to scan", 5, 15, 8, key="penny_slider")
-        with col2:
-            min_penny_rating = st.slider("Min AI Rating", 0.0, 10.0, 5.0, 0.5, key="penny_min_rating", help="Only show plays with this rating or higher")
-        with col3:
-            if use_ml_penny:
-                min_penny_score = st.slider("Min Ensemble Score", 0.0, 100.0, 65.0, 5.0, key="penny_min_score", help="Minimum ML+LLM+Quant ensemble score")
-            else:
-                min_penny_score = st.slider("Min Composite Score", 0.0, 100.0, 40.0, 5.0, key="penny_min_score", help="Minimum composite score threshold")
-        with col4:
-            st.write("")
-            st.write("")
-            scan_penny_btn = st.button("🔍 Scan Penny Stocks", type="primary", width="stretch")
-        
-        if scan_penny_btn:
-            with st.status("🔍 Scanning for top penny stocks...", expanded=True) as status:
-                st.write("📊 Analyzing penny stock data (real-time via Yahoo Finance)...")
-                if use_ml_penny:
-                    st.write("🧠 Running ML analysis with 158 alpha factors...")
-                st.write(f"🤖 Running AI analysis (filtering for {min_penny_rating}+ rating)...")
-                st.write("⚡ Calculating momentum, valuation, and catalyst scores...")
-                
-                try:
-                    if use_ml_penny:
-                        # Use ML-enhanced scanner
-                        trades = st.session_state.ml_scanner.scan_top_penny_stocks_with_ml(
-                            top_n=top_n_penny,
-                            min_ensemble_score=min_penny_score
-                        )
-                    else:
-                        # Use standard AI scanner
-                        trades = st.session_state.ai_scanner.scan_top_penny_stocks_with_ai(
-                            top_n=top_n_penny,
-                            min_ai_rating=min_penny_rating,
-                            min_score=min_penny_score
-                        )
-                    
-                    if trades:
-                        status.update(label=f"✅ Found {len(trades)} quality penny stocks!", state="complete")
-                        st.session_state.top_penny_trades = trades
-                        
-                        # Display summary
-                        avg_rating = sum(t.ai_rating for t in trades) / len(trades) if trades else 0
-                        high_conf = len([t for t in trades if t.ai_confidence in ['HIGH', 'VERY HIGH']])
-                        st.success(f"✅ Found {len(trades)} **quality** penny stock opportunities! Avg AI Rating: {avg_rating:.1f}/10 | High Confidence: {high_conf}")
-                        
-                        # Real-time indicator
-                        st.info(f"📡 **Real-time data** fetched at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (market hours may affect accuracy)")
-                        
-                        # Download button with UTF-8 BOM for Excel compatibility
-                        if use_ml_penny and hasattr(trades[0], 'ml_prediction_score'):
-                            csv_data = "\ufeffTicker,Ensemble Score,ML Score,AI Rating,AI Confidence,Composite Score,Price,Change %,Volume Ratio,Risk Level,Ensemble Confidence,AI Reasoning,AI Risks,Reason\n"
-                            for trade in trades:
-                                csv_data += f'"{trade.ticker}",{trade.combined_score:.1f},{trade.ml_prediction_score:.1f},{trade.ai_rating},"{trade.ai_confidence}",{trade.score},${trade.price},{trade.change_pct:+.2f}%,{trade.volume_ratio}x,"{trade.risk_level}","{trade.ensemble_confidence}","{trade.ai_reasoning}","{trade.ai_risks}","{trade.reason}"\n'
-                        else:
-                            csv_data = "\ufeffTicker,AI Rating,AI Confidence,Composite Score,Price,Change %,Volume Ratio,Risk Level,AI Reasoning,AI Risks,Reason\n"
-                            for trade in trades:
-                                csv_data += f'"{trade.ticker}",{trade.ai_rating},"{trade.ai_confidence}",{trade.score},${trade.price},{trade.change_pct:+.2f}%,{trade.volume_ratio}x,"{trade.risk_level}","{trade.ai_reasoning}","{trade.ai_risks}","{trade.reason}"\n'
-                        
-                        st.download_button(
-                            label="📥 Download Report (CSV)",
-                            data=csv_data.encode('utf-8-sig'),
-                            file_name=f"ai_penny_stocks_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                        
-                        st.divider()
-                        
-                        for i, trade in enumerate(trades, 1):
-                            # Color-code based on rating
-                            if trade.ai_rating >= 8.0:
-                                emoji = "🟢"
-                            elif trade.ai_rating >= 6.5:
-                                emoji = "🟡"
-                            else:
-                                emoji = "🟠"
-                            
-                            # Display header with ML metrics if available
-                            if use_ml_penny and hasattr(trade, 'combined_score'):
-                                header = f"{emoji} #{i} **{trade.ticker}** - Ensemble: {trade.combined_score:.1f}/100 | ML: {trade.ml_prediction_score:.1f} | AI: {trade.ai_rating:.1f}/10 | {trade.ensemble_confidence}"
-                            else:
-                                header = f"{emoji} #{i} **{trade.ticker}** - AI: {trade.ai_rating:.1f}/10 | Composite: {trade.score:.1f}/100 | {trade.ai_confidence}"
-                            
-                            with st.expander(header, expanded=(i==1)):
-                                # Top metrics row - add ML metric if available
-                                if use_ml_penny and hasattr(trade, 'combined_score'):
-                                    col_a, col_b, col_c, col_d, col_e = st.columns(5)
-                                else:
-                                    col_a, col_b, col_c, col_d = st.columns(4)
-                                
-                                with col_a:
-                                    st.metric("💵 Current Price", f"${trade.price:.2f}", 
-                                             f"{trade.change_pct:+.2f}%", delta_color="normal")
-                                
-                                with col_b:
-                                    st.metric("📊 Volume Activity", f"{trade.volume_ratio:.1f}x",
-                                             "Above Average" if trade.volume_ratio > 1.5 else "Normal")
-                                
-                                with col_c:
-                                    st.metric("🎯 AI Rating", f"{trade.ai_rating:.1f}/10", 
-                                             trade.ai_confidence)
-                                
-                                with col_d:
-                                    st.metric("⚠️ Risk Level", trade.risk_level,
-                                             "High Risk" if trade.risk_level in ['H', 'M-H'] else "Moderate")
-                                
-                                # Add ML metric if available
-                                if use_ml_penny and hasattr(trade, 'combined_score'):
-                                    with col_e:
-                                        st.metric("🧠 ML Score", f"{trade.ml_prediction_score:.1f}/100",
-                                                 f"{trade.ml_features_count} factors")
-                                
-                                st.divider()
-                                
-                                # Unified Confidence Summary (when ML is enabled)
-                                if use_ml_penny and hasattr(trade, 'combined_score'):
-                                    with st.expander("📊 **UNIFIED CONFIDENCE ANALYSIS** - See complete breakdown", expanded=True):
-                                        st.markdown(st.session_state.ml_scanner.get_unified_confidence_summary(trade))
-                                    st.divider()
-                                
-                                # Trading Strategy Section
-                                st.markdown("### 🎯 Penny Stock Trading Strategy")
-                                
-                                # Calculate support/resistance
-                                support = trade.price * 0.95
-                                resistance = trade.price * 1.08
-                                
-                                if trade.change_pct > 5:
-                                    strategy_text = f"""**MOMENTUM PLAY** 🚀
-- **Entry**: Ideally on pullback to ${support:.2f} - ${trade.price * 0.98:.2f}
-- **Target 1**: ${trade.price * 1.05:.2f} (+5%)
-- **Target 2**: ${resistance:.2f} (+8%)
-- **Stop Loss**: ${support * 0.97:.2f} (tight due to volatility)
-- **Position Size**: Small (1-3% of portfolio max for penny stocks)
-"""
-                                elif trade.change_pct < -3:
-                                    strategy_text = f"""**REVERSAL WATCH** ⏮️
-- **Entry**: Watch for bounce confirmation above ${trade.price * 1.01:.2f}
-- **Target**: ${trade.price * 1.06:.2f} (+6% bounce)
-- **Stop Loss**: ${support:.2f} (below recent support)
-- **Caution**: Confirm reversal with volume before entry
-- **Position Size**: Very small (1-2% max)
-"""
-                                else:
-                                    strategy_text = f"""**ACCUMULATION ZONE** 📈
-- **Entry**: Build position between ${support:.2f} - ${trade.price:.2f}
-- **Target 1**: ${trade.price * 1.04:.2f} (+4%)
-- **Target 2**: ${resistance:.2f} (+8%)
-- **Stop Loss**: ${support * 0.96:.2f}
-- **Strategy**: Scale in gradually, take profits incrementally
-"""
-                                st.info(strategy_text)
-                                
-                                # Entry/Exit Levels
-                                st.markdown("### 📍 Key Price Levels")
-                                col_e1, col_e2, col_e3 = st.columns(3)
-                                with col_e1:
-                                    st.markdown(f"**🟢 Buy Zone**\n${support:.2f} - ${trade.price * 0.99:.2f}")
-                                with col_e2:
-                                    st.markdown(f"**🎯 Profit Target**\n${resistance:.2f} (+{((resistance/trade.price - 1) * 100):.1f}%)")
-                                with col_e3:
-                                    st.markdown(f"**🛑 Stop Loss**\n${support * 0.96:.2f} (-{((1 - support * 0.96/trade.price) * 100):.1f}%)")
-                                
-                                st.divider()
-                                
-                                # Analysis sections
-                                col_info1, col_info2 = st.columns(2)
-                                
-                                with col_info1:
-                                    st.markdown("**📊 Composite Analysis**")
-                                    st.write(trade.reason or "N/A")
-                                    
-                                    if trade.ai_reasoning:
-                                        st.markdown("**🤖 AI Analysis**")
-                                        st.info(trade.ai_reasoning)
-                                
-                                with col_info2:
-                                    if trade.ai_risks:
-                                        st.markdown("**⚠️ Risk Assessment**")
-                                        st.warning(trade.ai_risks)
-                                    
-                                    # Additional context
-                                    st.markdown("**ℹ️ Trade Context**")
-                                    context = f"Volume: {trade.volume:,} ({trade.volume_ratio:.1f}x avg)\n"
-                                    context += f"Price Change: {trade.change_pct:+.2f}%\n"
-                                    context += f"Confidence: {trade.confidence} (Quant) / {trade.ai_confidence} (AI)\n"
-                                    context += f"⚠️ **Remember**: Penny stocks are high risk - use small positions!"
-                                    st.text(context)
-                    else:
-                        status.update(label="⚠️ No quality opportunities found", state="error")
-                        st.warning(f"No opportunities found meeting minimum criteria (AI Rating ≥ {min_penny_rating}, Score ≥ {min_penny_score}). Try lowering the minimum rating or check if markets are open.")
-                        
-                except Exception as e:
-                    status.update(label="❌ Scan failed", state="error")
-                    st.error(f"Error during scan: {str(e)[:100]}")
-        
-        elif 'top_penny_trades' in st.session_state and st.session_state.top_penny_trades:
-            st.info(f"💡 Showing {len(st.session_state.top_penny_trades)} previously scanned penny stocks. Click 'Scan Penny Stocks' to refresh with real-time data.")
-    
-    with tab4:
         st.header("🚀 Advanced Opportunity Scanner")
-        st.write("**Find top stocks & options with powerful filters.** Catch buzzing stocks and obscure plays before they rocket!")
+        st.write("**All-in-one scanner** with AI/ML analysis, powerful filters, reverse split detection, and merger candidate identification!")
         
-        # Initialize scanner
+        # Initialize scanners
         if 'advanced_scanner' not in st.session_state:
             st.session_state.advanced_scanner = AdvancedOpportunityScanner(use_ai=True)
+        if 'ai_scanner' not in st.session_state:
+            st.session_state.ai_scanner = AIConfidenceScanner()
+        if 'ml_scanner' not in st.session_state:
+            st.session_state.ml_scanner = MLEnhancedScanner()
         
         scanner = st.session_state.advanced_scanner
+        
+        # Analysis mode selector
+        analysis_mode = st.radio(
+            "🔬 Analysis Mode:",
+            options=["⚡ Quick Scan (Fast)", "🧠 AI+ML Enhanced (Comprehensive)"],
+            horizontal=True,
+            help="Quick Scan uses technical analysis only. AI+ML Enhanced adds AI confidence ratings and ML predictions for maximum accuracy."
+        )
+        
+        use_ai_ml = analysis_mode == "🧠 AI+ML Enhanced (Comprehensive)"
+        
+        if use_ai_ml:
+            with st.expander("ℹ️ What does AI+ML Enhanced include?", expanded=False):
+                st.markdown("""
+                **AI+ML Enhanced Mode** combines three powerful analysis systems:
+                - **🤖 AI Confidence Analysis**: LLM-powered reasoning and risk assessment
+                - **🧠 ML Predictions**: 158 alpha factors from Qlib (if installed)
+                - **📊 Technical Analysis**: All standard indicators plus reverse splits and merger detection
+                
+                This provides the **highest confidence** trading signals by requiring agreement across multiple systems.
+                """)
+        
+        st.divider()
         
         # Scan configuration
         col1, col2 = st.columns([1, 1])
@@ -3948,6 +3133,18 @@ def main():
             scan_type = scan_type_map[scan_type_display]
             
             num_results = st.slider("Number of results", 5, 50, 20, 5)
+            
+            # Performance control for buzzing stocks scan
+            max_tickers_to_scan = None
+            if scan_type == ScanType.BUZZING:
+                max_tickers_to_scan = st.slider(
+                    "Max tickers to scan (performance)", 
+                    min_value=20, 
+                    max_value=200, 
+                    value=50, 
+                    step=10,
+                    help="Limit number of tickers to check. Lower = faster scan. Default scans all 200+ tickers."
+                )
         
         with col2:
             st.subheader("🎚️ Quick Filters")
@@ -4018,8 +3215,15 @@ def main():
         )
         
         # Apply quick filter presets
-        if quick_filter == "High Confidence Only (Score ≥70)":
+        # Set min_buzz_score based on filter preset (for buzzing stocks scan)
+        min_buzz_score = 30.0  # Default
+        
+        if quick_filter == "None - Show All":
+            filters.min_score = 0.0  # Show everything
+            min_buzz_score = 10.0  # Very low threshold for buzzing scan
+        elif quick_filter == "High Confidence Only (Score ≥70)":
             filters.min_score = 70.0
+            min_buzz_score = 60.0
         elif quick_filter == "Ultra-Low Price (<$1)":
             filters.max_price = 1.0
         elif quick_filter == "Penny Stocks ($1-$5)":
@@ -4027,8 +3231,10 @@ def main():
             filters.max_price = 5.0
         elif quick_filter == "Volume Surge (>2x avg)":
             filters.min_volume_ratio = 2.0
+            min_buzz_score = 40.0  # Higher threshold for volume surge
         elif quick_filter == "Strong Momentum (>5% change)":
             filters.min_change_pct = 5.0
+            min_buzz_score = 40.0
         elif quick_filter == "Power Zone Stocks Only":
             filters.require_power_zone = True
         elif quick_filter == "EMA Reclaim Setups":
@@ -4041,7 +3247,7 @@ def main():
             scan_button = st.button("🔍 Scan Markets", type="primary", width="stretch", key="advanced_scan_button")
         with scan_col2:
             if scan_type == ScanType.BUZZING:
-                st.info("💡 **Buzzing scan** detects unusual volume, volatility, and price action")
+                st.info(f"💡 **Buzzing scan** detects unusual volume, volatility, price action + **Reddit/news sentiment** (min score: {min_buzz_score:.0f})")
             else:
                 st.info(f"💡 Scanning for **{scan_type_display}** with {quick_filter}")
         
@@ -4051,31 +3257,138 @@ def main():
                 try:
                     st.write(f"Analyzing {scan_type_display}...")
                     
-                    # Perform scan
-                    if scan_type == ScanType.BUZZING:
-                        opportunities = scanner.scan_buzzing_stocks(top_n=num_results)
+                    if use_ai_ml:
+                        # AI+ML Enhanced Mode
+                        st.write("🧠 Running ML analysis with 158 alpha factors...")
+                        st.write("🤖 Generating AI confidence ratings...")
+                        st.write("⚡ Calculating technical indicators, reverse splits, and merger candidates...")
+                        
+                        # Use ML scanner for Options or Penny Stocks scans
+                        if scan_type in [ScanType.OPTIONS, ScanType.PENNY_STOCKS]:
+                            if scan_type == ScanType.OPTIONS:
+                                opportunities = st.session_state.ml_scanner.scan_top_options_with_ml(
+                                    top_n=num_results,
+                                    min_ensemble_score=filters.min_score if filters.min_score else 60.0
+                                )
+                            else:  # Penny stocks
+                                opportunities = st.session_state.ml_scanner.scan_top_penny_stocks_with_ml(
+                                    top_n=num_results,
+                                    min_ensemble_score=filters.min_score if filters.min_score else 50.0
+                                )
+                            
+                            # Convert to OpportunityResult format if needed
+                            # ML scanner returns different format, wrap in simple display
+                            st.session_state.adv_scan_ai_results = opportunities
+                            st.session_state.adv_scan_mode = "AI+ML"
+                        else:
+                            # For other scan types, use standard scanner with AI enabled
+                            if scan_type == ScanType.BUZZING:
+                                opportunities = scanner.scan_buzzing_stocks(
+                                    top_n=num_results,
+                                    min_buzz_score=min_buzz_score,
+                                    max_tickers_to_scan=max_tickers_to_scan
+                                )
+                            else:
+                                opportunities = scanner.scan_opportunities(
+                                    scan_type=scan_type,
+                                    top_n=num_results,
+                                    filters=filters,
+                                    use_extended_universe=use_extended_universe
+                                )
+                            st.session_state.adv_scan_results = opportunities
+                            st.session_state.adv_scan_mode = "Standard"
                     else:
-                        opportunities = scanner.scan_opportunities(
-                            scan_type=scan_type,
-                            top_n=num_results,
-                            filters=filters,
-                            use_extended_universe=use_extended_universe
-                        )
+                        # Quick Scan Mode
+                        if scan_type == ScanType.BUZZING:
+                            opportunities = scanner.scan_buzzing_stocks(
+                                top_n=num_results,
+                                min_buzz_score=min_buzz_score,
+                                max_tickers_to_scan=max_tickers_to_scan
+                            )
+                        else:
+                            opportunities = scanner.scan_opportunities(
+                                scan_type=scan_type,
+                                top_n=num_results,
+                                filters=filters,
+                                use_extended_universe=use_extended_universe
+                            )
+                        st.session_state.adv_scan_results = opportunities
+                        st.session_state.adv_scan_mode = "Standard"
                     
-                    # Store results
-                    st.session_state.adv_scan_results = opportunities
+                    # Store scan type
                     st.session_state.adv_scan_type = scan_type_display
                     
-                    status.update(label=f"✅ Found {len(opportunities)} opportunities!", state="complete")
-                    st.success(f"✅ Scan complete! Found {len(opportunities)} {scan_type_display}")
+                    # Get count
+                    result_count = len(opportunities) if hasattr(opportunities, '__len__') else len(st.session_state.get('adv_scan_results', []))
+                    
+                    status.update(label=f"✅ Found {result_count} opportunities!", state="complete")
+                    if use_ai_ml:
+                        st.success(f"✅ AI+ML Scan complete! Found {result_count} quality {scan_type_display}")
+                    else:
+                        st.success(f"✅ Scan complete! Found {result_count} {scan_type_display}")
                     
                 except Exception as e:
                     status.update(label="❌ Scan failed", state="error")
                     st.error(f"Error during scan: {str(e)}")
                     logger.error(f"Advanced scan error: {e}", exc_info=True)
         
-        # Display results
-        if 'adv_scan_results' in st.session_state and st.session_state.adv_scan_results:
+        # Display AI+ML results (if available)
+        if 'adv_scan_ai_results' in st.session_state and st.session_state.adv_scan_ai_results:
+            ai_results = st.session_state.adv_scan_ai_results
+            
+            st.divider()
+            st.subheader(f"🧠 AI+ML Enhanced Results: {st.session_state.adv_scan_type}")
+            
+            st.info(f"📡 **Real-time AI+ML analysis** - Found {len(ai_results)} quality opportunities with high confidence")
+            
+            for i, trade in enumerate(ai_results, 1):
+                # Determine emoji based on rating
+                if trade.ai_rating >= 8.0:
+                    emoji = "🟢"
+                elif trade.ai_rating >= 6.5:
+                    emoji = "🟡"
+                else:
+                    emoji = "🟠"
+                
+                # Build header
+                if hasattr(trade, 'combined_score'):
+                    header = f"{emoji} #{i} **{trade.ticker}** - Ensemble: {trade.combined_score:.1f}/100 | ML: {trade.ml_prediction_score:.1f} | AI: {trade.ai_rating:.1f}/10"
+                else:
+                    header = f"{emoji} #{i} **{trade.ticker}** - AI: {trade.ai_rating:.1f}/10 | Score: {trade.score:.1f}/100"
+                
+                with st.expander(header, expanded=(i==1)):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("💵 Price", f"${trade.price:.2f}", f"{trade.change_pct:+.1f}%")
+                        st.metric("📊 Volume", f"{trade.volume_ratio:.1f}x", "Above Avg" if trade.volume_ratio > 1.5 else "Normal")
+                    
+                    with col2:
+                        st.metric("🎯 AI Rating", f"{trade.ai_rating:.1f}/10", trade.ai_confidence)
+                        st.metric("⚠️ Risk", trade.risk_level)
+                    
+                    with col3:
+                        if hasattr(trade, 'ml_prediction_score'):
+                            st.metric("🧠 ML Score", f"{trade.ml_prediction_score:.1f}/100")
+                        # Add to My Tickers button
+                        if st.button(f"⭐ Add to My Tickers", key=f"add_ai_{trade.ticker}_{i}"):
+                            if 'ticker_manager' not in st.session_state:
+                                st.session_state.ticker_manager = TickerManager()
+                            st.session_state.ticker_manager.add_ticker(trade.ticker, "AI+ML Scanner")
+                            st.success(f"✅ Added {trade.ticker} to My Tickers!")
+                    
+                    st.divider()
+                    
+                    if trade.ai_reasoning:
+                        st.markdown("**🤖 AI Analysis**")
+                        st.info(trade.ai_reasoning)
+                    
+                    if trade.ai_risks:
+                        st.markdown("**⚠️ Risk Assessment**")
+                        st.warning(trade.ai_risks)
+        
+        # Display standard results
+        elif 'adv_scan_results' in st.session_state and st.session_state.adv_scan_results:
             opportunities = st.session_state.adv_scan_results
             scan_summary = scanner.get_scan_summary(opportunities)
             
@@ -4202,7 +3515,7 @@ def main():
         else:
             st.info("👆 Configure your scan settings and click 'Scan Markets' to find opportunities")
     
-    with tab5:
+    with tab3:
         st.header("⭐ My Tickers")
         st.write("Manage your saved tickers and watchlists.")
         
@@ -4274,20 +3587,26 @@ def main():
                         # Display ML analysis if available
                         if ml_score is not None:
                             st.divider()
-                            st.markdown("**📊 Latest ML Analysis**")
-                            
+                            st.markdown("**📊 Latest Analysis**")
+                            st.write(f"**Recommendation:** {ticker.get('recommendation', 'N/A')}")
                             col_ml1, col_ml2, col_ml3, col_ml4 = st.columns(4)
                             with col_ml1:
-                                st.metric("ML Score", f"{ml_score:.0f}/100")
+                                st.metric("Confidence Score", f"{ml_score:.0f}/100")
                             with col_ml2:
-                                momentum = ticker.get('momentum', 0)
-                                st.metric("Momentum", f"{momentum:+.1f}%")
+                                trend = ticker.get('trend', 'N/A')
+                                st.metric("Trend", trend)
                             with col_ml3:
-                                vol_ratio = ticker.get('volume_ratio', 0)
-                                st.metric("Vol Ratio", f"{vol_ratio:.2f}x")
+                                sentiment = ticker.get('sentiment_score')
+                                if sentiment is not None:
+                                    st.metric("Sentiment", f"{sentiment:.2f}")
+                                else:
+                                    st.metric("Sentiment", "N/A")
                             with col_ml4:
-                                rsi = ticker.get('rsi', 0)
-                                st.metric("RSI", f"{rsi:.0f}")
+                                iv_rank = ticker.get('iv_rank')
+                                if iv_rank is not None:
+                                    st.metric("IV Rank", f"{iv_rank:.1f}%")
+                                else:
+                                    st.metric("IV Rank", "N/A")
                             
                             # Show when last analyzed
                             last_analyzed_str = ticker.get('last_analyzed')
@@ -4399,18 +3718,10 @@ def main():
                         for i, ticker_symbol in enumerate(ticker_list):
                             status.update(label=f"Analyzing {ticker_symbol} ({i+1}/{len(ticker_list)})...", state="running")
                             try:
-                                alpha_calc = AlphaFactorCalculator()
-                                alpha_factors = alpha_calc.calculate_factors(ticker_symbol)
-                                if alpha_factors:
-                                    momentum = alpha_factors.get('return_20d', 0) * 100
-                                    vol_ratio = alpha_factors.get('volume_5d_ratio', 1)
-                                    rsi = alpha_factors.get('rsi_14', 50)
-                                    ml_score = 50 + (15 if momentum > 5 else -15 if momentum < -5 else 0) + (10 if vol_ratio > 1.5 else 0) + (10 if 30 < rsi < 70 else 0)
-                                    ml_score = max(0, min(100, ml_score))
-                                    results.append({'ticker': ticker_symbol, 'ml_score': ml_score, 'momentum': momentum, 'volume_ratio': vol_ratio, 'rsi': rsi})
-                                    
-                                    # Save ML analysis results to ticker
-                                    tm.update_ml_analysis(ticker_symbol, ml_score=ml_score, momentum=momentum, volume_ratio=vol_ratio, rsi=rsi)
+                                analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol)
+                                if analysis:
+                                    results.append(analysis.__dict__)
+                                    tm.update_analysis(ticker_symbol, analysis.__dict__)
                             except Exception as e:
                                 logging.error(f"⚠️ Error analyzing {ticker_symbol}: {e}")
                             log_container.code(log_stream.getvalue())
@@ -4419,11 +3730,11 @@ def main():
                 alpha_factors_logger.removeHandler(st_handler)
 
                 if results:
-                    results.sort(key=lambda x: x['ml_score'], reverse=True)
+                    results.sort(key=lambda x: x['confidence_score'], reverse=True)
                     st.success(f"✅ Analyzed {len(results)} tickers")
                     st.subheader("🏆 Top Opportunities from Your Tickers")
                     for i, result in enumerate(results[:5], 1):
-                        score = result['ml_score']
+                        score = result['confidence_score']
                         emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
                         col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns([1, 1, 1, 1, 1])
                         with col_r1:
@@ -4431,20 +3742,20 @@ def main():
                         with col_r2:
                             st.write(f"Score: **{score:.0f}**/100")
                         with col_r3:
-                            st.write(f"Momentum: {result['momentum']:+.1f}%")
+                            st.write(f"Trend: {result['trend']}")
                         with col_r4:
-                            st.write(f"Vol: {result['volume_ratio']:.2f}x")
+                            st.write(f"Sentiment: {result['sentiment_score']:.2f}")
                         with col_r5:
                             st.write(f"RSI: {result['rsi']:.0f}")
                 else:
                     st.warning("No results to display after analysis.")
     
-    with tab6:
+    with tab4:
         st.header("🔍 Stock Intelligence")
         st.write("Analyze stocks in-depth with AI-powered insights. Use Dashboard tab for quick analysis.")
         st.info("💡 Tip: Use the Dashboard tab for comprehensive stock intelligence and analysis.")
     
-    with tab7:
+    with tab5:
         st.header("🎯 Intelligent Strategy Advisor")
         st.write("Get personalized strategy recommendations based on comprehensive analysis.")
         
@@ -4595,7 +3906,7 @@ def main():
                     else:
                         st.warning("No suitable strategies found. Try adjusting your parameters.")
     
-    with tab8:
+    with tab6:
         st.header("📊 Generate Trading Signal")
         
         if 'selected_strategy' in st.session_state:
@@ -4781,7 +4092,7 @@ def main():
         with m4:
             st.metric("Mode", "📝 Paper" if paper_mode else "🔴 Live")
     
-    with tab9:
+    with tab7:
         st.header("📜 Signal History")
         
         if st.session_state.signal_history:
@@ -4901,7 +4212,7 @@ def main():
         else:
             st.info("No signals generated yet")
     
-    with tab10:
+    with tab8:
         st.header("📚 Complete Strategy Guide")
         
         for i, (strategy_key, strategy_info) in enumerate(StrategyAdvisor.STRATEGIES.items()):
@@ -5428,7 +4739,7 @@ def main():
                     st.info("No calculations yet — run one above to populate history.")
     
     
-    with tab11:
+    with tab9:
         # Initialize Tradier client
         from src.integrations.tradier_client import create_tradier_client_from_env
         if 'tradier_client' not in st.session_state:
@@ -5710,7 +5021,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 else:
                     st.code(f"{var}={value}")
     
-    with tab12:
+    with tab10:
         st.header("📈 IBKR Day Trading / Scalping")
         st.write("Connect to Interactive Brokers for live day trading and scalping. Real-time positions, orders, and execution.")
         
@@ -6047,7 +5358,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                        "4. Set the port number (7497 for paper, 7496 for live)\n"
                        "5. Click 'Connect to IBKR' above")
     
-    with tab13:
+    with tab11:
         st.header("⚡ Scalping & Day Trading Dashboard")
         st.write("Quick entry/exit interface for stock day trading and scalping. Works with both Tradier and IBKR.")
         st.info("💡 **Perfect for:** Blue chips, penny stocks, runners, and high-momentum plays. Get instant scalping signals!")
@@ -6301,8 +5612,10 @@ TRADIER_API_URL=https://sandbox.tradier.com
                                             'signals': analysis.sentiment_signals
                                         }
                                 except Exception as e:
-                                    st.write(f"⚠️ Error analyzing {symbol}: {e}")
-                                    continue
+                                    analysis = ComprehensiveAnalyzer.analyze_stock(symbol)
+                                    if not analysis:
+                                        st.write(f"⚠️ Error analyzing {symbol}: Could not retrieve analysis.")
+                                        continue
                             
                             st.write("Running AI analysis...")
                             
@@ -6904,7 +6217,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             time.sleep(5)
             st.rerun()
     
-    with tab14:
+    with tab12:
         st.header("🤖 Strategy Analyzer")
         st.write("Analyze Option Alpha bot configs using an LLM provider. Choose provider, model and optionally provide an API key to run analysis.")
 

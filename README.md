@@ -27,7 +27,7 @@ This platform transforms options trading by combining real-time market data, tec
 - 📅 **Catalyst Detection** - Automatic earnings and event tracking
 - 🔔 **Smart Alerts** - Discord notifications for My Tickers setups + real-time position monitoring
 - 🎯 **Option Alpha Integration** - Direct webhook support for automated execution
-- 🚀 **Advanced Scanner** - 200+ ticker universe, buzzing stock detection, reverse merger candidates, penny stock risk analysis
+- 🚀 **Advanced Scanner** - 200+ ticker universe, **social sentiment analysis** (Reddit/Twitter/StockTwits), buzzing stock detection with Crawl4ai web scraping, reverse merger candidates, penny stock risk analysis
 
 ---
 
@@ -79,14 +79,22 @@ venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-3. (Optional) Install Microsoft Qlib for advanced ML features:
+3. (Optional) Install Crawl4ai for social sentiment analysis:
+
+```powershell
+pip install crawl4ai
+crawl4ai-setup  # Downloads headless browser for JS rendering
+python test_crawl4ai.py  # Test installation
+```
+
+4. (Optional) Install Microsoft Qlib for advanced ML features:
 
 ```powershell
 pip install pyqlib
 python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/us_data --region us
 ```
 
-4. Run the app:
+5. Run the app:
 
 ```powershell
 streamlit run app.py
@@ -109,6 +117,10 @@ Some integrations require API keys or credentials. You can put them in a `.env` 
   - TRADIER_ACCOUNT_ID
   - TRADIER_ACCESS_TOKEN
   - TRADIER_API_URL (optional, defaults to sandbox https://sandbox.tradier.com)
+- Crawl4ai (optional, for social sentiment analysis):
+  - Install with `pip install crawl4ai` and run `crawl4ai-setup`
+  - No API keys required, uses public endpoints
+  - Requires headless browser (Chromium) for JavaScript rendering
 - Microsoft Qlib (optional, for ML-enhanced predictions):
   - Install with `pip install pyqlib` and download data using `python -m qlib.run.get_data`
   - No API keys required, uses local data and models
@@ -869,12 +881,14 @@ The **Advanced Opportunity Scanner** is a powerful tool for discovering top trad
   - RSI range selection
   - IV Rank filters for options
 
-- **Buzzing Stock Detection**:
-  - Unusual volume analysis (3x+ surge)
-  - Volatility spike detection
-  - Consecutive price moves
-  - Gap move identification
-  - Combined buzz score (0-100)
+- **Buzzing Stock Detection with Social Sentiment (Crawl4ai)**:
+  - **Technical Analysis (60%)**: Volume surge, volatility spikes, consecutive moves, gaps
+  - **Social Sentiment (40%)**: Reddit (r/wallstreetbets, r/stocks), Twitter/X (via Nitter), StockTwits, financial news
+  - **No Login Required**: Public endpoints and mirrors for all sources
+  - **JavaScript Rendering**: Full browser crawling for dynamic content
+  - **BM25 Relevance Scoring**: Find most relevant discussions automatically
+  - **Sentiment Analysis**: Bullish/bearish keyword detection
+  - Combined buzz score (0-100) with social + technical indicators
   - Reverse merger candidate detection
 
 - **Penny Stock Risk Analysis**:
@@ -957,35 +971,113 @@ for opp in opportunities:
         print(f"  🔥 BUZZING: {', '.join(opp.buzz_reasons)}")
 ```
 
-### **Buzzing Stocks Detection:**
+### **Buzzing Stocks Detection with Social Sentiment:**
+
+The buzzing scanner now uses **Crawl4ai** for comprehensive social sentiment analysis across multiple platforms:
 
 ```python
-# Scan for stocks showing unusual activity
+# Scan for stocks showing unusual activity + social buzz
 buzzing = scanner.scan_buzzing_stocks(
     top_n=20,
     lookback_days=5,
-    min_buzz_score=50.0
+    min_buzz_score=30.0  # Lower threshold for broader results
 )
 
 for stock in buzzing:
     print(f"{stock.ticker}: Buzz Score {stock.buzz_score:.0f}")
     print(f"  {', '.join(stock.buzz_reasons)}")
+    # Example reasons:
+    # "Volume surge 3.2x average"
+    # "📱 25 Reddit mentions (BULLISH)"
+    # "🐦 18 Twitter mentions"
+    # "💬 12 StockTwits messages (BULLISH)"
+    # "📰 8 news articles"
+    # "🔥 Trending (score: 78)"
 ```
 
 ### **What Makes a Stock "Buzzing"?**
 
-The buzz detection algorithm scores stocks 0-100 based on:
+The buzz detection combines **technical analysis (60%)** + **social sentiment (40%)**:
 
+#### **Technical Buzz (60% weight):**
 - **Volume Surge (40 pts)**: Recent volume 2-3x+ average
 - **Volatility Spike (30 pts)**: Price swings 1.5-2x+ normal
 - **Consecutive Moves (20 pts)**: Multiple days of >2% moves
 - **Gap Moves (10 pts)**: Gap up/down >3-5%
 
-**Buzz Score Interpretation:**
-- **75-100**: Extremely hot - Major attention
-- **60-74**: Very buzzing - Strong interest
+#### **Social Sentiment (40% weight) - NEW:**
+- **Reddit mentions (0-50 pts)**: 10 popular subreddits (wallstreetbets, stocks, investing, options, StockMarket, pennystocks, Daytrading, swingtrading, wallstreetbetsOGs, thetagang) - searches for both `$TICKER` and `TICKER`
+- **Twitter mentions (0-30 pts)**: Via Nitter mirrors (no login required) - searches for `$TICKER` first (standard Twitter format)
+- **StockTwits sentiment (0-20 pts)**: Real-time trader sentiment with bullish/bearish tags
+- **Financial news (0-20 pts)**: Article volume from Yahoo Finance, Seeking Alpha
+- **Sentiment boost (0-20 pts)**: Bullish vs bearish keyword analysis
+
+**Combined Buzz Score Interpretation:**
+- **75-100**: Extremely hot - Major technical + social attention
+- **60-74**: Very buzzing - Strong interest across sources
 - **50-59**: Buzzing - Elevated activity
-- **<50**: Normal activity
+- **30-49**: Moderate interest - Worth monitoring
+- **<30**: Normal activity
+
+### **Social Sentiment Data Sources:**
+
+| Source | Access Method | Search Format | Login Required | Coverage |
+|--------|--------------|---------------|----------------|----------|
+| **Reddit** | Crawl4ai + BM25 scoring | `$TICKER OR TICKER` | ❌ No | 10 subreddits, 5 checked per scan, 30 posts each |
+| **Twitter/X** | Nitter mirrors | `$TICKER OR TICKER` | ❌ No | Multiple mirror instances, 20+ tweets |
+| **StockTwits** | Public streams | `TICKER` | ❌ No | Real-time stream, 30+ messages |
+| **News** | yfinance API | `TICKER` | ❌ No | Yahoo Finance, 10+ articles |
+
+**Features:**
+- ✅ **JavaScript Rendering**: Access dynamic/JS-heavy sites
+- ✅ **Stealth Mode**: Bypass bot detection
+- ✅ **BM25 Link Scoring**: Find most relevant discussions
+- ✅ **Parallel Crawling**: Fast multi-source scraping
+- ✅ **Sentiment Analysis**: Bullish/bearish keyword matching
+- ✅ **No Login Walls**: Uses public endpoints and mirrors
+
+**Excluded Sources:**
+- ❌ Instagram (not relevant for trading)
+- ❌ Facebook (minimal trading discussion)
+
+### **Installation:**
+
+The social sentiment analyzer requires **Crawl4ai**:
+
+```powershell
+# Install Crawl4ai
+pip install crawl4ai
+
+# Setup browser for JS rendering
+crawl4ai-setup
+
+# Test installation
+python test_crawl4ai.py
+```
+
+### **Example Output:**
+
+```
+NVDA - Buzz Score: 85.4/100 (VERY HIGH)
+├─ Volume surge 3.2x average
+├─ High volatility spike
+├─ 📱 25 Reddit mentions (BULLISH)
+│  └─ "NVDA calls printing 🚀 earnings crush expected"
+├─ 🐦 18 Twitter mentions
+│  └─ "NVDA breaking ATH, AI demand unstoppable"
+├─ 💬 12 StockTwits messages (BULLISH)
+│  └─ 83% bullish sentiment
+├─ 📰 8 news articles
+│  └─ "NVIDIA Earnings Beat, Revenue Guidance Raised"
+└─ 🔥 Trending (score: 78)
+```
+
+### **Performance:**
+- **Single ticker**: 10-20 seconds (comprehensive analysis)
+- **5 tickers**: 1-2 minutes
+- **20 tickers**: 4-8 minutes
+
+**Note**: Slower than technical-only analysis but provides comprehensive social sentiment data.
 
 ### **Reverse Split Tracking (Penny Stocks):**
 

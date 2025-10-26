@@ -16,8 +16,10 @@ from datetime import datetime, timedelta
 
 from .top_trades_scanner import TopTradesScanner, TopTrade
 from .ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrade
+from .social_sentiment_analyzer import SocialSentimentAnalyzer
 from analyzers.comprehensive import ComprehensiveAnalyzer
 from models.analysis import StockAnalysis
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -194,15 +196,11 @@ class AdvancedOpportunityScanner:
     ]
     
     def __init__(self, use_ai: bool = True):
-        """
-        Initialize advanced scanner
-        
-        Args:
-            use_ai: Whether to use AI-enhanced analysis
-        """
+        """Initialize the scanner"""
         self.base_scanner = TopTradesScanner()
         self.ai_scanner = AIConfidenceScanner(use_llm=use_ai) if use_ai else None
         self.use_ai = use_ai
+        self.social_analyzer = SocialSentimentAnalyzer()  # For buzz detection
     
     def scan_opportunities(
         self,
@@ -267,28 +265,54 @@ class AdvancedOpportunityScanner:
         self,
         top_n: int = 20,
         lookback_days: int = 5,
-        min_buzz_score: float = 50.0
+        min_buzz_score: float = 30.0,  # Lowered from 50 to show more results
+        max_tickers_to_scan: Optional[int] = None  # Limit number of tickers to scan for faster results
     ) -> List[OpportunityResult]:
         """
-        Scan for buzzing/trending stocks showing unusual activity
+        Scan for buzzing/trending stocks showing unusual activity.
+        
+        Now includes:
+        - Technical buzz (volume, volatility, price action)
+        - Social sentiment (Reddit, news)
+        - Combined scoring for comprehensive buzz detection
         
         Args:
-            top_n: Number of results
+            top_n: Number of results to return
             lookback_days: Days to look back for buzz detection
-            min_buzz_score: Minimum buzz score to include
+            min_buzz_score: Minimum buzz score to include (default 30.0 for broader results)
+            max_tickers_to_scan: Maximum number of tickers to scan (None = scan all). 
+                                Use lower values (e.g., 50) for faster scans.
         
         Returns:
             List of buzzing opportunities
         """
-        logger.info(f"Scanning for buzzing stocks (top {top_n}, lookback={lookback_days} days)")
+        # Limit ticker universe if requested for faster scans
+        ticker_universe = self.EXTENDED_UNIVERSE
+        if max_tickers_to_scan:
+            ticker_universe = ticker_universe[:max_tickers_to_scan]
+            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers (limited) for buzzing stocks (top {top_n}, min score={min_buzz_score})")
+        else:
+            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers for buzzing stocks (top {top_n}, min score={min_buzz_score})")
         
         opportunities = []
         
-        for ticker in self.EXTENDED_UNIVERSE:
+        for ticker in ticker_universe:
             try:
+                # 1. Technical buzz detection (price, volume, volatility)
                 buzz_result = self._detect_buzz(ticker, lookback_days)
                 
-                if buzz_result and buzz_result['buzz_score'] >= min_buzz_score:
+                # 2. Social sentiment analysis (Reddit, news, forums) - ASYNC
+                social_result = self._get_social_sentiment_sync(ticker)
+                
+                # 3. Combine scores
+                technical_score = buzz_result['buzz_score'] if buzz_result else 0
+                social_score = social_result.get('social_score', 0)
+                
+                # Weighted average: 60% technical, 40% social
+                combined_buzz_score = (technical_score * 0.6) + (social_score * 0.4)
+                
+                # Only include if meets threshold
+                if combined_buzz_score >= min_buzz_score:
                     # Get full analysis
                     analysis = ComprehensiveAnalyzer.analyze_stock(ticker, "SWING_TRADE")
                     
@@ -301,11 +325,26 @@ class AdvancedOpportunityScanner:
                     # Detect merger candidates (buzzing stocks might be merger targets)
                     merger_info = self._detect_reverse_merger_candidate(ticker, analysis)
                     
-                    # Boost buzz score if merger candidate detected
-                    final_buzz_score = buzz_result['buzz_score']
+                    # Build comprehensive buzz reasons
+                    buzz_reasons = []
+                    
+                    # Technical buzz reasons
+                    if buzz_result:
+                        buzz_reasons.extend(buzz_result['reasons'])
+                    
+                    # Social buzz reasons
+                    if social_result['reddit_mentions'] > 0:
+                        buzz_reasons.append(f"📱 {social_result['reddit_mentions']} Reddit mentions ({social_result['sentiment']})")
+                    if social_result['news_mentions'] > 5:
+                        buzz_reasons.append(f"📰 {social_result['news_mentions']} news articles")
+                    if social_result['trending_score'] > 60:
+                        buzz_reasons.append(f"🔥 Trending (score: {social_result['trending_score']:.0f})")
+                    
+                    # Boost final score if merger candidate
+                    final_buzz_score = combined_buzz_score
                     if merger_info['is_merger_candidate']:
                         final_buzz_score = min(100, final_buzz_score + 10)
-                        buzz_result['reasons'].insert(0, "🔄 Reverse merger candidate")
+                        buzz_reasons.insert(0, "🔄 Reverse merger candidate")
                     
                     result = OpportunityResult(
                         ticker=ticker,
@@ -315,14 +354,14 @@ class AdvancedOpportunityScanner:
                         change_pct=analysis.change_pct,
                         volume=analysis.volume,
                         volume_ratio=analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 0,
-                        reason=" | ".join(buzz_result['reasons']),
-                        confidence="HIGH" if final_buzz_score >= 75 else "MEDIUM",
+                        reason=" | ".join(buzz_reasons) if buzz_reasons else "Buzzing activity detected",
+                        confidence="VERY HIGH" if final_buzz_score >= 75 else "HIGH" if final_buzz_score >= 50 else "MEDIUM",
                         risk_level="M-H",
                         trend=analysis.trend,
                         rsi=analysis.rsi,
                         is_buzzing=True,
                         buzz_score=final_buzz_score,
-                        buzz_reasons=buzz_result['reasons'],
+                        buzz_reasons=buzz_reasons,
                         reverse_splits=reverse_split_info['reverse_splits'],
                         has_recent_reverse_split=reverse_split_info['has_recent_reverse_split'],
                         reverse_split_warning=reverse_split_info['warning'],
@@ -338,10 +377,12 @@ class AdvancedOpportunityScanner:
                 logger.debug(f"Error detecting buzz for {ticker}: {e}")
                 continue
         
-        # Sort by buzz score
+        # Sort by buzz score (highest first)
         opportunities.sort(key=lambda x: x.buzz_score, reverse=True)
         
-        logger.info(f"Found {len(opportunities)} buzzing stocks")
+        logger.info(f"🔥 Found {len(opportunities)} buzzing stocks with social sentiment")
+        if opportunities:
+            logger.info(f"   Top 3: {', '.join([f'{o.ticker}({o.buzz_score:.0f})' for o in opportunities[:3]])}")
         
         return opportunities[:top_n]
     
@@ -597,6 +638,69 @@ class AdvancedOpportunityScanner:
             'signals': signals
         }
     
+    def _get_social_sentiment_sync(self, ticker: str) -> Dict:
+        """
+        Get social sentiment in synchronous context.
+        Properly handles async/await and Windows subprocess issues.
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Social sentiment dict (or empty result on error)
+        """
+        try:
+            # In Streamlit/nest_asyncio environment, reuse the existing event loop
+            # This prevents "cannot schedule new futures after shutdown" errors
+            # caused by creating new event loops with asyncio.run()
+            try:
+                loop = asyncio.get_event_loop()
+                # Check if loop is closed or None
+                if loop is None or loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                # No event loop in current thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run the async function using the existing/new loop
+            social_result = loop.run_until_complete(
+                self.social_analyzer.analyze_social_buzz(ticker)
+            )
+            return social_result
+            
+        except (NotImplementedError, ImportError) as e:
+            # Crawl4ai not available or Windows subprocess issue
+            # This is expected on first run - only log once
+            if not hasattr(self, '_crawl4ai_warning_shown'):
+                logger.warning(f"Social sentiment disabled: {e.__class__.__name__}")
+                logger.info("Continuing with technical analysis only (no social data)")
+                self._crawl4ai_warning_shown = True
+            
+            # Return empty result - technical buzz will still work
+            return {
+                'social_score': 0,
+                'reddit_mentions': 0,
+                'twitter_mentions': 0,
+                'stocktwits_mentions': 0,
+                'news_mentions': 0,
+                'sentiment': 'NEUTRAL',
+                'trending_score': 0
+            }
+        except Exception as e:
+            # Other errors - log but continue
+            logger.debug(f"Social sentiment failed for {ticker}: {e}")
+            return {
+                'social_score': 0,
+                'reddit_mentions': 0,
+                'twitter_mentions': 0,
+                'stocktwits_mentions': 0,
+                'news_mentions': 0,
+                'sentiment': 'NEUTRAL',
+                'trending_score': 0
+            }
+    
     def _detect_buzz(self, ticker: str, lookback_days: int = 5) -> Optional[Dict]:
         """
         Detect if a stock is buzzing based on unusual activity
@@ -841,6 +945,15 @@ class AdvancedOpportunityScanner:
                 'merger_score': 0,
                 'signals': []
             }
+    
+    async def cleanup(self):
+        """Cleanup resources (social analyzer, crawlers, etc.)"""
+        try:
+            if hasattr(self, 'social_analyzer') and self.social_analyzer:
+                await self.social_analyzer.close()
+                logger.info("✅ Scanner cleanup completed")
+        except Exception as e:
+            logger.debug(f"Error during scanner cleanup: {e}")
     
     def get_scan_summary(self, opportunities: List[OpportunityResult]) -> Dict:
         """Generate summary statistics for scan results"""

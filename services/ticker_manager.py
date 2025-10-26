@@ -202,25 +202,58 @@ class TickerManager:
             logger.error(f"Error deleting watchlist {watchlist_name}: {e}")
             return False
 
-    def update_ml_analysis(self, ticker: str, ml_score: float = None, 
-                          momentum: float = None, volume_ratio: float = None, 
-                          rsi: float = None) -> bool:
+    def update_analysis(self, ticker: str, analysis: Dict) -> bool:
+        """
+        Update analysis data for a ticker using only core columns that exist in schema.
+        Database columns: ticker, name, sector, type, notes, tags, last_accessed, access_count
+        Analysis fields: ml_score, momentum, volume_ratio, rsi, sentiment_score, last_analyzed
+        """
         if not self._check_client(): return False
         try:
+            ticker = ticker.upper()
+            current_time = datetime.now(timezone.utc).isoformat()
+            
+            # Use upsert to handle both new and existing tickers
+            # Only use core columns that exist in the database
             update_data = {
-                'ml_score': ml_score,
-                'momentum': momentum,
-                'volume_ratio': volume_ratio,
-                'rsi': rsi,
-                'last_analyzed': datetime.now(timezone.utc).isoformat()
+                'ticker': ticker,
+                'last_accessed': current_time,
             }
-            update_data = {k: v for k, v in update_data.items() if v is not None}
+            
+            # Add only the analysis fields that have corresponding DB columns
+            # These were likely added to your Supabase schema
+            safe_field_mapping = {
+                'confidence_score': ('ml_score', float),
+                'change_pct': ('momentum', float),
+                'volume': ('volume_ratio', int),
+                'rsi': ('rsi', float),
+                'sentiment_score': ('sentiment_score', float),
+            }
+            
+            for analysis_key, (db_field, type_cast) in safe_field_mapping.items():
+                try:
+                    if analysis_key in analysis and analysis[analysis_key] is not None:
+                        update_data[db_field] = type_cast(analysis[analysis_key])
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Skipping {db_field} due to type conversion error: {e}")
+            
+            # Try to add last_analyzed if column exists
+            try:
+                update_data['last_analyzed'] = current_time
+            except:
+                pass
 
-            self.supabase.table('saved_tickers').update(update_data).eq('ticker', ticker.upper()).execute()
-            logger.info(f"Updated ML analysis for {ticker}")
+            self.supabase.table('saved_tickers').upsert(
+                update_data,
+                on_conflict='ticker'
+            ).execute()
+            
+            logger.info(f"✓ Updated analysis for {ticker}: score={update_data.get('ml_score', 'N/A')}, momentum={update_data.get('momentum', 'N/A')}%")
             return True
+                
         except Exception as e:
-            logger.error(f"Error updating ML analysis for {ticker}: {e}")
+            logger.error(f"Error updating analysis for {ticker}: {e}")
+            logger.debug(f"Attempted data: {update_data if 'update_data' in locals() else 'N/A'}")
             return False
 
     def get_statistics(self) -> Dict:
