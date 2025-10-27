@@ -27,10 +27,26 @@ class TickerManager:
             logger.warning("Supabase client not initialized. Skipping database operation.")
             return False
         return True
+    
+    def test_connection(self) -> bool:
+        """Test if we can connect to Supabase and access the saved_tickers table"""
+        if not self._check_client():
+            return False
+        try:
+            # Try to query the table to see if it exists and is accessible
+            response = self.supabase.table('saved_tickers').select('ticker').limit(1).execute()
+            logger.info(f"Supabase connection test successful. Response: {response}")
+            return True
+        except Exception as e:
+            logger.error(f"Supabase connection test failed: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
 
     def add_ticker(self, ticker: str, name: str = None, sector: str = None, 
                    ticker_type: str = 'stock', notes: str = None, tags: List[str] = None) -> bool:
-        if not self._check_client(): return False
+        if not self._check_client(): 
+            logger.error("Supabase client not available")
+            return False
         try:
             ticker = ticker.upper()
             current_time = datetime.now(timezone.utc).isoformat()
@@ -47,16 +63,20 @@ class TickerManager:
             }
             
             data_to_upsert = {k: v for k, v in data_to_upsert.items() if v is not None}
+            logger.info(f"Attempting to upsert ticker data: {data_to_upsert}")
 
-            self.supabase.table('saved_tickers').upsert(
+            response = self.supabase.table('saved_tickers').upsert(
                 data_to_upsert, 
                 on_conflict='ticker'
             ).execute()
 
-            logger.info(f"Added/updated ticker: {ticker}")
+            logger.info(f"Successfully added/updated ticker: {ticker}")
+            logger.info(f"Supabase response: {response}")
             return True
         except Exception as e:
             logger.error(f"Error adding/updating ticker {ticker}: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
             return False
 
     def remove_ticker(self, ticker: str) -> bool:

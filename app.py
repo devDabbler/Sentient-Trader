@@ -3795,6 +3795,17 @@ def main():
         
         tm = st.session_state.ticker_manager
         
+        # Debug: Show connection status
+        if tm.supabase:
+            if tm.test_connection():
+                st.success("✅ Supabase connected and table accessible")
+            else:
+                st.error("❌ Supabase connected but table not accessible - check table exists")
+                st.stop()
+        else:
+            st.error("❌ Supabase not connected - check your secrets")
+            st.stop()
+        
         # Add new ticker
         st.subheader("➕ Add New Ticker")
         col1, col2, col3 = st.columns(3)
@@ -3813,7 +3824,12 @@ def main():
                     st.success(f"✅ Added {new_ticker}!")
                     st.rerun()
                 else:
-                    st.error("❌ Failed to add ticker. It might already exist.")
+                    st.error("❌ Failed to add ticker. Check the logs for details.")
+                    # Show debug info
+                    if tm.supabase:
+                        st.info("✅ Supabase client is connected")
+                    else:
+                        st.error("❌ Supabase client is not connected - check your secrets")
             else:
                 st.warning("⚠️ Ticker symbol is required.")
         
