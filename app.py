@@ -3804,6 +3804,17 @@ def main():
                 st.stop()
         else:
             st.error("❌ Supabase not connected - check your secrets")
+            
+            # Show debug info about secrets
+            try:
+                if 'supabase' in st.secrets:
+                    st.info(f"✅ Found supabase section in secrets")
+                    st.info(f"URL: {st.secrets['supabase'].get('url', 'Not set')}")
+                    st.info(f"Service key: {'Set' if st.secrets['supabase'].get('service_key') else 'Not set'}")
+                else:
+                    st.error("❌ No [supabase] section found in Streamlit secrets")
+            except Exception as e:
+                st.error(f"❌ Error reading secrets: {e}")
             st.stop()
         
         # Add new ticker
