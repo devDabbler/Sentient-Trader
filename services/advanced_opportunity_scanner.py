@@ -265,7 +265,7 @@ class AdvancedOpportunityScanner:
         self,
         top_n: int = 20,
         lookback_days: int = 5,
-        min_buzz_score: float = 30.0,  # Lowered from 50 to show more results
+        min_buzz_score: float = 15.0,  # Lowered to 15 to capture social buzz without tech requirements
         max_tickers_to_scan: Optional[int] = None  # Limit number of tickers to scan for faster results
     ) -> List[OpportunityResult]:
         """
@@ -308,8 +308,9 @@ class AdvancedOpportunityScanner:
                 technical_score = buzz_result['buzz_score'] if buzz_result else 0
                 social_score = social_result.get('social_score', 0)
                 
-                # Weighted average: 60% technical, 40% social
-                combined_buzz_score = (technical_score * 0.6) + (social_score * 0.4)
+                # Use the MAXIMUM of technical and social scores
+                # This ensures stocks with strong social buzz OR technical signals get through
+                combined_buzz_score = max(technical_score, social_score)
                 
                 # Only include if meets threshold
                 if combined_buzz_score >= min_buzz_score:
@@ -335,6 +336,8 @@ class AdvancedOpportunityScanner:
                     # Social buzz reasons
                     if social_result['reddit_mentions'] > 0:
                         buzz_reasons.append(f"📱 {social_result['reddit_mentions']} Reddit mentions ({social_result['sentiment']})")
+                    if social_result.get('twitter_mentions', 0) > 0:
+                        buzz_reasons.append(f"🐦 {social_result['twitter_mentions']} Twitter mentions")
                     if social_result['news_mentions'] > 5:
                         buzz_reasons.append(f"📰 {social_result['news_mentions']} news articles")
                     if social_result['trending_score'] > 60:

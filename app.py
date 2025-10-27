@@ -1660,6 +1660,161 @@ def main():
                             if trade_class == "option":
                                 st.info(f"💡 **Suggested Strike:** {selected_rec.get('strike_suggestion', 'N/A')}")
                                 st.info(f"💡 **Suggested Expiration:** {selected_rec.get('dte_suggestion', 'N/A')}")
+                                
+                                # Add helpful information about finding options symbols
+                                with st.expander("📋 How to find valid options symbols", expanded=False):
+                                    st.markdown("""
+                                    **Since Tradier sandbox has limited options data, here's how to find valid symbols:**
+                                    
+                                    1. **Tradier Web Platform**: 
+                                       - Go to [sandbox.tradier.com](https://sandbox.tradier.com)
+                                       - Search for SOFI options
+                                       - Copy the exact symbol format
+                                    
+                                    2. **Yahoo Finance**:
+                                       - Search "SOFI options"
+                                       - Look for the symbol format: `SOFI251126C00025000`
+                                    
+                                    3. **Common SOFI Strike Prices** (as of recent):
+                                       - $20, $22.50, $25, $27.50, $30, $32.50, $35
+                                    
+                                    4. **Common Expiration Dates**:
+                                       - Weekly: Every Friday
+                                       - Monthly: Third Friday of each month
+                                    
+                                    **Symbol Format**: `SOFI + YYMMDD + C/P + 8-digit strike`
+                                    - Example: `SOFI251126C00025000` = SOFI $25 Call expiring 11/26/25
+                                    """)
+                                
+                                # Generate options contract symbol automatically
+                                col1, col2 = st.columns([2, 1])
+                                
+                                with col1:
+                                    # Auto-generate options symbol if we have the required data
+                                    auto_generated_symbol = ""
+                                    if selected_rec and selected_rec.get('strike_suggestion') and selected_rec.get('dte_suggestion'):
+                                        try:
+                                            # Parse strike price and round to nearest $0.50 or $1.00
+                                            strike = float(selected_rec['strike_suggestion'].replace('$', '').split()[0])
+                                            
+                                            # Round to nearest $0.50 for better strike price availability
+                                            if strike < 10:
+                                                strike = round(strike * 2) / 2  # Round to nearest $0.50
+                                            else:
+                                                strike = round(strike)  # Round to nearest $1.00
+                                            
+                                            # Calculate expiration date (DTE from today)
+                                            dte_text = selected_rec['dte_suggestion'].split()[0]
+                                            # Handle range format like "30-45" by taking the first number
+                                            if '-' in dte_text:
+                                                dte = int(dte_text.split('-')[0])
+                                            else:
+                                                dte = int(dte_text)
+                                            
+                                            # Round to common options expiration dates (Fridays)
+                                            exp_date = datetime.now() + timedelta(days=dte)
+                                            # Find the next Friday (options typically expire on Fridays)
+                                            days_until_friday = (4 - exp_date.weekday()) % 7
+                                            if days_until_friday == 0 and exp_date.weekday() != 4:  # If today is not Friday
+                                                days_until_friday = 7
+                                            exp_date = exp_date + timedelta(days=days_until_friday)
+                                            
+                                            # Determine option type (P for PUT, C for CALL)
+                                            option_type = "P" if "PUT" in selected_rec.get('type', '') else "C"
+                                            
+                                            # Format: SYMBOL + YYMMDD + P/C + 8-digit strike (padded with zeros)
+                                            auto_generated_symbol = f"{trade_symbol.upper()}{exp_date.strftime('%y%m%d')}{option_type}{int(strike * 1000):08d}"
+                                            
+                                            # Set the session state before creating the widget
+                                            if 'modal_option_symbol' not in st.session_state or not st.session_state['modal_option_symbol']:
+                                                st.session_state['modal_option_symbol'] = auto_generated_symbol
+                                        except:
+                                            pass
+                                    
+                                    # Use temp generated symbol if available, otherwise use existing value
+                                    default_value = st.session_state.get('temp_generated_symbol', st.session_state.get('modal_option_symbol', ''))
+                                    if st.session_state.get('temp_generated_symbol'):
+                                        # Clear the temp value after using it
+                                        st.session_state['modal_option_symbol'] = st.session_state['temp_generated_symbol']
+                                        del st.session_state['temp_generated_symbol']
+                                    
+                                    option_symbol = st.text_input(
+                                        "Options Contract Symbol", 
+                                        value=st.session_state.get('modal_option_symbol', ''), 
+                                        placeholder="e.g., SOFI250117P00029000",
+                                        help="Enter the full options contract symbol (e.g., SOFI250117P00029000 for SOFI $29 Put expiring 01/17/25)",
+                                        key="modal_option_symbol"
+                                    )
+                                
+                                with col2:
+                                    if st.button("🔧 Auto-Generate", help="Generate options symbol from strike and DTE"):
+                                        if selected_rec and selected_rec.get('strike_suggestion') and selected_rec.get('dte_suggestion'):
+                                            try:
+                                                # Parse strike price and round to nearest $0.50 or $1.00
+                                                strike = float(selected_rec['strike_suggestion'].replace('$', '').split()[0])
+                                                
+                                                # Round to nearest $0.50 for better strike price availability
+                                                if strike < 10:
+                                                    strike = round(strike * 2) / 2  # Round to nearest $0.50
+                                                else:
+                                                    strike = round(strike)  # Round to nearest $1.00
+                                                
+                                                # Calculate expiration date (DTE from today)
+                                                dte_text = selected_rec['dte_suggestion'].split()[0]
+                                                # Handle range format like "30-45" by taking the first number
+                                                if '-' in dte_text:
+                                                    dte = int(dte_text.split('-')[0])
+                                                else:
+                                                    dte = int(dte_text)
+                                                
+                                                # Round to common options expiration dates (Fridays)
+                                                exp_date = datetime.now() + timedelta(days=dte)
+                                                # Find the next Friday (options typically expire on Fridays)
+                                                days_until_friday = (4 - exp_date.weekday()) % 7
+                                                if days_until_friday == 0 and exp_date.weekday() != 4:  # If today is not Friday
+                                                    days_until_friday = 7
+                                                exp_date = exp_date + timedelta(days=days_until_friday)
+                                                
+                                                # Determine option type (P for PUT, C for CALL)
+                                                option_type = "P" if "PUT" in selected_rec.get('type', '') else "C"
+                                                
+                                                # Format: SYMBOL + YYMMDD + P/C + 8-digit strike (padded with zeros)
+                                                generated_symbol = f"{trade_symbol.upper()}{exp_date.strftime('%y%m%d')}{option_type}{int(strike * 1000):08d}"
+                                                # Store the generated symbol in a temporary session state key
+                                                st.session_state['temp_generated_symbol'] = generated_symbol
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Error generating symbol: {e}")
+                                        else:
+                                            st.error("Need strike and DTE suggestions to auto-generate")
+                                    
+                                    # Add validation button
+                                    if st.button("✅ Validate Symbol", help="Check if the options symbol exists"):
+                                        if st.session_state.get('modal_option_symbol'):
+                                            symbol = st.session_state['modal_option_symbol']
+                                            
+                                            # Basic format validation first
+                                            if len(symbol) < 15:
+                                                st.error("❌ Options symbol too short. Expected format: SYMBOL + YYMMDD + C/P + 8-digit strike")
+                                            elif not any(c.isdigit() for c in symbol):
+                                                st.error("❌ Options symbol must contain numbers for date and strike")
+                                            elif not any(c in ['C', 'P'] for c in symbol):
+                                                st.error("❌ Options symbol must contain 'C' for Call or 'P' for Put")
+                                            else:
+                                                with st.spinner("Validating options symbol..."):
+                                                    success, message = st.session_state.tradier_client.validate_options_symbol(symbol)
+                                                    if success:
+                                                        st.success(f"✅ {message}")
+                                                    else:
+                                                        # Check if it's an API limitation
+                                                        if "API limitation" in message:
+                                                            st.warning(f"⚠️ {message}")
+                                                            st.info("💡 The symbol format looks correct. You can proceed with the trade, but verify the symbol exists on your broker's platform.")
+                                                        else:
+                                                            st.error(f"❌ {message}")
+                                        else:
+                                            st.error("Please enter an options symbol first")
+                                
                                 trade_side = st.selectbox("Action", 
                                                         ["buy_to_open", "sell_to_open", "buy_to_close", "sell_to_close"],
                                                         index=0 if 'buy' in default_action else 1,
@@ -1668,6 +1823,7 @@ def main():
                             else:
                                 trade_side = st.selectbox("Action", ["buy", "sell", "sell_short", "buy_to_cover"], key="modal_trade_side2")
                                 trade_quantity = st.number_input("Quantity (shares)", min_value=1, value=default_qty, step=1, key="modal_trade_qty2")
+                                option_symbol = None
                         else:
                             trade_class = "equity"
                             if default_action == "SELL_SHORT":
@@ -1788,6 +1944,20 @@ def main():
                         if st.button("✅ Place Order", type="primary", width="stretch", key="modal_place_order"):
                             with st.spinner("Placing order..."):
                                 try:
+                                    # Validate required fields
+                                    if not trade_symbol:
+                                        st.error("❌ Please enter a symbol")
+                                        st.stop()
+                                    elif trade_quantity <= 0:
+                                        st.error("❌ Quantity must be greater than 0")
+                                        st.stop()
+                                    elif trade_type == "limit" and (not trade_price or trade_price <= 0):
+                                        st.error("❌ Please enter a valid limit price")
+                                        st.stop()
+                                    elif trade_class == "option" and (not st.session_state.get('modal_option_symbol', '')):
+                                        st.error("❌ Please enter the options contract symbol (e.g., SOFI250117P00029000)")
+                                        st.stop()
+                                    
                                     # Determine if we can use bracket orders
                                     # Bracket orders require: equity class, limit entry, buy/sell side, and stop/target prices
                                     use_bracket = (
@@ -1822,21 +1992,27 @@ def main():
                                                 target = round(trade_price * 0.95, 2)
                                         logger.info(f"🎯 Placing bracket order: {trade_symbol} {trade_side} {trade_quantity} @ ${trade_price} (SL: ${stop_loss:.2f}, Target: ${target:.2f})")
                                         
-                                        success, result = st.session_state.tradier_client.place_bracket_order(
-                                            symbol=trade_symbol.upper(),
-                                            side=trade_side,
-                                            quantity=trade_quantity,
-                                            entry_price=trade_price,
-                                            take_profit_price=target,
-                                            stop_loss_price=stop_loss,
-                                            duration='gtc',  # Use GTC for bracket orders
-                                            tag=f"AIREC{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                                        )
+                                        # Prepare bracket order parameters
+                                        bracket_params = {
+                                            "symbol": trade_symbol.upper(),
+                                            "side": trade_side,
+                                            "quantity": trade_quantity,
+                                            "entry_price": trade_price,
+                                            "take_profit_price": target,
+                                            "stop_loss_price": stop_loss,
+                                            "duration": 'gtc',  # Use GTC for bracket orders
+                                            "tag": f"AIREC{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                        }
+                                        
+                                        # Add option_symbol if this is an options trade
+                                        if trade_class == "option" and st.session_state.get('modal_option_symbol'):
+                                            bracket_params["option_symbol"] = st.session_state['modal_option_symbol'].upper()
+                                        
+                                        success, result = st.session_state.tradier_client.place_bracket_order(**bracket_params)
                                     else:
                                         # Fallback to regular order for market orders or options
                                         order_data = {
                                             "class": trade_class,
-                                            "symbol": trade_symbol.upper(),
                                             "side": trade_side,
                                             "quantity": str(trade_quantity),
                                             "type": trade_type,
@@ -1844,12 +2020,20 @@ def main():
                                             "tag": f"AIREC{datetime.now().strftime('%Y%m%d%H%M%S')}"
                                         }
                                         
+                                        # Use appropriate symbol field based on trade class
+                                        if trade_class == "option" and st.session_state.get('modal_option_symbol'):
+                                            order_data["option_symbol"] = st.session_state['modal_option_symbol'].upper()
+                                            trade_symbol_display = st.session_state['modal_option_symbol']
+                                        else:
+                                            order_data["symbol"] = trade_symbol.upper()
+                                            trade_symbol_display = trade_symbol
+                                        
                                         if trade_type == "limit" and trade_price:
                                             order_data["price"] = str(trade_price)
                                         
                                         # Explain why bracket wasn't used
                                         reason = "market order" if trade_type == "market" else "options trade" if trade_class != "equity" else "non-standard side"
-                                        logger.info(f"🚀 Placing REGULAR order ({reason}): {trade_symbol} {trade_side} {trade_quantity} @ {trade_type}")
+                                        logger.info(f"🚀 Placing REGULAR order ({reason}): {trade_symbol_display} {trade_side} {trade_quantity} @ {trade_type}")
                                         success, result = st.session_state.tradier_client.place_order(order_data)
                                     
                                     if success:
@@ -4348,10 +4532,10 @@ def main():
                     st.subheader("Risk Calculator")
                     risk_per_trade = st.number_input(
                         "Risk per Trade ($)",
-                        min_value=10,
-                        max_value=max_position_amount,
-                        value=min(100, max_position_amount),
-                        step=10,
+                        min_value=10.0,
+                        max_value=float(max_position_amount),
+                        value=float(min(100, max_position_amount)),
+                        step=10.0,
                         help="Maximum amount you're willing to lose on this single trade"
                     )
                     

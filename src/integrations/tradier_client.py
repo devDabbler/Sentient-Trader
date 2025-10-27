@@ -302,7 +302,14 @@ class TradierClient:
         try:
             # Validate required fields for simple orders
             if order_data.get('class') not in ['otoco', 'oco', 'combo']:
-                required_fields = ['class', 'symbol', 'side', 'quantity', 'type']
+                required_fields = ['class', 'side', 'quantity', 'type']
+                
+                # For options trades, require option_symbol instead of symbol
+                if order_data.get('class') == 'option':
+                    required_fields.append('option_symbol')
+                else:
+                    required_fields.append('symbol')
+                
                 for field in required_fields:
                     if field not in order_data:
                         return False, {"error": f"Missing required field: {field}"}
@@ -524,6 +531,59 @@ class TradierClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting order status: {e}")
             return False, {"error": str(e)}
+    
+    def get_options_chain(self, symbol: str, expiration: str = None) -> Tuple[bool, Dict]:
+        """Get options chain for a symbol"""
+        try:
+            url = f'{self.api_url}/v1/markets/options/chains'
+            params = {'symbol': symbol.upper()}
+            if expiration:
+                params['expiration'] = expiration
+                
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            return True, response.json()
+        except Exception as e:
+            logger.error(f"Error getting options chain: {e}")
+            return False, {"error": str(e)}
+    
+    def validate_options_symbol(self, option_symbol: str) -> Tuple[bool, str]:
+        """Validate if an options symbol exists"""
+        try:
+            # Extract underlying symbol from options symbol
+            # Format: SYMBOL + YYMMDD + C/P + 8-digit strike
+            underlying = ""
+            for i, char in enumerate(option_symbol):
+                if char.isdigit():
+                    underlying = option_symbol[:i]
+                    break
+            
+            if not underlying:
+                return False, "Invalid options symbol format"
+            
+            # Get options chain for the underlying symbol
+            success, data = self.get_options_chain(underlying)
+            if not success:
+                # Check if it's a 400 error (likely API limitation)
+                error_msg = data.get('error', 'Unknown error')
+                if "400" in str(error_msg):
+                    return False, f"Options data not available for {underlying} (API limitation). Symbol format appears correct: {option_symbol}"
+                return False, f"Could not fetch options chain: {error_msg}"
+            
+            # Check if the symbol exists in the chain
+            options = data.get('options', {}).get('option', [])
+            if not isinstance(options, list):
+                options = [options] if options else []
+            
+            for option in options:
+                if option.get('symbol') == option_symbol:
+                    return True, "Valid options symbol"
+            
+            return False, "Options symbol not found in available contracts"
+            
+        except Exception as e:
+            logger.error(f"Error validating options symbol: {e}")
+            return False, f"Validation error: {str(e)}"
     
     def convert_signal_to_order(self, signal: Dict) -> Dict:
         """Convert Option Alpha signal to Tradier order format"""
