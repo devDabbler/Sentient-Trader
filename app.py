@@ -1040,6 +1040,48 @@ class StrategyAdvisor:
         recommendations.sort(key=lambda x: x.confidence, reverse=True)
         return recommendations[:5]
 
+def _apply_filter_preset(filters: ScanFilters, filter_name: str) -> None:
+    """Apply a single filter preset to the filters object"""
+    if filter_name == "High Confidence Only (Score ≥70)":
+        filters.min_score = 70.0
+    elif filter_name == "Ultra-Low Price (<$1)":
+        filters.max_price = 1.0
+    elif filter_name == "Penny Stocks ($1-$5)":
+        filters.min_price = 1.0
+        filters.max_price = 5.0
+    elif filter_name == "Volume Surge (>2x avg)":
+        filters.min_volume_ratio = 2.0
+    elif filter_name == "Strong Momentum (>5% change)":
+        filters.min_change_pct = 5.0
+    elif filter_name == "Power Zone Stocks Only":
+        filters.require_power_zone = True
+    elif filter_name == "EMA Reclaim Setups":
+        filters.require_ema_reclaim = True
+
+def _apply_secondary_filter(filters: ScanFilters, filter_name: str) -> None:
+    """Apply secondary filters that can be combined with primary filters"""
+    if filter_name == "High Confidence Only (Score ≥70)":
+        if filters.min_score is None or filters.min_score < 70.0:
+            filters.min_score = 70.0
+    elif filter_name == "Volume Surge (>2x avg)":
+        if filters.min_volume_ratio is None or filters.min_volume_ratio < 2.0:
+            filters.min_volume_ratio = 2.0
+    elif filter_name == "Strong Momentum (>5% change)":
+        if filters.min_change_pct is None or filters.min_change_pct < 5.0:
+            filters.min_change_pct = 5.0
+    elif filter_name == "Power Zone Stocks Only":
+        filters.require_power_zone = True
+    elif filter_name == "EMA Reclaim Setups":
+        filters.require_ema_reclaim = True
+    elif filter_name == "RSI Oversold (<30)":
+        filters.max_rsi = 30.0
+    elif filter_name == "RSI Overbought (>70)":
+        filters.min_rsi = 70.0
+    elif filter_name == "High IV Rank (>60)":
+        filters.min_iv_rank = 60.0
+    elif filter_name == "Low IV Rank (<40)":
+        filters.max_iv_rank = 40.0
+
 @dataclass
 class TradingConfig:
     """Configuration for trading parameters and guardrails"""
@@ -3151,20 +3193,182 @@ def main():
             use_extended_universe = st.checkbox("Use Extended Universe (200+ tickers)", value=True, 
                                                help="Includes obscure plays and emerging stocks")
             
-            # Quick filter presets
-            quick_filter = st.selectbox(
-                "Filter Preset:",
-                options=[
-                    "None - Show All",
-                    "High Confidence Only (Score ≥70)",
-                    "Ultra-Low Price (<$1)",
-                    "Penny Stocks ($1-$5)",
-                    "Volume Surge (>2x avg)",
-                    "Strong Momentum (>5% change)",
-                    "Power Zone Stocks Only",
-                    "EMA Reclaim Setups"
-                ]
-            )
+            # Initialize quick_filter variable
+            quick_filter = "None - Show All"  # Default value
+            
+            # Strategy-Based Hybrid Approach
+            use_hybrid_approach = st.checkbox("🧬 Use Strategy-Based Hybrid Approach", value=False,
+                                            help="Use proven strategy combinations for balanced risk and opportunity")
+            
+            if use_hybrid_approach:
+                st.info("💡 **Strategy-Based Mode**: Uses proven filter combinations with AI analysis and personalized strategy recommendations")
+                
+                # Strategy selection
+                st.markdown("### 🎯 Choose Your Strategy")
+                strategy_choice = st.radio(
+                    "Select a proven strategy combination:",
+                    options=[
+                        "🎯 Quality Momentum (Recommended)",
+                        "📈 Aggressive Growth", 
+                        "⚡ Conservative Income",
+                        "🔥 High-Volatility Plays",
+                        "🔧 Custom Combination"
+                    ],
+                    key="strategy_choice"
+                )
+                
+                # Strategy-specific configurations
+                if strategy_choice == "🎯 Quality Momentum (Recommended)":
+                    st.success("**Best for balanced risk and opportunity**")
+                    st.markdown("""
+                    **Combines:**
+                    - High Confidence Only (≥70) - Foundation filter
+                    - Volume Surge (>2x avg) - Confirmation of interest  
+                    - Power Zone Stocks OR EMA Reclaim Setups - Technical validation
+                    
+                    **Why it works:** Risk management through confidence scores + growth potential through momentum + clear entry/exit points
+                    """)
+                    
+                    primary_approach = "High Confidence Only (Score ≥70)"
+                    secondary_approach = ["Volume Surge (>2x avg)", "Power Zone Stocks Only"]
+                    technical_choice = st.radio("Technical Confirmation:", ["Power Zone Stocks Only", "EMA Reclaim Setups"], key="quality_tech")
+                    if technical_choice == "EMA Reclaim Setups":
+                        secondary_approach = ["Volume Surge (>2x avg)", "EMA Reclaim Setups"]
+                
+                elif strategy_choice == "📈 Aggressive Growth":
+                    st.warning("**Higher risk, higher reward - for experienced traders**")
+                    st.markdown("""
+                    **Combines:**
+                    - Penny Stocks ($1-$5) - Price range for upside potential
+                    - Volume Surge (>2x avg) - Liquidity filter
+                    - High Confidence (≥70) - Quality control
+                    
+                    **Why it works:** Penny stock upside + volume ensures you can enter/exit + confidence filter reduces risk
+                    """)
+                    
+                    primary_approach = "Penny Stocks ($1-$5)"
+                    secondary_approach = ["Volume Surge (>2x avg)", "High Confidence Only (Score ≥70)"]
+                
+                elif strategy_choice == "⚡ Conservative Income":
+                    st.info("**Lower risk, steady returns**")
+                    st.markdown("""
+                    **Combines:**
+                    - High Confidence Only (≥70) - Quality foundation
+                    - EMA Reclaim Setups - High-probability entries
+                    - RSI Oversold (<30) - Mean reversion opportunities
+                    
+                    **Why it works:** Conservative screening + technical confirmation + oversold bounce potential
+                    """)
+                    
+                    primary_approach = "High Confidence Only (Score ≥70)"
+                    secondary_approach = ["EMA Reclaim Setups", "RSI Oversold (<30)"]
+                
+                elif strategy_choice == "🔥 High-Volatility Plays":
+                    st.error("**Highest risk, highest reward - for aggressive traders only**")
+                    st.markdown("""
+                    **Combines:**
+                    - Ultra-Low Price (<$1) - Maximum upside potential
+                    - Volume Surge (>2x avg) - Confirmation of interest
+                    - Strong Momentum (>5% change) - Already moving stocks
+                    
+                    **Why it works:** Maximum upside + volume confirmation + momentum continuation
+                    """)
+                    
+                    primary_approach = "Ultra-Low Price (<$1)"
+                    secondary_approach = ["Volume Surge (>2x avg)", "Strong Momentum (>5% change)"]
+                
+                else:  # Custom Combination
+                    st.markdown("**Build your own strategy combination**")
+                    
+                    col_custom1, col_custom2 = st.columns(2)
+                    
+                    with col_custom1:
+                        st.markdown("**Primary Filter:**")
+                        primary_approach = st.selectbox(
+                            "Main Filter:",
+                            options=[
+                                "High Confidence Only (Score ≥70)",
+                                "Ultra-Low Price (<$1)",
+                                "Penny Stocks ($1-$5)",
+                                "Volume Surge (>2x avg)",
+                                "Strong Momentum (>5% change)",
+                                "Power Zone Stocks Only",
+                                "EMA Reclaim Setups"
+                            ],
+                            key="custom_primary"
+                        )
+                    
+                    with col_custom2:
+                        st.markdown("**Additional Filters:**")
+                        secondary_approach = st.multiselect(
+                            "Secondary Filters:",
+                            options=[
+                                "High Confidence Only (Score ≥70)",
+                                "Volume Surge (>2x avg)",
+                                "Strong Momentum (>5% change)",
+                                "Power Zone Stocks Only",
+                                "EMA Reclaim Setups",
+                                "RSI Oversold (<30)",
+                                "RSI Overbought (>70)",
+                                "High IV Rank (>60)",
+                                "Low IV Rank (<40)"
+                            ],
+                            default=["Volume Surge (>2x avg)"],
+                            key="custom_secondary"
+                        )
+                
+                # Strategy recommendation integration
+                st.divider()
+                include_strategy_recs = st.checkbox("🎯 Include Strategy Recommendations", value=True,
+                                                  help="Get specific trading strategy recommendations for each found opportunity")
+                
+                if include_strategy_recs:
+                    st.markdown("**Your Trading Profile:**")
+                    strategy_col1, strategy_col2 = st.columns(2)
+                    
+                    with strategy_col1:
+                        user_experience_hybrid = st.selectbox(
+                            "Experience Level",
+                            options=["Beginner", "Intermediate", "Advanced"],
+                            key='hybrid_experience'
+                        )
+                        
+                        risk_tolerance_hybrid = st.selectbox(
+                            "Risk Tolerance",
+                            options=["Conservative", "Moderate", "Aggressive"],
+                            key='hybrid_risk'
+                        )
+                    
+                    with strategy_col2:
+                        capital_available_hybrid = st.number_input(
+                            "Available Capital ($)",
+                            min_value=500,
+                            max_value=1000000,
+                            value=5000,
+                            step=500,
+                            key='hybrid_capital'
+                        )
+                        
+                        outlook_hybrid = st.selectbox(
+                            "Market Outlook",
+                            options=["Bullish", "Bearish", "Neutral"],
+                            key='hybrid_outlook'
+                        )
+            else:
+                # Original single filter approach
+                quick_filter = st.selectbox(
+                    "Filter Preset:",
+                    options=[
+                        "None - Show All",
+                        "High Confidence Only (Score ≥70)",
+                        "Ultra-Low Price (<$1)",
+                        "Penny Stocks ($1-$5)",
+                        "Volume Surge (>2x avg)",
+                        "Strong Momentum (>5% change)",
+                        "Power Zone Stocks Only",
+                        "EMA Reclaim Setups"
+                    ]
+                )
         
         # Advanced Filters (Expandable)
         with st.expander("🔧 Advanced Filters", expanded=False):
@@ -3214,31 +3418,53 @@ def main():
             max_rsi=rsi_range[1] if rsi_range[1] < 100 else None
         )
         
-        # Apply quick filter presets
-        # Set min_buzz_score based on filter preset (for buzzing stocks scan)
+        # Apply filter presets (hybrid or single)
         min_buzz_score = 30.0  # Default
         
-        if quick_filter == "None - Show All":
-            filters.min_score = 0.0  # Show everything
-            min_buzz_score = 10.0  # Very low threshold for buzzing scan
-        elif quick_filter == "High Confidence Only (Score ≥70)":
-            filters.min_score = 70.0
-            min_buzz_score = 60.0
-        elif quick_filter == "Ultra-Low Price (<$1)":
-            filters.max_price = 1.0
-        elif quick_filter == "Penny Stocks ($1-$5)":
-            filters.min_price = 1.0
-            filters.max_price = 5.0
-        elif quick_filter == "Volume Surge (>2x avg)":
-            filters.min_volume_ratio = 2.0
-            min_buzz_score = 40.0  # Higher threshold for volume surge
-        elif quick_filter == "Strong Momentum (>5% change)":
-            filters.min_change_pct = 5.0
-            min_buzz_score = 40.0
-        elif quick_filter == "Power Zone Stocks Only":
-            filters.require_power_zone = True
-        elif quick_filter == "EMA Reclaim Setups":
-            filters.require_ema_reclaim = True
+        if use_hybrid_approach:
+            # Apply hybrid approach filters
+            st.session_state.hybrid_approach_active = True
+            # Store values in different session state keys to avoid widget conflicts
+            st.session_state.hybrid_primary_value = primary_approach
+            st.session_state.hybrid_secondary_value = secondary_approach
+            st.session_state.include_strategy_recs_value = include_strategy_recs
+            st.session_state.strategy_choice_value = strategy_choice
+            
+            # Apply primary approach
+            _apply_filter_preset(filters, primary_approach)
+            
+            # Apply secondary approaches
+            for secondary in secondary_approach:
+                _apply_secondary_filter(filters, secondary)
+            
+            # Set buzz score for hybrid
+            min_buzz_score = 50.0  # Higher threshold for hybrid approach
+            
+        else:
+            # Apply single filter preset (original logic)
+            st.session_state.hybrid_approach_active = False
+            
+            if quick_filter == "None - Show All":
+                filters.min_score = 0.0  # Show everything
+                min_buzz_score = 10.0  # Very low threshold for buzzing scan
+            elif quick_filter == "High Confidence Only (Score ≥70)":
+                filters.min_score = 70.0
+                min_buzz_score = 60.0
+            elif quick_filter == "Ultra-Low Price (<$1)":
+                filters.max_price = 1.0
+            elif quick_filter == "Penny Stocks ($1-$5)":
+                filters.min_price = 1.0
+                filters.max_price = 5.0
+            elif quick_filter == "Volume Surge (>2x avg)":
+                filters.min_volume_ratio = 2.0
+                min_buzz_score = 40.0  # Higher threshold for volume surge
+            elif quick_filter == "Strong Momentum (>5% change)":
+                filters.min_change_pct = 5.0
+                min_buzz_score = 40.0
+            elif quick_filter == "Power Zone Stocks Only":
+                filters.require_power_zone = True
+            elif quick_filter == "EMA Reclaim Setups":
+                filters.require_ema_reclaim = True
         
         # Scan button
         st.divider()
@@ -3249,7 +3475,11 @@ def main():
             if scan_type == ScanType.BUZZING:
                 st.info(f"💡 **Buzzing scan** detects unusual volume, volatility, price action + **Reddit/news sentiment** (min score: {min_buzz_score:.0f})")
             else:
-                st.info(f"💡 Scanning for **{scan_type_display}** with {quick_filter}")
+                if use_hybrid_approach:
+                    strategy_name = st.session_state.get('strategy_choice_value', 'Custom Strategy')
+                    st.info(f"💡 Scanning for **{scan_type_display}** using **{strategy_name}** strategy")
+                else:
+                    st.info(f"💡 Scanning for **{scan_type_display}** with {quick_filter}")
         
         # Execute scan
         if scan_button:
@@ -3393,7 +3623,14 @@ def main():
             scan_summary = scanner.get_scan_summary(opportunities)
             
             st.divider()
-            st.subheader(f"📊 Results: {st.session_state.adv_scan_type}")
+            
+            # Hybrid approach summary
+            if st.session_state.get('hybrid_approach_active', False):
+                strategy_name = st.session_state.get('strategy_choice_value', 'Custom Strategy')
+                st.subheader(f"🧬 {strategy_name} Results: {st.session_state.adv_scan_type}")
+                st.info(f"**Strategy:** {strategy_name} | **Primary:** {st.session_state.get('hybrid_primary_value', 'N/A')} | **Secondary:** {', '.join(st.session_state.get('hybrid_secondary_value', []))}")
+            else:
+                st.subheader(f"📊 Results: {st.session_state.adv_scan_type}")
             
             # Summary metrics
             mcol1, mcol2, mcol3, mcol4, mcol5, mcol6, mcol7 = st.columns(7)
@@ -3464,6 +3701,39 @@ def main():
                     
                     if opp.is_merger_candidate and opp.merger_signals:
                         st.info(f"🔄 **Merger Signals:** {', '.join(opp.merger_signals)}")
+                    
+                    # Hybrid approach: Add strategy recommendations
+                    if st.session_state.get('hybrid_approach_active', False) and st.session_state.get('include_strategy_recs_value', False):
+                        st.markdown("---")
+                        st.markdown("**🎯 Strategy Recommendations**")
+                        
+                        # Get analysis for strategy recommendations
+                        try:
+                            analysis = ComprehensiveAnalyzer.analyze_stock(opp.ticker, "SWING_TRADE")
+                            if analysis:
+                                recommendations = StrategyAdvisor.get_recommendations(
+                                    analysis=analysis,
+                                    user_experience=st.session_state.get('hybrid_experience', 'Intermediate'),
+                                    risk_tolerance=st.session_state.get('hybrid_risk', 'Moderate'),
+                                    capital_available=st.session_state.get('hybrid_capital', 5000),
+                                    outlook=st.session_state.get('hybrid_outlook', 'Neutral')
+                                )
+                                
+                                if recommendations:
+                                    # Show top 2 recommendations
+                                    for j, rec in enumerate(recommendations[:2], 1):
+                                        confidence_pct = int(rec.confidence * 100)
+                                        st.markdown(f"**{j}. {rec.strategy_name}** ({confidence_pct}% match)")
+                                        st.caption(f"Risk: {rec.risk_level} | Best for: {', '.join(rec.best_conditions[:2])}")
+                                        
+                                        if st.button(f"Use Strategy", key=f"use_strategy_{opp.ticker}_{j}"):
+                                            st.session_state.selected_strategy = rec.action
+                                            st.session_state.selected_ticker = opp.ticker
+                                            st.success(f"✅ Selected {rec.strategy_name} for {opp.ticker}")
+                                else:
+                                    st.info("No specific strategies recommended for this stock")
+                        except Exception as e:
+                            st.warning(f"Could not generate strategy recommendations: {str(e)}")
                     
                     # Action buttons
                     acol1, acol2 = st.columns(2)
@@ -3555,77 +3825,233 @@ def main():
 
         if all_tickers:
             for ticker in all_tickers:
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    # Build expander title with ML score if available
-                    ml_score = ticker.get('ml_score')
-                    if ml_score is not None:
-                        score_emoji = "🟢" if ml_score >= 70 else "🟡" if ml_score >= 50 else "🔴"
-                        expander_title = f"{score_emoji} **{ticker['ticker']}** ({ticker.get('type', 'N/A')}) - ML Score: {ml_score:.0f}/100"
+                # Create enhanced ticker card with better visual design
+                ticker_symbol = ticker['ticker']
+                ticker_name = ticker.get('name', 'Unknown Company')
+                ticker_type = ticker.get('type', 'stock')
+                ml_score = ticker.get('ml_score')
+                notes = ticker.get('notes', '')
+                
+                # Determine card header styling based on ML score
+                if ml_score is not None:
+                    if ml_score >= 70:
+                        score_emoji = "🟢"
+                        score_color = "green"
+                        confidence_label = "HIGH"
+                    elif ml_score >= 50:
+                        score_emoji = "🟡"
+                        score_color = "orange"
+                        confidence_label = "MEDIUM"
                     else:
-                        expander_title = f"**{ticker['ticker']}** ({ticker.get('type', 'N/A')})"
+                        score_emoji = "🔴"
+                        score_color = "red"
+                        confidence_label = "LOW"
+                    expander_title = f"{score_emoji} **{ticker_symbol}** · {ticker_name[:30]}{'...' if len(ticker_name) > 30 else ''} · **{confidence_label}** {ml_score:.0f}/100"
+                else:
+                    expander_title = f"📊 **{ticker_symbol}** · {ticker_name[:30]}{'...' if len(ticker_name) > 30 else ''}"
+                
+                # Main card container
+                with st.container():
+                    # Card header with action buttons
+                    col_header, col_actions = st.columns([5, 2])
                     
-                    with st.expander(expander_title):
-                        st.write(f"**Name:** {ticker.get('name', 'N/A')}")
-                        st.write(f"**Notes:** {ticker.get('notes', 'N/A')}")
-                        
-                        date_added_str = ticker.get('date_added', 'Unknown')
-                        if date_added_str != 'Unknown':
-                            try:
-                                # Parse string, assume it's UTC, and convert to local time
-                                dt_utc = datetime.fromisoformat(date_added_str).replace(tzinfo=timezone.utc)
-                                dt_local = dt_utc.astimezone()
-                                friendly_date = dt_local.strftime('%B %d, %Y at %I:%M %p')
-                            except (ValueError, TypeError):
-                                friendly_date = date_added_str # Fallback for invalid formats
-                        else:
-                            friendly_date = 'Unknown'
-                        st.write(f"**Added:** {friendly_date}")
-
-                        st.write(f"**Access Count:** {ticker.get('access_count', 0)}")
-                        
-                        # Display ML analysis if available
-                        if ml_score is not None:
-                            st.divider()
-                            st.markdown("**📊 Latest Analysis**")
-                            st.write(f"**Recommendation:** {ticker.get('recommendation', 'N/A')}")
-                            col_ml1, col_ml2, col_ml3, col_ml4 = st.columns(4)
-                            with col_ml1:
-                                st.metric("Confidence Score", f"{ml_score:.0f}/100")
-                            with col_ml2:
-                                trend = ticker.get('trend', 'N/A')
-                                st.metric("Trend", trend)
-                            with col_ml3:
-                                sentiment = ticker.get('sentiment_score')
-                                if sentiment is not None:
-                                    st.metric("Sentiment", f"{sentiment:.2f}")
-                                else:
-                                    st.metric("Sentiment", "N/A")
-                            with col_ml4:
-                                iv_rank = ticker.get('iv_rank')
-                                if iv_rank is not None:
-                                    st.metric("IV Rank", f"{iv_rank:.1f}%")
-                                else:
-                                    st.metric("IV Rank", "N/A")
+                    with col_header:
+                        with st.expander(expander_title, expanded=False):
+                            # Company info section
+                            info_col1, info_col2 = st.columns(2)
                             
-                            # Show when last analyzed
-                            last_analyzed_str = ticker.get('last_analyzed')
-                            if last_analyzed_str:
-                                try:
-                                    dt_analyzed = datetime.fromisoformat(last_analyzed_str).replace(tzinfo=timezone.utc)
-                                    dt_local_analyzed = dt_analyzed.astimezone()
-                                    friendly_analyzed = dt_local_analyzed.strftime('%B %d, %Y at %I:%M %p')
-                                    st.caption(f"Last analyzed: {friendly_analyzed}")
-                                except:
-                                    pass
-
-                with col2:
-                    if st.button("🗑️ Remove", key=f"remove_{ticker['ticker']}", width="stretch"):
-                        if tm.remove_ticker(ticker['ticker']):
-                            st.success(f"🗑️ Removed {ticker['ticker']}!")
+                            with info_col1:
+                                st.markdown("**📊 Company Details**")
+                                st.write(f"**Symbol:** `{ticker_symbol}`")
+                                st.write(f"**Name:** {ticker_name}")
+                                st.write(f"**Type:** {ticker_type.replace('_', ' ').title()}")
+                                
+                                # Sector and tags if available
+                                sector = ticker.get('sector')
+                                if sector:
+                                    st.write(f"**Sector:** {sector}")
+                                
+                                tags = ticker.get('tags')
+                                if tags and isinstance(tags, list):
+                                    st.write(f"**Tags:** {', '.join(tags)}")
+                            
+                            with info_col2:
+                                st.markdown("**📈 Activity & Stats**")
+                                
+                                # Access count with emoji
+                                access_count = ticker.get('access_count', 0)
+                                activity_emoji = "🔥" if access_count > 10 else "📊" if access_count > 5 else "📋"
+                                st.write(f"**Views:** {activity_emoji} {access_count}")
+                                
+                                # Date added
+                                date_added_str = ticker.get('date_added', 'Unknown')
+                                if date_added_str != 'Unknown':
+                                    try:
+                                        dt_utc = datetime.fromisoformat(date_added_str).replace(tzinfo=timezone.utc)
+                                        dt_local = dt_utc.astimezone()
+                                        friendly_date = dt_local.strftime('%b %d, %Y')
+                                        days_ago = (datetime.now(timezone.utc) - dt_utc).days
+                                        if days_ago == 0:
+                                            time_label = "Today"
+                                        elif days_ago == 1:
+                                            time_label = "Yesterday"
+                                        elif days_ago < 7:
+                                            time_label = f"{days_ago} days ago"
+                                        else:
+                                            time_label = friendly_date
+                                        st.write(f"**Added:** {time_label}")
+                                    except (ValueError, TypeError):
+                                        st.write(f"**Added:** {date_added_str}")
+                                else:
+                                    st.write(f"**Added:** Unknown")
+                                
+                                # Last accessed if available
+                                last_accessed = ticker.get('last_accessed')
+                                if last_accessed:
+                                    try:
+                                        dt_accessed = datetime.fromisoformat(last_accessed).replace(tzinfo=timezone.utc)
+                                        dt_local_accessed = dt_accessed.astimezone()
+                                        accessed_ago = (datetime.now(timezone.utc) - dt_accessed).days
+                                        if accessed_ago == 0:
+                                            access_label = "Today"
+                                        elif accessed_ago == 1:
+                                            access_label = "Yesterday"
+                                        elif accessed_ago < 7:
+                                            access_label = f"{accessed_ago} days ago"
+                                        else:
+                                            access_label = dt_local_accessed.strftime('%b %d, %Y')
+                                        st.write(f"**Last View:** {access_label}")
+                                    except:
+                                        pass
+                            
+                            # Notes section if available
+                            if notes and notes.strip():
+                                st.markdown("**📝 Notes**")
+                                with st.container():
+                                    st.info(notes)
+                            
+                            # ML Analysis section if available
+                            if ml_score is not None:
+                                st.divider()
+                                st.markdown("**🤖 AI Analysis Results**")
+                                
+                                # Confidence score with color coding
+                                if ml_score >= 70:
+                                    st.success(f"✅ **HIGH CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                elif ml_score >= 50:
+                                    st.info(f"📊 **MEDIUM CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                else:
+                                    st.warning(f"⚠️ **LOW CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                
+                                # Analysis metrics in grid
+                                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                                
+                                with metric_col1:
+                                    trend = ticker.get('trend', 'N/A')
+                                    trend_emoji = "📈" if trend == "BULLISH" else "📉" if trend == "BEARISH" else "➡️"
+                                    st.metric("Trend", f"{trend_emoji} {trend}")
+                                
+                                with metric_col2:
+                                    sentiment = ticker.get('sentiment_score')
+                                    if sentiment is not None:
+                                        sentiment_emoji = "😊" if sentiment > 0.1 else "😐" if sentiment > -0.1 else "😟"
+                                        st.metric("Sentiment", f"{sentiment_emoji} {sentiment:.2f}")
+                                    else:
+                                        st.metric("Sentiment", "N/A")
+                                
+                                with metric_col3:
+                                    rsi = ticker.get('rsi')
+                                    if rsi is not None:
+                                        rsi_emoji = "🔴" if rsi > 70 else "🟢" if rsi < 30 else "🟡"
+                                        st.metric("RSI", f"{rsi_emoji} {rsi:.1f}")
+                                    else:
+                                        st.metric("RSI", "N/A")
+                                
+                                with metric_col4:
+                                    momentum = ticker.get('momentum')
+                                    if momentum is not None:
+                                        momentum_emoji = "🚀" if momentum > 5 else "📈" if momentum > 0 else "📉"
+                                        st.metric("Momentum", f"{momentum_emoji} {momentum:.1f}%")
+                                    else:
+                                        st.metric("Momentum", "N/A")
+                                
+                                # Recommendation if available
+                                recommendation = ticker.get('recommendation')
+                                if recommendation and recommendation != 'N/A':
+                                    rec_emoji = "💰" if "BUY" in recommendation.upper() else "⏱️" if "HOLD" in recommendation.upper() else "🚨"
+                                    st.markdown(f"**💡 Recommendation:** {rec_emoji} {recommendation}")
+                                
+                                # Last analysis timestamp
+                                last_analyzed_str = ticker.get('last_analyzed')
+                                if last_analyzed_str:
+                                    try:
+                                        dt_analyzed = datetime.fromisoformat(last_analyzed_str).replace(tzinfo=timezone.utc)
+                                        analyzed_ago = (datetime.now(timezone.utc) - dt_analyzed).total_seconds() / 3600
+                                        if analyzed_ago < 1:
+                                            time_str = "Just now"
+                                        elif analyzed_ago < 24:
+                                            time_str = f"{analyzed_ago:.0f} hours ago"
+                                        else:
+                                            time_str = f"{analyzed_ago/24:.0f} days ago"
+                                        st.caption(f"🕒 Analysis updated: {time_str}")
+                                    except:
+                                        pass
+                    
+                    with col_actions:
+                        st.write("")  # Add some spacing
+                        
+                        # Quick analyze button
+                        if st.button("🔍 Analyze", key=f"analyze_{ticker_symbol}", help="Run fresh ML analysis", use_container_width=True):
+                            st.session_state.ml_ticker_to_analyze = ticker_symbol
                             st.rerun()
-                        else:
-                            st.error(f"❌ Failed to remove {ticker['ticker']}.")
+                        
+                        # Quick trade button
+                        if st.button("⚡ Trade", key=f"trade_{ticker_symbol}", help="Open quick trade interface", use_container_width=True):
+                            st.session_state.selected_ticker = ticker_symbol
+                            st.session_state.show_quick_trade = True
+                            st.info(f"💡 Switch to '🚀 Quick Trade' tab to trade {ticker_symbol}")
+                        
+                        # Edit notes button
+                        if st.button("✏️ Edit", key=f"edit_{ticker_symbol}", help="Edit ticker details", use_container_width=True):
+                            st.session_state[f"editing_{ticker_symbol}"] = True
+                            st.rerun()
+                        
+                        # Remove button
+                        if st.button("🗑️ Remove", key=f"remove_{ticker_symbol}", help="Remove from saved tickers", use_container_width=True):
+                            if tm.remove_ticker(ticker_symbol):
+                                st.success(f"🗑️ Removed {ticker_symbol}!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to remove {ticker_symbol}.")
+                    
+                    # Edit mode popup
+                    if st.session_state.get(f"editing_{ticker_symbol}", False):
+                        with st.expander(f"✏️ Edit {ticker_symbol}", expanded=True):
+                            edit_col1, edit_col2 = st.columns(2)
+                            with edit_col1:
+                                new_name = st.text_input("Company Name", value=ticker_name, key=f"edit_name_{ticker_symbol}")
+                                new_notes = st.text_area("Notes", value=notes, key=f"edit_notes_{ticker_symbol}")
+                            with edit_col2:
+                                new_sector = st.text_input("Sector", value=ticker.get('sector', ''), key=f"edit_sector_{ticker_symbol}")
+                                new_type = st.selectbox("Type", ["stock", "option", "penny_stock", "crypto"], 
+                                                       index=["stock", "option", "penny_stock", "crypto"].index(ticker_type) if ticker_type in ["stock", "option", "penny_stock", "crypto"] else 0,
+                                                       key=f"edit_type_{ticker_symbol}")
+                            
+                            button_col1, button_col2 = st.columns(2)
+                            with button_col1:
+                                if st.button("� Save Changes", key=f"save_{ticker_symbol}"):
+                                    if tm.add_ticker(ticker_symbol, name=new_name, sector=new_sector, ticker_type=new_type, notes=new_notes):
+                                        st.success(f"✅ Updated {ticker_symbol}!")
+                                        st.session_state[f"editing_{ticker_symbol}"] = False
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ Failed to update ticker.")
+                            with button_col2:
+                                if st.button("❌ Cancel", key=f"cancel_{ticker_symbol}"):
+                                    st.session_state[f"editing_{ticker_symbol}"] = False
+                                    st.rerun()
+                    
+                    st.divider()  # Separator between cards
             
             # Show ML analysis if requested
             if 'ml_ticker_to_analyze' in st.session_state:
@@ -3759,6 +4185,86 @@ def main():
         st.header("🎯 Intelligent Strategy Advisor")
         st.write("Get personalized strategy recommendations based on comprehensive analysis.")
         
+        # Add educational section about filtered investment approaches
+        with st.expander("📚 Understanding Filtered Investment Approaches", expanded=False):
+            st.markdown("""
+            ### What are Filtered Investment Approaches?
+            
+            Filtered investment approaches are pre-configured scanning strategies that help you find specific types of trading opportunities based on your risk tolerance, market conditions, and investment goals. Each approach applies different criteria to filter stocks and identify the most relevant opportunities for your trading style.
+            
+            ### Available Investment Approaches:
+            """)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                **🎯 High Confidence Only (Score ≥70)**
+                - **What it does**: Shows only stocks with high AI confidence scores
+                - **Best for**: Conservative traders, beginners, reliable setups
+                - **Risk level**: Low to Medium
+                - **Why use**: Reduces false signals, focuses on quality setups
+                
+                **💰 Ultra-Low Price (<$1)**
+                - **What it does**: Finds stocks trading under $1 per share
+                - **Best for**: High-risk, high-reward traders, penny stock enthusiasts
+                - **Risk level**: Very High
+                - **Why use**: Maximum upside potential, but requires careful risk management
+                
+                **💵 Penny Stocks ($1-$5)**
+                - **What it does**: Targets stocks between $1-$5 per share
+                - **Best for**: Growth-focused traders, small-cap investors
+                - **Risk level**: High
+                - **Why use**: Classic penny stock range with moderate risk/reward
+                
+                **📈 Volume Surge (>2x avg)**
+                - **What it does**: Identifies stocks with unusually high trading volume
+                - **Best for**: Momentum traders, breakout specialists
+                - **Risk level**: Medium to High
+                - **Why use**: High volume often precedes significant price movements
+                """)
+            
+            with col2:
+                st.markdown("""
+                **🚀 Strong Momentum (>5% change)**
+                - **What it does**: Finds stocks with significant price movements
+                - **Best for**: Trend followers, momentum traders
+                - **Risk level**: Medium to High
+                - **Why use**: Captures stocks already in motion with strong directional bias
+                
+                **⚡ Power Zone Stocks Only**
+                - **What it does**: Filters for stocks in EMA 8>21 power zone
+                - **Best for**: Technical traders, trend followers
+                - **Risk level**: Medium
+                - **Why use**: EMA power zones indicate strong uptrend momentum
+                
+                **🔄 EMA Reclaim Setups**
+                - **What it does**: Finds stocks that have reclaimed key EMA levels
+                - **Best for**: Mean reversion traders, technical analysts
+                - **Risk level**: Low to Medium
+                - **Why use**: High-probability entry points with defined risk levels
+                """)
+            
+            st.markdown("""
+            ### ⚠️ Important Risk Considerations:
+            
+            - **Penny Stocks & Ultra-Low Price**: These stocks are highly volatile and can experience rapid price swings. Many penny stocks have low liquidity and may be difficult to exit quickly.
+            
+            - **Volume Surge & Momentum**: While high volume and momentum can indicate strong moves, they can also signal the end of a trend. Always use proper risk management.
+            
+            - **Technical Setups**: Power zones and EMA reclaims are based on historical patterns and may not always predict future performance.
+            
+            - **Diversification**: Don't put all your capital into one approach. Consider spreading risk across different strategies and timeframes.
+            
+            ### 💡 Pro Tips:
+            
+            1. **Start Conservative**: Begin with "High Confidence Only" to understand the platform
+            2. **Combine Approaches**: Use multiple filters together for more targeted results
+            3. **Risk Management**: Never risk more than you can afford to lose
+            4. **Research First**: Always do your own due diligence before trading
+            5. **Paper Trade**: Test strategies with paper trading before using real money
+            """)
+        
         # Check if we have analysis
         if not st.session_state.current_analysis:
             st.warning("⚠️ Please analyze a stock in the 'Dashboard' tab first!")
@@ -3770,26 +4276,107 @@ def main():
 
             with col1:
                 st.subheader("Your Trading Profile")
+                
+                # Create tabs for different input modes
+                profile_tab, comparison_tab = st.tabs(["Single Profile", "Compare Scenarios"])
 
-                user_experience = st.selectbox(
-                    "Experience Level",
-                    options=["Beginner", "Intermediate", "Advanced"],
-                    key='user_experience_select'
-                )
+                with profile_tab:
+                    user_experience = st.selectbox(
+                        "Experience Level",
+                        options=["Beginner", "Intermediate", "Advanced"],
+                        key='user_experience_select',
+                        help="Affects which strategies are recommended"
+                    )
 
-                risk_tolerance = st.selectbox(
-                    "Risk Tolerance",
-                    options=["Conservative", "Moderate", "Aggressive"],
-                    key='risk_tolerance_select'
-                )
+                    risk_tolerance = st.selectbox(
+                        "Risk Tolerance",
+                        options=["Conservative", "Moderate", "Aggressive"],
+                        key='risk_tolerance_select',
+                        help="Conservative = Lower risk strategies, Aggressive = Higher risk/reward"
+                    )
 
-                capital_available = st.number_input(
-                    "Available Capital ($)",
-                    min_value=500,
-                    max_value=1000000,
-                    value=5000,
-                    step=500
-                )
+                    capital_available = st.number_input(
+                        "Available Capital ($)",
+                        min_value=100,
+                        max_value=1000000,
+                        value=500,
+                        step=100,
+                        help="Total capital you're willing to risk on this trade"
+                    )
+                    
+                    # Add position sizing controls
+                    st.subheader("Position Sizing")
+                    max_position_pct = st.slider(
+                        "Max % of Capital per Trade",
+                        min_value=1,
+                        max_value=50,
+                        value=10,
+                        help="Maximum percentage of capital to risk on a single trade"
+                    )
+                    
+                    max_position_amount = capital_available * (max_position_pct / 100)
+                    st.info(f"💰 Max position size: ${max_position_amount:,.0f}")
+                    
+                    # Risk calculator
+                    st.subheader("Risk Calculator")
+                    risk_per_trade = st.number_input(
+                        "Risk per Trade ($)",
+                        min_value=10,
+                        max_value=max_position_amount,
+                        value=min(100, max_position_amount),
+                        step=10,
+                        help="Maximum amount you're willing to lose on this single trade"
+                    )
+                    
+                    risk_percentage = (risk_per_trade / capital_available) * 100
+                    st.metric("Risk as % of Capital", f"{risk_percentage:.1f}%")
+                    
+                    if risk_percentage > 5:
+                        st.warning("⚠️ Risk is high (>5% of capital). Consider reducing position size.")
+                    elif risk_percentage > 2:
+                        st.info("ℹ️ Moderate risk level (2-5% of capital).")
+                    else:
+                        st.success("✅ Conservative risk level (<2% of capital).")
+
+                with comparison_tab:
+                    st.subheader("Compare Different Scenarios")
+                    
+                    # Scenario 1
+                    st.write("**Scenario 1 (Conservative)**")
+                    col1a, col1b, col1c = st.columns(3)
+                    with col1a:
+                        exp1 = st.selectbox("Experience", ["Beginner", "Intermediate", "Advanced"], key="exp1")
+                    with col1b:
+                        risk1 = st.selectbox("Risk", ["Conservative", "Moderate", "Aggressive"], key="risk1")
+                    with col1c:
+                        cap1 = st.number_input("Capital ($)", 100, 1000000, 500, 100, key="cap1")
+                    
+                    # Scenario 2
+                    st.write("**Scenario 2 (Moderate)**")
+                    col2a, col2b, col2c = st.columns(3)
+                    with col2a:
+                        exp2 = st.selectbox("Experience", ["Beginner", "Intermediate", "Advanced"], key="exp2")
+                    with col2b:
+                        risk2 = st.selectbox("Risk", ["Conservative", "Moderate", "Aggressive"], key="risk2")
+                    with col2c:
+                        cap2 = st.number_input("Capital ($)", 100, 1000000, 2000, 100, key="cap2")
+                    
+                    # Scenario 3
+                    st.write("**Scenario 3 (Aggressive)**")
+                    col3a, col3b, col3c = st.columns(3)
+                    with col3a:
+                        exp3 = st.selectbox("Experience", ["Beginner", "Intermediate", "Advanced"], key="exp3")
+                    with col3b:
+                        risk3 = st.selectbox("Risk", ["Conservative", "Moderate", "Aggressive"], key="risk3")
+                    with col3c:
+                        cap3 = st.number_input("Capital ($)", 100, 1000000, 10000, 100, key="cap3")
+                    
+                    # Store scenarios for comparison
+                    scenarios = [
+                        {"name": "Conservative", "exp": exp1, "risk": risk1, "cap": cap1},
+                        {"name": "Moderate", "exp": exp2, "risk": risk2, "cap": cap2},
+                        {"name": "Aggressive", "exp": exp3, "risk": risk3, "cap": cap3}
+                    ]
 
             with col2:
                 st.subheader("Your Market View")
@@ -3808,21 +4395,43 @@ def main():
                 st.write(f"• IV Rank: {analysis.iv_rank}%")
                 st.write(f"• Sentiment: {('Positive' if analysis.sentiment_score > 0.2 else 'Negative' if analysis.sentiment_score < -0.2 else 'Neutral')}")
 
+            # Generate recommendations based on selected tab
             if st.button("🚀 Generate Strategy Recommendations", type="primary", width="stretch"):
                 with st.spinner("Analyzing optimal strategies..."):
-                    recommendations = StrategyAdvisor.get_recommendations(
+                    # Check which tab is active by looking at the current tab selection
+                    # For now, we'll generate both single and comparison views
+                    
+                    # Single profile recommendations
+                    single_recommendations = StrategyAdvisor.get_recommendations(
                         analysis=analysis,
                         user_experience=user_experience,
                         risk_tolerance=risk_tolerance,
                         capital_available=capital_available,
                         outlook=outlook
                     )
-
-                    if recommendations:
-                        st.subheader(f"📋 Top {len(recommendations)} Recommended Strategies for {analysis.ticker}")
-
-                        # Display recommendations as clean cards
-                        for idx, rec in enumerate(recommendations, 1):
+                    
+                    # Comparison recommendations
+                    comparison_results = []
+                    for scenario in scenarios:
+                        scenario_recs = StrategyAdvisor.get_recommendations(
+                            analysis=analysis,
+                            user_experience=scenario["exp"],
+                            risk_tolerance=scenario["risk"],
+                            capital_available=scenario["cap"],
+                            outlook=outlook
+                        )
+                        comparison_results.append({
+                            "scenario": scenario,
+                            "recommendations": scenario_recs
+                        })
+                    
+                    # Display results
+                    if single_recommendations:
+                        st.subheader(f"📋 Recommended Strategies for {analysis.ticker}")
+                        
+                        # Show single profile results
+                        st.write("**Your Profile Results:**")
+                        for idx, rec in enumerate(single_recommendations, 1):
                             confidence_pct = int(rec.confidence * 100)
                             badge = "🟢 High" if confidence_pct >= 70 else "🟡 Moderate" if confidence_pct >= 50 else "🟠 Low"
 
@@ -3905,6 +4514,186 @@ def main():
                                     st.write("\n")
                     else:
                         st.warning("No suitable strategies found. Try adjusting your parameters.")
+                    
+                    # Display comparison results
+                    st.divider()
+                    st.subheader("📊 Strategy Comparison Across Different Scenarios")
+                    
+                    if comparison_results:
+                        # Create a comparison table
+                        comparison_data = []
+                        for result in comparison_results:
+                            scenario = result["scenario"]
+                            recommendations = result["recommendations"]
+                            
+                            if recommendations:
+                                top_rec = recommendations[0]  # Get the top recommendation
+                                comparison_data.append({
+                                    "Scenario": scenario["name"],
+                                    "Experience": scenario["exp"],
+                                    "Risk": scenario["risk"],
+                                    "Capital": f"${scenario['cap']:,}",
+                                    "Top Strategy": top_rec.strategy_name,
+                                    "Confidence": f"{int(top_rec.confidence * 100)}%",
+                                    "Risk Level": top_rec.risk_level,
+                                    "Max Loss": top_rec.max_loss,
+                                    "Max Gain": top_rec.max_gain
+                                })
+                        
+                        if comparison_data:
+                            # Display as a table
+                            df_comparison = pd.DataFrame(comparison_data)
+                            st.dataframe(df_comparison, use_container_width=True)
+                            
+                            # Show detailed comparison for each scenario
+                            st.subheader("🔍 Detailed Strategy Analysis by Scenario")
+                            
+                            for i, result in enumerate(comparison_results):
+                                scenario = result["scenario"]
+                                recommendations = result["recommendations"]
+                                
+                                with st.expander(f"Scenario {i+1}: {scenario['name']} ({scenario['exp']} + {scenario['risk']} + ${scenario['cap']:,})", expanded=False):
+                                    if recommendations:
+                                        for idx, rec in enumerate(recommendations[:3], 1):  # Show top 3
+                                            confidence_pct = int(rec.confidence * 100)
+                                            badge = "🟢 High" if confidence_pct >= 70 else "🟡 Moderate" if confidence_pct >= 50 else "🟠 Low"
+                                            
+                                            st.write(f"**#{idx} {rec.strategy_name}** - {badge} ({confidence_pct}%)")
+                                            st.write(f"Risk: {rec.risk_level} | Max Loss: {rec.max_loss} | Max Gain: {rec.max_gain}")
+                                            st.write(f"*{rec.reasoning}*")
+                                            st.write("---")
+                                    else:
+                                        st.write("No suitable strategies found for this scenario.")
+                        else:
+                            st.warning("No strategies found for any scenario. Try adjusting parameters.")
+        
+        # Strategy Explanation Section
+        st.divider()
+        st.subheader("📚 Understanding Option Strategies")
+        
+        with st.expander("🔍 Learn About Different Option Strategies", expanded=False):
+            st.markdown("""
+            ### For Beginners (Low Risk):
+            - **Long Call/Put**: Buy options with limited risk (premium paid)
+            - **Covered Call**: Sell calls against stock you own
+            - **Cash-Secured Put**: Sell puts with cash backing (like your NOK example)
+            
+            ### For Intermediate (Medium Risk):
+            - **Credit Spreads**: Sell one option, buy another to limit risk
+            - **Debit Spreads**: Buy one option, sell another to reduce cost
+            - **Iron Condors**: Range-bound strategies for sideways markets
+            
+            ### For Advanced (Higher Risk):
+            - **Straddles/Strangles**: Profit from big moves in either direction
+            - **Calendar Spreads**: Time-based strategies
+            - **Wheel Strategy**: Systematic put selling and call writing
+            """)
+            
+            st.markdown("""
+            ### Risk Management Tips:
+            1. **Start Small**: Use only 1-2% of capital per trade initially
+            2. **Define Risk**: Always know your maximum loss before entering
+            3. **Diversify**: Don't put all capital in one strategy or stock
+            4. **Learn Gradually**: Master one strategy before trying others
+            5. **Use Stops**: Set mental or actual stop losses
+            """)
+        
+        # Quick Reference Section
+        st.divider()
+        st.subheader("📋 Quick Reference: Investment Approaches")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("""
+            **🎯 Conservative Approaches**
+            - High Confidence Only
+            - EMA Reclaim Setups
+            - Power Zone Stocks
+            """)
+        
+        with col2:
+            st.markdown("""
+            **⚡ Active Trading**
+            - Volume Surge
+            - Strong Momentum
+            - Power Zone Stocks
+            """)
+        
+        with col3:
+            st.markdown("""
+            **💰 High Risk/Reward**
+            - Ultra-Low Price
+            - Penny Stocks
+            - Volume Surge + Momentum
+            """)
+        
+        st.info("💡 **Tip**: Use the Advanced Scanner tab to apply these approaches to find specific opportunities in the market!")
+        
+        # Hybrid Approach Explanation
+        st.divider()
+        st.subheader("🧬 Hybrid Approach: Holistic Stock Assessment")
+        
+        st.markdown("""
+        ### What is the Hybrid Approach?
+        
+        The **Hybrid Approach** in the Advanced Scanner combines multiple investment approaches with AI analysis and strategy recommendations to provide a **comprehensive, holistic assessment** of the best stocks to invest in and the optimal strategies to use.
+        
+        ### Key Features:
+        
+        **🔗 Multi-Filter Combination:**
+        - **Primary Approach**: Choose your main investment focus (e.g., "High Confidence Only")
+        - **Secondary Filters**: Add additional criteria (e.g., "Volume Surge" + "Power Zone")
+        - **Smart Filtering**: Combines all criteria to find stocks that meet multiple conditions
+        
+        **🎯 Strategy Integration:**
+        - **Personalized Recommendations**: Get specific trading strategies for each found opportunity
+        - **Risk-Adjusted**: Strategies are tailored to your experience level and risk tolerance
+        - **Capital-Aware**: Recommendations consider your available capital
+        - **Market Outlook**: Strategies align with your market expectations
+        
+        **🤖 AI-Enhanced Analysis:**
+        - **Comprehensive Scoring**: Combines technical, fundamental, and sentiment analysis
+        - **Confidence Ratings**: Each opportunity gets an AI confidence score
+        - **Risk Assessment**: Detailed risk analysis for each recommendation
+        
+        ### Example Hybrid Scenarios:
+        
+        **Conservative Hybrid:**
+        - Primary: "High Confidence Only (Score ≥70)"
+        - Secondary: "EMA Reclaim Setups" + "RSI Oversold (<30)"
+        - Result: High-quality, low-risk setups with strong technical confirmation
+        
+        **Momentum Hybrid:**
+        - Primary: "Strong Momentum (>5% change)"
+        - Secondary: "Volume Surge (>2x avg)" + "Power Zone Stocks Only"
+        - Result: High-momentum stocks with strong volume and technical confirmation
+        
+        **Penny Stock Hybrid:**
+        - Primary: "Penny Stocks ($1-$5)"
+        - Secondary: "Volume Surge (>2x avg)" + "High Confidence Only"
+        - Result: Quality penny stocks with strong volume and AI confidence
+        
+        ### Benefits of Hybrid Approach:
+        
+        1. **Higher Quality Results**: Multiple filters reduce false signals
+        2. **Personalized Strategies**: Get specific trading recommendations for each stock
+        3. **Risk Management**: Built-in risk assessment and strategy matching
+        4. **Comprehensive Analysis**: Combines technical, fundamental, and AI analysis
+        5. **Actionable Insights**: Not just what to buy, but how to trade it
+        
+        ### How to Use:
+        
+        1. **Enable Hybrid Mode**: Check "🧬 Use Hybrid Approach" in the Advanced Scanner
+        2. **Set Primary Filter**: Choose your main investment approach
+        3. **Add Secondary Filters**: Select additional criteria to combine
+        4. **Configure Strategy Preferences**: Set your experience, risk tolerance, and capital
+        5. **Run Scan**: Get comprehensive results with strategy recommendations
+        6. **Review Results**: Each opportunity shows both analysis and recommended strategies
+        7. **Take Action**: Use the recommended strategies or get full analysis
+        
+        This hybrid approach gives you the **most comprehensive and actionable** stock analysis available, combining the best of technical analysis, AI insights, and personalized strategy recommendations.
+        """)
     
     with tab6:
         st.header("📊 Generate Trading Signal")
@@ -5569,11 +6358,15 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 else:
                     with st.status("🤖 AI analyzing market data...", expanded=True) as status:
                         try:
-                            # Import AI signal generator
-                            from ai_trading_signals import create_ai_signal_generator
+                            # Import and initialize AI signal generator
+                            from services.ai_trading_signals import create_ai_signal_generator
                             
                             st.write("Initializing AI engine...")
-                            ai_generator = create_ai_signal_generator(provider=ai_provider)
+                            ai_generator = create_ai_signal_generator(provider=ai_provider)  # noqa: F841
+                            
+                            # Verify AI generator is ready and immediately test functionality
+                            if not ai_generator or not hasattr(ai_generator, 'batch_analyze'):
+                                raise Exception("Failed to initialize AI signal generator or missing batch_analyze method")
                             
                             # Collect data for each symbol
                             st.write(f"Gathering data for {len(symbols_list)} symbols...")
@@ -5631,7 +6424,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             except Exception:
                                 pass
                             
-                            # Generate signals
+                            # Generate signals using the AI generator
                             signals = ai_generator.batch_analyze(
                                 symbols=symbols_list,
                                 technical_data_dict=technical_data_dict,
