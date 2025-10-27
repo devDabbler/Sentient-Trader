@@ -43,6 +43,7 @@ class TickerManager:
                 'notes': notes,
                 'tags': tags,
                 'last_accessed': current_time,
+                'access_count': 0,  # Initialize access_count
             }
             
             data_to_upsert = {k: v for k, v in data_to_upsert.items() if v is not None}
@@ -84,7 +85,13 @@ class TickerManager:
             if ticker_type:
                 query = query.eq('type', ticker_type)
             
-            response = query.order('access_count', desc=True).order('ticker').limit(limit).execute()
+            # Try to order by access_count, fallback to ticker if column doesn't exist
+            try:
+                response = query.order('access_count', desc=True).order('ticker').limit(limit).execute()
+            except Exception as order_error:
+                logger.warning(f"Could not order by access_count, using ticker order: {order_error}")
+                response = query.order('ticker').limit(limit).execute()
+            
             return response.data
         except Exception as e:
             logger.error(f"Error getting all tickers: {e}")
@@ -102,7 +109,13 @@ class TickerManager:
     def get_popular_tickers(self, limit: int = 10) -> List[str]:
         if not self._check_client(): return []
         try:
-            response = self.supabase.table('saved_tickers').select('ticker').gt('access_count', 0).order('access_count', desc=True).limit(limit).execute()
+            # Try to filter by access_count, fallback to all tickers if column doesn't exist
+            try:
+                response = self.supabase.table('saved_tickers').select('ticker').gt('access_count', 0).order('access_count', desc=True).limit(limit).execute()
+            except Exception as filter_error:
+                logger.warning(f"Could not filter by access_count, returning recent tickers: {filter_error}")
+                response = self.supabase.table('saved_tickers').select('ticker').order('last_accessed', desc=True).limit(limit).execute()
+            
             return [item['ticker'] for item in response.data]
         except Exception as e:
             logger.error(f"Error getting popular tickers: {e}")
@@ -111,7 +124,17 @@ class TickerManager:
     def record_access(self, ticker: str):
         if not self._check_client(): return
         try:
-            self.supabase.rpc('increment_access_count', {'ticker_symbol': ticker.upper()}).execute()
+            # Try RPC function first, fallback to direct update if RPC doesn't exist
+            try:
+                self.supabase.rpc('increment_access_count', {'ticker_symbol': ticker.upper()}).execute()
+            except Exception as rpc_error:
+                logger.warning(f"RPC function not available, using direct update: {rpc_error}")
+                # Fallback: direct update
+                current_time = datetime.now(timezone.utc).isoformat()
+                self.supabase.table('saved_tickers').update({
+                    'access_count': 1,
+                    'last_accessed': current_time
+                }).eq('ticker', ticker.upper()).execute()
         except Exception as e:
             logger.error(f"Error recording access for {ticker}: {e}")
 
