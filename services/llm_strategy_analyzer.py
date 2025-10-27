@@ -31,64 +31,29 @@ class StrategyAnalysis:
 class LLMStrategyAnalyzer:
     """Analyzes Option Alpha bot strategies using LLM"""
     
-    def __init__(self, provider: str = "openai", model: Optional[str] = None, api_key: Optional[str] = None):
-        self.provider = provider.lower()
-        self.model = model or self._get_default_model()
-        # Allow passing API key at runtime (from UI) or fall back to env var
-        if api_key:
-            self.api_key = api_key
-        else:
-            self.api_key = self._get_api_key()
-        self.base_url = self._get_base_url()
+    def __init__(self, model: str, api_key: Optional[str] = None):
+        self.model = model
+        # Allow passing API key at runtime or fall back to env var
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.base_url = "https://openrouter.ai/api/v1"
+
+        if not self.api_key:
+            raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable.")
         
-    def _get_default_model(self) -> str:
-        """Get default model based on provider"""
-        defaults = {
-            "openai": "gpt-4-turbo-preview",
-            "anthropic": "claude-3-5-sonnet-20241022",
-            "google": "gemini-pro",
-            "openrouter": "meta-llama/llama-3.3-70b-instruct"
-        }
-        return defaults.get(self.provider, "gpt-4-turbo-preview")
-    
-    def _get_api_key(self) -> str:
-        """Get API key from environment"""
-        key_mapping = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY", 
-            "google": "GOOGLE_API_KEY",
-            "openrouter": "OPENROUTER_API_KEY"
-        }
-        
-        env_var = key_mapping.get(self.provider)
-        if not env_var:
-            raise ValueError(f"Unsupported provider: {self.provider}")
-        
-        api_key = os.getenv(env_var)
-        if not api_key:
-            raise ValueError(f"API key not found. Set {env_var} environment variable.")
-        
-        return api_key
-    
-    def _get_base_url(self) -> Optional[str]:
-        """Get base URL for API calls"""
-        if self.provider == "openrouter":
-            return "https://openrouter.ai/api/v1"
-        return None
     
     def analyze_bot_strategy(self, bot_config: Dict) -> StrategyAnalysis:
         """Analyze a bot strategy configuration"""
         try:
             logger.info(f"Starting strategy analysis for {bot_config.get('name', 'Unknown Bot')}")
-            logger.debug(f"Using provider: {self.provider}, model: {self.model}")
+            logger.debug(f"Using model: {self.model}")
             
             # Prepare analysis prompt
             prompt = self._create_analysis_prompt(bot_config)
             logger.debug(f"Created analysis prompt (length: {len(prompt)} chars)")
             
             # Get LLM response
-            logger.info("Calling LLM API...")
-            response = self._call_llm(prompt)
+            logger.info("Calling LLM API via OpenRouter...")
+            response = self._call_openrouter(prompt)
             logger.debug(f"Received LLM response (length: {len(response)} chars)")
             
             # Parse response
@@ -179,102 +144,9 @@ Focus on practical, actionable insights for options trading. Consider the specif
         
         return prompt
     
-    def _call_llm(self, prompt: str) -> str:
-        """Call the appropriate LLM API. Returns a string (may be empty on error)."""
-        try:
-            if self.provider == "openai":
-                return self._call_openai(prompt)
-            elif self.provider == "anthropic":
-                return self._call_anthropic(prompt)
-            elif self.provider == "google":
-                return self._call_google(prompt)
-            elif self.provider == "openrouter":
-                return self._call_openrouter(prompt)
-            else:
-                raise ValueError(f"Unsupported provider: {self.provider}")
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}", exc_info=True)
-            return ""
     
-    def _call_openai(self, prompt: str) -> str:
-        """Call OpenAI API. Returns response text or empty string on error."""
-        try:
-            import openai
-            client = openai.OpenAI(api_key=self.api_key)
-            
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert options trading strategist and risk manager."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=2000
-            )
-            
-            content = getattr(response.choices[0].message, 'content', None)
-            return content or ""
-            
-        except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            return ""
     
-    def _call_anthropic(self, prompt: str) -> str:
-        """Call Anthropic API. Returns response text or empty string on error."""
-        try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.api_key)
-            
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=2000,
-                temperature=0.3,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            # Try to extract text safely
-            try:
-                content = getattr(response, 'content', None)
-                if content and len(content) > 0:
-                    block = content[0]
-                    text = getattr(block, 'text', None) or getattr(block, 'content', None)
-                    return str(text) if text is not None else str(block)
-                return str(response) or ""
-            except Exception:
-                return str(response) or ""
-            
-        except Exception as e:
-            logger.error(f"Anthropic API error: {e}")
-            return ""
     
-    def _call_google(self, prompt: str) -> str:
-        """Call Google Gemini API. Returns string or empty on error."""
-        try:
-            import google.generativeai as genai
-            # Some google SDK versions use configure or different entrypoints; attempt best-effort
-            # Different versions of google.generativeai expose different APIs; attempt best-effort call
-            try:
-                model_cls = getattr(genai, 'GenerativeModel', None)
-                if model_cls is not None:
-                    m = model_cls(self.model)
-                    response = m.generate_content(
-                        prompt,
-                        generation_config=(getattr(genai, 'types', {}).get('GenerationConfig', lambda **k: None)(
-                            temperature=0.3,
-                            max_output_tokens=2000
-                        ))
-                    )
-                    return getattr(response, 'text', str(response) or "")
-            except Exception:
-                # Give up gracefully on SDK mismatch
-                return ""
-
-            return ""
-        except Exception as e:
-            logger.error(f"Google API error: {e}")
-            return ""
     
     def _call_openrouter(self, prompt: str) -> str:
         """Call OpenRouter API (via OpenAI-compatible client). Returns string or empty on error."""

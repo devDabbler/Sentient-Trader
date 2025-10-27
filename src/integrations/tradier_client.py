@@ -1,5 +1,5 @@
 """
-Tradier API Client for Paper Trading Integration
+Tradier API Client for Paper and Production Trading Integration
 Handles account management, order placement, and position tracking
 """
 
@@ -8,22 +8,45 @@ import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import json
+from .trading_config import get_trading_mode_manager, TradingMode
 
 logger = logging.getLogger(__name__)
 
 class TradierClient:
-    """Client for Tradier API integration with paper trading"""
+    """Client for Tradier API integration with paper and production trading"""
     
-    def __init__(self, account_id: str, access_token: str, api_url: str = "https://sandbox.tradier.com"):
-        self.account_id = account_id
-        self.access_token = access_token
-        self.api_url = api_url
+    def __init__(self, account_id: str = None, access_token: str = None, api_url: str = None, trading_mode: TradingMode = None):
+        # If no credentials provided, use trading mode manager
+        if account_id is None or access_token is None:
+            mode_manager = get_trading_mode_manager()
+            if trading_mode:
+                mode_manager.set_mode(trading_mode)
+            
+            creds = mode_manager.get_current_credentials()
+            if not creds:
+                raise ValueError("No trading credentials available. Please configure environment variables.")
+            
+            self.account_id = creds.account_id
+            self.access_token = creds.access_token
+            self.api_url = creds.api_url
+            self.trading_mode = creds.mode
+        else:
+            # Use provided credentials
+            self.account_id = account_id
+            self.access_token = access_token
+            self.api_url = api_url or "https://sandbox.tradier.com"
+            self.trading_mode = trading_mode or TradingMode.PAPER
+        
         self.session = requests.Session()
         self.session.headers.update({
-            'Authorization': f'Bearer {access_token}',
+            'Authorization': f'Bearer {self.access_token}',
             'Accept': 'application/json',
             'Content-Type': 'application/json'
         })
+        
+        logger.info(f"🔧 TradierClient initialized for {self.trading_mode.value} mode")
+        logger.info(f"🔗 API URL: {self.api_url}")
+        logger.info(f"👤 Account ID: {self.account_id[:8]}...")
         
         # Ensure we have a robust JSON parser for inconsistent responses
         # Some sandbox endpoints may return JSON as a string or with wrong content-type
@@ -700,28 +723,44 @@ class TradierClient:
             return False, {"error": str(e)}
 
 # Utility functions for common operations
-def create_tradier_client_from_env() -> Optional[TradierClient]:
-    """Create TradierClient from environment variables"""
-    import os
-    
-    account_id = os.getenv('TRADIER_ACCOUNT_ID')
-    access_token = os.getenv('TRADIER_ACCESS_TOKEN')
-    api_url = os.getenv('TRADIER_API_URL', 'https://sandbox.tradier.com')
-    
-    if not account_id or not access_token:
-        logger.error("Missing Tradier credentials in environment variables")
+def create_tradier_client_from_env(trading_mode: TradingMode = None) -> Optional[TradierClient]:
+    """Create TradierClient from environment variables using trading mode manager"""
+    try:
+        return TradierClient(trading_mode=trading_mode)
+    except ValueError as e:
+        logger.error(f"Failed to create Tradier client: {e}")
         return None
-    
-    return TradierClient(account_id, access_token, api_url)
 
-def validate_tradier_connection() -> Tuple[bool, str]:
-    """Validate Tradier API connection"""
-    client = create_tradier_client_from_env()
+def create_tradier_client_for_mode(trading_mode: TradingMode) -> Optional[TradierClient]:
+    """Create TradierClient for a specific trading mode"""
+    try:
+        return TradierClient(trading_mode=trading_mode)
+    except ValueError as e:
+        logger.error(f"Failed to create Tradier client for {trading_mode.value}: {e}")
+        return None
+
+def validate_tradier_connection(trading_mode: TradingMode = None) -> Tuple[bool, str]:
+    """Validate Tradier API connection for current or specified mode"""
+    client = create_tradier_client_from_env(trading_mode)
     if not client:
-        return False, "Failed to create Tradier client - check environment variables"
+        mode_name = trading_mode.value if trading_mode else "current"
+        return False, f"Failed to create Tradier client for {mode_name} mode - check environment variables"
     
     success, balance = client.get_account_balance()
     if success:
-        return True, "Tradier connection successful"
+        mode_name = client.trading_mode.value
+        return True, f"Tradier {mode_name} connection successful"
     else:
-        return False, f"Tradier connection failed: {balance.get('error', 'Unknown error')}"
+        mode_name = client.trading_mode.value
+        return False, f"Tradier {mode_name} connection failed: {balance.get('error', 'Unknown error')}"
+
+def validate_all_trading_modes() -> Dict[str, Tuple[bool, str]]:
+    """Validate connections for all available trading modes"""
+    mode_manager = get_trading_mode_manager()
+    results = {}
+    
+    for mode in mode_manager.get_available_modes():
+        success, message = validate_tradier_connection(mode)
+        results[mode.value] = (success, message)
+    
+    return results

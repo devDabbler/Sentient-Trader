@@ -36,17 +36,15 @@ class TradingSignal:
 class AITradingSignalGenerator:
     """Generate trading signals using AI analysis"""
     
-    def __init__(self, llm_provider: str = "openrouter", api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize AI signal generator
         
         Args:
-            llm_provider: LLM provider (openai, anthropic, openrouter)
             api_key: API key (optional if in env)
         """
-        self.llm_provider = llm_provider
         self.api_key = api_key
-        logger.info(f"AI Trading Signal Generator initialized with {llm_provider}")
+        logger.info("AI Trading Signal Generator initialized with OpenRouter")
     
     def generate_signal(
         self,
@@ -89,7 +87,7 @@ class AITradingSignalGenerator:
             )
             
             # Get AI analysis
-            response = self._call_llm(prompt)
+            response = self._call_openrouter(prompt)
             
             if response:
                 # Parse AI response into trading signal
@@ -241,22 +239,6 @@ Analyze all the data above and provide a trading recommendation. Consider:
         
         return prompt
     
-    def _call_llm(self, prompt: str) -> Optional[str]:
-        """Call LLM provider"""
-        try:
-            if self.llm_provider == "openrouter":
-                return self._call_openrouter(prompt)
-            elif self.llm_provider == "openai":
-                return self._call_openai(prompt)
-            elif self.llm_provider == "anthropic":
-                return self._call_anthropic(prompt)
-            else:
-                logger.error(f"Unknown LLM provider: {self.llm_provider}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"Error calling LLM: {e}")
-            return None
     
     def _call_openrouter(self, prompt: str) -> Optional[str]:
         """Call OpenRouter API"""
@@ -276,7 +258,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "model": os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free'),
                     "messages": [
                         {
                             "role": "system",
@@ -302,52 +284,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
             logger.error(f"Error calling OpenRouter: {e}")
             return None
     
-    def _call_openai(self, prompt: str) -> Optional[str]:
-        """Call OpenAI API"""
-        try:
-            import os
-            from openai import OpenAI
-            
-            api_key = self.api_key or os.getenv('OPENAI_API_KEY')
-            client = OpenAI(api_key=api_key)
-            
-            response = client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[
-                    {"role": "system", "content": "You are an expert day trader. Always respond with valid JSON only."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3
-            )
-            
-            return response.choices[0].message.content
-        
-        except Exception as e:
-            logger.error(f"Error calling OpenAI: {e}")
-            return None
     
-    def _call_anthropic(self, prompt: str) -> Optional[str]:
-        """Call Anthropic API"""
-        try:
-            import os
-            from anthropic import Anthropic
-            
-            api_key = self.api_key or os.getenv('ANTHROPIC_API_KEY')
-            client = Anthropic(api_key=api_key)
-            
-            response = client.messages.create(
-                model="claude-3-sonnet-20240229",
-                max_tokens=1024,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            
-            return response.content[0].text
-        
-        except Exception as e:
-            logger.error(f"Error calling Anthropic: {e}")
-            return None
     
     def _parse_signal(self, response: str, symbol: str) -> Optional[TradingSignal]:
         """Parse LLM response into TradingSignal"""
@@ -438,15 +375,14 @@ Analyze all the data above and provide a trading recommendation. Consider:
         return signals
 
 
-def create_ai_signal_generator(provider: str = "openrouter", api_key: Optional[str] = None) -> AITradingSignalGenerator:
+def create_ai_signal_generator(api_key: Optional[str] = None) -> AITradingSignalGenerator:
     """
     Create AI signal generator
     
     Args:
-        provider: LLM provider
         api_key: Optional API key
         
     Returns:
         AITradingSignalGenerator instance
     """
-    return AITradingSignalGenerator(llm_provider=provider, api_key=api_key)
+    return AITradingSignalGenerator(api_key=api_key)

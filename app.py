@@ -1,25 +1,12 @@
-# CRITICAL: Apply Windows async fix BEFORE any other imports
+# This must be the very first thing to run to ensure all modules are found
 import sys
-if sys.platform == 'win32':
-    import asyncio
-    # Ensure ProactorEventLoop for subprocess support
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    # Apply nest_asyncio to allow nested event loops (fixes Streamlit conflicts)
-    try:
-        import nest_asyncio
-        nest_asyncio.apply()
-    except ImportError:
-        print("WARNING: nest_asyncio not installed - social sentiment may fail")
-        print("Install with: pip install nest-asyncio")
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
 
+# --- Standard and Third-Party Libraries ---
 import streamlit as st
-
-st.set_page_config(
-    page_title="Sentient Trader",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+import asyncio
+import yfinance as yf
 import io
 import requests
 import pandas as pd
@@ -29,32 +16,40 @@ import time
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-import yfinance as yf
 from enum import Enum
 import numpy as np
-import os
-import sys
-from io import TextIOWrapper
 from dotenv import load_dotenv
-from analyzers.comprehensive import ComprehensiveAnalyzer
 
-# Load environment variables
+# --- Application Configuration ---
+st.set_page_config(
+    page_title="Sentient Trader",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Load environment variables and set up logging
 load_dotenv()
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Import integration clients from new structure
-from src.integrations.tradier_client import TradierClient, validate_tradier_connection
+# Windows-specific asyncio policy
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-# Import service modules from new structure
+# --- Local Application Modules ---
+from src.integrations.tradier_client import TradierClient, validate_tradier_connection, validate_all_trading_modes
+from src.integrations.trading_config import get_trading_mode_manager, TradingMode, switch_to_paper_mode, switch_to_production_mode
 from services.llm_strategy_analyzer import LLMStrategyAnalyzer, StrategyAnalysis, extract_bot_config_from_screenshot, create_strategy_comparison
-from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
 from services.watchlist_manager import WatchlistManager
+from services.ai_trading_signals import AITradingSignalGenerator, TradingSignal
 from services.ticker_manager import TickerManager
 from services.top_trades_scanner import TopTradesScanner, TopTrade
 from services.ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrade
 from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
+from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, ScanType, OpportunityResult
-from analyzers.comprehensive import ComprehensiveAnalyzer
+from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
 
 # Add caching for better performance with new Streamlit features
 @st.cache_data(ttl=60)  # Cache for 1 minute for more real-time data
@@ -1453,11 +1448,92 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
+        # Trading Mode Configuration
         st.subheader("Trading Mode")
-        paper_mode = st.toggle("Paper Trading Mode", value=st.session_state.paper_mode)
-        st.session_state.paper_mode = paper_mode
         
-        if paper_mode:
+        # Get trading mode manager
+        mode_manager = get_trading_mode_manager()
+        available_modes = mode_manager.get_available_modes()
+        
+        if not available_modes:
+            st.error("❌ No trading credentials configured")
+            st.caption("Please set up environment variables for paper and/or production trading")
+        else:
+            # Display current mode info
+            mode_info = mode_manager.get_mode_display_info()
+            
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.metric("Current Mode", mode_info["mode"], mode_info["status"])
+            with col2:
+                if mode_info["status"] == "✅ Ready":
+                    st.success("Ready")
+                else:
+                    st.error("Not Ready")
+            
+            # Mode switching
+            if len(available_modes) > 1:
+                st.caption("Switch Trading Mode:")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📝 Paper Mode", disabled=mode_manager.is_paper_mode()):
+                        if switch_to_paper_mode():
+                            st.success("Switched to Paper Mode")
+                            # Refresh Tradier client for new mode
+                            if 'tradier_client' in st.session_state:
+                                try:
+                                    st.session_state.tradier_client = create_tradier_client_from_env()
+                                    st.info("Tradier client refreshed for Paper Mode")
+                                except Exception as e:
+                                    st.warning(f"Failed to refresh Tradier client: {e}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to switch to Paper Mode")
+                
+                with col2:
+                    if st.button("💰 Production Mode", disabled=mode_manager.is_production_mode()):
+                        if switch_to_production_mode():
+                            st.success("Switched to Production Mode")
+                            # Refresh Tradier client for new mode
+                            if 'tradier_client' in st.session_state:
+                                try:
+                                    st.session_state.tradier_client = create_tradier_client_from_env()
+                                    st.info("Tradier client refreshed for Production Mode")
+                                except Exception as e:
+                                    st.warning(f"Failed to refresh Tradier client: {e}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to switch to Production Mode")
+            else:
+                current_mode = available_modes[0]
+                st.info(f"Only {current_mode.value.title()} mode available")
+            
+            # Mode details
+            with st.expander("Mode Details"):
+                st.write(f"**API URL:** {mode_info['api_url']}")
+                st.write(f"**Account ID:** {mode_info['account_id']}")
+                st.write(f"**Status:** {mode_info['status']}")
+                
+                # Test connection
+                if st.button("Test Connection"):
+                    success, message = validate_tradier_connection()
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+        
+        # Legacy paper mode toggle for backward compatibility
+        st.subheader("Legacy Settings")
+        paper_mode = st.toggle("Paper Trading Mode (Legacy)", value=mode_manager.is_paper_mode())
+        if paper_mode != mode_manager.is_paper_mode():
+            if paper_mode:
+                switch_to_paper_mode()
+            else:
+                switch_to_production_mode()
+            st.rerun()
+        
+        if mode_manager.is_paper_mode():
             st.info("🔒 Paper trading: Signals logged only")
         else:
             st.warning("⚠️ LIVE TRADING ENABLED")
@@ -1720,7 +1796,7 @@ def main():
                                             exp_date = exp_date + timedelta(days=days_until_friday)
                                             
                                             # Determine option type (P for PUT, C for CALL)
-                                            option_type = "P" if "PUT" in selected_rec.get('type', '') else "C"
+                                            option_type = "P" if "PUT" in selected_rec.get('strategy', '') else "C"
                                             
                                             # Format: SYMBOL + YYMMDD + P/C + 8-digit strike (padded with zeros)
                                             auto_generated_symbol = f"{trade_symbol.upper()}{exp_date.strftime('%y%m%d')}{option_type}{int(strike * 1000):08d}"
@@ -1776,7 +1852,7 @@ def main():
                                                 exp_date = exp_date + timedelta(days=days_until_friday)
                                                 
                                                 # Determine option type (P for PUT, C for CALL)
-                                                option_type = "P" if "PUT" in selected_rec.get('type', '') else "C"
+                                                option_type = "P" if "PUT" in selected_rec.get('strategy', '') else "C"
                                                 
                                                 # Format: SYMBOL + YYMMDD + P/C + 8-digit strike (padded with zeros)
                                                 generated_symbol = f"{trade_symbol.upper()}{exp_date.strftime('%y%m%d')}{option_type}{int(strike * 1000):08d}"
@@ -2084,7 +2160,44 @@ def main():
                 
                 st.write(f"🤖 Generating {trading_style_display} recommendations...")
                 analysis = ComprehensiveAnalyzer.analyze_stock(search_ticker, trading_style)
-                
+
+                # --- Generate Premium AI Trading Signal ---
+                st.session_state.ai_trading_signal = None
+                if analysis:
+                    st.write("🤖 Generating Premium AI Trading Signal with Gemini...")
+                    signal_generator = AITradingSignalGenerator()
+
+                    # Prepare data for the signal generator
+                    technical_data = {
+                        'price': analysis.price,
+                        'change_pct': analysis.change_pct,
+                        'rsi': analysis.rsi,
+                        'macd_signal': analysis.macd_signal,
+                        'trend': analysis.trend,
+                        'volume': analysis.volume,
+                        'avg_volume': analysis.avg_volume,
+                        'support': analysis.support,
+                        'resistance': analysis.resistance,
+                        'iv_rank': analysis.iv_rank
+                    }
+                    news_data = analysis.recent_news
+                    sentiment_data = {
+                        'score': analysis.sentiment_score,
+                        'signals': analysis.sentiment_signals
+                    }
+                    social_data = None  # Social sentiment not available in StockAnalysis
+
+                    # Generate the signal using the configured premium model
+                    ai_signal = signal_generator.generate_signal(
+                        symbol=analysis.ticker,
+                        technical_data=technical_data,
+                        news_data=news_data,
+                        sentiment_data=sentiment_data,
+                        social_data=social_data
+                    )
+                    st.session_state.ai_trading_signal = ai_signal
+                # ----------------------------------------
+
                 if analysis:
                     status.update(label=f"✅ Analysis complete for {search_ticker}", state="complete")
                 else:
@@ -2103,6 +2216,31 @@ def main():
                     
                     # Header metrics
                     st.success(f"✅ Analysis complete for {analysis.ticker}")
+
+                    # --- Display Premium AI Trading Signal ---
+                    if 'ai_trading_signal' in st.session_state and st.session_state.ai_trading_signal:
+                        signal = st.session_state.ai_trading_signal
+                        st.subheader("🤖 Premium AI Trading Signal (Gemini)")
+                        
+                        signal_color = "green" if signal.signal == "BUY" else "red" if signal.signal == "SELL" else "orange"
+                        st.markdown(f"## <span style='color:{signal_color};'>{signal.signal}</span>", unsafe_allow_html=True)
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Confidence", f"{signal.confidence:.1f}%")
+                        with col2:
+                            st.metric("Risk Level", signal.risk_level)
+                        with col3:
+                            st.metric("Time Horizon", signal.time_horizon.replace('_', ' ').title())
+
+                        with st.expander("View AI Reasoning and Price Targets"):
+                            st.write(f"**Reasoning:** {signal.reasoning}")
+                            st.write("-")
+                            st.metric("Entry Price", f"${signal.entry_price:.2f}" if signal.entry_price else "N/A")
+                            st.metric("Target Price", f"${signal.target_price:.2f}" if signal.target_price else "N/A")
+                            st.metric("Stop Loss", f"${signal.stop_loss:.2f}" if signal.stop_loss else "N/A")
+                        st.divider()
+                    # ----------------------------------------
                     
                     # Special alerts for penny stocks and runners
                     if is_runner:
@@ -4030,6 +4168,24 @@ def main():
         
         st.divider()
         
+        # Trading Style Selector
+        st.subheader("⚙️ Analysis Settings")
+        col_style, col_refresh_all = st.columns([2, 1])
+        
+        with col_style:
+            analysis_style = st.selectbox(
+                "Trading Style for Analysis",
+                ["OPTIONS", "DAY_TRADE", "SWING_TRADE"],
+                index=0,
+                help="Select the trading style to analyze your tickers with"
+            )
+            st.session_state.analysis_timeframe = analysis_style
+        
+        with col_refresh_all:
+            if st.button("🔄 Refresh All", help="Refresh analysis for all tickers"):
+                st.session_state.refresh_all_tickers = True
+                st.rerun()
+        
         # View saved tickers
         st.subheader("📋 Your Saved Tickers")
         all_tickers = tm.get_all_tickers(limit=50)
@@ -4141,79 +4297,506 @@ def main():
                                 with st.container():
                                     st.info(notes)
                             
-                            # ML Analysis section if available
-                            if ml_score is not None:
-                                st.divider()
-                                st.markdown("**🤖 AI Analysis Results**")
+                            # Comprehensive Analysis section - Enhanced with Dashboard-level data
+                            st.divider()
+                            st.markdown("**📊 Comprehensive Analysis**")
+                            
+                            # Get fresh analysis data for this ticker
+                            try:
+                                # Check if this ticker should be refreshed
+                                should_refresh = (
+                                    st.session_state.get(f"refresh_{ticker_symbol}", False) or 
+                                    st.session_state.get('refresh_all_tickers', False) or
+                                    st.session_state.get('ml_ticker_to_analyze') == ticker_symbol
+                                )
                                 
-                                # Confidence score with color coding
-                                if ml_score >= 70:
-                                    st.success(f"✅ **HIGH CONFIDENCE** - Score: {ml_score:.0f}/100")
-                                elif ml_score >= 50:
-                                    st.info(f"📊 **MEDIUM CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                if should_refresh:
+                                    with st.spinner(f"Analyzing {ticker_symbol}..."):
+                                        analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, st.session_state.get('analysis_timeframe', 'OPTIONS'))
+                                    
+                                    # Clear refresh flags
+                                    if f"refresh_{ticker_symbol}" in st.session_state:
+                                        del st.session_state[f"refresh_{ticker_symbol}"]
                                 else:
-                                    st.warning(f"⚠️ **LOW CONFIDENCE** - Score: {ml_score:.0f}/100")
-                                
-                                # Analysis metrics in grid
-                                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-                                
-                                with metric_col1:
-                                    trend = ticker.get('trend', 'N/A')
-                                    trend_emoji = "📈" if trend == "BULLISH" else "📉" if trend == "BEARISH" else "➡️"
-                                    st.metric("Trend", f"{trend_emoji} {trend}")
-                                
-                                with metric_col2:
-                                    sentiment = ticker.get('sentiment_score')
-                                    if sentiment is not None:
-                                        sentiment_emoji = "😊" if sentiment > 0.1 else "😐" if sentiment > -0.1 else "😟"
-                                        st.metric("Sentiment", f"{sentiment_emoji} {sentiment:.2f}")
+                                    # Use cached analysis if available
+                                    cached_analysis = ticker.get('analysis_data')
+                                    if cached_analysis and isinstance(cached_analysis, dict):
+                                        # Convert dict back to StockAnalysis object
+                                        from models.analysis import StockAnalysis
+                                        analysis = StockAnalysis(**cached_analysis)
                                     else:
-                                        st.metric("Sentiment", "N/A")
-                                
-                                with metric_col3:
-                                    rsi = ticker.get('rsi')
-                                    if rsi is not None:
-                                        rsi_emoji = "🔴" if rsi > 70 else "🟢" if rsi < 30 else "🟡"
-                                        st.metric("RSI", f"{rsi_emoji} {rsi:.1f}")
-                                    else:
-                                        st.metric("RSI", "N/A")
-                                
-                                with metric_col4:
-                                    momentum = ticker.get('momentum')
-                                    if momentum is not None:
-                                        momentum_emoji = "🚀" if momentum > 5 else "📈" if momentum > 0 else "📉"
-                                        st.metric("Momentum", f"{momentum_emoji} {momentum:.1f}%")
-                                    else:
-                                        st.metric("Momentum", "N/A")
-                                
-                                # Recommendation if available
-                                recommendation = ticker.get('recommendation')
-                                if recommendation and recommendation != 'N/A':
-                                    rec_emoji = "💰" if "BUY" in recommendation.upper() else "⏱️" if "HOLD" in recommendation.upper() else "🚨"
-                                    st.markdown(f"**💡 Recommendation:** {rec_emoji} {recommendation}")
-                                
-                                # Last analysis timestamp
-                                last_analyzed_str = ticker.get('last_analyzed')
-                                if last_analyzed_str:
-                                    try:
-                                        dt_analyzed = datetime.fromisoformat(last_analyzed_str).replace(tzinfo=timezone.utc)
-                                        analyzed_ago = (datetime.now(timezone.utc) - dt_analyzed).total_seconds() / 3600
-                                        if analyzed_ago < 1:
-                                            time_str = "Just now"
-                                        elif analyzed_ago < 24:
-                                            time_str = f"{analyzed_ago:.0f} hours ago"
+                                        # No cached data, run fresh analysis
+                                        with st.spinner(f"Analyzing {ticker_symbol}..."):
+                                            analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, st.session_state.get('analysis_timeframe', 'OPTIONS'))
+                                    
+                                if analysis:
+                                    # Update ticker with fresh analysis data
+                                    tm.update_analysis(ticker_symbol, analysis.__dict__)
+                                    
+                                    # Detect characteristics
+                                    is_penny_stock = analysis.price < 5.0
+                                    is_otc = analysis.ticker.endswith(('.OTC', '.PK', '.QB'))
+                                    volume_vs_avg = ((analysis.volume / analysis.avg_volume - 1) * 100) if analysis.avg_volume > 0 else 0
+                                    is_runner = volume_vs_avg > 200 and analysis.change_pct > 10
+                                    
+                                    # Header metrics (same as dashboard)
+                                    metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
+                                    
+                                    with metric_col1:
+                                        price_display = f"${analysis.price:.4f}" if is_penny_stock else f"${analysis.price:.2f}"
+                                        st.metric("Price", price_display, f"{analysis.change_pct:+.2f}%")
+                                    with metric_col2:
+                                        st.metric("Trend", analysis.trend)
+                                    with metric_col3:
+                                        st.metric("Confidence", f"{int(analysis.confidence_score)}%")
+                                    with metric_col4:
+                                        st.metric("IV Rank", f"{analysis.iv_rank}%")
+                                    with metric_col5:
+                                        volume_indicator = "🔥" if volume_vs_avg > 100 else "📊"
+                                        st.metric(f"{volume_indicator} Volume", f"{analysis.volume:,}", f"{volume_vs_avg:+.1f}%")
+                                    
+                                    # Special alerts for penny stocks and runners
+                                    if is_runner:
+                                        st.warning(f"🚀 **RUNNER DETECTED!** {volume_vs_avg:+.0f}% volume spike with {analysis.change_pct:+.1f}% price move!")
+                                    
+                                    if is_penny_stock:
+                                        st.info(f"💰 **PENNY STOCK** (${analysis.price:.4f}) - High risk/high reward. Use caution and proper position sizing.")
+                                    
+                                    if is_otc:
+                                        st.warning("⚠️ **OTC STOCK** - Lower liquidity, wider spreads, higher risk. Limited data may be available.")
+                                    
+                                    # Technical Indicators (same as dashboard)
+                                    st.subheader("📊 Technical Indicators")
+                                    
+                                    tech_col1, tech_col2, tech_col3 = st.columns(3)
+                                    
+                                    with tech_col1:
+                                        st.metric("RSI (14)", f"{analysis.rsi:.1f}")
+                                        if analysis.rsi < 30:
+                                            st.caption("🟢 Oversold - potential buy")
+                                        elif analysis.rsi > 70:
+                                            st.caption("🔴 Overbought - potential sell")
                                         else:
-                                            time_str = f"{analyzed_ago/24:.0f} days ago"
-                                        st.caption(f"🕒 Analysis updated: {time_str}")
-                                    except:
-                                        pass
+                                            st.caption("🟡 Neutral")
+                                    
+                                    with tech_col2:
+                                        st.metric("MACD Signal", analysis.macd_signal)
+                                        if analysis.macd_signal == "BULLISH":
+                                            st.caption("🟢 Bullish momentum")
+                                        elif analysis.macd_signal == "BEARISH":
+                                            st.caption("🔴 Bearish momentum")
+                                        else:
+                                            st.caption("🟡 Neutral momentum")
+                                    
+                                    with tech_col3:
+                                        st.metric("Support", f"${analysis.support}")
+                                        st.metric("Resistance", f"${analysis.resistance}")
+                                    
+                                    # IV Analysis (same as dashboard)
+                                    st.subheader("📈 Implied Volatility Analysis")
+                                    
+                                    iv_col1, iv_col2, iv_col3 = st.columns(3)
+                                    
+                                    with iv_col1:
+                                        st.metric("IV Rank", f"{analysis.iv_rank}%")
+                                        if analysis.iv_rank > 60:
+                                            st.caption("🔥 High IV - Great for selling premium")
+                                        elif analysis.iv_rank < 40:
+                                            st.caption("❄️ Low IV - Good for buying options")
+                                        else:
+                                            st.caption("➡️ Moderate IV")
+                                    
+                                    with iv_col2:
+                                        st.metric("IV Percentile", f"{analysis.iv_percentile}%")
+                                    
+                                    with iv_col3:
+                                        if analysis.iv_rank > 50:
+                                            st.info("💡 Consider: Selling puts, covered calls, iron condors")
+                                        else:
+                                            st.info("💡 Consider: Buying calls/puts, debit spreads")
+                                    
+                                    # Catalysts (same as dashboard)
+                                    st.subheader("📅 Upcoming Catalysts")
+                                    
+                                    if analysis.catalysts:
+                                        for catalyst in analysis.catalysts:
+                                            impact_color = {
+                                                'HIGH': '🔴',
+                                                'MEDIUM': '🟡',
+                                                'LOW': '🟢'
+                                            }.get(catalyst['impact'], '⚪')
+                                            
+                                            with st.expander(f"{impact_color} {catalyst['type']} - {catalyst['date']} ({catalyst.get('days_away', 'N/A')} days away)"):
+                                                st.write(f"**Impact Level:** {catalyst['impact']}")
+                                                st.write(f"**Details:** {catalyst['description']}")
+                                                
+                                                if catalyst['type'] == 'Earnings Report' and catalyst.get('days_away', 999) <= 7:
+                                                    st.warning("⚠️ Earnings within 7 days - expect high volatility!")
+                                    else:
+                                        st.info("No major catalysts identified in the next 60 days")
+                                    
+                                    # News & Sentiment (same as dashboard)
+                                    st.subheader("📰 Recent News & Sentiment")
+                                    
+                                    if analysis.recent_news:
+                                        st.success(f"✅ Found {len(analysis.recent_news)} recent news articles")
+                                    else:
+                                        st.warning("⚠️ No recent news found - this may indicate low news volume or connectivity issues")
+                                    
+                                    sentiment_col1, sentiment_col2 = st.columns([1, 3])
+                                    
+                                    with sentiment_col1:
+                                        sentiment_label = "POSITIVE" if analysis.sentiment_score > 0.2 else "NEGATIVE" if analysis.sentiment_score < -0.2 else "NEUTRAL"
+                                        sentiment_color = "🟢" if analysis.sentiment_score > 0.2 else "🔴" if analysis.sentiment_score < -0.2 else "🟡"
+                                        
+                                        st.metric("News Sentiment", f"{sentiment_color} {sentiment_label}")
+                                        st.metric("Sentiment Score", f"{analysis.sentiment_score:.2f}")
+                                        
+                                        # Show sentiment signals if available
+                                        if hasattr(analysis, 'sentiment_signals') and analysis.sentiment_signals:
+                                            with st.expander("📊 Sentiment Analysis Details"):
+                                                for signal in analysis.sentiment_signals[:3]:  # Show top 3
+                                                    st.write(signal)
+                                    
+                                    with sentiment_col2:
+                                        if analysis.recent_news:
+                                            st.write("**Latest News Articles:**")
+                                            for idx, article in enumerate(analysis.recent_news[:3]):  # Show top 3
+                                                # Create a more informative expander
+                                                expander_title = f"📰 {article['title'][:50]}..." if len(article['title']) > 50 else f"📰 {article['title']}"
+                                                
+                                                with st.expander(expander_title):
+                                                    col_pub, col_time = st.columns(2)
+                                                    with col_pub:
+                                                        st.write(f"**Publisher:** {article['publisher']}")
+                                                    with col_time:
+                                                        st.write(f"**Published:** {article['published']}")
+                                                    
+                                                    # Show summary if available
+                                                    if article.get('summary'):
+                                                        st.write("**Summary:**")
+                                                        st.write(article['summary'])
+                                                    
+                                                    # Link to full article
+                                                    if article.get('link'):
+                                                        st.write(f"[📖 Read Full Article]({article['link']})")
+                                        else:
+                                            st.info("📭 No recent news found for this ticker.")
+                                    
+                                    # Penny Stock Risk Assessment (if applicable)
+                                    if is_penny_stock:
+                                        st.subheader("⚠️ Penny Stock Risk Assessment")
+                                        
+                                        risk_col1, risk_col2 = st.columns(2)
+                                        
+                                        with risk_col1:
+                                            st.warning("""
+**Penny Stock Risks:**
+- 🔴 High volatility (can swing 20-50%+ daily)
+- 🔴 Low liquidity (harder to exit positions)
+- 🔴 Wide bid-ask spreads (higher trading costs)
+- 🔴 Manipulation risk (pump & dump schemes)
+- 🔴 Limited financial data/transparency
+- 🔴 Higher bankruptcy risk
+                                            """)
+                                        
+                                        with risk_col2:
+                                            st.success("""
+**Penny Stock Trading Rules:**
+- ✅ Never risk more than 1-2% of portfolio
+- ✅ Use limit orders (avoid market orders)
+- ✅ Set tight stop losses (5-10%)
+- ✅ Take profits quickly (don't be greedy)
+- ✅ Research company fundamentals
+- ✅ Watch for unusual volume spikes
+- ✅ Avoid stocks with no news/catalysts
+                                            """)
+                                        
+                                        # Calculate penny stock score
+                                        penny_score = 0
+                                        if volume_vs_avg > 100: penny_score += 25
+                                        if analysis.change_pct > 5: penny_score += 20
+                                        if analysis.rsi < 70: penny_score += 20
+                                        if len(analysis.recent_news) > 0: penny_score += 20
+                                        if analysis.sentiment_score > 0: penny_score += 15
+                                        
+                                        st.metric("Penny Stock Opportunity Score", f"{penny_score}/100")
+                                        
+                                        if penny_score > 70:
+                                            st.success("🟢 Strong opportunity - but still use caution!")
+                                        elif penny_score > 50:
+                                            st.info("🟡 Moderate opportunity - proceed carefully")
+                                        else:
+                                            st.warning("🔴 Weak setup - consider waiting for better entry")
+                                    
+                                    # Runner Metrics (if detected)
+                                    if is_runner or volume_vs_avg > 100:
+                                        st.subheader("🚀 Runner / Momentum Metrics")
+                                        
+                                        runner_col1, runner_col2, runner_col3, runner_col4 = st.columns(4)
+                                        
+                                        with runner_col1:
+                                            st.metric("Volume Spike", f"{volume_vs_avg:+.0f}%")
+                                            if volume_vs_avg > 300:
+                                                st.caption("🔥 EXTREME volume!")
+                                            elif volume_vs_avg > 200:
+                                                st.caption("🔥 Very high volume")
+                                            else:
+                                                st.caption("📈 Elevated volume")
+                                        
+                                        with runner_col2:
+                                            st.metric("Price Change", f"{analysis.change_pct:+.2f}%")
+                                            if abs(analysis.change_pct) > 20:
+                                                st.caption("🚀 Major move!")
+                                            elif abs(analysis.change_pct) > 10:
+                                                st.caption("📈 Strong move")
+                                        
+                                        with runner_col3:
+                                            # Calculate momentum score
+                                            momentum_score = min(100, (abs(analysis.change_pct) * 2 + volume_vs_avg / 5))
+                                            st.metric("Momentum Score", f"{momentum_score:.0f}/100")
+                                            if momentum_score > 80:
+                                                st.caption("🔥 HOT!")
+                                            elif momentum_score > 60:
+                                                st.caption("🔥 Strong")
+                                        
+                                        with runner_col4:
+                                            # Risk level for runners
+                                            runner_risk = "EXTREME" if is_penny_stock and volume_vs_avg > 300 else "VERY HIGH" if volume_vs_avg > 200 else "HIGH"
+                                            st.metric("Runner Risk", runner_risk)
+                                            st.caption("⚠️ Use stops!")
+                                        
+                                        if is_runner:
+                                            st.warning("""
+**Runner Trading Tips:**
+- ✅ Use tight stop losses (3-5%)
+- ✅ Take profits quickly (don't be greedy)
+- ✅ Watch for volume decline (exit signal)
+- ✅ Avoid chasing - wait for pullbacks
+- ❌ Don't hold overnight (high gap risk)
+                                            """)
+                                    
+                                    # Timeframe-Specific Analysis
+                                    st.subheader("⏰ Trading Style Analysis")
+                                    
+                                    # Get trading style from session state or default to OPTIONS
+                                    trading_style = st.session_state.get('analysis_timeframe', 'OPTIONS')
+                                    
+                                    # Calculate timeframe-specific metrics
+                                    if trading_style == "DAY_TRADE":
+                                        # Day trading focus: quick moves, tight stops
+                                        timeframe_score = 0
+                                        reasons = []
+                                        
+                                        if volume_vs_avg > 100:
+                                            timeframe_score += 30
+                                            reasons.append(f"✅ High volume (+{volume_vs_avg:.0f}%) - good for day trading")
+                                        else:
+                                            reasons.append(f"⚠️ Volume only +{volume_vs_avg:.0f}% - may lack intraday momentum")
+                                        
+                                        if abs(analysis.change_pct) > 2:
+                                            timeframe_score += 25
+                                            reasons.append(f"✅ Strong intraday move ({analysis.change_pct:+.1f}%)")
+                                        else:
+                                            reasons.append("⚠️ Low intraday volatility - limited profit potential")
+                                        
+                                        if 30 < analysis.rsi < 70:
+                                            timeframe_score += 20
+                                            reasons.append("✅ RSI in tradeable range (not overbought/oversold)")
+                                        
+                                        if not is_penny_stock:
+                                            timeframe_score += 15
+                                            reasons.append("✅ Not a penny stock - better liquidity for day trading")
+                                        else:
+                                            reasons.append("⚠️ Penny stock - higher risk, use smaller size")
+                                        
+                                        if analysis.trend != "NEUTRAL":
+                                            timeframe_score += 10
+                                            reasons.append(f"✅ Clear trend ({analysis.trend}) - easier to trade")
+                                        
+                                        st.metric("Day Trading Suitability", f"{timeframe_score}/100")
+                                        
+                                        for reason in reasons:
+                                            st.write(reason)
+                                        
+                                        if timeframe_score > 70:
+                                            st.success("🟢 **EXCELLENT** for day trading!")
+                                        elif timeframe_score > 50:
+                                            st.info("🟡 **GOOD** for day trading with caution")
+                                        else:
+                                            st.warning("🔴 **POOR** for day trading - consider other timeframes")
+                                    
+                                    elif trading_style == "SWING_TRADE":
+                                        # Swing trading focus: multi-day moves, wider stops
+                                        timeframe_score = 0
+                                        reasons = []
+                                        
+                                        if abs(analysis.change_pct) > 5:
+                                            timeframe_score += 25
+                                            reasons.append(f"✅ Strong momentum ({analysis.change_pct:+.1f}%) - good for swing trades")
+                                        
+                                        if analysis.trend != "NEUTRAL":
+                                            timeframe_score += 30
+                                            reasons.append(f"✅ Clear trend ({analysis.trend}) - ideal for swing trading")
+                                        
+                                        if 40 < analysis.rsi < 60:
+                                            timeframe_score += 20
+                                            reasons.append("✅ RSI in good swing range")
+                                        
+                                        if analysis.iv_rank > 30:
+                                            timeframe_score += 15
+                                            reasons.append("✅ Sufficient volatility for swing moves")
+                                        
+                                        if len(analysis.recent_news) > 0:
+                                            timeframe_score += 10
+                                            reasons.append("✅ News catalyst available")
+                                        
+                                        st.metric("Swing Trading Suitability", f"{timeframe_score}/100")
+                                        
+                                        for reason in reasons:
+                                            st.write(reason)
+                                        
+                                        if timeframe_score > 70:
+                                            st.success("🟢 **EXCELLENT** for swing trading!")
+                                        elif timeframe_score > 50:
+                                            st.info("🟡 **GOOD** for swing trading")
+                                        else:
+                                            st.warning("🔴 **POOR** for swing trading - wait for better setup")
+                                    
+                                    else:  # OPTIONS trading
+                                        # Options trading focus: IV, time decay, volatility
+                                        timeframe_score = 0
+                                        reasons = []
+                                        
+                                        if analysis.iv_rank > 60:
+                                            timeframe_score += 30
+                                            reasons.append(f"✅ High IV Rank ({analysis.iv_rank}%) - great for selling premium")
+                                        elif analysis.iv_rank < 40:
+                                            timeframe_score += 20
+                                            reasons.append(f"✅ Low IV Rank ({analysis.iv_rank}%) - good for buying options")
+                                        else:
+                                            reasons.append(f"⚠️ Moderate IV Rank ({analysis.iv_rank}%) - mixed signals")
+                                        
+                                        if analysis.trend != "NEUTRAL":
+                                            timeframe_score += 25
+                                            reasons.append(f"✅ Clear trend ({analysis.trend}) - easier to pick direction")
+                                        
+                                        if 30 < analysis.rsi < 70:
+                                            timeframe_score += 20
+                                            reasons.append("✅ RSI in tradeable range")
+                                        
+                                        if volume_vs_avg > 50:
+                                            timeframe_score += 15
+                                            reasons.append(f"✅ Good volume activity (+{volume_vs_avg:.0f}%)")
+                                        
+                                        if len(analysis.catalysts) > 0:
+                                            timeframe_score += 10
+                                            reasons.append("✅ Upcoming catalysts for volatility")
+                                        
+                                        st.metric("Options Trading Suitability", f"{timeframe_score}/100")
+                                        
+                                        for reason in reasons:
+                                            st.write(reason)
+                                        
+                                        if timeframe_score > 70:
+                                            st.success("🟢 **EXCELLENT** for options trading!")
+                                        elif timeframe_score > 50:
+                                            st.info("🟡 **GOOD** for options trading")
+                                        else:
+                                            st.warning("🔴 **POOR** for options trading - wait for better setup")
+                                        
+                                        # Options-specific recommendations
+                                        if analysis.iv_rank > 60:
+                                            st.info("💡 **High IV Strategy:** Consider selling puts, covered calls, or iron condors")
+                                        elif analysis.iv_rank < 40:
+                                            st.info("💡 **Low IV Strategy:** Consider buying calls/puts or debit spreads")
+                                    
+                                    # Last analysis timestamp
+                                    st.caption(f"🕒 Analysis updated: Just now")
+                                    
+                                else:
+                                    st.error(f"❌ Could not analyze {ticker_symbol}. Check ticker symbol or try again.")
+                                    
+                            except Exception as e:
+                                st.error(f"❌ Error analyzing {ticker_symbol}: {str(e)}")
+                                # Fallback to stored analysis if available
+                                if ml_score is not None:
+                                    st.info("📊 Showing cached analysis data:")
+                                    
+                                    # Confidence score with color coding
+                                    if ml_score >= 70:
+                                        st.success(f"✅ **HIGH CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                    elif ml_score >= 50:
+                                        st.info(f"📊 **MEDIUM CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                    else:
+                                        st.warning(f"⚠️ **LOW CONFIDENCE** - Score: {ml_score:.0f}/100")
+                                    
+                                    # Analysis metrics in grid
+                                    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                                    
+                                    with metric_col1:
+                                        trend = ticker.get('trend', 'N/A')
+                                        trend_emoji = "📈" if trend == "BULLISH" else "📉" if trend == "BEARISH" else "➡️"
+                                        st.metric("Trend", f"{trend_emoji} {trend}")
+                                    
+                                    with metric_col2:
+                                        sentiment = ticker.get('sentiment_score')
+                                        if sentiment is not None:
+                                            sentiment_emoji = "😊" if sentiment > 0.1 else "😐" if sentiment > -0.1 else "😟"
+                                            st.metric("Sentiment", f"{sentiment_emoji} {sentiment:.2f}")
+                                        else:
+                                            st.metric("Sentiment", "N/A")
+                                    
+                                    with metric_col3:
+                                        rsi = ticker.get('rsi')
+                                        if rsi is not None:
+                                            rsi_emoji = "🔴" if rsi > 70 else "🟢" if rsi < 30 else "🟡"
+                                            st.metric("RSI", f"{rsi_emoji} {rsi:.1f}")
+                                        else:
+                                            st.metric("RSI", "N/A")
+                                    
+                                    with metric_col4:
+                                        momentum = ticker.get('momentum')
+                                        if momentum is not None:
+                                            momentum_emoji = "🚀" if momentum > 5 else "📈" if momentum > 0 else "📉"
+                                            st.metric("Momentum", f"{momentum_emoji} {momentum:.1f}%")
+                                        else:
+                                            st.metric("Momentum", "N/A")
+                                    
+                                    # Recommendation if available
+                                    recommendation = ticker.get('recommendation')
+                                    if recommendation and recommendation != 'N/A':
+                                        rec_emoji = "💰" if "BUY" in recommendation.upper() else "⏱️" if "HOLD" in recommendation.upper() else "🚨"
+                                        st.markdown(f"**💡 Recommendation:** {rec_emoji} {recommendation}")
+                                    
+                                    # Last analysis timestamp
+                                    last_analyzed_str = ticker.get('last_analyzed')
+                                    if last_analyzed_str:
+                                        try:
+                                            dt_analyzed = datetime.fromisoformat(last_analyzed_str).replace(tzinfo=timezone.utc)
+                                            analyzed_ago = (datetime.now(timezone.utc) - dt_analyzed).total_seconds() / 3600
+                                            if analyzed_ago < 1:
+                                                time_str = "Just now"
+                                            elif analyzed_ago < 24:
+                                                time_str = f"{analyzed_ago:.0f} hours ago"
+                                            else:
+                                                time_str = f"{analyzed_ago/24:.0f} days ago"
+                                            st.caption(f"🕒 Analysis updated: {time_str}")
+                                        except:
+                                            pass
                     
                     with col_actions:
                         st.write("")  # Add some spacing
                         
-                        # Quick analyze button
-                        if st.button("🔍 Analyze", key=f"analyze_{ticker_symbol}", help="Run fresh ML analysis", use_container_width=True):
+                        # Quick analyze button with timeframe selection
+                        if st.button("🔍 Analyze", key=f"analyze_{ticker_symbol}", help="Run fresh comprehensive analysis", use_container_width=True):
                             st.session_state.ml_ticker_to_analyze = ticker_symbol
+                            st.session_state.analysis_timeframe = "OPTIONS"  # Default to options
+                            st.rerun()
+                        
+                        # Refresh analysis button
+                        if st.button("🔄 Refresh", key=f"refresh_{ticker_symbol}", help="Refresh analysis data", use_container_width=True):
+                            st.session_state[f"refresh_{ticker_symbol}"] = True
                             st.rerun()
                         
                         # Quick trade button
@@ -4332,6 +4915,10 @@ def main():
                             st.rerun()
         else:
             st.info("No saved tickers yet. Add some above!")
+        
+        # Clear refresh_all_tickers flag if it was set
+        if st.session_state.get('refresh_all_tickers', False):
+            st.session_state.refresh_all_tickers = False
         
         # Bulk ML Analysis Section
         if all_tickers:
@@ -4684,9 +5271,9 @@ def main():
                                         st.session_state.selected_ticker = analysis.ticker
                                         st.success(f"✅ Strategy selected! Go to 'Generate Signal' tab.")
                                     # Load Example Trade button - populates Generate Signal form with suggested defaults
-                                    if st.button(f"Load Example Trade", key=f"load_example_{idx}"):
+                                        if st.button(f"Load Example Trade", key=f"strategy_load_example_{idx}"):
                                         # Derive suggested values from examples or defaults
-                                        suggested_qty = 2
+                                            suggested_qty = 2
                                         suggested_iv = int(st.session_state.current_analysis.iv_rank if st.session_state.current_analysis else 48)
                                         suggested_dte = 30
                                         suggested_expiry = (datetime.now() + timedelta(days=suggested_dte)).date()
@@ -5394,7 +5981,7 @@ def main():
                     with col_b:
                         bump_underlying = st.number_input("Bump underlying ($)", min_value=-1000.0, max_value=1000.0, value=0.0, step=0.01, key=f"bump_underlying_{i}")
 
-                    if st.button("Load from selected strategy/example", key=f"load_example_{i}"):
+                    if st.button("Load from selected strategy/example", key=f"sensitivity_load_example_{i}"):
                         # If an example_trade exists, prefill fields (session state will supply next rerun)
                         if 'example_trade' in st.session_state:
                             ex2 = st.session_state.example_trade
@@ -5745,8 +6332,11 @@ def main():
         if 'tradier_client' not in st.session_state:
             logger.info("Initializing Tradier client from environment")
             try:
+                # Use trading mode manager to get client for current mode
+                mode_manager = get_trading_mode_manager()
                 st.session_state.tradier_client = create_tradier_client_from_env()
                 logger.info("Tradier client initialized successfully: %s", bool(st.session_state.tradier_client))
+                logger.info("Trading mode: %s", mode_manager.get_mode().value)
             except Exception as e:
                 logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
                 st.session_state.tradier_client = None
@@ -6779,11 +7369,14 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     if st.button("🔗 Connect to Tradier", type="primary", width="stretch"):
                         try:
                             from src.integrations.tradier_client import create_tradier_client_from_env
+                            # Get current trading mode and create client
+                            mode_manager = get_trading_mode_manager()
                             client = create_tradier_client_from_env()
                             if client:
                                 st.session_state.tradier_client = client
                                 logger.info("Tradier client connected successfully")
-                                st.success("✅ Connected to Tradier!")
+                                logger.info("Trading mode: %s", mode_manager.get_mode().value)
+                                st.success(f"✅ Connected to Tradier ({mode_manager.get_mode().value.title()} Mode)!")
                                 st.rerun()
                             else:
                                 st.error("Failed to initialize Tradier client. Check your .env file.")

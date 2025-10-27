@@ -52,33 +52,16 @@ class AIConfidenceScanner:
         if self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
-                # Try OpenRouter first (free!), then fallback to others
-                if os.getenv('OPENROUTER_API_KEY'):
-                    self.llm_analyzer = LLMStrategyAnalyzer(
-                        provider='openrouter',
-                        model='meta-llama/llama-3.3-70b-instruct'  # Fast and free!
-                    )
-                    logger.info("AI Confidence Scanner initialized with OpenRouter (FREE)")
-                elif os.getenv('OPENAI_API_KEY'):
-                    self.llm_analyzer = LLMStrategyAnalyzer(provider='openai')
-                    logger.info("AI Confidence Scanner initialized with OpenAI")
-                elif os.getenv('ANTHROPIC_API_KEY'):
-                    self.llm_analyzer = LLMStrategyAnalyzer(provider='anthropic')
-                    logger.info("AI Confidence Scanner initialized with Anthropic")
-                else:
-                    raise Exception("No LLM API key found")
+                model = os.getenv('AI_CONFIDENCE_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
+                self.llm_analyzer = LLMStrategyAnalyzer(model=model)
+                logger.info(f"AI Confidence Scanner initialized with OpenRouter model: {model}")
             except Exception as e:
-                logger.warning(f"LLM not available: {e}")
+                logger.warning(f"LLM not available for AI Confidence Scanner: {e}")
                 self.use_llm = False
     
     def _check_llm_available(self) -> bool:
-        """Check if LLM API keys are available"""
-        return any([
-            os.getenv('OPENAI_API_KEY'),
-            os.getenv('ANTHROPIC_API_KEY'),
-            os.getenv('GOOGLE_API_KEY'),
-            os.getenv('OPENROUTER_API_KEY')  # Added OpenRouter support
-        ])
+        """Check if OpenRouter LLM API key is available"""
+        return bool(os.getenv('OPENROUTER_API_KEY'))
     
     def _generate_ai_confidence(self, trade: TopTrade, trade_type: str) -> Dict:
         """
@@ -211,7 +194,7 @@ Be concise but insightful. Focus on actionable analysis."""
             full_prompt = f"{system_prompt}\n\n{prompt}"
             
             # Call LLM directly
-            response = self.llm_analyzer._call_llm(full_prompt)
+            response = self.llm_analyzer._call_openrouter(full_prompt)
             
             if not response:
                 raise Exception("Empty LLM response")
