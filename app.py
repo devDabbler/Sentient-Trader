@@ -1,7 +1,7 @@
 # This must be the very first thing to run to ensure all modules are found
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 # --- Standard and Third-Party Libraries ---
 import streamlit as st
@@ -37,8 +37,8 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 # --- Local Application Modules ---
-from src.integrations.tradier_client import TradierClient, validate_tradier_connection, validate_all_trading_modes
-from src.integrations.trading_config import get_trading_mode_manager, TradingMode, switch_to_paper_mode, switch_to_production_mode
+from integrations.tradier_client import TradierClient, validate_tradier_connection, validate_all_trading_modes
+from integrations.trading_config import get_trading_mode_manager, TradingMode, switch_to_paper_mode, switch_to_production_mode
 from services.llm_strategy_analyzer import LLMStrategyAnalyzer, StrategyAnalysis, extract_bot_config_from_screenshot, create_strategy_comparison
 from services.watchlist_manager import WatchlistManager
 from services.ai_trading_signals import AITradingSignalGenerator, TradingSignal
