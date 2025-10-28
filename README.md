@@ -749,6 +749,22 @@ class OpportunityResult:
 
 ---
 
+## 🚀 Deployment
+
+This application is designed to be deployed on Streamlit Cloud. To enable trading features, you must configure your Tradier API credentials as secrets in your Streamlit Cloud workspace.
+
+### **Configuring Streamlit Cloud Secrets**
+
+1.  Go to your app's settings on Streamlit Cloud.
+2.  Navigate to the **Secrets** section.
+3.  Add the required environment variables for paper and/or production trading as described in the [Environment variables](#environment-variables) section below.
+
+For detailed instructions, refer to Streamlit's official documentation on [Secrets management](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management).
+
+**IMPORTANT**: Never commit your API keys or other secrets directly to your Git repository.
+
+---
+
 ## ✅ Key Benefits
 
 ✅ **Avoid False Signals** - Filter out buzz/breakouts in noisy markets  
