@@ -54,3 +54,7 @@ class StockAnalysis:
     # Multi-timeframe and sector analysis (additive)
     timeframe_alignment: Optional[Dict] = None
     sector_rs: Optional[Dict] = None
+    # Entropy analysis for market noise filtering (additive)
+    entropy: Optional[float] = None  # Combined entropy score (0-100, lower is better)
+    entropy_state: Optional[str] = None  # HIGHLY_STRUCTURED, STRUCTURED, MIXED, NOISY
+    entropy_signal: Optional[str] = None  # FAVORABLE, CAUTION, AVOID

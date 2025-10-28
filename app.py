@@ -28,9 +28,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load environment variables and set up logging
+# Load environment variables (logging configured later)
 load_dotenv()
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Windows-specific asyncio policy
 if sys.platform == "win32":
@@ -89,14 +88,25 @@ def _create_logging_handlers(log_file: str = 'trading_signals.log') -> List[logg
     handlers: List[logging.Handler] = []
 
     try:
-        # File handler with UTF-8 encoding
-        fh = logging.FileHandler(log_file, encoding='utf-8')
+        # Ensure logs directory exists
+        log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Create log file path in logs directory
+        log_path = os.path.join(log_dir, log_file)
+        
+        # File handler with UTF-8 encoding - mode='w' to truncate/reset on each app start
+        fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
         handlers.append(fh)
-    except Exception:
+        
+        # Also log when we create the file
+        print(f"📝 Logging to: {log_path} (reset on app start)")
+    except Exception as e:
         # Fallback: File handler without explicit encoding
         try:
-            handlers.append(logging.FileHandler(log_file))
+            handlers.append(logging.FileHandler(log_file, mode='w'))
         except Exception:
+            print(f"⚠️ Warning: Could not create log file: {e}")
             pass
 
     # Safe console handler which avoids writing to a closed stream
@@ -170,11 +180,28 @@ def _create_logging_handlers(log_file: str = 'trading_signals.log') -> List[logg
 
 # Configure enhanced logging for debugging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,  # Changed to INFO to reduce noise (was DEBUG)
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=_create_logging_handlers('trading_signals.log')
+    handlers=_create_logging_handlers('sentient_trader_app.log'),  # Save to logs/sentient_trader_app.log
+    force=True  # Override any previous basicConfig calls
 )
 logger = logging.getLogger(__name__)
+
+# Log app startup
+logger.info("="*80)
+logger.info("🚀 Sentient Trader Application Started")
+logger.info(f"📅 Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+logger.info(f"📁 Log file: logs/sentient_trader_app.log (resets on each start)")
+logger.info("="*80)
+
+# Optional: Create a timestamped archive of previous logs (disabled by default)
+# Uncomment the following lines if you want to preserve historical logs
+# try:
+#     log_dir = os.path.join(os.path.dirname(__file__), 'logs')
+#     archive_name = f"sentient_trader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+#     # This would save a timestamped copy before reset
+# except Exception:
+#     pass
 
 # Set specific loggers to INFO/WARNING to reduce noise
 logging.getLogger('urllib3').setLevel(logging.INFO)
@@ -2364,6 +2391,52 @@ def main():
                         else:
                             st.info("💡 Consider: Buying calls/puts, debit spreads")
                     
+                    # Entropy Analysis (Market Noise Detection)
+                    st.subheader("🔬 Entropy Analysis (Market Noise Detection)")
+                    
+                    entropy_col1, entropy_col2, entropy_col3 = st.columns(3)
+                    
+                    with entropy_col1:
+                        entropy_value = analysis.entropy if analysis.entropy is not None else 50.0
+                        st.metric("Entropy Score", f"{entropy_value:.1f}/100")
+                        if entropy_value < 30:
+                            st.caption("✅ Highly Structured - Ideal for trading")
+                        elif entropy_value < 50:
+                            st.caption("✅ Structured - Good patterns")
+                        elif entropy_value < 70:
+                            st.caption("⚠️ Mixed - Trade with caution")
+                        else:
+                            st.caption("❌ Noisy - High risk/choppy")
+                    
+                    with entropy_col2:
+                        entropy_state = analysis.entropy_state if analysis.entropy_state else "UNKNOWN"
+                        st.metric("Market State", entropy_state)
+                        st.caption("Pattern predictability")
+                    
+                    with entropy_col3:
+                        entropy_signal = analysis.entropy_signal if analysis.entropy_signal else "CAUTION"
+                        signal_emoji = {"FAVORABLE": "✅", "CAUTION": "⚠️", "AVOID": "❌"}
+                        st.metric("Trade Signal", f"{signal_emoji.get(entropy_signal, '⚠️')} {entropy_signal}")
+                        if entropy_signal == "FAVORABLE":
+                            st.caption("🟢 Low entropy - Trade normally")
+                        elif entropy_signal == "CAUTION":
+                            st.caption("🟡 Moderate entropy - Reduce size")
+                        else:
+                            st.caption("🔴 High entropy - Avoid or skip")
+                    
+                    # Entropy explanation
+                    with st.expander("ℹ️ What is Entropy?"):
+                        st.write("""
+                        **Entropy measures market unpredictability and noise:**
+                        
+                        - **Low Entropy (< 30)**: Clear patterns, predictable moves → Trade with confidence
+                        - **Medium Entropy (30-70)**: Some noise, mixed signals → Trade with caution
+                        - **High Entropy (> 70)**: Random/choppy price action → Avoid or reduce size significantly
+                        
+                        Entropy helps filter out false signals and whipsaws by identifying when the market is 
+                        too noisy for reliable pattern recognition.
+                        """)
+                    
                     # Catalysts
                     st.subheader("📅 Upcoming Catalysts")
                     
@@ -2504,24 +2577,39 @@ def main():
                         timeframe_score = 0
                         reasons = []
                         
-                        if volume_vs_avg > 100:
+                        # ENTROPY CHECK (CRITICAL FOR DAY TRADING)
+                        entropy_value = analysis.entropy if analysis.entropy is not None else 50.0
+                        if entropy_value < 30:
                             timeframe_score += 30
+                            reasons.append(f"✅ LOW ENTROPY ({entropy_value:.0f}) - Clean price action, ideal for day trading")
+                        elif entropy_value < 50:
+                            timeframe_score += 15
+                            reasons.append(f"✅ Moderate entropy ({entropy_value:.0f}) - Structured patterns present")
+                        elif entropy_value < 70:
+                            timeframe_score -= 10
+                            reasons.append(f"⚠️ Moderate-high entropy ({entropy_value:.0f}) - Use wider stops and reduce size 30%")
+                        else:
+                            timeframe_score -= 25
+                            reasons.append(f"❌ HIGH ENTROPY ({entropy_value:.0f}) - CHOPPY MARKET - Avoid day trading or reduce size 50%+")
+                        
+                        if volume_vs_avg > 100:
+                            timeframe_score += 20
                             reasons.append(f"✅ High volume (+{volume_vs_avg:.0f}%) - good for day trading")
                         else:
                             reasons.append(f"⚠️ Volume only +{volume_vs_avg:.0f}% - may lack intraday momentum")
                         
                         if abs(analysis.change_pct) > 2:
-                            timeframe_score += 25
+                            timeframe_score += 15
                             reasons.append(f"✅ Strong intraday move ({analysis.change_pct:+.1f}%)")
                         else:
                             reasons.append("⚠️ Low intraday volatility - limited profit potential")
                         
                         if 30 < analysis.rsi < 70:
-                            timeframe_score += 20
+                            timeframe_score += 15
                             reasons.append("✅ RSI in tradeable range (not overbought/oversold)")
                         
                         if not is_penny_stock:
-                            timeframe_score += 15
+                            timeframe_score += 10
                             reasons.append("✅ Not a penny stock - better liquidity for day trading")
                         else:
                             reasons.append("⚠️ Penny stock - higher risk, use smaller size")
@@ -2535,12 +2623,17 @@ def main():
                         for reason in reasons:
                             st.write(reason)
                         
-                        if timeframe_score > 70:
+                        # Overall verdict based on entropy-adjusted score
+                        if entropy_value >= 70:
+                            st.error("🔴 **NOT RECOMMENDED** for day trading - High entropy (choppy market) will cause whipsaws")
+                        elif timeframe_score > 70:
                             st.success("🟢 **EXCELLENT** for day trading - strong setup!")
                         elif timeframe_score > 50:
                             st.info("🟡 **GOOD** for day trading - proceed with caution")
+                        elif timeframe_score > 30:
+                            st.warning("🟡 **MARGINAL** for day trading - not ideal; multiple divergent signals")
                         else:
-                            st.warning("🔴 **POOR** for day trading - consider swing/position trading instead")
+                            st.error("🔴 **POOR** for day trading - consider swing/position trading instead")
                         
                         st.write("**Day Trading Strategy:**")
                         st.write(f"• 🎯 Entry: ${analysis.price:.2f}")
@@ -2702,17 +2795,50 @@ def main():
                     
                     recommendation_box = st.container()
                     with recommendation_box:
-                        # Add penny stock context to recommendation
-                        if is_penny_stock and trading_style in ["BUY_HOLD", "SWING_TRADE"]:
-                            st.warning("⚠️ **Penny Stock Alert:** High risk/high reward - use proper position sizing and tight stops")
+                        # ENTROPY OVERRIDE: Block day trading/scalping recommendations if entropy is too high
+                        entropy_value = analysis.entropy if analysis.entropy is not None else 50.0
                         
-                        # Display recommendation with proper formatting
-                        if trading_style == "OPTIONS":
-                            st.info(f"**Options Strategy:**\n\n{analysis.recommendation}")
-                        else:
-                            # For equity strategies, use markdown for better formatting
-                            st.markdown(f"**{trading_style_display} Strategy:**")
+                        if trading_style in ["DAY_TRADE", "SCALP"] and entropy_value >= 70:
+                            st.error("❌ **DAY TRADING/SCALPING NOT RECOMMENDED**")
+                            st.warning(f"""
+                            **High Entropy Alert ({entropy_value:.0f}/100):**
+                            
+                            The market is currently too choppy and unpredictable for day trading or scalping. 
+                            High entropy means random price movements that will cause whipsaws and false signals.
+                            
+                            **Recommendation:** 
+                            - ⏸️ Skip this trade for day trading
+                            - 🔄 Consider swing trading or options strategies instead
+                            - ⏰ Wait for entropy to drop below 50 before day trading
+                            - 📊 Current state: {analysis.entropy_state}
+                            """)
+                        elif trading_style == "DAY_TRADE" and entropy_value >= 50:
+                            st.warning(f"""
+                            **⚠️ Moderate Entropy Warning ({entropy_value:.0f}/100):**
+                            
+                            Market noise is elevated. Day trading is risky in these conditions.
+                            
+                            **If you still trade:**
+                            - Reduce position size by 50%
+                            - Use wider stops (1.5-2x normal)
+                            - Take profits quickly
+                            - Expect lower win rate
+                            """)
+                            st.markdown("---")
+                            st.markdown(f"**{trading_style_display} Strategy (Use Caution):**")
                             st.markdown(analysis.recommendation)
+                        else:
+                            # Add penny stock context to recommendation
+                            if is_penny_stock and trading_style in ["BUY_HOLD", "SWING_TRADE"]:
+                                st.warning("⚠️ **Penny Stock Alert:** High risk/high reward - use proper position sizing and tight stops")
+                            
+                            # Display recommendation with proper formatting
+                            if trading_style == "OPTIONS":
+                                st.info(f"**Options Strategy:**\n\n{analysis.recommendation}")
+                            else:
+                                # For equity strategies, use markdown for better formatting
+                                st.markdown(f"**{trading_style_display} Strategy:**")
+                                st.markdown(analysis.recommendation)
                     
                     # ML-Enhanced Confidence Analysis (MOVED UP - More Prominent)
                     st.subheader(f"🧠 ML-Enhanced Confidence Analysis for {trading_style_display}")
@@ -3720,6 +3846,12 @@ def main():
                 require_reclaim = st.checkbox("Require EMA Reclaim", key="adv_reclaim")
                 require_alignment = st.checkbox("Require Timeframe Alignment", key="adv_align")
                 
+                st.markdown("**Entropy Filters** 🔬")
+                require_low_entropy = st.checkbox("Require Low Entropy (< 50)", key="adv_low_entropy", 
+                                                 help="Only show structured markets, ideal for day trading")
+                max_entropy = st.number_input("Max Entropy", min_value=0, max_value=100, value=None, step=5, key="adv_max_entropy",
+                                             help="Filter out high-noise markets above this threshold")
+                
                 st.markdown("**RSI Filters**")
                 rsi_range = st.slider("RSI Range", 0, 100, (0, 100), key="adv_rsi")
         
@@ -3737,7 +3869,9 @@ def main():
             require_ema_reclaim=require_reclaim,
             require_timeframe_alignment=require_alignment,
             min_rsi=rsi_range[0] if rsi_range[0] > 0 else None,
-            max_rsi=rsi_range[1] if rsi_range[1] < 100 else None
+            max_rsi=rsi_range[1] if rsi_range[1] < 100 else None,
+            require_low_entropy=require_low_entropy,
+            max_entropy=max_entropy
         )
         
         # Apply filter presets (hybrid or single)
@@ -3993,6 +4127,11 @@ def main():
                         st.write(f"🎯 **Score:** {opp.score:.1f}/100")
                         st.write(f"✅ **Confidence:** {opp.confidence}")
                         st.write(f"⚠️ **Risk:** {opp.risk_level}")
+                        if opp.entropy is not None:
+                            entropy_emoji = "✅" if opp.entropy < 50 else "⚠️" if opp.entropy < 70 else "❌"
+                            st.write(f"🔬 **Entropy:** {entropy_emoji} {opp.entropy:.0f}/100")
+                            if opp.entropy_state:
+                                st.caption(f"State: {opp.entropy_state}")
                         if opp.trend:
                             st.write(f"📈 **Trend:** {opp.trend}")
                         if opp.rsi:
@@ -4083,6 +4222,8 @@ def main():
                         'Volume Ratio': o.volume_ratio,
                         'Confidence': o.confidence,
                         'Risk': o.risk_level,
+                        'Entropy': o.entropy if o.entropy is not None else '',
+                        'Entropy State': o.entropy_state if o.entropy_state else '',
                         'Trend': o.trend,
                         'RSI': o.rsi,
                         'Breakout': o.is_breakout,

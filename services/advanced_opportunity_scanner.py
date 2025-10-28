@@ -88,6 +88,11 @@ class ScanFilters:
     detect_consolidation_breakout: bool = False
     detect_volume_surge: bool = False
     detect_ma_breakthrough: bool = False
+    
+    # Entropy filters (market noise detection)
+    max_entropy: Optional[float] = None  # Maximum acceptable entropy (filter out noisy stocks)
+    min_entropy: Optional[float] = None  # Minimum entropy (if you want volatile/noisy stocks)
+    require_low_entropy: bool = False  # Only show stocks with entropy < 50 (structured markets)
 
 
 @dataclass
@@ -134,6 +139,10 @@ class OpportunityResult:
     is_merger_candidate: bool = False
     merger_score: float = 0.0
     merger_signals: List[str] = field(default_factory=list)
+    
+    # Entropy metrics (optional)
+    entropy: Optional[float] = None
+    entropy_state: Optional[str] = None
     
     # Full analysis (optional)
     full_analysis: Optional[StockAnalysis] = None
@@ -371,6 +380,8 @@ class AdvancedOpportunityScanner:
                         is_merger_candidate=merger_info['is_merger_candidate'],
                         merger_score=merger_info['merger_score'],
                         merger_signals=merger_info['signals'],
+                        entropy=analysis.entropy,
+                        entropy_state=analysis.entropy_state,
                         full_analysis=analysis
                     )
                     
@@ -483,6 +494,8 @@ class AdvancedOpportunityScanner:
                 is_merger_candidate=merger_info['is_merger_candidate'],
                 merger_score=merger_info['merger_score'],
                 merger_signals=merger_info['signals'],
+                entropy=analysis.entropy,
+                entropy_state=analysis.entropy_state,
                 full_analysis=analysis
             )
             
@@ -551,6 +564,15 @@ class AdvancedOpportunityScanner:
         # Sentiment filter
         if filters.min_sentiment_score is not None and analysis.sentiment_score < filters.min_sentiment_score:
             return False
+        
+        # Entropy filters (market noise detection)
+        if analysis.entropy is not None:
+            if filters.max_entropy is not None and analysis.entropy > filters.max_entropy:
+                return False
+            if filters.min_entropy is not None and analysis.entropy < filters.min_entropy:
+                return False
+            if filters.require_low_entropy and analysis.entropy >= 50:
+                return False  # Only pass structured markets (entropy < 50)
         
         return True
     

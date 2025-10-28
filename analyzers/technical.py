@@ -2,6 +2,7 @@
 
 import logging
 from typing import Tuple
+from math import log2
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -405,3 +406,193 @@ class TechnicalAnalyzer:
             logger.error(f"Error calculating IV metrics: {e}")
         
         return 50.0, 50.0
+    
+    @staticmethod
+    def calculate_shannon_entropy(prices: pd.Series, bins: int = 10, window: int = 20) -> float:
+        """
+        Calculate Shannon entropy for price returns to measure market predictability.
+        
+        Lower entropy = more structured/predictable markets (good for trading)
+        Higher entropy = more noisy/unpredictable markets (avoid or use caution)
+        
+        Args:
+            prices: Price series (typically Close prices)
+            bins: Number of bins for histogram (default 10)
+            window: Lookback window for recent returns (default 20)
+        
+        Returns:
+            Entropy score 0-100 (lower is better for trading)
+        """
+        try:
+            # Calculate returns
+            returns = prices.pct_change().dropna()
+            
+            # Use recent window
+            recent_returns = returns.tail(window)
+            
+            if len(recent_returns) < 5:
+                return 50.0  # Neutral default
+            
+            # Create histogram of returns (counts, not density)
+            hist, _ = np.histogram(recent_returns, bins=bins, density=False)
+            
+            # Normalize to probabilities (must sum to 1)
+            hist = hist / hist.sum()
+            
+            # Remove zero bins to avoid log(0)
+            hist = hist[hist > 0]
+            
+            if len(hist) == 0:
+                return 50.0
+            
+            # Calculate Shannon entropy: -Σ(p * log2(p))
+            entropy = -sum(p * log2(p) for p in hist)
+            
+            # Normalize to 0-100 scale
+            # Maximum entropy for uniform distribution across all bins
+            max_entropy = log2(bins)
+            
+            if max_entropy > 0:
+                normalized = (entropy / max_entropy) * 100
+            else:
+                normalized = 50.0
+            
+            # Clamp to valid range [0, 100]
+            normalized = max(0.0, min(100.0, normalized))
+            
+            return round(normalized, 2)
+            
+        except Exception as e:
+            logger.debug(f"Error calculating Shannon entropy: {e}")
+            return 50.0
+    
+    @staticmethod
+    def calculate_approx_entropy(prices: pd.Series, m: int = 2, r: float = 0.2, window: int = 50) -> float:
+        """
+        Calculate Approximate Entropy (ApEn) for price series.
+        More sophisticated than Shannon entropy, measures pattern regularity.
+        
+        Lower ApEn = more regular/predictable patterns
+        Higher ApEn = more irregular/random patterns
+        
+        Args:
+            prices: Price series
+            m: Pattern length (default 2)
+            r: Tolerance threshold as fraction of std dev (default 0.2)
+            window: Lookback window (default 50)
+        
+        Returns:
+            ApEn score 0-100 (lower = more structured)
+        """
+        try:
+            # Use recent window
+            data = prices.tail(window).values
+            N = len(data)
+            
+            if N < m + 1:
+                return 50.0
+            
+            # Calculate standard deviation for threshold
+            std_dev = np.std(data)
+            r_threshold = r * std_dev
+            
+            def _maxdist(xi, xj, m):
+                """Maximum distance between patterns"""
+                return max([abs(ua - va) for ua, va in zip(xi, xj)])
+            
+            def _phi(m):
+                """Pattern frequency calculation"""
+                patterns = np.array([[data[j] for j in range(i, i + m)] for i in range(N - m + 1)])
+                C = []
+                
+                for i, pattern in enumerate(patterns):
+                    # Count similar patterns
+                    count = sum(1 for p in patterns if _maxdist(pattern, p, m) <= r_threshold)
+                    C.append(count / (N - m + 1))
+                
+                return sum(np.log(C)) / (N - m + 1)
+            
+            # Calculate ApEn
+            phi_m = _phi(m)
+            phi_m1 = _phi(m + 1)
+            
+            # Check for invalid values (NaN, inf)
+            if not np.isfinite(phi_m) or not np.isfinite(phi_m1):
+                return 50.0
+            
+            apen = abs(phi_m - phi_m1)
+            
+            # Normalize to 0-100 scale
+            # Typical ApEn values range from 0 to ~2, normalize accordingly
+            normalized = min(100.0, max(0.0, (apen / 2.0) * 100))
+            
+            return round(normalized, 2)
+            
+        except Exception as e:
+            logger.debug(f"Error calculating Approximate Entropy: {e}")
+            return 50.0
+    
+    @staticmethod
+    def calculate_entropy_metrics(prices: pd.Series, window: int = 20) -> dict:
+        """
+        Calculate comprehensive entropy metrics for market analysis.
+        
+        Args:
+            prices: Price series
+            window: Lookback window
+        
+        Returns:
+            Dict with entropy scores and interpretation
+        """
+        try:
+            # Calculate both entropy measures
+            shannon = TechnicalAnalyzer.calculate_shannon_entropy(prices, window=window)
+            apen = TechnicalAnalyzer.calculate_approx_entropy(prices, window=min(50, window * 2))
+            
+            # Validate individual scores
+            shannon = max(0.0, min(100.0, shannon))
+            apen = max(0.0, min(100.0, apen))
+            
+            # Average for combined score
+            combined = (shannon + apen) / 2
+            
+            # Final validation - ensure combined is in valid range
+            combined = max(0.0, min(100.0, combined))
+            
+            # Classify market state
+            if combined < 30:
+                state = "HIGHLY_STRUCTURED"
+                interpretation = "Low entropy - predictable patterns, ideal for trading"
+                trade_signal = "FAVORABLE"
+            elif combined < 50:
+                state = "STRUCTURED"
+                interpretation = "Moderate entropy - patterns emerging, good for trading"
+                trade_signal = "FAVORABLE"
+            elif combined < 70:
+                state = "MIXED"
+                interpretation = "Moderate-high entropy - some noise, trade with caution"
+                trade_signal = "CAUTION"
+            else:
+                state = "NOISY"
+                interpretation = "High entropy - unpredictable/choppy, avoid or reduce size"
+                trade_signal = "AVOID"
+            
+            return {
+                "shannon_entropy": shannon,
+                "approx_entropy": apen,
+                "combined_entropy": round(combined, 2),
+                "state": state,
+                "interpretation": interpretation,
+                "trade_signal": trade_signal
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating entropy metrics: {e}")
+            return {
+                "shannon_entropy": 50.0,
+                "approx_entropy": 50.0,
+                "combined_entropy": 50.0,
+                "state": "UNKNOWN",
+                "interpretation": "Unable to calculate entropy",
+                "trade_signal": "CAUTION"
+            }

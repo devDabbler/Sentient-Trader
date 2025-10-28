@@ -44,6 +44,9 @@ class ComprehensiveAnalyzer:
             timeframe_alignment = TechnicalAnalyzer.analyze_timeframe_alignment(ticker)
             sector_rs = TechnicalAnalyzer.calculate_sector_relative_strength(ticker)
             
+            # Entropy analysis for noise filtering
+            entropy_metrics = TechnicalAnalyzer.calculate_entropy_metrics(hist['Close'], window=20)
+            
             # Volume analysis
             current_volume = int(hist['Volume'].iloc[-1])
             avg_volume = int(hist['Volume'].mean())
@@ -79,17 +82,17 @@ class ComprehensiveAnalyzer:
                     earnings_days_away = catalyst['days_away']
                     break
             
-            # Calculate confidence score (enhanced with timeframe and sector RS)
+            # Calculate confidence score (enhanced with timeframe, sector RS, and entropy)
             confidence_score = ComprehensiveAnalyzer._calculate_confidence(
                 rsi, macd_signal, iv_rank, sentiment_score, len(catalysts), earnings_days_away,
-                timeframe_alignment=timeframe_alignment, sector_rs=sector_rs
+                timeframe_alignment=timeframe_alignment, sector_rs=sector_rs, entropy=entropy_metrics['combined_entropy']
             )
             
             # Generate recommendation based on trading style
             recommendation = ComprehensiveAnalyzer._generate_recommendation(
                 rsi, macd_signal, trend, iv_rank, sentiment_score, earnings_days_away, trading_style,
                 ema_ctx=ema_ctx, demarker_value=(dem_series.iloc[-1] if not dem_series.empty else None),
-                fib_targets=fib_targets
+                fib_targets=fib_targets, entropy_metrics=entropy_metrics
             )
             
             return StockAnalysis(
@@ -120,7 +123,10 @@ class ComprehensiveAnalyzer:
                 ema_power_zone=bool(ema_ctx.get("power_zone")),
                 ema_reclaim=bool(ema_ctx.get("is_reclaim")),
                 timeframe_alignment=timeframe_alignment,
-                sector_rs=sector_rs
+                sector_rs=sector_rs,
+                entropy=entropy_metrics['combined_entropy'],
+                entropy_state=entropy_metrics['state'],
+                entropy_signal=entropy_metrics['trade_signal']
             )
             
         except Exception as e:
@@ -132,7 +138,8 @@ class ComprehensiveAnalyzer:
                             sentiment: float, catalyst_count: int, 
                             earnings_days: Optional[int],
                             timeframe_alignment: dict = None,
-                            sector_rs: dict = None) -> float:
+                            sector_rs: dict = None,
+                            entropy: float = None) -> float:
         """Calculate overall confidence score for trading this stock"""
         score = 50  # Base score
         
@@ -178,6 +185,19 @@ class ComprehensiveAnalyzer:
             elif rs_score < 40:
                 score -= min(10, (50 - rs_score) / 5)  # Penalty for underperformance
         
+        # Entropy contribution (up to +15 / -15)
+        # Low entropy = predictable patterns = higher confidence
+        # High entropy = noisy/choppy = lower confidence
+        if entropy is not None:
+            if entropy < 30:
+                score += 15  # Highly structured - big boost
+            elif entropy < 50:
+                score += 10  # Structured - moderate boost
+            elif entropy < 70:
+                score -= 5   # Mixed - slight penalty
+            else:
+                score -= 15  # Noisy - big penalty, avoid trading
+        
         return min(100, max(0, score))
     
     @staticmethod
@@ -187,38 +207,52 @@ class ComprehensiveAnalyzer:
                                 trading_style: str = "OPTIONS",
                                 ema_ctx: dict | None = None,
                                 demarker_value: float | None = None,
-                                fib_targets: dict | None = None) -> str:
+                                fib_targets: dict | None = None,
+                                entropy_metrics: dict | None = None) -> str:
         """Generate trading recommendation based on selected trading style"""
         
         if trading_style == "DAY_TRADE":
             return ComprehensiveAnalyzer._generate_day_trade_recommendation(
-                rsi, macd_signal, trend, sentiment, earnings_days, ema_ctx=ema_ctx
+                rsi, macd_signal, trend, sentiment, earnings_days, ema_ctx=ema_ctx, entropy_metrics=entropy_metrics
             )
         elif trading_style == "SWING_TRADE":
             return ComprehensiveAnalyzer._generate_swing_trade_recommendation(
                 rsi, macd_signal, trend, sentiment, earnings_days,
-                ema_ctx=ema_ctx, demarker_value=demarker_value, fib_targets=fib_targets
+                ema_ctx=ema_ctx, demarker_value=demarker_value, fib_targets=fib_targets, entropy_metrics=entropy_metrics
             )
         elif trading_style == "SCALP":
             return ComprehensiveAnalyzer._generate_scalp_recommendation(
-                rsi, macd_signal, trend, sentiment
+                rsi, macd_signal, trend, sentiment, entropy_metrics=entropy_metrics
             )
         elif trading_style == "BUY_HOLD":
             return ComprehensiveAnalyzer._generate_buy_hold_recommendation(
-                rsi, macd_signal, trend, sentiment, earnings_days
+                rsi, macd_signal, trend, sentiment, earnings_days, entropy_metrics=entropy_metrics
             )
         else:  # OPTIONS
             return ComprehensiveAnalyzer._generate_options_recommendation(
                 rsi, macd_signal, trend, iv_rank, sentiment, earnings_days,
-                ema_ctx=ema_ctx, demarker_value=demarker_value, fib_targets=fib_targets, current_price=None
+                ema_ctx=ema_ctx, demarker_value=demarker_value, fib_targets=fib_targets, current_price=None,
+                entropy_metrics=entropy_metrics
             )
     
     @staticmethod
     def _generate_day_trade_recommendation(rsi: float, macd_signal: str, trend: str,
                                           sentiment: float, earnings_days: Optional[int],
-                                          ema_ctx: dict | None = None) -> str:
+                                          ema_ctx: dict | None = None,
+                                          entropy_metrics: dict | None = None) -> str:
         """Generate day trading recommendation for intraday equity trades"""
         recommendations = []
+        
+        # Entropy warning for day traders (critical for scalping/day trading)
+        if entropy_metrics:
+            entropy = entropy_metrics['combined_entropy']
+            state = entropy_metrics['state']
+            if entropy >= 70:
+                recommendations.insert(0, f"⚠️ HIGH ENTROPY ({entropy:.0f}) - CHOPPY MARKET - Avoid day trading or reduce size 50%")
+            elif entropy >= 50:
+                recommendations.insert(0, f"⚡ Moderate entropy ({entropy:.0f}) - Use wider stops and smaller size")
+            elif entropy < 30:
+                recommendations.insert(0, f"✅ LOW ENTROPY ({entropy:.0f}) - Clean price action - Ideal for day trading")
         
         # Trend-based entry
         if "UPTREND" in trend or "STRONG UPTREND" in trend:
@@ -267,9 +301,18 @@ class ComprehensiveAnalyzer:
                                             sentiment: float, earnings_days: Optional[int],
                                             ema_ctx: dict | None = None,
                                             demarker_value: float | None = None,
-                                            fib_targets: dict | None = None) -> str:
+                                            fib_targets: dict | None = None,
+                                            entropy_metrics: dict | None = None) -> str:
         """Generate swing trading recommendation for multi-day equity holds"""
         recommendations = []
+        
+        # Entropy context for swing traders
+        if entropy_metrics:
+            entropy = entropy_metrics['combined_entropy']
+            if entropy < 30:
+                recommendations.append("✅ Low entropy - Strong patterns for swing setups")
+            elif entropy >= 70:
+                recommendations.append("⚠️ High entropy - Wait for consolidation before entering swing")
         
         # Trend-based strategy
         if "UPTREND" in trend or "STRONG UPTREND" in trend:
@@ -344,9 +387,20 @@ class ComprehensiveAnalyzer:
         return "\n".join(recommendations) if recommendations else "Insufficient data for swing trade recommendation"
     
     @staticmethod
-    def _generate_scalp_recommendation(rsi: float, macd_signal: str, trend: str, sentiment: float) -> str:
+    def _generate_scalp_recommendation(rsi: float, macd_signal: str, trend: str, sentiment: float,
+                                       entropy_metrics: dict | None = None) -> str:
         """Generate scalping recommendation for very short-term trades"""
         recommendations = []
+        
+        # Entropy is CRITICAL for scalping
+        if entropy_metrics:
+            entropy = entropy_metrics['combined_entropy']
+            if entropy >= 70:
+                recommendations.insert(0, f"❌ HIGH ENTROPY ({entropy:.0f}) - DO NOT SCALP - Market too choppy")
+                recommendations.append("⚠️ High entropy kills scalpers with whipsaws - STAY OUT")
+                return "\n".join(recommendations)
+            elif entropy < 30:
+                recommendations.insert(0, f"✅ LOW ENTROPY ({entropy:.0f}) - Clean tape for scalping")
         
         recommendations.append("⚡ SCALPING STRATEGY (seconds to minutes):")
         
@@ -375,9 +429,14 @@ class ComprehensiveAnalyzer:
     
     @staticmethod
     def _generate_buy_hold_recommendation(rsi: float, macd_signal: str, trend: str,
-                                         sentiment: float, earnings_days: Optional[int]) -> str:
+                                         sentiment: float, earnings_days: Optional[int],
+                                         entropy_metrics: dict | None = None) -> str:
         """Generate buy and hold recommendation for long-term investing"""
         recommendations = []
+        
+        # Entropy less critical for long-term, but note it
+        if entropy_metrics and entropy_metrics['combined_entropy'] < 30:
+            recommendations.append("📊 Low entropy - Good entry timing for position building")
         
         recommendations.append("📊 LONG-TERM INVESTMENT ANALYSIS:")
         
@@ -424,9 +483,18 @@ class ComprehensiveAnalyzer:
                                         ema_ctx: dict = None,
                                         demarker_value: float = None,
                                         fib_targets: dict = None,
-                                        current_price: float = None) -> str:
+                                        current_price: float = None,
+                                        entropy_metrics: dict = None) -> str:
         """Generate enhanced options trading recommendation with EMA/Fibonacci context"""
         recommendations = []
+        
+        # Entropy context for options
+        if entropy_metrics:
+            entropy = entropy_metrics['combined_entropy']
+            if entropy < 30:
+                recommendations.append("✅ Low entropy - Predictable moves favor directional options")
+            elif entropy >= 70:
+                recommendations.append("⚠️ High entropy - Favor selling premium (iron condors) over directional plays")
         
         # EMA Reclaim signal (high-confidence bullish setup)
         if ema_ctx and ema_ctx.get("is_reclaim") and iv_rank is not None:
