@@ -1,8 +1,13 @@
 """Strategy recommendation engine for options trading."""
 
 import logging
-from typing import List
+from typing import List, Optional
 from models.analysis import StockAnalysis, StrategyRecommendation
+from models.reddit_strategies import (
+    get_all_custom_strategies, 
+    get_strategies_by_experience,
+    CustomStrategy
+)
 
 logger = logging.getLogger(__name__)
 
@@ -295,3 +300,68 @@ class StrategyAdvisor:
         
         recommendations.sort(key=lambda x: x.confidence, reverse=True)
         return recommendations[:5]
+    
+    @classmethod
+    def get_custom_strategies(cls, user_experience: str = "Intermediate") -> List[CustomStrategy]:
+        """
+        Get available custom/advanced strategies filtered by user experience level.
+        
+        Args:
+            user_experience: User's experience level (Beginner, Intermediate, Advanced, Professional)
+        
+        Returns:
+            List of CustomStrategy objects suitable for the user
+        """
+        return get_strategies_by_experience(user_experience)
+    
+    @classmethod
+    def convert_custom_to_recommendation(cls, custom_strategy: CustomStrategy, confidence: float = 0.7) -> StrategyRecommendation:
+        """
+        Convert a CustomStrategy to a StrategyRecommendation for UI compatibility.
+        
+        Args:
+            custom_strategy: The custom strategy to convert
+            confidence: Confidence score (0-1)
+        
+        Returns:
+            StrategyRecommendation object
+        """
+        # Build reasoning from strategy details
+        reasoning_parts = [
+            f"📊 Source: {custom_strategy.source}",
+            f"🎯 Philosophy: {custom_strategy.philosophy[:200]}...",
+            f"📈 Key Metrics: {', '.join([f'{k}: {v}' for k, v in list(custom_strategy.key_metrics.items())[:3]])}",
+            f"⚠️ Risk Level: {custom_strategy.risk_level}",
+            f"💰 Capital Required: {custom_strategy.capital_requirement}"
+        ]
+        
+        if custom_strategy.typical_win_rate:
+            reasoning_parts.append(f"✅ Win Rate: {custom_strategy.typical_win_rate}")
+        
+        # Add warnings
+        if custom_strategy.warnings:
+            reasoning_parts.append(f"\n⚠️ WARNINGS:\n" + "\n".join(custom_strategy.warnings[:3]))
+        
+        # Build best conditions from required conditions
+        best_conditions = [
+            f"Market: {cond.value}" for cond in custom_strategy.required_conditions
+        ]
+        best_conditions.extend([f"Product: {prod}" for prod in custom_strategy.suitable_products[:3]])
+        
+        # Build examples from setup rules
+        examples = [rule.condition for rule in custom_strategy.setup_rules[:3]]
+        
+        return StrategyRecommendation(
+            strategy_name=custom_strategy.name,
+            action=custom_strategy.strategy_id,
+            confidence=confidence,
+            reasoning="\n".join(reasoning_parts),
+            risk_level=custom_strategy.risk_level,
+            max_loss="See strategy details",
+            max_gain="See strategy details",
+            best_conditions=best_conditions,
+            experience_level=custom_strategy.experience_level,
+            examples=examples,
+            notes=custom_strategy.notes,
+            example_trade=None  # Custom strategies have complex setup, not simple example trades
+        )

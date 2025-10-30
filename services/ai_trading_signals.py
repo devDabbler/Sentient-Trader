@@ -4,6 +4,7 @@ Uses LLM to analyze multiple data sources and generate buy/sell signals
 """
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -44,7 +45,8 @@ class AITradingSignalGenerator:
             api_key: API key (optional if in env)
         """
         self.api_key = api_key
-        logger.info("AI Trading Signal Generator initialized with OpenRouter")
+        model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
+        logger.info(f"AI Trading Signal Generator initialized with OpenRouter using model: {model}")
     
     def generate_signal(
         self,
@@ -55,7 +57,8 @@ class AITradingSignalGenerator:
         social_data: Optional[Dict] = None,
         discord_data: Optional[Dict] = None,
         account_balance: float = 10000.0,
-        risk_tolerance: str = "MEDIUM"
+        risk_tolerance: str = "MEDIUM",
+        current_positions: List[str] = None
     ) -> Optional[TradingSignal]:
         """
         Generate AI trading signal
@@ -69,6 +72,7 @@ class AITradingSignalGenerator:
             discord_data: Discord trading alerts from monitored channels
             account_balance: Available capital
             risk_tolerance: LOW, MEDIUM, HIGH
+            current_positions: List of symbols currently owned
             
         Returns:
             TradingSignal or None
@@ -83,7 +87,8 @@ class AITradingSignalGenerator:
                 social_data=social_data,
                 discord_data=discord_data,
                 account_balance=account_balance,
-                risk_tolerance=risk_tolerance
+                risk_tolerance=risk_tolerance,
+                current_positions=current_positions or []
             )
             
             # Get AI analysis
@@ -109,7 +114,8 @@ class AITradingSignalGenerator:
         social_data: Optional[Dict],
         discord_data: Optional[Dict],
         account_balance: float,
-        risk_tolerance: str
+        risk_tolerance: str,
+        current_positions: List[str]
     ) -> str:
         """Build comprehensive analysis prompt for LLM"""
         
@@ -183,6 +189,10 @@ class AITradingSignalGenerator:
 - Discord Sentiment: {'BULLISH' if entry_alerts > exit_alerts else 'BEARISH' if exit_alerts > entry_alerts else 'NEUTRAL'}
 """
         
+        # Check if we currently own this stock
+        own_this_stock = symbol in current_positions
+        position_status = f"✅ YOU CURRENTLY OWN {symbol}" if own_this_stock else f"❌ YOU DO NOT OWN {symbol}"
+        
         # Build complete prompt
         prompt = f"""You are an expert day trader and scalper analyzing {symbol} for a potential trade.
 
@@ -200,6 +210,10 @@ class AITradingSignalGenerator:
 - Account Balance: ${account_balance:,.2f}
 - Risk Tolerance: {risk_tolerance}
 - Trading Style: Day Trading / Scalping (intraday exits)
+
+**CRITICAL - Current Position Status:**
+{position_status}
+- Current Holdings: {', '.join(current_positions) if current_positions else 'None'}
 
 **Your Task:**
 Analyze all the data above and provide a trading recommendation. Consider:
@@ -231,6 +245,10 @@ Analyze all the data above and provide a trading recommendation. Consider:
 
 **Important:**
 - Only recommend BUY/SELL if confidence > 60%
+- **CRITICAL: Only recommend SELL if you CURRENTLY OWN the stock ({own_this_stock})**
+- If you DON'T own it and it looks weak, recommend HOLD (avoid it), NOT SELL
+- If you DON'T own it and it looks strong, recommend BUY
+- If you DO own it and it looks weak or hit target, recommend SELL
 - For day trading, recommend closing position same day
 - Position size should not exceed 20% of account balance
 - Stop loss should be 1-3% below entry for day trades
@@ -333,7 +351,8 @@ Analyze all the data above and provide a trading recommendation. Consider:
         news_data_dict: Dict[str, List[Dict]],
         sentiment_data_dict: Dict[str, Dict],
         account_balance: float = 10000.0,
-        risk_tolerance: str = "MEDIUM"
+        risk_tolerance: str = "MEDIUM",
+        current_positions: List[str] = None
     ) -> List[TradingSignal]:
         """
         Analyze multiple symbols and return signals
@@ -345,10 +364,14 @@ Analyze all the data above and provide a trading recommendation. Consider:
             sentiment_data_dict: Dict of symbol -> sentiment data
             account_balance: Available capital
             risk_tolerance: Risk level
+            current_positions: List of symbols currently owned (for position-aware signals)
             
         Returns:
             List of TradingSignal objects
         """
+        if current_positions is None:
+            current_positions = []
+            
         signals = []
         
         for symbol in symbols:
@@ -359,10 +382,16 @@ Analyze all the data above and provide a trading recommendation. Consider:
                     news_data=news_data_dict.get(symbol, []),
                     sentiment_data=sentiment_data_dict.get(symbol, {}),
                     account_balance=account_balance,
-                    risk_tolerance=risk_tolerance
+                    risk_tolerance=risk_tolerance,
+                    current_positions=current_positions
                 )
                 
+                # Filter out invalid signals
                 if signal and signal.signal != "HOLD" and signal.confidence >= 60:
+                    # CRITICAL: Only allow SELL if we own the stock
+                    if signal.signal == "SELL" and symbol not in current_positions:
+                        logger.info(f"🚫 Filtering out SELL signal for {symbol} - not in current positions")
+                        continue
                     signals.append(signal)
             
             except Exception as e:

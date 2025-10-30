@@ -1,6 +1,7 @@
 """
 Interactive Brokers Client for Day Trading/Scalping
 Supports live trading, market data, and position management for IBKR accounts
+Integrated with Trading Mode Manager for paper and live trading
 """
 
 import logging
@@ -15,6 +16,14 @@ import sys
 # Configure logging first
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+# Import trading configuration
+try:
+    from .trading_config import get_trading_mode_manager, TradingMode
+    TRADING_CONFIG_AVAILABLE = True
+except ImportError:
+    TRADING_CONFIG_AVAILABLE = False
+    logger.warning("Trading config not available, using legacy mode")
 
 # Fix asyncio event loop issue with Streamlit - CRITICAL FIX
 def setup_event_loop():
@@ -130,16 +139,18 @@ class IBKRClient:
     """
     Interactive Brokers Client for day trading and scalping
     Requires IB Gateway or TWS to be running
+    Supports paper and live trading modes via TradingModeManager
     """
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1):
+    def __init__(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1, trading_mode: Optional['TradingMode'] = None):
         """
         Initialize IBKR client
         
         Args:
             host: IB Gateway/TWS host (default: localhost)
-            port: IB Gateway port (7497 for paper, 7496 for live) or TWS port (7497)
+            port: IB Gateway port (7497 for paper TWS, 7496 for live TWS, 4002 for paper Gateway, 4001 for live Gateway)
             client_id: Unique client ID (1-32)
+            trading_mode: Trading mode (PAPER or PRODUCTION). If None, uses provided connection details.
         """
         if not IB_INSYNC_AVAILABLE:
             raise ImportError(
@@ -150,11 +161,13 @@ class IBKRClient:
         self.host = host
         self.port = port
         self.client_id = client_id
+        self.trading_mode = trading_mode
         self.connected = False
         self._event_loop = None
         self._thread = None
         
-        logger.info(f"IBKR Client initialized for {host}:{port} (client_id={client_id})")
+        mode_str = f" ({trading_mode.value} mode)" if trading_mode else ""
+        logger.info(f"IBKR Client initialized for {host}:{port} (client_id={client_id}){mode_str}")
     
     def connect(self, timeout: int = 10) -> bool:
         """
@@ -676,46 +689,109 @@ class IBKRClient:
             return None
 
 
-def create_ibkr_client_from_env() -> Optional[IBKRClient]:
+def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None) -> Optional[IBKRClient]:
     """
-    Create IBKR client from environment variables
+    Create IBKR client from environment variables or trading mode manager
     
-    Environment variables:
+    Args:
+        trading_mode: Trading mode (PAPER or PRODUCTION). If None, tries to load from trading mode manager.
+    
+    Environment variables (legacy support):
         IBKR_HOST: IB Gateway/TWS host (default: 127.0.0.1)
-        IBKR_PORT: Port number (7497 for paper, 7496 for live)
+        IBKR_PORT: Port number (7497 for paper TWS, 7496 for live TWS, 4002 for paper Gateway, 4001 for live Gateway)
         IBKR_CLIENT_ID: Client ID (default: 1)
+    
+    Or use mode-specific variables:
+        IBKR_PAPER_HOST, IBKR_PAPER_PORT, IBKR_PAPER_CLIENT_ID
+        IBKR_LIVE_HOST, IBKR_LIVE_PORT, IBKR_LIVE_CLIENT_ID
     
     Returns:
         IBKRClient instance or None if error
     """
     import os
     
-    host = os.getenv('IBKR_HOST', '127.0.0.1')
-    port = int(os.getenv('IBKR_PORT', '7497'))  # Default to paper trading
-    client_id = int(os.getenv('IBKR_CLIENT_ID', '1'))
-    
     try:
-        client = IBKRClient(host=host, port=port, client_id=client_id)
+        # Try using TradingModeManager first if available
+        if TRADING_CONFIG_AVAILABLE:
+            mode_manager = get_trading_mode_manager()
+            
+            # Set mode if specified
+            if trading_mode:
+                if not mode_manager.set_mode(trading_mode):
+                    logger.warning(f"No IBKR credentials available for {trading_mode.value} mode, falling back to env vars")
+                else:
+                    creds = mode_manager.get_ibkr_credentials()
+                    if creds:
+                        logger.info(f"🔧 Creating IBKR client from {trading_mode.value} mode credentials")
+                        return IBKRClient(
+                            host=creds.host,
+                            port=creds.port,
+                            client_id=creds.client_id,
+                            trading_mode=trading_mode
+                        )
+            else:
+                # Use current mode
+                creds = mode_manager.get_ibkr_credentials()
+                if creds:
+                    current_mode = mode_manager.get_mode()
+                    logger.info(f"🔧 Creating IBKR client from current {current_mode.value} mode credentials")
+                    return IBKRClient(
+                        host=creds.host,
+                        port=creds.port,
+                        client_id=creds.client_id,
+                        trading_mode=current_mode
+                    )
+        
+        # Fall back to legacy environment variables
+        host = os.getenv('IBKR_HOST', '127.0.0.1')
+        port = int(os.getenv('IBKR_PORT', '7497'))  # Default to paper trading TWS
+        client_id = int(os.getenv('IBKR_CLIENT_ID', '1'))
+        
+        logger.info("🔧 Creating IBKR client from legacy environment variables")
+        client = IBKRClient(host=host, port=port, client_id=client_id, trading_mode=trading_mode)
         return client
+        
     except Exception as e:
         logger.error(f"Error creating IBKR client from environment: {e}")
         return None
 
 
-def validate_ibkr_connection() -> Tuple[bool, str]:
+def create_ibkr_client_for_mode(trading_mode: 'TradingMode') -> Optional[IBKRClient]:
     """
-    Validate IBKR connection
+    Create IBKR client for a specific trading mode
+    
+    Args:
+        trading_mode: Trading mode (PAPER or PRODUCTION)
+    
+    Returns:
+        IBKRClient instance or None if error
+    """
+    try:
+        return create_ibkr_client_from_env(trading_mode)
+    except Exception as e:
+        logger.error(f"Failed to create IBKR client for {trading_mode.value}: {e}")
+        return None
+
+
+def validate_ibkr_connection(trading_mode: Optional['TradingMode'] = None) -> Tuple[bool, str]:
+    """
+    Validate IBKR connection for current or specified mode
+    
+    Args:
+        trading_mode: Trading mode to validate. If None, uses current mode.
     
     Returns:
         Tuple of (success, message)
     """
     try:
-        client = create_ibkr_client_from_env()
+        client = create_ibkr_client_from_env(trading_mode)
         if client is None:
-            return False, "Failed to create IBKR client (check ib_insync installation)"
+            mode_name = trading_mode.value if trading_mode else "current"
+            return False, f"Failed to create IBKR client for {mode_name} mode (check ib_insync installation and credentials)"
         
         if not client.connect():
-            return False, "Failed to connect to IBKR (make sure IB Gateway/TWS is running)"
+            mode_name = client.trading_mode.value if client.trading_mode else "unknown"
+            return False, f"Failed to connect to IBKR {mode_name} mode (make sure IB Gateway/TWS is running)"
         
         # Get account info to verify connection
         account_info = client.get_account_info()
@@ -723,8 +799,33 @@ def validate_ibkr_connection() -> Tuple[bool, str]:
             client.disconnect()
             return False, "Connected but failed to retrieve account information"
         
+        mode_name = client.trading_mode.value if client.trading_mode else "unknown"
+        account_id = account_info.account_id
         client.disconnect()
-        return True, f"Successfully connected to IBKR account {account_info.account_id}"
+        return True, f"Successfully connected to IBKR {mode_name} account {account_id}"
         
     except Exception as e:
         return False, f"IBKR validation error: {str(e)}"
+
+
+def validate_all_ibkr_modes() -> Dict[str, Tuple[bool, str]]:
+    """
+    Validate IBKR connections for all available trading modes
+    
+    Returns:
+        Dictionary mapping mode names to (success, message) tuples
+    """
+    if not TRADING_CONFIG_AVAILABLE:
+        return {"error": (False, "Trading config not available")}
+    
+    mode_manager = get_trading_mode_manager()
+    results = {}
+    
+    for mode in [TradingMode.PAPER, TradingMode.PRODUCTION]:
+        if mode_manager.has_ibkr_credentials(mode):
+            success, message = validate_ibkr_connection(mode)
+            results[mode.value] = (success, message)
+        else:
+            results[mode.value] = (False, f"No IBKR credentials configured for {mode.value} mode")
+    
+    return results

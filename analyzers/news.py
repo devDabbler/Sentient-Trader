@@ -131,6 +131,12 @@ class NewsAnalyzer:
         if not news_articles:
             return 0.0, ["No news articles to analyze"]
         
+        # Filter out None articles
+        news_articles = [a for a in news_articles if a is not None]
+        
+        if not news_articles:
+            return 0.0, ["No valid news articles to analyze"]
+        
         for article in news_articles:
             title = article.get('title', '').lower()
             summary = article.get('summary', '').lower()
@@ -218,25 +224,32 @@ class NewsAnalyzer:
             
             # Check for recent analyst upgrades/downgrades in news
             news = NewsAnalyzer.get_stock_news(ticker, max_articles=10)
+            # Filter out None articles
+            news = [a for a in news if a is not None]
+            
             for article in news:
-                if article and article.get('title'):
-                    title_lower = article['title'].lower()
-                    if 'upgrade' in title_lower or 'raises price target' in title_lower:
-                        catalysts.append({
-                            'type': 'Analyst Upgrade',
-                            'date': article.get('published', 'Unknown'),
-                            'days_away': 0,
-                            'impact': 'MEDIUM',
-                            'description': article['title'][:80]
-                        })
-                    elif 'downgrade' in title_lower or 'lowers price target' in title_lower:
-                        catalysts.append({
-                            'type': 'Analyst Downgrade',
-                            'date': article.get('published', 'Unknown'),
-                            'days_away': 0,
-                            'impact': 'MEDIUM',
-                            'description': article['title'][:80]
-                        })
+                try:
+                    if article and article.get('title'):
+                        title_lower = article['title'].lower()
+                        if 'upgrade' in title_lower or 'raises price target' in title_lower:
+                            catalysts.append({
+                                'type': 'Analyst Upgrade',
+                                'date': article.get('published', 'Unknown'),
+                                'days_away': 0,
+                                'impact': 'MEDIUM',
+                                'description': article['title'][:80]
+                            })
+                        elif 'downgrade' in title_lower or 'lowers price target' in title_lower:
+                            catalysts.append({
+                                'type': 'Analyst Downgrade',
+                                'date': article.get('published', 'Unknown'),
+                                'days_away': 0,
+                                'impact': 'MEDIUM',
+                                'description': article['title'][:80]
+                            })
+                except Exception as e:
+                    logger.debug(f"Error processing catalyst article: {e}")
+                    continue
             
         except Exception as e:
             logger.error(f"Error getting catalysts for {ticker}: {e}")

@@ -35,9 +35,14 @@ try:
     from qlib.contrib.strategy import TopkDropoutStrategy
     from qlib.contrib.evaluate import backtest
     QLIB_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     QLIB_AVAILABLE = False
-    logger.warning("Qlib not installed. Run: pip install pyqlib")
+    # Only log if qlib is truly not installed (not just a submodule issue)
+    try:
+        import qlib
+        logger.info("Qlib is installed but some features may not be available")
+    except ImportError:
+        logger.warning("Qlib not installed. Run: pip install pyqlib")
 
 
 class QLIbEnhancedAnalyzer:

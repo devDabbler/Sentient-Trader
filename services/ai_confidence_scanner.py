@@ -52,9 +52,9 @@ class AIConfidenceScanner:
         if self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
-                model = os.getenv('AI_CONFIDENCE_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-                self.llm_analyzer = LLMStrategyAnalyzer(model=model)
-                logger.info(f"AI Confidence Scanner initialized with OpenRouter model: {model}")
+                model = os.getenv('AI_CONFIDENCE_MODEL', 'google/gemini-2.0-flash-exp:free')
+                self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model)
+                logger.info(f"AI Confidence Scanner initialized with OpenRouter using model: {model}")
             except Exception as e:
                 logger.warning(f"LLM not available for AI Confidence Scanner: {e}")
                 self.use_llm = False

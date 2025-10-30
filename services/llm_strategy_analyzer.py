@@ -31,14 +31,29 @@ class StrategyAnalysis:
 class LLMStrategyAnalyzer:
     """Analyzes Option Alpha bot strategies using LLM"""
     
-    def __init__(self, model: str, api_key: Optional[str] = None):
+    def __init__(self, provider: str = "openrouter", model: Optional[str] = None, api_key: Optional[str] = None):
+        self.provider = provider
         self.model = model
-        # Allow passing API key at runtime or fall back to env var
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        self.base_url = "https://openrouter.ai/api/v1"
+        self.api_key = api_key
+
+        if provider == "openrouter":
+            self.base_url = "https://openrouter.ai/api/v1"
+            self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+            if not self.model:
+                self.model = os.getenv("AI_ANALYZER_MODEL", "google/gemini-2.0-flash-exp:free")
+        elif provider == "openai":
+            self.base_url = "https://api.openai.com/v1"
+            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+            if not self.model:
+                self.model = "gpt-4-turbo"
+        # Add other providers as needed
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
 
         if not self.api_key:
-            raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable.")
+            raise ValueError(f"API key for {provider} not found. Please set the appropriate environment variable.")
+        
+        logger.info(f"LLM Strategy Analyzer initialized with {provider} using model: {self.model}")
         
     
     def analyze_bot_strategy(self, bot_config: Dict) -> StrategyAnalysis:
@@ -52,8 +67,8 @@ class LLMStrategyAnalyzer:
             logger.debug(f"Created analysis prompt (length: {len(prompt)} chars)")
             
             # Get LLM response
-            logger.info("Calling LLM API via OpenRouter...")
-            response = self._call_openrouter(prompt)
+            logger.info(f"Calling LLM API via {self.provider}...")
+            response = self._call_llm_api(prompt)
             logger.debug(f"Received LLM response (length: {len(response)} chars)")
             
             # Parse response
@@ -148,12 +163,11 @@ Focus on practical, actionable insights for options trading. Consider the specif
     
     
     
-    def _call_openrouter(self, prompt: str) -> str:
-        """Call OpenRouter API (via OpenAI-compatible client). Returns string or empty on error."""
+    def _call_llm_api(self, prompt: str) -> str:
+        """Call the selected LLM API. Returns string or empty on error."""
         try:
-            logger.debug(f"Calling OpenRouter API with model: {self.model}")
+            logger.debug(f"Calling {self.provider} API with model: {self.model}")
             logger.debug(f"Base URL: {self.base_url}")
-            logger.debug(f"API Key: {self.api_key[:10]}..." if self.api_key else "No API key")
             
             import openai
             client = openai.OpenAI(
@@ -161,7 +175,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
                 base_url=self.base_url
             )
             
-            logger.debug("Created OpenAI client for OpenRouter")
+            logger.debug(f"Created OpenAI client for {self.provider}")
             
             response = client.chat.completions.create(
                 model=self.model,
@@ -174,12 +188,54 @@ Focus on practical, actionable insights for options trading. Consider the specif
             )
             
             content = getattr(response.choices[0].message, 'content', None)
-            logger.debug(f"OpenRouter API response received: {str(content)[:200]}...")
+            logger.debug(f"{self.provider} API response received: {str(content)[:200]}...")
             return content or ""
             
         except Exception as e:
-            logger.error(f"OpenRouter API error: {e}", exc_info=True)
+            logger.error(f"{self.provider} API error: {e}", exc_info=True)
             return ""
+    
+    def _call_openrouter(self, prompt: str) -> Optional[str]:
+        """
+        Call OpenRouter API directly - used by ai_confidence_scanner
+        This is a simplified wrapper around _call_llm_api for direct calls
+        """
+        try:
+            logger.debug(f"Direct OpenRouter call with model: {self.model}")
+            
+            # Use requests for direct API call
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 1500
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                content = data['choices'][0]['message']['content']
+                logger.debug(f"OpenRouter response received: {str(content)[:200]}...")
+                return content
+            else:
+                logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"Error calling OpenRouter: {e}", exc_info=True)
+            return None
     
     def _parse_analysis_response(self, response: str, bot_config: Dict) -> StrategyAnalysis:
         """Parse LLM response into StrategyAnalysis object"""

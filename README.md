@@ -9,6 +9,27 @@
 
 ## 🆕 Latest Updates (October 2025)
 
+### **🤖 PDT-Safe Trading System** 🆕
+- ✅ **Multi-Agent Architecture** - Event-driven agents for data, setups, risk, execution, and journaling
+- ✅ **SLOW_SCALPER Mode** - Intraday ORB/VWAP strategies with 3-bucket cash rotation
+- ✅ **MICRO_SWING Mode** - Key level rejections with T+2 settlement tracking
+- ✅ **Strategy Detectors** - ORB, VWAP Bounce, Key Level Rejection with multi-timeframe confirmation
+- ✅ **Settled Funds Only** - Avoid PDT rules by trading only settled cash
+- ✅ **Cash Bucket Rotation** - 3 buckets enable daily trading in cash accounts
+- ✅ **Risk Management** - Per-mode limits, cooldowns, dynamic position sizing
+- ✅ **Trade Journaling** - SQLite persistence with settlement dates, R multiples, per-setup stats
+- ✅ **Async Event Bus** - Non-blocking pub/sub for agent communication
+
+### **🤖 Automated Trading Bot**
+- ✅ **Full Auto-Trading System** - Monitor watchlist and execute trades automatically
+- ✅ **Per-Ticker Control** - Enable/disable auto-trading for each ticker individually
+- ✅ **Scalping Mode** - Fast intraday trades with 2% profit / 1% stop targets
+- ✅ **Multiple Trading Modes** - STOCKS, OPTIONS, SCALPING, SLOW_SCALPER, MICRO_SWING, or ALL
+- ✅ **Safety Features** - Trading hours enforcement, daily limits, confidence filtering
+- ✅ **Bracket Orders** - Automatic stop-loss and take-profit on every trade
+- ✅ **Paper Trading** - Test strategies risk-free before going live
+- ✅ **Execution History** - Track all automated trades with detailed metrics
+
 ### **Google Gemini 2.5 Flash Integration**
 - ✅ **AI Trading Signals** now powered by Gemini for superior buy/sell recommendations
 - ✅ **Strategy Analyzer** uses Gemini for advanced bot configuration critique
@@ -16,9 +37,15 @@
 - ✅ Configurable via `.env` - easily switch between free and premium models
 - ✅ Fixed environment variable handling (`AI_TRADING_MODEL`, `AI_CONFIDENCE_MODEL`, `AI_ANALYZER_MODEL`)
 
+### **Tradier Production Trading**
+- ✅ **Fixed Production Connection** - Resolved enum comparison issues for live trading
+- ✅ **Bracket Order Display** - View stop-loss and take-profit prices for all orders
+- ✅ **Enhanced Order Management** - Detailed order leg information with status tracking
+
 ### **Bug Fixes & Improvements**
 - 🐛 Fixed `AttributeError` in stock analysis (corrected `sentiment_score` and removed non-existent `social_sentiment`)
 - 🐛 Resolved module import issues with `ComprehensiveAnalyzer`
+- 🐛 Fixed Tradier production mode credential loading with whitespace handling
 - 🔧 Improved Streamlit cache handling for reliable code reloading
 - 📝 Updated documentation with comprehensive AI model configuration guide
 
@@ -174,6 +201,180 @@ AI_ANALYZER_MODEL=google/gemini-2.5-flash
 
 **Find more models at:** https://openrouter.ai/models
 
+## 🎯 Advanced Strategy Library with AI Validation
+
+The platform now includes a library of professional-grade option strategies with detailed playbooks and AI-powered viability assessment. These strategies go beyond basic options plays to include sophisticated approaches used by successful professional traders.
+
+### **Available Strategies**
+
+#### **1. Professional Futures Options Selling ("The Chicken Approach")**
+- **Source**: Professional portfolio manager ($8.7M AUM)
+- **Performance**: 27.64% YTD, 12/12 winning trades, Sharpe ratio 2.47
+- **Approach**: Sell strangles/puts on commodity futures (Gold, Silver, Copper, Oil, Gas, Wheat, Soybeans)
+- **Philosophy**: Only trade when odds are overwhelmingly favorable; exit before major unpredictable events
+- **Experience Level**: Professional
+- **Capital Required**: Very High ($100k+ recommended)
+
+**Key Parameters:**
+- DTE: 45-120 days for optimal theta decay
+- Profit Target: 50% of credit collected
+- Stop Loss: 50% of credit (tight risk management)
+- Max Margin: 30% per position
+- Never roll positions - close and re-evaluate
+- Never trade correlated products simultaneously
+
+**4-Step Playbook:**
+1. **Check CVOL**: Ensure 3-month volatility is elevated (high premiums)
+2. **Analyze Technicals**: Determine trend direction (uptrend/downtrend/sideways)
+3. **Fundamental Analysis** (CRITICAL): Distinguish critical vs non-critical news
+   - Critical news (tariffs, war, policy shifts) = DO NOT TRADE
+   - Non-critical news (social media hype, minor reports) = Opportunity
+4. **Position Setup**: Use decision matrix based on fundamentals
+
+**Risk Management:**
+- Preemptive exit before major events ("Chicken Rule")
+- Wide strikes (low delta, far OTM) using historical ranges
+- Active monitoring of geopolitical/fundamental news
+
+#### **2. LEAPS Recovery Strategy ("Blood in the Streets")**
+- **Source**: Professional trader ($30k → $548k in 7 months)
+- **Return**: 1,727% (17.27x) in 7 months
+- **Approach**: Buy LEAPS calls on SPY during major market crashes
+- **Philosophy**: Enter during "blood in the streets" when sentiment is crushed
+- **Experience Level**: Advanced
+- **Capital Required**: Medium to High
+- **Risk Level**: Very High (can lose 100% of capital)
+
+**Key Parameters:**
+- **Expiration**: 1.5-2+ years (LEAPS minimize theta decay)
+- **Strike Selection**: ITM or Near-ATM (Delta 0.70-0.85)
+- **Entry Timing**: Major non-catastrophic sell-off (tariff panic, policy shock)
+- **Exit Timing**: Catalytic FOMO moment (Fed cuts, political clarity, strong earnings)
+- **Optional**: Roll up to higher strikes to compound gains
+
+**5-Step Playbook:**
+1. **Wait for Blood in Streets**: Major panic, crushed sentiment, recovery seems impossible
+2. **Select LEAPS on SPY**: 1.5-2+ years to expiration
+3. **Buy ITM Calls**: Delta 0.70-0.85 for maximum exposure, minimal time decay
+4. **Optional Roll-Up**: As profitable, sell and buy higher strike to compound
+5. **Exit into FOMO**: When positive catalysts converge (Fed cuts, political clarity)
+
+**Risk Management:**
+- Only allocate capital you can afford to lose entirely
+- Requires accurate market timing and strong recovery thesis
+- Emotional discipline to hold through volatility
+- Monitor thesis validity continuously
+
+### **AI Strategy Validation**
+
+Each strategy includes AI-powered validation that analyzes:
+
+✅ **Viability Assessment** - Is the strategy suitable for the current market?  
+✅ **Market Alignment** - Do conditions match strategy requirements?  
+✅ **Red Flag Detection** - Identify dangerous conditions to avoid  
+✅ **Missing Conditions** - What requirements are NOT currently met?  
+✅ **Specific Recommendations** - Tailored advice for implementation  
+✅ **Confidence Scoring** - AI confidence in the viability assessment
+
+### **How to Use Custom Strategies**
+
+**In Strategy Advisor Tab:**
+
+```python
+from analyzers.strategy import StrategyAdvisor
+from services.strategy_validator import StrategyValidator
+
+# Get available strategies for your experience level
+custom_strategies = StrategyAdvisor.get_custom_strategies(user_experience="Advanced")
+
+# Convert to recommendations for display
+for strategy in custom_strategies:
+    recommendation = StrategyAdvisor.convert_custom_to_recommendation(strategy)
+    print(f"{recommendation.strategy_name}: {recommendation.confidence:.1%}")
+
+# Validate a specific strategy for a ticker
+validator = StrategyValidator()
+validation = validator.validate_strategy(
+    strategy=custom_strategies[0],
+    ticker="SPY",
+    analysis=stock_analysis,  # Your StockAnalysis object
+    market_context={"vix": 35.0, "sentiment": "Panic"}
+)
+
+# Check results
+if validation.is_viable:
+    print(f"✅ Strategy viable: {validation.viability_score:.1%}")
+    print(f"Strengths: {validation.strengths}")
+else:
+    print(f"❌ Not viable: {validation.concerns}")
+```
+
+**Strategy Selection Dropdown:**
+
+The Strategy Advisor now includes a dropdown to select between:
+- **Traditional Strategies** (Sell Put, Buy Call, Iron Condor, etc.)
+- **Advanced Strategies** (Futures Options Selling, LEAPS Recovery)
+
+When you select an advanced strategy, the AI automatically:
+1. Analyzes current market conditions
+2. Checks if all requirements are met
+3. Identifies any red flags
+4. Provides specific implementation recommendations
+5. Calculates viability score and confidence
+
+**Example Workflow:**
+
+1. Select "Advanced Strategies" from dropdown
+2. Choose strategy (e.g., "LEAPS Recovery Strategy")
+3. Enter ticker (e.g., "SPY")
+4. Click "Validate Strategy with AI"
+5. Review AI assessment:
+   - Viability score
+   - Market alignment rating
+   - Strengths and concerns
+   - Missing conditions
+   - Red flags detected
+   - Implementation recommendations
+
+### **Integration with Existing Features**
+
+Custom strategies integrate seamlessly with:
+- **Stock Intelligence**: Validate strategies against current analysis
+- **Advanced Scanner**: Batch validate strategies across multiple tickers
+- **AI Signals**: Combine with AI trading signals for comprehensive analysis
+- **Risk Management**: Built-in guardrails and validation checklists
+
+### **Important Warnings**
+
+⚠️ **Futures Options Selling**:
+- Requires futures trading approval and significant capital
+- Needs deep commodity-specific knowledge
+- Must monitor geopolitical news constantly
+- Professional-level strategy - not for beginners
+
+⚠️ **LEAPS Recovery**:
+- EXTREMELY HIGH RISK - can lose 100% of capital
+- Requires accurate market timing
+- Massive leverage = massive potential losses
+- Not suitable for beginners or conservative investors
+- One example ≠ guaranteed future results
+
+### **Files Added**
+
+- `models/reddit_strategies.py` - Strategy definitions with detailed parameters
+- `services/strategy_validator.py` - AI validation service
+- `analyzers/strategy.py` - Updated with custom strategy methods
+
+### **Configuration**
+
+Ensure your `.env` includes:
+```bash
+OPENROUTER_API_KEY=your_key_here
+AI_ANALYZER_MODEL=google/gemini-2.0-flash-exp:free
+```
+
+The AI validator uses the same model configuration as other AI features.
+
 ## Environment variables
 
 Some integrations require API keys or credentials. You can put them in a `.env` file (project uses python-dotenv) or export them into your environment.
@@ -232,6 +433,459 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 ```
 
+## 🤖 Automated Trading Bot
+
+The platform includes a fully automated trading system that monitors your watchlist and executes high-confidence trades automatically. **NEW**: Multi-agent architecture for PDT-safe trading!
+
+### **Features**
+
+- **🔄 Continuous Monitoring** - Scans watchlist every 5-60 minutes for trading opportunities
+- **🎯 AI-Powered Signals** - Generates comprehensive AI signals with entry/exit/stop-loss
+- **✅ Per-Ticker Control** - Enable/disable auto-trading for each ticker individually
+- **🚀 Multiple Trading Modes**:
+  - **STOCKS**: Standard stock trading with AI signals
+  - **OPTIONS**: Options strategies (framework ready)
+  - **SCALPING**: Fast intraday trades with tight stops (2% profit / 1% stop)
+  - **SLOW_SCALPER** 🆕: PDT-safe intraday (ORB, VWAP bounces) with multi-agent architecture
+  - **MICRO_SWING** 🆕: PDT-safe swing trades (key levels) with settled cash management
+  - **ALL**: Combines all strategies
+- **🛡️ Safety Features**:
+  - Trading hours enforcement (9:30 AM - 3:30 PM ET)
+  - Daily order limits
+  - Confidence threshold filtering (75%+ default)
+  - Automatic bracket orders with stop-loss protection
+  - Won't add to existing positions
+  - Paper trading mode for risk-free testing
+- **💰 PDT-Safe Cash Management** 🆕:
+  - 3-bucket cash rotation (T+2 settlement)
+  - Settled funds only trading
+  - Automatic cooldowns and risk limits
+  - Per-mode trade caps and position sizing
+
+### **Scalping Mode (Recommended for Testing)**
+
+Perfect for paper trading and learning automated strategies:
+
+```
+✅ Trading Mode: SCALPING
+✅ Scan Interval: 10 minutes
+✅ Min Confidence: 75%
+✅ Max Daily Orders: 15-20
+✅ Take Profit: 2%
+✅ Stop Loss: 1%
+✅ Paper Trading: ON
+✅ Bracket Orders: ON
+```
+
+**How Scalping Works:**
+- Scans every 10 minutes for high-momentum setups
+- Executes bracket orders with 2% profit target and 1% stop-loss
+- All orders close same day (no overnight risk)
+- Ideal for liquid, high-volume stocks (MAIA, NOK, PLUG, SOFI, TLRY)
+
+### **Setup Instructions**
+
+1. **Go to "🤖 Auto-Trader" tab**
+2. **Configure Settings**:
+   - Scan interval: 10-15 minutes
+   - Min confidence: 75%
+   - Max daily orders: 10-20
+   - Enable bracket orders
+   - **Enable Paper Trading** (highly recommended)
+3. **Select Trading Mode**: Choose SCALPING for testing
+4. **Enable Tickers**: Check boxes for tickers you want to auto-trade
+5. **Click "🚀 Start Auto-Trader"**
+
+### **Per-Ticker Auto-Trade Control**
+
+Each ticker in your watchlist has an individual checkbox to enable/disable auto-trading:
+
+```
+✅ MAIA  ✅ NOK  ✅ PLUG  ☐ SOFI  ☐ TLRY
+```
+
+Settings are saved to database and persist across sessions. This gives you fine-grained control over which tickers the bot trades.
+
+### **Monitoring & History**
+
+The Auto-Trader tab displays:
+- **Real-time Status**: Running/stopped, daily orders, trading hours
+- **Execution History**: All automated trades with entry/exit/stop prices
+- **Performance Metrics**: Confidence scores, profit targets, actual results
+
+### **Safety & Best Practices**
+
+⚠️ **IMPORTANT SAFETY RULES:**
+
+1. **Start with Paper Trading** - Test for at least 1 week before live trading
+2. **Monitor Daily** - Check execution history and adjust settings
+3. **Start Small** - Use low max daily orders (5-10) initially
+4. **High Confidence Only** - Keep min confidence at 75%+
+5. **Diversify** - Monitor 5-10 different tickers
+6. **Review Results** - Analyze what works and adjust strategy
+7. **Scalping Tips**: Use 5-10 min intervals, liquid stocks only
+
+⚠️ **Risk Warning**: Automated trading carries significant risk. Past performance doesn't guarantee future results. Always start with paper trading and only risk capital you can afford to lose.
+
+### **New: PDT-Safe SLOW_SCALPER & MICRO_SWING Modes** 🆕
+
+Perfect for cash accounts under $25k that want to trade daily without PDT restrictions!
+
+#### **How It Works**
+
+**Multi-Agent Architecture**:
+```
+DataAgent → SetupAgent → RiskAgent → ExecutionAgent → JournalAgent
+    ↓           ↓            ↓             ↓              ↓
+BarEvent → TradeCandidate → ApprovedOrder → OrderUpdate → JournalEntry
+```
+
+**Strategy Detectors**:
+1. **ORB (Opening Range Breakout)**: First 15-min high/low breakout with volume confirmation
+2. **VWAP Bounce**: Trend-aligned bounces off VWAP in established trends
+3. **Key Level Rejection**: Support/resistance bounces at prev day high/low, overnight levels
+
+**3-Bucket Cash System**:
+- Bucket 1 (Day 1) → Settles Day 3
+- Bucket 2 (Day 2) → Settles Day 4  
+- Bucket 3 (Day 3) → Settles Day 5
+- Bucket 1 available again on Day 4!
+
+**Risk Management**:
+- SLOW_SCALPER: Max 6 trades/day, 30-min cooldown, max 3 positions, 4% daily loss limit
+- MICRO_SWING: Max 4 trades/day, 60-min cooldown, max 5 positions, 5% daily loss limit
+- Dynamic position sizing: 2% risk base, halved after 2% daily loss
+- Symbol cooldowns: 60-120 min after exit to avoid chop
+
+**Enable PDT-Safe Mode**:
+```python
+config = AutoTraderConfig(
+    trading_mode='SLOW_SCALPER',  # or 'MICRO_SWING'
+    use_agent_system=True,         # Enable multi-agent architecture
+    use_settled_funds_only=True,
+    cash_buckets=3,
+    t_plus_settlement_days=2,
+    risk_per_trade_pct=0.02,
+    max_daily_loss_pct=0.04
+)
+```
+
+**Demo**:
+```bash
+python examples/pdt_safe_trading_demo.py
+```
+
+**Test Suite** (All 17 tests passing ✅):
+```bash
+python -m pytest tests/test_pdt_safe_trading.py -v
+```
+
+**Full Documentation**: See [PDT_SAFE_TRADING_GUIDE.md](documentation/PDT_SAFE_TRADING_GUIDE.md)
+
+---
+
+## 💰 PDT-Safe Trading System - Complete Overview
+
+Perfect for **cash accounts under $25k** that want to trade daily without Pattern Day Trader restrictions!
+
+### **The Problem**
+
+Traditional day trading requires $25k minimum and triggers PDT rules after 3 day trades in 5 days. Cash accounts avoid PDT but must wait T+2 for settlement, preventing daily trading.
+
+### **The Solution**
+
+Our multi-agent system with **3-bucket cash rotation** enables continuous daily trading using only settled funds:
+
+#### **3-Bucket Cash Rotation System**
+
+```
+$30,000 Account = 3 Buckets × $10,000 each
+
+Day 1: Trade with Bucket 1 ($10k) → Settles Day 3
+Day 2: Trade with Bucket 2 ($10k) → Settles Day 4  
+Day 3: Trade with Bucket 3 ($10k) → Settles Day 5
+Day 4: Bucket 1 settled! Trade again → Continues daily...
+```
+
+**Result**: Trade every single day without PDT violations or using margin!
+
+### **Strategy Detectors (Proven Setups)**
+
+#### **1. Opening Range Breakout (ORB)**
+- **Setup**: First 15 minutes establish high/low range
+- **Entry**: 5-min candle closes through high/low with 1.5x+ volume
+- **Stop**: Opposite end of range
+- **Target**: 1.5R (1.5× risk)
+- **Win Rate**: 60-70%
+- **Example**: Range $180-$181, breaks above $181.20 with volume → Entry $181.20, Stop $180.00, Target $182.80
+
+#### **2. VWAP Bounce**
+- **Setup**: Trend confirmed (9 EMA > 20 EMA), price touches VWAP
+- **Entry**: Rejection candle bounces away from VWAP with 1.3x+ volume
+- **Stop**: 1% beyond VWAP
+- **Target**: 2R
+- **Win Rate**: 55-65%
+- **Example**: Uptrend, price touches VWAP @ $180, bounces to $180.50 → Entry $180.50, Stop $178.20, Target $185.10
+
+#### **3. Key Level Rejection**
+- **Setup**: Price at prev day high/low, overnight high/low, weekly pivots
+- **Entry**: Rejection candle with decreasing volume
+- **Stop**: 0.5% beyond level
+- **Target**: 1.5R
+- **Win Rate**: 60-70%
+- **Example**: Prev day high $181.50, rejection at $181.40 → Entry $181.10, Stop $182.00, Target $179.75
+
+### **Multi-Agent Architecture**
+
+```
+┌─────────────┐    ┌────────────┐    ┌───────────┐    ┌─────────────┐    ┌──────────────┐
+│ DataAgent   │───▶│ SetupAgent │───▶│ RiskAgent │───▶│ ExecutionAgt│───▶│ JournalAgent │
+│ (Bars &     │    │ (Detects   │    │ (Sizes &  │    │ (Places     │    │ (Records &   │
+│  Indicators)│    │  Setups)   │    │  Validates)│    │  Orders)    │    │  Tracks T+2) │
+└─────────────┘    └────────────┘    └───────────┘    └─────────────┘    └──────────────┘
+      ↓                  ↓                  ↓                 ↓                    ↓
+  BarEvent        TradeCandidate     ApprovedOrder      OrderUpdate         JournalEntry
+```
+
+**Event-Driven Design**: Async pub/sub for non-blocking, scalable architecture
+
+### **Risk Management (Industry-Leading)**
+
+#### **Per-Mode Limits**
+
+| Mode | Trades/Day | Cooldown | Max Positions | Daily Loss | Consecutive Losses |
+|------|-----------|----------|---------------|------------|-------------------|
+| SLOW_SCALPER | 6 | 30 min | 3 | 4% | 2 |
+| MICRO_SWING | 4 | 60 min | 5 | 5% | 3 |
+
+#### **Dynamic Position Sizing**
+
+```python
+# Base calculation
+shares = (equity × 2% risk) / (entry - stop)
+
+# Adjustments
+if daily_loss > 2%:
+    shares = shares / 2  # Halve size when down
+
+if consecutive_losses == 1:
+    shares = shares × 0.75  # Reduce by 25%
+
+# Clamps
+shares = min(shares, bucket_cash / entry)  # Settled funds only
+shares = min(shares, equity × 20% / entry)  # Max 20% position
+```
+
+#### **Cooldown System**
+
+- **Per-Ticker**: 30-60 min between trades on same symbol
+- **Post-Exit**: 60-120 min after closing position (avoid chop)
+- **Concurrent Positions**: Max 3-5 open at once
+
+### **Trade Journaling & Analytics**
+
+**SQLite Database Tracks**:
+- Entry/exit prices, timestamps
+- Settlement dates (T+2 automatic)
+- R multiples achieved (actual vs target)
+- Hold time, exit reason
+- Running settled cash balance
+
+**Performance Metrics**:
+- Overall: Win rate, profit factor, avg R, total P&L
+- Per-Setup: ORB vs VWAP vs KeyLevel stats
+- Per-Symbol: Best/worst performers
+- Per-Day: Daily P&L tracking
+
+**Example Query**:
+```python
+from services.journal_service import get_journal_service
+
+journal = get_journal_service()
+stats = journal.get_statistics(start_date=datetime.now() - timedelta(days=30))
+
+print(f"30-Day Stats:")
+print(f"  Win Rate: {stats.win_rate*100:.1f}%")
+print(f"  Avg R: {stats.avg_r_multiple:.2f}R")
+print(f"  Profit Factor: {stats.profit_factor:.2f}")
+print(f"  Total P&L: ${stats.total_pnl:.2f}")
+
+# Export to CSV
+journal.export_to_csv('trades_march_2024.csv')
+```
+
+### **Quick Start Guide**
+
+**1. Enable PDT-Safe Mode in Config:**
+
+```python
+from services.auto_trader import AutoTrader, AutoTraderConfig
+
+config = AutoTraderConfig(
+    trading_mode='SLOW_SCALPER',      # or 'MICRO_SWING'
+    use_agent_system=True,             # Enable multi-agent architecture
+    use_settled_funds_only=True,       # PDT-safe
+    cash_buckets=3,                    # 3-bucket rotation
+    t_plus_settlement_days=2,          # T+2 for stocks
+    risk_per_trade_pct=0.02,           # 2% risk per trade
+    max_daily_loss_pct=0.04,           # 4% daily loss limit
+    max_consecutive_losses=2,          # Halt after 2 losses
+    reserve_cash_pct=0.05,             # Reserve 5%
+    paper_trading=True                 # Start with paper trading!
+)
+```
+
+**2. Create AutoTrader:**
+
+```python
+from src.integrations.tradier_client import TradierClient, TradierMode
+
+tradier = TradierClient(
+    account_id='YOUR_ACCOUNT_ID',
+    access_token='YOUR_TOKEN',
+    mode=TradierMode.PAPER
+)
+
+trader = AutoTrader(
+    config=config,
+    tradier_client=tradier,
+    signal_generator=None,  # Not needed for agent mode
+    watchlist=['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'QQQ']
+)
+
+trader.start()
+```
+
+**3. Monitor Performance:**
+
+```python
+# Real-time status
+status = trader.get_agent_status()
+print(f"Settled Cash: ${status['settled_cash']:.2f}")
+print(f"Daily P&L: ${status['risk_state']['daily_pnl']:.2f}")
+print(f"Trades Today: {status['risk_state']['trades_today']}")
+
+# Journal stats
+stats = trader.get_agent_journal_stats(days=30)
+print(f"30-Day Win Rate: {stats['win_rate']*100:.1f}%")
+print(f"Avg R Multiple: {stats['avg_r_multiple']:.2f}R")
+```
+
+### **Realistic Performance Expectations**
+
+#### **SLOW_SCALPER (Intraday)**
+- **Win Rate**: 60-70%
+- **Avg R**: 1.5-2R
+- **Trades/Day**: 3-6
+- **Daily Target**: 0.5-1.5% account growth
+- **Hold Time**: 30-90 minutes
+
+#### **MICRO_SWING (4-24 hours)**
+- **Win Rate**: 55-65%
+- **Avg R**: 1.5-2.5R
+- **Trades/Day**: 2-4
+- **Daily Target**: 0.3-1.0% account growth
+- **Hold Time**: 4-24 hours
+
+### **Capital Requirements**
+
+- **Minimum**: $10,000 (3 × $3,333 buckets)
+- **Recommended**: $30,000 (3 × $10,000 buckets)
+- **Optimal**: $50,000+ (comfortable position sizing)
+
+**Why?** Each bucket needs enough capital for meaningful position sizes after 2% risk per trade.
+
+### **Testing & Validation**
+
+**Comprehensive Test Suite** (17 tests):
+- ✅ Event bus pub/sub
+- ✅ Strategy detectors (ORB, VWAP, KeyLevel)
+- ✅ Intraday data service
+- ✅ Risk manager (limits, cooldowns, losses)
+- ✅ Cash manager (T+2, buckets)
+- ✅ Journal service (persistence, stats)
+- ✅ End-to-end agent flow
+- ✅ AutoTrader integration
+
+```bash
+# Run all tests
+python -m pytest tests/test_pdt_safe_trading.py -v
+
+# Run specific test
+python -m pytest tests/test_pdt_safe_trading.py::test_orb_detector_bullish_breakout -v
+```
+
+### **Important Warnings**
+
+⚠️ **Start with Paper Trading**: Test for 2+ weeks before live
+⚠️ **Capital at Risk**: Never risk money you can't afford to lose
+⚠️ **No Guarantees**: Past performance ≠ future results
+⚠️ **Strategy Dependent**: Win rates vary by market conditions
+⚠️ **Discipline Required**: Follow risk rules strictly
+
+### **Best Practices**
+
+✅ **Symbol Selection**: Liquid large-caps only (AAPL, MSFT, SPY, QQQ, NVDA, TSLA)
+✅ **Min Volume**: 1M+ shares average daily volume
+✅ **Risk Management**: Never exceed 2% risk per trade
+✅ **Daily Review**: Check journal stats weekly
+✅ **Strategy Mix**: Use all 3 setups (ORB, VWAP, KeyLevel)
+✅ **Market Hours**: Trade only 9:30 AM - 3:30 PM ET
+✅ **Avoid**: Earnings, low float, illiquid stocks
+
+### **Troubleshooting**
+
+**"No settled cash available"**
+- Check bucket rotation: Different bucket each day
+- Verify settlement dates: T+2 for stocks
+- Solution: Increase capital or reduce position sizes
+
+**"Daily loss limit reached"**
+- Current: 4-5% max daily loss
+- Resets: Next trading day
+- Solution: Review losing trades, adjust strategy
+
+**"Symbol cooldown active"**
+- Cooldown: 30-60 min between trades per ticker
+- Purpose: Prevent overtrading same symbol
+- Solution: Trade other symbols or wait
+
+### **Advanced Features**
+
+**Backtesting** (Coming Soon):
+```python
+from services.backtest_ema_fib import EMAFibonacciBacktester
+
+bt = EMAFibonacciBacktester(
+    require_reclaim=True,
+    require_alignment=True
+)
+results = bt.backtest('AAPL', '2023-01-01', '2024-10-01')
+results.print_summary()
+```
+
+**UI Integration** (In Progress):
+- Streamlit dashboard with live metrics
+- Real-time settled cash display
+- Bucket allocation visualization
+- Journal table with filters
+
+---
+
+### **Files**
+
+- `services/auto_trader.py` - Core auto-trading engine with agent integration
+- `services/ticker_manager.py` - Per-ticker auto-trade settings
+- `services/agents/` - Multi-agent architecture (DataAgent, SetupAgent, RiskAgent, ExecutionAgent, JournalAgent)
+- `services/strategy_detectors.py` - ORB, VWAP Bounce, Key Level detectors
+- `services/event_bus.py` - Async event-driven communication
+- `services/intraday_data_service.py` - Multi-timeframe bar data and indicators
+- `services/risk_limits.py` - Extended risk management with per-mode limits
+- `services/journal_service.py` - Trade journaling with settlement tracking
+- `app.py` - Auto-Trader UI (tab 13)
+
+---
+
 ## How to use the app (short walkthrough)
 
 1. Start in Paper Trading Mode (default) — this logs signals locally and prevents real executions.
@@ -241,7 +895,8 @@ GOOGLE_API_KEY=...
    - Paper mode logs to session state and keeps a local signal history.
    - Live mode will attempt to POST to the provided Option Alpha webhook URL or use the Tradier client if you integrate it.
 5. Inspect and export your signals under "Signal History". You can edit fields in the interactive data editor and export CSV/JSON.
-6. Advanced users: Use the "Strategy Analyzer" to analyze Option Alpha bot configs with an LLM. The analysis requires valid API credentials for your chosen provider.
+6. **NEW: Use "🤖 Auto-Trader" tab** to set up automated trading with AI signals and bracket orders.
+7. Advanced users: Use the "Strategy Analyzer" to analyze Option Alpha bot configs with an LLM. The analysis requires valid API credentials for your chosen provider.
 
 ## Testing
 

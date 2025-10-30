@@ -1,6 +1,7 @@
 """
 Trading Mode Configuration System
 Handles switching between paper trading and production trading modes
+Supports both Tradier and Interactive Brokers (IBKR)
 """
 
 import os
@@ -8,6 +9,7 @@ import logging
 from enum import Enum
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +17,11 @@ class TradingMode(Enum):
     """Trading mode enumeration"""
     PAPER = "paper"
     PRODUCTION = "production"
+
+class BrokerType(Enum):
+    """Broker type enumeration"""
+    TRADIER = "tradier"
+    IBKR = "ibkr"
 
 @dataclass
 class TradingCredentials:
@@ -24,61 +31,158 @@ class TradingCredentials:
     api_url: str
     mode: TradingMode
 
+@dataclass
+class IBKRCredentials:
+    """IBKR-specific credentials"""
+    host: str
+    port: int
+    client_id: int
+    mode: TradingMode
+    account_id: Optional[str] = None  # Will be populated after connection
+
 class TradingModeManager:
-    """Manages trading mode configuration and credentials"""
+    """Manages trading mode configuration and credentials for Tradier and IBKR"""
     
     def __init__(self):
-        self.current_mode = TradingMode.PAPER
-        self.credentials = {}
+        # Default to paper mode if not in session state
+        if 'trading_mode' not in st.session_state:
+            st.session_state.trading_mode = TradingMode.PAPER
+        self.current_mode = st.session_state.trading_mode
+        
+        # Separate credentials for each broker
+        self.tradier_credentials = {}
+        self.ibkr_credentials = {}
+        
+        # For backwards compatibility, keep main credentials dict for Tradier
+        self.credentials = self.tradier_credentials
+        
         self._load_credentials()
+        self._load_ibkr_credentials()
     
     def _load_credentials(self):
-        """Load credentials for both paper and production modes"""
+        """Load Tradier credentials for both paper and production modes"""
         # Paper trading credentials
-        paper_account_id = os.getenv('TRADIER_PAPER_ACCOUNT_ID') or os.getenv('TRADIER_ACCOUNT_ID')
-        paper_access_token = os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or os.getenv('TRADIER_ACCESS_TOKEN')
-        paper_api_url = os.getenv('TRADIER_PAPER_API_URL', 'https://sandbox.tradier.com')
+        paper_account_id = (os.getenv('TRADIER_PAPER_ACCOUNT_ID') or os.getenv('TRADIER_ACCOUNT_ID') or '').strip()
+        paper_access_token = (os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or os.getenv('TRADIER_ACCESS_TOKEN') or '').strip()
+        paper_api_url = os.getenv('TRADIER_PAPER_API_URL', 'https://sandbox.tradier.com').strip()
         
         if paper_account_id and paper_access_token:
-            self.credentials[TradingMode.PAPER] = TradingCredentials(
+            self.tradier_credentials[TradingMode.PAPER] = TradingCredentials(
                 account_id=paper_account_id,
                 access_token=paper_access_token,
                 api_url=paper_api_url,
                 mode=TradingMode.PAPER
             )
-            logger.info("✅ Paper trading credentials loaded")
+            logger.info("✅ Tradier Paper trading credentials loaded")
         else:
-            logger.warning("⚠️ Paper trading credentials not found")
+            logger.warning("⚠️ Tradier Paper trading credentials not found")
         
         # Production trading credentials
-        prod_account_id = os.getenv('TRADIER_PROD_ACCOUNT_ID')
-        prod_access_token = os.getenv('TRADIER_PROD_ACCESS_TOKEN')
-        prod_api_url = os.getenv('TRADIER_PROD_API_URL', 'https://api.tradier.com')
+        prod_account_id = os.getenv('TRADIER_PROD_ACCOUNT_ID', '').strip()
+        prod_access_token = os.getenv('TRADIER_PROD_ACCESS_TOKEN', '').strip()
+        prod_api_url = os.getenv('TRADIER_PROD_API_URL', 'https://api.tradier.com').strip()
+        
+        logger.info(f"🔍 Debug - prod_account_id: '{prod_account_id}' (len={len(prod_account_id)})")
+        logger.info(f"🔍 Debug - prod_access_token: '{prod_access_token[:10]}...' (len={len(prod_access_token)})")
         
         if prod_account_id and prod_access_token:
-            self.credentials[TradingMode.PRODUCTION] = TradingCredentials(
+            self.tradier_credentials[TradingMode.PRODUCTION] = TradingCredentials(
                 account_id=prod_account_id,
                 access_token=prod_access_token,
                 api_url=prod_api_url,
                 mode=TradingMode.PRODUCTION
             )
             logger.info("✅ Production trading credentials loaded")
+            logger.info(f"🔍 Debug - credentials dict keys: {list(self.tradier_credentials.keys())}")
         else:
-            logger.warning("⚠️ Production trading credentials not found")
+            logger.warning(f"⚠️ Production trading credentials not found - account_id: {bool(prod_account_id)}, token: {bool(prod_access_token)}")
+    
+    def _load_ibkr_credentials(self):
+        """Load IBKR credentials for both paper and live trading modes"""
+        # IBKR Paper trading credentials
+        paper_host = os.getenv('IBKR_PAPER_HOST', '127.0.0.1').strip()
+        paper_port_str = os.getenv('IBKR_PAPER_PORT', '').strip()
+        paper_client_id_str = os.getenv('IBKR_PAPER_CLIENT_ID', '1').strip()
+        
+        # Use legacy IBKR_PORT if paper port not specified (defaults to 7497 for paper TWS or 4002 for paper Gateway)
+        if not paper_port_str:
+            paper_port_str = os.getenv('IBKR_PORT', '7497').strip()
+        
+        if paper_port_str:
+            try:
+                paper_port = int(paper_port_str)
+                paper_client_id = int(paper_client_id_str)
+                
+                self.ibkr_credentials[TradingMode.PAPER] = IBKRCredentials(
+                    host=paper_host,
+                    port=paper_port,
+                    client_id=paper_client_id,
+                    mode=TradingMode.PAPER
+                )
+                logger.info(f"✅ IBKR Paper trading credentials loaded: {paper_host}:{paper_port} (client_id={paper_client_id})")
+            except ValueError as e:
+                logger.error(f"❌ Invalid IBKR paper port or client_id: {e}")
+        else:
+            logger.warning("⚠️ IBKR Paper trading credentials not found")
+        
+        # IBKR Live/Production trading credentials
+        live_host = os.getenv('IBKR_LIVE_HOST', '127.0.0.1').strip()
+        live_port_str = os.getenv('IBKR_LIVE_PORT', '').strip()
+        live_client_id_str = os.getenv('IBKR_LIVE_CLIENT_ID', '1').strip()
+        
+        logger.info(f"🔍 Debug - IBKR live_port: '{live_port_str}' (len={len(live_port_str)})")
+        logger.info(f"🔍 Debug - IBKR live_host: '{live_host}' (len={len(live_host)})")
+        
+        if live_port_str:
+            try:
+                live_port = int(live_port_str)
+                live_client_id = int(live_client_id_str)
+                
+                self.ibkr_credentials[TradingMode.PRODUCTION] = IBKRCredentials(
+                    host=live_host,
+                    port=live_port,
+                    client_id=live_client_id,
+                    mode=TradingMode.PRODUCTION
+                )
+                logger.info(f"✅ IBKR Live trading credentials loaded: {live_host}:{live_port} (client_id={live_client_id})")
+                logger.info(f"🔍 Debug - IBKR credentials dict keys: {list(self.ibkr_credentials.keys())}")
+            except ValueError as e:
+                logger.error(f"❌ Invalid IBKR live port or client_id: {e}")
+        else:
+            logger.warning(f"⚠️ IBKR Live trading credentials not found")
     
     def set_mode(self, mode: TradingMode) -> bool:
         """Set the current trading mode"""
-        if mode not in self.credentials:
+        logger.info(f"🔍 Debug set_mode - Requested mode: {mode} (type: {type(mode)}, value: {mode.value})")
+        logger.info(f"🔍 Debug set_mode - Available credentials: {list(self.credentials.keys())}")
+        logger.info(f"🔍 Debug set_mode - Mode in credentials (direct): {mode in self.credentials}")
+        
+        # Check if mode exists by comparing enum values (handles enum identity issues)
+        mode_found = False
+        for key in self.credentials.keys():
+            logger.info(f"🔍 Debug - Comparing {mode} == {key}: {mode == key}, id match: {id(mode) == id(key)}")
+            if key.value == mode.value:
+                mode_found = True
+                actual_key = key
+                break
+        
+        if not mode_found:
             logger.error(f"❌ No credentials available for {mode.value} mode")
+            logger.error(f"❌ Credentials dict: {self.credentials}")
             return False
         
-        self.current_mode = mode
+        self.current_mode = actual_key
+        st.session_state.trading_mode = mode  # Persist to session state
         logger.info(f"🔄 Switched to {mode.value} trading mode")
         return True
     
     def get_current_credentials(self) -> Optional[TradingCredentials]:
         """Get credentials for the current trading mode"""
-        return self.credentials.get(self.current_mode)
+        # Use value-based lookup to handle enum identity issues
+        for key, creds in self.credentials.items():
+            if key.value == self.current_mode.value:
+                return creds
+        return None
     
     def get_mode(self) -> TradingMode:
         """Get the current trading mode"""
@@ -127,6 +231,71 @@ class TradingModeManager:
             "api_url": creds.api_url,
             "account_id": creds.account_id[:8] + "..." if creds.account_id else "N/A"
         }
+    
+    def get_ibkr_credentials(self, mode: Optional[TradingMode] = None) -> Optional[IBKRCredentials]:
+        """
+        Get IBKR credentials for specified mode or current mode
+        
+        Args:
+            mode: Trading mode (PAPER or PRODUCTION). If None, uses current mode.
+        
+        Returns:
+            IBKRCredentials or None if not available
+        """
+        target_mode = mode if mode else self.current_mode
+        
+        # Use value-based lookup to handle enum identity issues
+        for key, creds in self.ibkr_credentials.items():
+            if key.value == target_mode.value:
+                return creds
+        return None
+    
+    def get_tradier_credentials(self, mode: Optional[TradingMode] = None) -> Optional[TradingCredentials]:
+        """
+        Get Tradier credentials for specified mode or current mode
+        
+        Args:
+            mode: Trading mode (PAPER or PRODUCTION). If None, uses current mode.
+        
+        Returns:
+            TradingCredentials or None if not available
+        """
+        target_mode = mode if mode else self.current_mode
+        
+        # Use value-based lookup to handle enum identity issues
+        for key, creds in self.tradier_credentials.items():
+            if key.value == target_mode.value:
+                return creds
+        return None
+    
+    def has_ibkr_credentials(self, mode: Optional[TradingMode] = None) -> bool:
+        """Check if IBKR credentials are available for the specified or current mode"""
+        return self.get_ibkr_credentials(mode) is not None
+    
+    def has_tradier_credentials(self, mode: Optional[TradingMode] = None) -> bool:
+        """Check if Tradier credentials are available for the specified or current mode"""
+        return self.get_tradier_credentials(mode) is not None
+    
+    def get_available_brokers(self, mode: Optional[TradingMode] = None) -> list[BrokerType]:
+        """
+        Get list of available brokers for the specified or current mode
+        
+        Args:
+            mode: Trading mode to check. If None, uses current mode.
+        
+        Returns:
+            List of available BrokerType enums
+        """
+        target_mode = mode if mode else self.current_mode
+        brokers = []
+        
+        if self.has_tradier_credentials(target_mode):
+            brokers.append(BrokerType.TRADIER)
+        
+        if self.has_ibkr_credentials(target_mode):
+            brokers.append(BrokerType.IBKR)
+        
+        return brokers
 
 # Global instance
 trading_mode_manager = TradingModeManager()

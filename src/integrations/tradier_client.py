@@ -5,12 +5,76 @@ Handles account management, order placement, and position tracking
 
 import requests
 import logging
+import time
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import json
+from functools import wraps
 from .trading_config import get_trading_mode_manager, TradingMode
 
 logger = logging.getLogger(__name__)
+
+def retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0):
+    """
+    Decorator to retry API calls on 504 Gateway Timeout errors with exponential backoff.
+    
+    Args:
+        max_retries: Maximum number of retry attempts
+        initial_delay: Initial delay in seconds before first retry
+        backoff_factor: Multiplier for delay between retries
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            last_exception = None
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except requests.exceptions.HTTPError as e:
+                    # Check if it's a 504 Gateway Timeout error
+                    if e.response is not None and e.response.status_code == 504:
+                        last_exception = e
+                        if attempt < max_retries:
+                            logger.warning(
+                                f"⏳ 504 Gateway Timeout on {func.__name__} (attempt {attempt + 1}/{max_retries + 1}). "
+                                f"Retrying in {delay:.1f}s... (Tradier sandbox may be slow)"
+                            )
+                            time.sleep(delay)
+                            delay *= backoff_factor
+                            continue
+                        else:
+                            logger.error(
+                                f"❌ 504 Gateway Timeout on {func.__name__} after {max_retries + 1} attempts. "
+                                f"Tradier sandbox API is experiencing issues. This is a Tradier server problem, not your code."
+                            )
+                    # Re-raise non-504 errors immediately
+                    raise
+                except requests.exceptions.Timeout as e:
+                    # Handle connection timeouts
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"⏳ Connection timeout on {func.__name__} (attempt {attempt + 1}/{max_retries + 1}). "
+                            f"Retrying in {delay:.1f}s..."
+                        )
+                        time.sleep(delay)
+                        delay *= backoff_factor
+                        continue
+                    else:
+                        logger.error(f"❌ Connection timeout on {func.__name__} after {max_retries + 1} attempts.")
+                    raise
+                except Exception:
+                    # Re-raise all other exceptions immediately
+                    raise
+            
+            # If we exhausted all retries, raise the last exception
+            if last_exception:
+                raise last_exception
+                
+        return wrapper
+    return decorator
 
 class TradierClient:
     """Client for Tradier API integration with paper and production trading"""
@@ -20,7 +84,8 @@ class TradierClient:
         if account_id is None or access_token is None:
             mode_manager = get_trading_mode_manager()
             if trading_mode:
-                mode_manager.set_mode(trading_mode)
+                if not mode_manager.set_mode(trading_mode):
+                    raise ValueError(f"No trading credentials available for {trading_mode.value} mode. Please configure environment variables.")
             
             creds = mode_manager.get_current_credentials()
             if not creds:
@@ -145,6 +210,7 @@ class TradierClient:
             logger.error("_safe_json unexpected error: %s", e)
             return {}
     
+    @retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
     def get_account_balance(self) -> Tuple[bool, Dict]:
         """Get account balance information"""
         try:
@@ -159,10 +225,14 @@ class TradierClient:
             logger.error(f"Error getting account balance: {e}")
             return False, {"error": str(e)}
     
+    @retry_on_timeout(max_retries=4, initial_delay=0.5, backoff_factor=2.0)
     def get_positions(self) -> Tuple[bool, List[Dict]]:
-        """Get current positions"""
+        """Get current positions with enhanced error handling"""
         try:
-            response = self.session.get(f'{self.api_url}/v1/accounts/{self.account_id}/positions')
+            response = self.session.get(
+                f'{self.api_url}/v1/accounts/{self.account_id}/positions',
+                timeout=10  # Add explicit timeout
+            )
             response.raise_for_status()
             
             positions_data = self._safe_json(response)
@@ -190,13 +260,19 @@ class TradierClient:
             return True, []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting positions: {e}")
+            logger.warning("⚠️ Returning empty positions list due to API error (safe fallback)")
             return False, []
     
+    @retry_on_timeout(max_retries=4, initial_delay=0.5, backoff_factor=2.0)
     def get_orders(self, status: str = "all") -> Tuple[bool, List[Dict]]:
-        """Get order history"""
+        """Get order history with enhanced error handling"""
         try:
             params = {"status": status}
-            response = self.session.get(f'{self.api_url}/v1/accounts/{self.account_id}/orders', params=params)
+            response = self.session.get(
+                f'{self.api_url}/v1/accounts/{self.account_id}/orders',
+                params=params,
+                timeout=10  # Add explicit timeout
+            )
             response.raise_for_status()
             
             orders_data = self._safe_json(response)
@@ -224,6 +300,7 @@ class TradierClient:
             return True, []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting orders: {e}")
+            logger.warning("⚠️ Returning empty orders list due to API error (safe fallback)")
             return False, []
     
     def get_quote(self, symbol: str) -> Dict:
@@ -249,6 +326,7 @@ class TradierClient:
             logger.error(f"Error getting quote for {symbol}: {e}")
             return {}
     
+    @retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
     def get_quotes(self, symbols: List[str]) -> Tuple[bool, Dict]:
         """Get real-time quotes for symbols"""
         try:
@@ -398,10 +476,40 @@ class TradierClient:
         """
         Place a bracket order (OTOCO - One-Triggers-OCO) with entry, take-profit, and stop-loss.
         This function constructs and sends a multi-leg order to Tradier.
+        
+        Note: For SELL orders, you must have an existing position. Short selling is not supported
+        in paper trading accounts.
         """
         try:
+            # Validate side
+            if side.lower() not in ['buy', 'sell']:
+                return False, {"error": f"Invalid side: {side}. Must be 'buy' or 'sell'"}
+            
+            # Warn about SELL orders (potential short selling)
+            if side.lower() == 'sell':
+                logger.warning(f"⚠️ Placing SELL bracket order for {symbol}. Ensure you have an existing position to avoid short selling rejection.")
+            
             exit_side = 'sell' if side.lower() == 'buy' else 'buy'
             trade_symbol = option_symbol if option_symbol else symbol.upper()
+            
+            # Round all prices to 2 decimals (Tradier requirement)
+            entry_price = round(float(entry_price), 2)
+            take_profit_price = round(float(take_profit_price), 2)
+            stop_loss_price = round(float(stop_loss_price), 2)
+            
+            # Validate price logic for BUY orders
+            if side.lower() == 'buy':
+                if take_profit_price <= entry_price:
+                    logger.warning(f"⚠️ BUY order: take_profit (${take_profit_price}) should be > entry (${entry_price})")
+                if stop_loss_price >= entry_price:
+                    logger.warning(f"⚠️ BUY order: stop_loss (${stop_loss_price}) should be < entry (${entry_price})")
+            
+            # Validate price logic for SELL orders (closing position)
+            if side.lower() == 'sell':
+                if take_profit_price >= entry_price:
+                    logger.warning(f"⚠️ SELL order: take_profit (${take_profit_price}) should be < entry (${entry_price})")
+                if stop_loss_price <= entry_price:
+                    logger.warning(f"⚠️ SELL order: stop_loss (${stop_loss_price}) should be > entry (${entry_price})")
 
             # 1. Build the order payload with explicit parameters
             order_data = {
@@ -541,6 +649,7 @@ class TradierClient:
             logger.error(f"Error cancelling order: {e}")
             return False, {"error": str(e)}
     
+    @retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0)
     def get_order_status(self, order_id: str) -> Tuple[bool, Dict]:
         """Get status of a specific order"""
         try:

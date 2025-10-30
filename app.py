@@ -1,4 +1,8 @@
+from dotenv import load_dotenv
+
 # This must be the very first thing to run to ensure all modules are found
+load_dotenv()
+
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
@@ -18,7 +22,6 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
-from dotenv import load_dotenv
 
 # --- Application Configuration ---
 st.set_page_config(
@@ -27,9 +30,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Load environment variables (logging configured later)
-load_dotenv()
 
 # Windows-specific asyncio policy
 if sys.platform == "win32":
@@ -47,7 +47,7 @@ from services.ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrad
 from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
 from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
-from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, ScanType, OpportunityResult
+from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
 from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
 
 # Add caching for better performance with new Streamlit features
@@ -317,6 +317,41 @@ class StrategyRecommendation:
     examples: Optional[List[str]] = None
     notes: Optional[str] = None
     example_trade: Optional[Dict] = None
+    
+    # Additional attributes for compatibility
+    @property
+    def name(self) -> str:
+        """Alias for strategy_name for backward compatibility"""
+        return self.strategy_name
+    
+    @property
+    def score(self) -> float:
+        """Alias for confidence for backward compatibility"""
+        return self.confidence
+    
+    @property
+    def experience(self) -> str:
+        """Alias for experience_level for backward compatibility"""
+        return self.experience_level
+    
+    @property
+    def best_for(self) -> List[str]:
+        """Alias for best_conditions for backward compatibility"""
+        return self.best_conditions
+    
+    @property
+    def reasoning_list(self) -> List[str]:
+        """Convert reasoning string to list for iteration"""
+        if isinstance(self.reasoning, str):
+            return [line.strip() for line in self.reasoning.split('\n') if line.strip()]
+        return self.reasoning if isinstance(self.reasoning, list) else []
+    
+    # Default values for missing attributes
+    win_rate: Optional[str] = None
+    capital_req: Optional[str] = None
+    description: Optional[str] = None
+    setup_steps: Optional[List[str]] = None
+    warnings: Optional[List[str]] = None
 
 @dataclass
 class StockAnalysis:
@@ -962,9 +997,14 @@ class StrategyAdvisor:
             
             # Capital requirements
             capital_req = strategy_info.get("capital_req", "Medium")
-            if capital_available < 5000 and capital_req == "High":
+            # Check if capital requirement is high (handle different formats)
+            is_high_capital = capital_req.startswith("High") if isinstance(capital_req, str) else capital_req == "High"
+            if capital_available < 2000 and is_high_capital:
                 score -= 40
                 reasoning_parts.append("⚠️ May require more capital than available")
+            elif capital_available < 5000 and is_high_capital:
+                score -= 10  # Smaller penalty for moderate capital shortfall
+                reasoning_parts.append("⚠️ Consider capital requirements carefully")
             
             # IV considerations
             if analysis.iv_rank > 60:
@@ -988,7 +1028,7 @@ class StrategyAdvisor:
                     score += 25
                     reasoning_parts.append("✅ Aligns with bearish outlook")
             elif outlook == "Neutral":
-                if strategy_key in ["IRON_CONDOR", "SELL_CALL", "WHEEL_STRATEGY"]:
+                if strategy_key in ["IRON_CONDOR", "SELL_CALL", "SELL_PUT", "WHEEL_STRATEGY"]:
                     score += 25
                     reasoning_parts.append("✅ Good for neutral/range-bound markets")
             
@@ -1044,7 +1084,18 @@ class StrategyAdvisor:
                     score += 10
                     reasoning_parts.append(f"✅ High win rate (~{strategy_info['typical_win_rate']})")
             
-            confidence = max(0, min(1, (score + 50) / 100))
+            # Convert score to confidence (0-1) with better scaling
+            # Raw score can be negative, so we normalize it better
+            # Use a more generous scaling to avoid very low scores
+            base_score = max(0, score + 30)  # Less harsh penalty for negative scores
+            confidence = min(1.0, base_score / 80)  # Scale to 0-1 with 80 as max
+            
+            # Debug: Log scoring details for first few strategies
+            if strategy_key in ["SELL_PUT", "SELL_CALL", "IRON_CONDOR"]:
+                print(f"DEBUG {strategy_key}: raw_score={score}, base_score={base_score}, confidence={confidence:.3f}")
+                print(f"  - IV_rank: {analysis.iv_rank}, trend: {analysis.trend}, outlook: {outlook}")
+                print(f"  - capital_available: {capital_available}, capital_req: {capital_req}")
+                print(f"  - reasoning: {reasoning_parts}")
             
             if confidence > 0.3:
                 recommendations.append(StrategyRecommendation(
@@ -1056,7 +1107,12 @@ class StrategyAdvisor:
                     max_loss=strategy_info["max_loss"],
                     max_gain=strategy_info["max_gain"],
                     best_conditions=strategy_info["best_for"],
-                    experience_level=strategy_info["experience"]
+                    experience_level=strategy_info["experience"],
+                    win_rate=strategy_info.get("typical_win_rate"),
+                    capital_req=strategy_info.get("capital_req", "Medium"),
+                    description=strategy_info["description"],
+                    setup_steps=strategy_info.get("examples", []),
+                    warnings=strategy_info.get("notes", "").split("; ") if strategy_info.get("notes") else []
                 ))
         
         recommendations.sort(key=lambda x: x.confidence, reverse=True)
@@ -1510,7 +1566,7 @@ def main():
                             # Refresh Tradier client for new mode
                             if 'tradier_client' in st.session_state:
                                 try:
-                                    st.session_state.tradier_client = create_tradier_client_from_env()
+                                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
                                     st.info("Tradier client refreshed for Paper Mode")
                                 except Exception as e:
                                     st.warning(f"Failed to refresh Tradier client: {e}")
@@ -1525,7 +1581,7 @@ def main():
                             # Refresh Tradier client for new mode
                             if 'tradier_client' in st.session_state:
                                 try:
-                                    st.session_state.tradier_client = create_tradier_client_from_env()
+                                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
                                     st.info("Tradier client refreshed for Production Mode")
                                 except Exception as e:
                                     st.warning(f"Failed to refresh Tradier client: {e}")
@@ -1618,7 +1674,7 @@ def main():
             st.info("Run a strategy analysis to see a quick summary here.")
     
     # Main tabs - Reorganized for clarity
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
         "🏠 Dashboard",
         "🚀 Advanced Scanner",
         "⭐ My Tickers",
@@ -1627,10 +1683,12 @@ def main():
         "📊 Generate Signal", 
         "📜 Signal History",
         "📚 Strategy Guide",
+        "📚 Strategy Templates",
         "🏦 Tradier Account",
         "📈 IBKR Trading",
         "⚡ Scalping/Day Trade",
-        "🤖 Strategy Analyzer"
+        "🤖 Strategy Analyzer",
+        "🤖 Auto-Trader"
     ])
     
     with tab1:
@@ -2171,6 +2229,10 @@ def main():
             st.divider()
         
         if analyze_btn and search_ticker:
+            # Clear previous analysis from session state
+            if 'analysis' in st.session_state:
+                del st.session_state['analysis']
+
             # Use new st.status for better progress indication
             with st.status(f"🔍 Analyzing {search_ticker}...", expanded=True) as status:
                 st.write("📊 Fetching market data...")
@@ -3348,7 +3410,14 @@ def main():
                     
                     # Final Notes
                     st.divider()
-                    st.caption(f"""**Analysis completed at:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')} | 
+                    # Ensure alpha_factors is defined
+                    if 'alpha_factors' not in locals():
+                        alpha_factors = None
+                    
+                    # Get current timestamp safely
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    st.caption(f"""**Analysis completed at:** {current_time} | 
 **Trading Style:** {trading_style_display} | 
 **Data Source:** Yahoo Finance (Real-time) | 
 **ML Factors:** {len(alpha_factors) if alpha_factors else 0} alpha factors analyzed""")
@@ -3607,7 +3676,8 @@ def main():
                     "💰 Penny Stocks (<$5)",
                     "💥 Breakouts",
                     "🚀 Momentum Plays",
-                    "🔥 Buzzing Stocks"
+                    "🔥 Buzzing Stocks",
+                    "🌶️ Hottest Stocks"
                 ],
                 help="Select the type of opportunities to find"
             )
@@ -3618,22 +3688,46 @@ def main():
                 "💰 Penny Stocks (<$5)": ScanType.PENNY_STOCKS,
                 "💥 Breakouts": ScanType.BREAKOUTS,
                 "🚀 Momentum Plays": ScanType.MOMENTUM,
-                "🔥 Buzzing Stocks": ScanType.BUZZING
+                "🔥 Buzzing Stocks": ScanType.BUZZING,
+                "🌶️ Hottest Stocks": ScanType.HOTTEST_STOCKS
             }
             scan_type = scan_type_map[scan_type_display]
             
+            # Trading style selector
+            st.subheader("📈 Trading Style")
+            trading_style_display = st.selectbox(
+                "Strategy recommendations for:",
+                options=[
+                    "📊 Options Trading",
+                    "⚡ Scalping (seconds-minutes)",
+                    "🎯 Day Trading (intraday)",
+                    "📈 Swing Trading (days-weeks)",
+                    "💎 Buy & Hold (long-term)"
+                ],
+                help="Choose your preferred trading style for strategy recommendations"
+            )
+            
+            trading_style_map = {
+                "📊 Options Trading": "OPTIONS",
+                "⚡ Scalping (seconds-minutes)": "SCALP",
+                "🎯 Day Trading (intraday)": "DAY_TRADE",
+                "📈 Swing Trading (days-weeks)": "SWING_TRADE",
+                "💎 Buy & Hold (long-term)": "BUY_HOLD"
+            }
+            trading_style = trading_style_map[trading_style_display]
+            
             num_results = st.slider("Number of results", 5, 50, 20, 5)
             
-            # Performance control for buzzing stocks scan
+            # Performance control for buzzing and hottest stocks scans
             max_tickers_to_scan = None
-            if scan_type == ScanType.BUZZING:
+            if scan_type in [ScanType.BUZZING, ScanType.HOTTEST_STOCKS]:
                 max_tickers_to_scan = st.slider(
                     "Max tickers to scan (performance)", 
-                    min_value=20, 
-                    max_value=200, 
-                    value=50, 
-                    step=10,
-                    help="Limit number of tickers to check. Lower = faster scan. Default scans all 200+ tickers."
+                    min_value=50, 
+                    max_value=300, 
+                    value=150, 
+                    step=25,
+                    help="Limit the number of tickers to scan for faster results. More tickers = wider net but slower scan."
                 )
         
         with col2:
@@ -3971,6 +4065,7 @@ def main():
                             if scan_type == ScanType.BUZZING:
                                 opportunities = scanner.scan_buzzing_stocks(
                                     top_n=num_results,
+                                    trading_style=trading_style,
                                     min_buzz_score=min_buzz_score,
                                     max_tickers_to_scan=max_tickers_to_scan
                                 )
@@ -3978,6 +4073,7 @@ def main():
                                 opportunities = scanner.scan_opportunities(
                                     scan_type=scan_type,
                                     top_n=num_results,
+                                    trading_style=trading_style,
                                     filters=filters,
                                     use_extended_universe=use_extended_universe
                                 )
@@ -3988,6 +4084,7 @@ def main():
                         if scan_type == ScanType.BUZZING:
                             opportunities = scanner.scan_buzzing_stocks(
                                 top_n=num_results,
+                                trading_style=trading_style,
                                 min_buzz_score=min_buzz_score,
                                 max_tickers_to_scan=max_tickers_to_scan
                             )
@@ -3995,6 +4092,7 @@ def main():
                             opportunities = scanner.scan_opportunities(
                                 scan_type=scan_type,
                                 top_n=num_results,
+                                trading_style=trading_style,
                                 filters=filters,
                                 use_extended_universe=use_extended_universe
                             )
@@ -5124,6 +5222,126 @@ def main():
         st.header("🎯 Intelligent Strategy Advisor")
         st.write("Get personalized strategy recommendations based on comprehensive analysis.")
         
+        # Check if we have a current analysis to work with
+        current_analysis = st.session_state.get('current_analysis', None)
+        
+        if current_analysis:
+            st.success(f"📊 **Current Analysis Available:** {current_analysis.ticker} @ ${current_analysis.price:.2f}")
+            
+            # Quick analysis summary
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Price Change", f"{current_analysis.change_pct:+.2f}%")
+            with col2:
+                st.metric("RSI", f"{current_analysis.rsi:.1f}")
+            with col3:
+                st.metric("IV Rank", f"{current_analysis.iv_rank:.1f}%")
+            with col4:
+                st.metric("Trend", current_analysis.trend)
+            
+            # Generate strategy recommendations based on current analysis
+            st.subheader("🎯 AI-Powered Strategy Recommendations")
+            st.write("Based on your current analysis and market conditions:")
+            
+            # Get user preferences
+            col1, col2 = st.columns(2)
+            with col1:
+                user_experience = st.selectbox(
+                    "Your Experience Level",
+                    ["Beginner", "Intermediate", "Advanced"],
+                    index=1,
+                    key="advisor_exp"
+                )
+                risk_tolerance = st.selectbox(
+                    "Risk Tolerance",
+                    ["Low", "Moderate", "High"],
+                    index=1,
+                    key="advisor_risk"
+                )
+            with col2:
+                capital_available = st.number_input(
+                    "Available Capital ($)",
+                    min_value=100,
+                    max_value=1000000,
+                    value=5000,
+                    step=100,
+                    key="advisor_capital"
+                )
+                market_outlook = st.selectbox(
+                    "Market Outlook",
+                    ["Bullish", "Bearish", "Neutral"],
+                    index=2,
+                    key="advisor_outlook"
+                )
+            
+            # Generate recommendations
+            if st.button("🔍 Generate Strategy Recommendations", type="primary"):
+                with st.spinner("Analyzing market conditions and generating recommendations..."):
+                    try:
+                        recommendations = StrategyAdvisor.get_recommendations(
+                            analysis=current_analysis,
+                            user_experience=user_experience,
+                            risk_tolerance=risk_tolerance,
+                            capital_available=capital_available,
+                            outlook=market_outlook
+                        )
+                        
+                        if recommendations:
+                            st.success(f"✅ Generated {len(recommendations)} strategy recommendations!")
+                            
+                            for i, rec in enumerate(recommendations[:5], 1):  # Show top 5
+                                with st.expander(f"#{i} {rec.name} (Score: {int(rec.score * 100)}/100)", expanded=i==1):
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Risk Level", rec.risk_level)
+                                        st.metric("Max Loss", rec.max_loss)
+                                    with col2:
+                                        st.metric("Max Gain", rec.max_gain)
+                                        st.metric("Win Rate", rec.win_rate)
+                                    with col3:
+                                        st.metric("Capital Req", rec.capital_req)
+                                        st.metric("Experience", rec.experience)
+                                    
+                                    st.write(f"**Description:** {rec.description}")
+                                    st.write(f"**Best For:** {', '.join(rec.best_for)}")
+                                    
+                                    if rec.reasoning:
+                                        st.write("**Why This Strategy:**")
+                                        for reason in rec.reasoning_list:
+                                            st.write(f"• {reason}")
+                                    
+                                    if rec.setup_steps:
+                                        st.write("**Setup Steps:**")
+                                        for j, step in enumerate(rec.setup_steps, 1):
+                                            st.write(f"{j}. {step}")
+                                    
+                                    if rec.warnings:
+                                        st.write("**⚠️ Warnings:**")
+                                        for warning in rec.warnings:
+                                            st.warning(warning)
+                                    
+                                    # Action buttons
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        if st.button(f"Use This Strategy", key=f"use_rec_{i}"):
+                                            st.session_state.selected_strategy = rec.name
+                                            st.session_state.selected_ticker = current_analysis.ticker
+                                            st.success(f"✅ Strategy '{rec.name}' selected for {current_analysis.ticker}")
+                                    with col2:
+                                        if st.button(f"View Details", key=f"details_rec_{i}"):
+                                            st.info("Navigate to 'Generate Signal' tab to configure this strategy")
+                        else:
+                            st.warning("No suitable strategies found for current market conditions. Try adjusting your preferences.")
+                            
+                    except Exception as e:
+                        st.error(f"Error generating recommendations: {e}")
+        else:
+            st.info("💡 **No stock analysis available.** Go to the Dashboard tab to analyze a stock first, then return here for strategy recommendations.")
+            if st.button("Go to Dashboard"):
+                st.info("Navigate to the 'Dashboard' tab above to analyze a stock")
+        
+        st.divider()
+        
         # Add educational section about filtered investment approaches
         with st.expander("📚 Understanding Filtered Investment Approaches", expanded=False):
             st.markdown("""
@@ -5204,13 +5422,11 @@ def main():
             5. **Paper Trade**: Test strategies with paper trading before using real money
             """)
         
-        # Check if we have analysis
-        if not st.session_state.current_analysis:
-            st.warning("⚠️ Please analyze a stock in the 'Dashboard' tab first!")
-        else:
+        # Check if we have analysis (optional for traditional strategies)
+        if st.session_state.current_analysis:
             analysis = st.session_state.current_analysis
             st.success(f"Using analysis for: **{analysis.ticker}** (${analysis.price}, {analysis.change_pct:+.2f}%)")
-
+            
             col1, col2 = st.columns(2)
 
             with col1:
@@ -5505,6 +5721,532 @@ def main():
                                         st.write("No suitable strategies found for this scenario.")
                         else:
                             st.warning("No strategies found for any scenario. Try adjusting parameters.")
+        else:
+            # No analysis available - show message
+            st.info("💡 **Traditional Strategy Recommendations** require stock analysis. Analyze a stock in the Dashboard tab first, or use Advanced Strategies below.")
+        
+        # Custom Template Strategies Section
+        st.divider()
+        # Enhanced Custom Strategy Templates with Analysis Integration
+        st.subheader("📚 Your Custom Strategy Templates")
+        st.caption("Strategies you've saved in the Strategy Templates tab")
+        
+        try:
+            from models.option_strategy_templates import template_manager
+            
+            custom_templates = template_manager.get_all_templates()
+            
+            if custom_templates:
+                # Filter options
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    template_exp_filter = st.selectbox(
+                        "Experience Level",
+                        ["All", "Beginner", "Intermediate", "Advanced", "Professional"],
+                        key="template_exp_filter"
+                    )
+                with col2:
+                    template_direction_filter = st.selectbox(
+                        "Direction",
+                        ["All", "Bullish", "Bearish", "Neutral", "Volatility"],
+                        key="template_direction_filter"
+                    )
+                with col3:
+                    template_oa_filter = st.checkbox(
+                        "Option Alpha Compatible Only",
+                        value=True,
+                        key="template_oa_filter"
+                    )
+                
+                # Apply filters
+                filtered_templates = custom_templates
+                if template_exp_filter != "All":
+                    filtered_templates = [t for t in filtered_templates if t.experience_level == template_exp_filter]
+                if template_direction_filter != "All":
+                    filtered_templates = [t for t in filtered_templates if template_direction_filter.upper() in t.direction.upper()]
+                if template_oa_filter:
+                    filtered_templates = [t for t in filtered_templates if t.option_alpha_compatible]
+                
+                if filtered_templates:
+                    st.write(f"**{len(filtered_templates)} template(s) available**")
+                    
+                    # If we have current analysis, show compatibility scores
+                    if current_analysis:
+                        st.info("🎯 **Analysis-Based Recommendations:** Templates are scored based on current market conditions")
+                        
+                        # Score templates based on current analysis
+                        scored_templates = []
+                        for template in filtered_templates:
+                            score = 0
+                            reasoning = []
+                            
+                            # IV Rank compatibility
+                            if template.ideal_iv_rank == "High (>60)" and current_analysis.iv_rank > 60:
+                                score += 30
+                                reasoning.append(f"✅ High IV Rank ({current_analysis.iv_rank}%) - perfect for premium selling")
+                            elif template.ideal_iv_rank == "Low (<30)" and current_analysis.iv_rank < 30:
+                                score += 30
+                                reasoning.append(f"✅ Low IV Rank ({current_analysis.iv_rank}%) - good for option buying")
+                            elif template.ideal_iv_rank == "Medium (30-60)" and 30 <= current_analysis.iv_rank <= 60:
+                                score += 25
+                                reasoning.append(f"✅ Medium IV Rank ({current_analysis.iv_rank}%) - balanced conditions")
+                            
+                            # RSI compatibility
+                            if template.direction == "BULLISH" and current_analysis.rsi < 30:
+                                score += 20
+                                reasoning.append(f"✅ Oversold RSI ({current_analysis.rsi:.1f}) - bullish opportunity")
+                            elif template.direction == "BEARISH" and current_analysis.rsi > 70:
+                                score += 20
+                                reasoning.append(f"✅ Overbought RSI ({current_analysis.rsi:.1f}) - bearish opportunity")
+                            elif template.direction == "NEUTRAL" and 30 <= current_analysis.rsi <= 70:
+                                score += 15
+                                reasoning.append(f"✅ Neutral RSI ({current_analysis.rsi:.1f}) - good for neutral strategies")
+                            
+                            # Trend compatibility
+                            if template.direction == "BULLISH" and current_analysis.trend == "Uptrend":
+                                score += 25
+                                reasoning.append("✅ Uptrending stock - bullish strategies favorable")
+                            elif template.direction == "BEARISH" and current_analysis.trend == "Downtrend":
+                                score += 25
+                                reasoning.append("✅ Downtrending stock - bearish strategies favorable")
+                            elif template.direction == "NEUTRAL" and current_analysis.trend == "Sideways":
+                                score += 20
+                                reasoning.append("✅ Sideways movement - neutral strategies ideal")
+                            
+                            # Price movement compatibility
+                            if template.direction == "BULLISH" and current_analysis.change_pct > 0:
+                                score += 10
+                                reasoning.append(f"✅ Positive price movement ({current_analysis.change_pct:+.1f}%)")
+                            elif template.direction == "BEARISH" and current_analysis.change_pct < 0:
+                                score += 10
+                                reasoning.append(f"✅ Negative price movement ({current_analysis.change_pct:+.1f}%)")
+                            
+                            scored_templates.append((template, score, reasoning))
+                        
+                        # Sort by score
+                        scored_templates.sort(key=lambda x: x[1], reverse=True)
+                        
+                        for template, score, reasoning in scored_templates:
+                            with st.expander(f"📋 {template.name} (Compatibility: {score}/100) ({template.experience_level} | {template.risk_level} Risk)", expanded=score>70):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Direction", template.direction)
+                                    st.metric("Risk Level", template.risk_level)
+                                with col2:
+                                    st.metric("Capital Required", template.capital_requirement)
+                                    if template.typical_win_rate:
+                                        st.metric("Win Rate", template.typical_win_rate)
+                                with col3:
+                                    st.metric("IV Rank", template.ideal_iv_rank)
+                                    st.metric("Type", template.strategy_type)
+                                
+                                st.markdown(f"**Description:** {template.description}")
+                                st.markdown(f"**Max Loss:** {template.max_loss}")
+                                st.markdown(f"**Max Gain:** {template.max_gain}")
+                                
+                                if reasoning:
+                                    st.write("**Why This Strategy Works Now:**")
+                                    for reason in reasoning:
+                                        st.write(f"• {reason}")
+                                
+                                if template.setup_steps:
+                                    st.write("**Setup Steps:**")
+                                    for i, step in enumerate(template.setup_steps, 1):
+                                        st.write(f"{i}. {step}")
+                                
+                                if template.warnings:
+                                    st.write("**⚠️ Warnings:**")
+                                    for warning in template.warnings:
+                                        st.warning(warning)
+                                
+                                if template.option_alpha_compatible:
+                                    st.success(f"✅ Option Alpha Compatible - Action: `{template.option_alpha_action}`")
+                                
+                                # Action buttons
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.button(f"Use This Template", key=f"use_template_{template.strategy_id}"):
+                                        st.session_state.selected_template = template.strategy_id
+                                        st.session_state.selected_strategy = template.name
+                                        st.session_state.selected_ticker = current_analysis.ticker
+                                        st.success(f"✅ Template '{template.name}' selected for {current_analysis.ticker}")
+                                with col2:
+                                    if st.button(f"View Full Details", key=f"details_template_{template.strategy_id}"):
+                                        st.info("Navigate to 'Generate Signal' tab to configure this strategy")
+                    else:
+                        # No current analysis - show basic template list
+                        for template in filtered_templates:
+                            with st.expander(f"📋 {template.name} ({template.experience_level} | {template.risk_level} Risk)"):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Direction", template.direction)
+                                    st.metric("Risk Level", template.risk_level)
+                                with col2:
+                                    st.metric("Capital Required", template.capital_requirement)
+                                    if template.typical_win_rate:
+                                        st.metric("Win Rate", template.typical_win_rate)
+                                with col3:
+                                    st.metric("IV Rank", template.ideal_iv_rank)
+                                    st.metric("Type", template.strategy_type)
+                                
+                                st.markdown(f"**Description:** {template.description}")
+                                st.markdown(f"**Max Loss:** {template.max_loss}")
+                                st.markdown(f"**Max Gain:** {template.max_gain}")
+                                
+                                if template.option_alpha_compatible:
+                                    st.success(f"✅ Option Alpha Compatible - Action: `{template.option_alpha_action}`")
+                                
+                                if st.button(f"Use This Template", key=f"use_template_{template.strategy_id}"):
+                                    st.session_state.selected_template = template.strategy_id
+                                    st.success(f"✅ Template selected! Configure in Generate Signal tab.")
+                else:
+                    st.info("No templates match your filters. Adjust filters or add templates in the Strategy Templates tab.")
+            else:
+                st.info("💡 No custom templates yet. Create your first template in the **Strategy Templates** tab!")
+                if st.button("Go to Strategy Templates"):
+                    st.info("Navigate to the 'Strategy Templates' tab above to create templates")
+        
+        except Exception as e:
+            st.error(f"Error loading custom templates: {e}")
+        
+        # Strategy Testing and Comparison Section
+        if current_analysis:
+            st.divider()
+            st.subheader("🧪 Strategy Testing & Comparison")
+            st.caption("Test and compare different strategies for the current analysis")
+            
+            # Quick strategy comparison
+            if st.button("🔍 Compare All Strategies", type="secondary"):
+                with st.spinner("Analyzing all strategies for current market conditions..."):
+                    try:
+                        from models.option_strategy_templates import template_manager
+                        
+                        all_templates = template_manager.get_all_templates()
+                        comparison_results = []
+                        
+                        for template in all_templates:
+                            score = 0
+                            reasoning = []
+                            
+                            # IV Rank compatibility
+                            if template.ideal_iv_rank == "High (>60)" and current_analysis.iv_rank > 60:
+                                score += 30
+                                reasoning.append(f"High IV Rank ({current_analysis.iv_rank}%) - perfect for premium selling")
+                            elif template.ideal_iv_rank == "Low (<30)" and current_analysis.iv_rank < 30:
+                                score += 30
+                                reasoning.append(f"Low IV Rank ({current_analysis.iv_rank}%) - good for option buying")
+                            elif template.ideal_iv_rank == "Medium (30-60)" and 30 <= current_analysis.iv_rank <= 60:
+                                score += 25
+                                reasoning.append(f"Medium IV Rank ({current_analysis.iv_rank}%) - balanced conditions")
+                            
+                            # RSI compatibility
+                            if template.direction == "BULLISH" and current_analysis.rsi < 30:
+                                score += 20
+                                reasoning.append(f"Oversold RSI ({current_analysis.rsi:.1f}) - bullish opportunity")
+                            elif template.direction == "BEARISH" and current_analysis.rsi > 70:
+                                score += 20
+                                reasoning.append(f"Overbought RSI ({current_analysis.rsi:.1f}) - bearish opportunity")
+                            elif template.direction == "NEUTRAL" and 30 <= current_analysis.rsi <= 70:
+                                score += 15
+                                reasoning.append(f"Neutral RSI ({current_analysis.rsi:.1f}) - good for neutral strategies")
+                            
+                            # Trend compatibility
+                            if template.direction == "BULLISH" and current_analysis.trend == "Uptrend":
+                                score += 25
+                                reasoning.append("Uptrending stock - bullish strategies favorable")
+                            elif template.direction == "BEARISH" and current_analysis.trend == "Downtrend":
+                                score += 25
+                                reasoning.append("Downtrending stock - bearish strategies favorable")
+                            elif template.direction == "NEUTRAL" and current_analysis.trend == "Sideways":
+                                score += 20
+                                reasoning.append("Sideways movement - neutral strategies ideal")
+                            
+                            comparison_results.append({
+                                'template': template,
+                                'score': score,
+                                'reasoning': reasoning
+                            })
+                        
+                        # Sort by score
+                        comparison_results.sort(key=lambda x: x['score'], reverse=True)
+                        
+                        # Display results
+                        st.success(f"✅ Analyzed {len(comparison_results)} strategies")
+                        
+                        # Create a comparison table
+                        # pandas already imported at module level
+                        comparison_data = []
+                        for result in comparison_results[:10]:  # Top 10
+                            template = result['template']
+                            comparison_data.append({
+                                'Strategy': template.name,
+                                'Direction': template.direction,
+                                'Risk': template.risk_level,
+                                'Score': result['score'],
+                                'IV Match': template.ideal_iv_rank,
+                                'Experience': template.experience_level,
+                                'Capital Req': template.capital_requirement
+                            })
+                        
+                        df = pd.DataFrame(comparison_data)
+                        st.dataframe(df, use_container_width=True)
+                        
+                        # Show top 3 strategies in detail
+                        st.subheader("🏆 Top 3 Recommended Strategies")
+                        for i, result in enumerate(comparison_results[:3], 1):
+                            template = result['template']
+                            with st.expander(f"#{i} {template.name} (Score: {result['score']}/100)", expanded=i==1):
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Direction", template.direction)
+                                    st.metric("Risk Level", template.risk_level)
+                                with col2:
+                                    st.metric("Capital Required", template.capital_requirement)
+                                    if template.typical_win_rate:
+                                        st.metric("Win Rate", template.typical_win_rate)
+                                with col3:
+                                    st.metric("IV Rank", template.ideal_iv_rank)
+                                    st.metric("Type", template.strategy_type)
+                                
+                                st.markdown(f"**Description:** {template.description}")
+                                
+                                if result['reasoning']:
+                                    st.write("**Why This Strategy Works Now:**")
+                                    for reason in result['reasoning']:
+                                        st.write(f"• {reason}")
+                                
+                                if template.setup_steps:
+                                    st.write("**Setup Steps:**")
+                                    for j, step in enumerate(template.setup_steps, 1):
+                                        st.write(f"{j}. {step}")
+                                
+                                # Action buttons
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if st.button(f"Use This Strategy", key=f"use_compare_{template.strategy_id}"):
+                                        st.session_state.selected_template = template.strategy_id
+                                        st.session_state.selected_strategy = template.name
+                                        st.session_state.selected_ticker = current_analysis.ticker
+                                        st.success(f"✅ Strategy '{template.name}' selected for {current_analysis.ticker}")
+                                with col2:
+                                    if st.button(f"Test Strategy", key=f"test_compare_{template.strategy_id}"):
+                                        st.info("Navigate to 'Generate Signal' tab to test this strategy")
+                        
+                    except Exception as e:
+                        st.error(f"Error comparing strategies: {e}")
+        
+        # Advanced Strategies Section (works independently)
+        st.divider()
+        st.subheader("🚀 Advanced Professional Strategies")
+        st.caption("Professional-grade strategies with AI validation")
+        
+        # Import advanced strategy modules
+        try:
+            from models.reddit_strategies import get_all_custom_strategies, get_custom_strategy
+            from services.reddit_strategy_validator import StrategyValidator
+            from analyzers.strategy import StrategyAdvisor as AdvancedAdvisor
+            
+            # Get available strategies
+            user_exp_advanced = st.selectbox(
+                "Your Experience Level for Advanced Strategies",
+                ["Beginner", "Intermediate", "Advanced", "Professional"],
+                index=1,
+                key="advanced_exp_level"
+            )
+            
+            advanced_strategies = AdvancedAdvisor.get_custom_strategies(user_exp_advanced)
+            
+            if not advanced_strategies:
+                st.info(f"ℹ️ No advanced strategies available for {user_exp_advanced} level. Try selecting a higher experience level.")
+            else:
+                # Strategy selection
+                strategy_names = [s.name for s in advanced_strategies]
+                selected_name = st.selectbox(
+                    "Select Advanced Strategy",
+                    strategy_names,
+                    key="advanced_strategy_select"
+                )
+                
+                # Get selected strategy
+                selected_strategy = next(s for s in advanced_strategies if s.name == selected_name)
+                
+                # Display strategy overview
+                with st.expander("📋 Strategy Overview", expanded=True):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Source", selected_strategy.source)
+                        st.metric("Experience", selected_strategy.experience_level)
+                    with col2:
+                        st.metric("Risk Level", selected_strategy.risk_level)
+                        st.metric("Capital Required", selected_strategy.capital_requirement)
+                    with col3:
+                        if selected_strategy.typical_win_rate:
+                            st.metric("Win Rate", selected_strategy.typical_win_rate)
+                        st.metric("Products", len(selected_strategy.suitable_products))
+                    
+                    st.markdown(f"**Description:** {selected_strategy.description}")
+                    st.markdown(f"**Philosophy:** {selected_strategy.philosophy}")
+                
+                # Key metrics
+                with st.expander("📊 Performance Metrics"):
+                    metric_cols = st.columns(len(selected_strategy.key_metrics))
+                    for i, (key, value) in enumerate(selected_strategy.key_metrics.items()):
+                        with metric_cols[i]:
+                            st.metric(key.replace("_", " ").title(), value)
+                
+                # Setup rules
+                with st.expander("📖 Step-by-Step Playbook"):
+                    for rule in sorted(selected_strategy.setup_rules, key=lambda r: r.priority):
+                        st.markdown(f"**{rule.priority}. {rule.condition}**")
+                        st.info(rule.action)
+                        if rule.notes:
+                            st.caption(f"📝 {rule.notes}")
+                        st.markdown("---")
+                
+                # Risk management
+                with st.expander("🛡️ Risk Management"):
+                    for rule in selected_strategy.risk_management:
+                        mandatory = "🔴 MANDATORY" if rule.mandatory else "🟡 Optional"
+                        st.markdown(f"**{rule.rule_type.upper()}** {mandatory}")
+                        st.write(f"Value: `{rule.value}`")
+                        st.caption(rule.description)
+                        st.markdown("---")
+                
+                # Warnings
+                if selected_strategy.warnings:
+                    with st.expander("⚠️ Important Warnings", expanded=True):
+                        for warning in selected_strategy.warnings:
+                            st.warning(warning)
+                
+                # AI Validation Section
+                st.markdown("---")
+                st.markdown("### 🤖 AI Strategy Validation")
+                st.caption("Validate this strategy for a specific ticker with AI analysis")
+                
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    ticker_input = st.text_input(
+                        "Ticker to Validate",
+                        value=st.session_state.current_analysis.ticker if st.session_state.current_analysis else "",
+                        placeholder="SPY",
+                        key="advanced_strat_ticker"
+                    )
+                with col2:
+                    include_context = st.checkbox("Include Market Context", value=True, key="include_market_ctx")
+                
+                market_context = None
+                if include_context:
+                    with st.expander("📊 Market Context (Optional)"):
+                        ctx_col1, ctx_col2 = st.columns(2)
+                        with ctx_col1:
+                            vix = st.number_input("VIX Level", 0.0, 100.0, 20.0, key="vix_input")
+                            sentiment = st.selectbox(
+                                "Market Sentiment",
+                                ["Bullish", "Neutral", "Bearish", "Panic", "Euphoric"],
+                                key="sentiment_input"
+                            )
+                        with ctx_col2:
+                            events = st.text_area(
+                                "Upcoming Events",
+                                placeholder="Fed meeting, earnings season, etc.",
+                                key="events_input"
+                            )
+                        market_context = {
+                            "vix": vix,
+                            "sentiment": sentiment,
+                            "upcoming_events": events
+                        }
+                
+                if st.button("🚀 Validate Strategy with AI", type="primary", key="validate_advanced_btn"):
+                    if not ticker_input:
+                        st.error("Please enter a ticker symbol")
+                    else:
+                        with st.spinner(f"AI analyzing {selected_strategy.name} for {ticker_input}..."):
+                            try:
+                                # Get stock analysis if available
+                                analysis_for_validation = None
+                                if st.session_state.current_analysis and st.session_state.current_analysis.ticker == ticker_input:
+                                    analysis_for_validation = st.session_state.current_analysis
+                                else:
+                                    # Try to get fresh analysis
+                                    try:
+                                        analysis_for_validation = ComprehensiveAnalyzer.analyze_stock(ticker_input, "SWING_TRADE")
+                                    except Exception as e:
+                                        st.warning(f"Could not get fresh analysis: {e}")
+                                
+                                # Run validation
+                                validator = StrategyValidator()
+                                validation = validator.validate_strategy(
+                                    strategy=selected_strategy,
+                                    ticker=ticker_input,
+                                    analysis=analysis_for_validation,
+                                    market_context=market_context
+                                )
+                                
+                                # Display results
+                                st.markdown("---")
+                                st.markdown("### 📊 Validation Results")
+                                
+                                # Overall verdict
+                                if validation.is_viable:
+                                    st.success(f"✅ **VIABLE** - {validation.market_alignment} Market Alignment")
+                                else:
+                                    st.error(f"❌ **NOT VIABLE** - {validation.market_alignment} Market Alignment")
+                                
+                                # Metrics
+                                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                                with metric_col1:
+                                    st.metric("Viability Score", f"{validation.viability_score:.1%}")
+                                with metric_col2:
+                                    st.metric("Confidence", f"{validation.confidence:.1%}")
+                                with metric_col3:
+                                    st.metric("Alignment", validation.market_alignment)
+                                
+                                # Reasoning
+                                with st.expander("🧠 AI Reasoning", expanded=True):
+                                    st.markdown(validation.reasoning)
+                                
+                                # Strengths
+                                if validation.strengths:
+                                    with st.expander("✅ Strengths", expanded=True):
+                                        for strength in validation.strengths:
+                                            st.success(f"✅ {strength}")
+                                
+                                # Concerns
+                                if validation.concerns:
+                                    with st.expander("⚠️ Concerns", expanded=True):
+                                        for concern in validation.concerns:
+                                            st.warning(f"⚠️ {concern}")
+                                
+                                # Missing conditions
+                                if validation.missing_conditions:
+                                    with st.expander("❌ Missing Conditions", expanded=True):
+                                        st.markdown("**The following required conditions are NOT currently met:**")
+                                        for condition in validation.missing_conditions:
+                                            st.error(f"❌ {condition}")
+                                
+                                # Red flags
+                                if validation.red_flags_detected:
+                                    with st.expander("🚩 Red Flags Detected", expanded=True):
+                                        st.markdown("**⚠️ WARNING: The following red flags were detected:**")
+                                        for flag in validation.red_flags_detected:
+                                            st.error(f"🚩 {flag}")
+                                
+                                # Recommendations
+                                if validation.recommendations:
+                                    with st.expander("💡 Recommendations", expanded=True):
+                                        for rec in validation.recommendations:
+                                            st.info(f"💡 {rec}")
+                            
+                            except Exception as e:
+                                st.error(f"Validation failed: {str(e)}")
+                                with st.expander("Error Details"):
+                                    import traceback
+                                    st.code(traceback.format_exc())
+        
+        except ImportError as e:
+            st.error(f"Advanced strategies module not available: {e}")
+            st.info("Make sure the following files exist:\n- models/reddit_strategies.py\n- services/reddit_strategy_validator.py")
         
         # Strategy Explanation Section
         st.divider()
@@ -5637,8 +6379,90 @@ def main():
     with tab6:
         st.header("📊 Generate Trading Signal")
         
-        if 'selected_strategy' in st.session_state:
-            st.info(f"💡 Using recommended strategy: **{st.session_state.selected_strategy}** for **{st.session_state.get('selected_ticker', 'N/A')}**")
+        # Get current trading mode
+        mode_manager = get_trading_mode_manager()
+        paper_mode = mode_manager.is_paper_mode()
+        
+        # Show current trading mode with switch option
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if paper_mode:
+                st.info("🔒 **Paper Trading Mode** - Signals will be logged only")
+            else:
+                st.warning("⚠️ **LIVE TRADING MODE** - Real trades will be executed!")
+        with col2:
+            if paper_mode:
+                if st.button("Switch to Live Trading", type="primary"):
+                    if switch_to_production_mode():
+                        st.success("Switched to Live Trading Mode!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to switch to Live Trading Mode")
+            else:
+                if st.button("Switch to Paper Trading"):
+                    if switch_to_paper_mode():
+                        st.success("Switched to Paper Trading Mode!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to switch to Paper Trading Mode")
+        
+        # Check if we have a selected strategy template
+        selected_template_id = st.session_state.get('selected_template')
+        selected_strategy = st.session_state.get('selected_strategy')
+        selected_ticker = st.session_state.get('selected_ticker', 'N/A')
+        
+        if selected_template_id:
+            try:
+                from models.option_strategy_templates import template_manager
+                template = template_manager.get_template(selected_template_id)
+                
+                if template:
+                    st.success(f"🎯 **Using Strategy Template:** {template.name}")
+                    
+                    # Show template details in an expandable section
+                    with st.expander("📋 Template Details", expanded=True):
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Direction", template.direction)
+                            st.metric("Risk Level", template.risk_level)
+                        with col2:
+                            st.metric("Capital Required", template.capital_requirement)
+                            if template.typical_win_rate:
+                                st.metric("Win Rate", template.typical_win_rate)
+                        with col3:
+                            st.metric("IV Rank", template.ideal_iv_rank)
+                            st.metric("Type", template.strategy_type)
+                        
+                        st.markdown(f"**Description:** {template.description}")
+                        st.markdown(f"**Max Loss:** {template.max_loss}")
+                        st.markdown(f"**Max Gain:** {template.max_gain}")
+                        
+                        if template.setup_steps:
+                            st.write("**Setup Steps:**")
+                            for i, step in enumerate(template.setup_steps, 1):
+                                st.write(f"{i}. {step}")
+                        
+                        if template.warnings:
+                            st.write("**⚠️ Warnings:**")
+                            for warning in template.warnings:
+                                st.warning(warning)
+                        
+                        if template.option_alpha_compatible:
+                            st.success(f"✅ Option Alpha Compatible - Action: `{template.option_alpha_action}`")
+                    
+                    # Pre-fill strategy selection
+                    if template.option_alpha_action:
+                        st.session_state.selected_strategy = template.option_alpha_action
+                        selected_strategy = template.option_alpha_action
+                    
+                    st.divider()
+                else:
+                    st.warning("Selected template not found. Please select a valid template.")
+            except Exception as e:
+                st.error(f"Error loading template: {e}")
+        
+        if selected_strategy:
+            st.info(f"💡 Using recommended strategy: **{selected_strategy}** for **{selected_ticker}**")
         
         col1, col2 = st.columns(2)
         
@@ -6468,6 +7292,12 @@ def main():
     
     
     with tab9:
+        # Strategy Templates Manager
+        from ui.strategy_template_manager import render_template_manager
+        render_template_manager()
+    
+    
+    with tab10:
         # Initialize Tradier client
         from src.integrations.tradier_client import create_tradier_client_from_env
         if 'tradier_client' not in st.session_state:
@@ -6475,7 +7305,7 @@ def main():
             try:
                 # Use trading mode manager to get client for current mode
                 mode_manager = get_trading_mode_manager()
-                st.session_state.tradier_client = create_tradier_client_from_env()
+                st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
                 logger.info("Tradier client initialized successfully: %s", bool(st.session_state.tradier_client))
                 logger.info("Trading mode: %s", mode_manager.get_mode().value)
             except Exception as e:
@@ -6576,27 +7406,70 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     orders = summary.get('recent_orders', [])
                     
                     if orders:
-                        orders_df = pd.DataFrame(orders)
-                        
-                        # Display key columns
-                        display_cols = ['id', 'symbol', 'side', 'quantity', 'status', 'created_at']
-                        available_cols = [col for col in display_cols if col in orders_df.columns]
-                        
-                        if available_cols:
-                            st.dataframe(
-                                orders_df[available_cols],
-                                width='stretch',
-                                column_config={
-                                    "id": "Order ID",
-                                    "symbol": "Symbol",
-                                    "side": "Side",
-                                    "quantity": "Quantity",
-                                    "status": "Status",
-                                    "created_at": "Created"
-                                }
-                            )
-                        else:
-                            st.dataframe(orders_df, width='stretch')
+                        # Group orders by class (show bracket orders specially)
+                        for order in orders:
+                            order_class = order.get('class', 'equity')
+                            order_id = order.get('id', 'N/A')
+                            symbol = order.get('symbol', 'N/A')
+                            status = order.get('status', 'N/A')
+                            
+                            if order_class in ['otoco', 'oco']:
+                                # Bracket order - show all legs
+                                with st.expander(f"🎯 Bracket Order: {symbol} (ID: {order_id}) - {status}"):
+                                    st.write(f"**Order Class:** {order_class.upper()}")
+                                    st.write(f"**Status:** {status}")
+                                    
+                                    # Get legs if available
+                                    legs = order.get('leg', [])
+                                    if not isinstance(legs, list):
+                                        legs = [legs] if legs else []
+                                    
+                                    if legs:
+                                        st.write("**Order Legs:**")
+                                        for i, leg in enumerate(legs, 1):
+                                            leg_type = leg.get('type', 'N/A')
+                                            leg_side = leg.get('side', 'N/A')
+                                            leg_qty = leg.get('quantity', 'N/A')
+                                            leg_price = leg.get('price', leg.get('avg_fill_price', ''))
+                                            leg_stop = leg.get('stop', '')
+                                            leg_status = leg.get('status', 'N/A')
+                                            
+                                            # Determine leg purpose based on type and position
+                                            if leg_type == 'limit' and i == 1:
+                                                price_str = f"${leg_price}" if leg_price else "N/A"
+                                                st.info(f"**Leg {i} - Entry:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
+                                            elif leg_type == 'limit' and i == 2:
+                                                price_str = f"${leg_price}" if leg_price else "N/A"
+                                                st.success(f"**Leg {i} - Take Profit:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
+                                            elif leg_type in ['stop', 'stop_limit'] or i == 3:
+                                                # For stop orders, show stop price
+                                                if leg_stop:
+                                                    price_display = f"${leg_stop}"
+                                                elif leg_price:
+                                                    price_display = f"${leg_price}"
+                                                else:
+                                                    price_display = "N/A"
+                                                st.error(f"**Leg {i} - Stop Loss:** {leg_side.upper()} {leg_qty} @ {price_display} ({leg_status})")
+                                            else:
+                                                # Fallback display
+                                                price_info = f"Price: ${leg_price}" if leg_price else ""
+                                                stop_info = f", Stop: ${leg_stop}" if leg_stop else ""
+                                                st.write(f"**Leg {i}:** {leg_type.upper()} {leg_side.upper()} {leg_qty} - {price_info}{stop_info} ({leg_status})")
+                                    
+                                    # Show full order details
+                                    with st.expander("View Full Order JSON"):
+                                        st.json(order)
+                            else:
+                                # Simple order
+                                with st.expander(f"📝 {order_class.upper()}: {symbol} (ID: {order_id}) - {status}"):
+                                    st.write(f"**Side:** {order.get('side', 'N/A')}")
+                                    st.write(f"**Quantity:** {order.get('quantity', 'N/A')}")
+                                    st.write(f"**Type:** {order.get('type', 'N/A')}")
+                                    st.write(f"**Price:** ${order.get('price', 'N/A')}")
+                                    st.write(f"**Status:** {status}")
+                                    
+                                    with st.expander("View Full Order JSON"):
+                                        st.json(order)
                     else:
                         st.info("No orders found")
                 
@@ -6752,7 +7625,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                 else:
                     st.code(f"{var}={value}")
     
-    with tab10:
+    with tab11:
         st.header("📈 IBKR Day Trading / Scalping")
         st.write("Connect to Interactive Brokers for live day trading and scalping. Real-time positions, orders, and execution.")
         
@@ -7089,7 +7962,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                        "4. Set the port number (7497 for paper, 7496 for live)\n"
                        "5. Click 'Connect to IBKR' above")
     
-    with tab11:
+    with tab12:
         st.header("⚡ Scalping & Day Trading Dashboard")
         st.write("Quick entry/exit interface for stock day trading and scalping. Works with both Tradier and IBKR.")
         st.info("💡 **Perfect for:** Blue chips, penny stocks, runners, and high-momentum plays. Get instant scalping signals!")
@@ -7715,6 +8588,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                         })
                     
                     # Display positions
+                    # pandas already imported at module level
                     df_positions = pd.DataFrame(positions_data)
                     
                     # Style the dataframe
@@ -7928,6 +8802,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                                 'P&L': f"${pos.unrealized_pnl:,.2f}"
                             })
                         
+                        # pandas already imported at module level
                         df_positions = pd.DataFrame(positions_data)
                         st.dataframe(df_positions, width="stretch", height=300)
                         
@@ -7955,15 +8830,15 @@ TRADIER_API_URL=https://sandbox.tradier.com
             time.sleep(5)
             st.rerun()
     
-    with tab12:
+    with tab13:
         st.header("🤖 Strategy Analyzer")
         st.write("Analyze Option Alpha bot configs using an LLM provider. Choose provider, model and optionally provide an API key to run analysis.")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            provider = st.selectbox("LLM Provider", options=["openai", "anthropic", "google", "openrouter"], index=0, key='tab11_llm_provider_select')
-            model = st.text_input("Model (leave blank for default)", value="")
+            provider = st.selectbox("LLM Provider", options=["openai", "anthropic", "google", "openrouter"], index=3, key='tab12_llm_provider_select')
+            model = st.text_input("Model (leave blank for default)", value=os.getenv("AI_ANALYZER_MODEL", ""))
             api_key_input = st.text_input("API Key (optional, will override env var)", value="", type="password")
             run_btn = st.button("🔎 Run Analysis", type="primary")
 
@@ -7973,6 +8848,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
             st.json(sample_config)
 
         if run_btn:
+            logger.info("--- 'Run Analysis' button clicked ---")
             with st.spinner("Running strategy analysis..."):
                 try:
                     analyzer = LLMStrategyAnalyzer(provider=provider, model=(model or None), api_key=(api_key_input or None))
@@ -8108,6 +8984,400 @@ TRADIER_API_URL=https://sandbox.tradier.com
 
                     except Exception as e:
                         st.error(f"Analysis failed: {e}")
+    
+    with tab14:
+        st.header("🤖 Automated Trading Bot")
+        st.write("Set up automated trading that monitors your watchlist and executes high-confidence signals.")
+        
+        st.warning("⚠️ **IMPORTANT**: Start with Paper Trading mode to test before using real money!")
+        
+        # Initialize auto-trader in session state
+        if 'auto_trader' not in st.session_state:
+            st.session_state.auto_trader = None
+        
+        # Configuration section
+        st.subheader("⚙️ Configuration")
+        
+        col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+        
+        with col_cfg1:
+            scan_interval = st.number_input(
+                "Scan Interval (minutes)",
+                min_value=5,
+                max_value=60,
+                value=15,
+                help="How often to scan for new signals"
+            )
+            min_confidence = st.slider(
+                "Min Confidence %",
+                min_value=60,
+                max_value=95,
+                value=75,
+                help="Only execute signals above this confidence"
+            )
+        
+        with col_cfg2:
+            max_daily_orders = st.number_input(
+                "Max Daily Orders",
+                min_value=1,
+                max_value=50,
+                value=10,
+                help="Maximum orders per day"
+            )
+            use_bracket_orders = st.checkbox(
+                "Use Bracket Orders",
+                value=True,
+                help="Automatically set stop-loss and take-profit"
+            )
+        
+        with col_cfg3:
+            risk_tolerance = st.selectbox(
+                "Risk Tolerance",
+                options=["LOW", "MEDIUM", "HIGH"],
+                index=1
+            )
+            paper_trading = st.checkbox(
+                "Paper Trading Mode",
+                value=True,
+                help="HIGHLY RECOMMENDED: Test with paper trading first"
+            )
+            allow_short_selling = st.checkbox(
+                "Allow Short Selling (Advanced)",
+                value=False,
+                help="⚠️ Enable short selling for SELL signals. NOT recommended for scalping or cash accounts. Only for margin accounts and advanced strategies.",
+                disabled=not paper_trading
+            )
+        
+        # Smart Scanner option
+        st.divider()
+        use_smart_scanner = st.checkbox(
+            "🧠 Use Smart Scanner (Advanced)",
+            value=False,
+            help="IGNORES your ticker selections and automatically finds the best tickers using the Advanced Scanner. Leave unchecked to only scan YOUR selected tickers."
+        )
+        
+        if use_smart_scanner:
+            st.warning("""
+            ⚠️ **Smart Scanner Mode:**
+            - **IGNORES** your ticker checkboxes below
+            - Automatically scans 24-33 curated tickers based on strategy
+            - Uses Advanced Scanner to find top opportunities
+            - Updates dynamically each scan cycle
+            
+            **Strategy Mapping:**
+            - SCALPING → Scans 24 high-volume tickers, returns top 10
+            - STOCKS → Scans 33 swing trade candidates, returns top 15
+            - OPTIONS → Scans 24 high IV tickers, returns top 15
+            - ALL → Scans 24 mixed tickers, returns top 20
+            
+            💡 **Recommended if:** You want automated ticker discovery
+            ❌ **Not recommended if:** You want to control which tickers to trade
+            """)
+        else:
+            st.success("✅ Using YOUR selected tickers below (manual control)")
+        
+        # Trading mode selection
+        st.subheader("📈 Trading Mode")
+        col_mode1, col_mode2 = st.columns(2)
+        
+        with col_mode1:
+            trading_mode = st.selectbox(
+                "Strategy Type",
+                options=["STOCKS", "OPTIONS", "SCALPING", "ALL"],
+                index=2,  # Default to SCALPING
+                help="SCALPING: Fast intraday trades with tight stops (2% profit, 1% stop)"
+            )
+        
+        with col_mode2:
+            if trading_mode == "SCALPING":
+                scalp_take_profit = st.number_input(
+                    "Scalp Take Profit %",
+                    min_value=0.5,
+                    max_value=10.0,
+                    value=2.0,
+                    step=0.5,
+                    help="Target profit percentage for scalping"
+                )
+                scalp_stop_loss = st.number_input(
+                    "Scalp Stop Loss %",
+                    min_value=0.5,
+                    max_value=5.0,
+                    value=1.0,
+                    step=0.5,
+                    help="Stop loss percentage for scalping"
+                )
+            else:
+                scalp_take_profit = 2.0
+                scalp_stop_loss = 1.0
+        
+        st.divider()
+        
+        # Watchlist selection
+        st.subheader("📋 Watchlist")
+        st.write("Select tickers to monitor for automated trading:")
+        
+        # Get tickers from database
+        try:
+            ticker_mgr = TickerManager()
+            all_tickers = ticker_mgr.get_all_tickers()
+            ticker_symbols = [t['ticker'] for t in all_tickers] if all_tickers else []
+        except Exception:
+            ticker_symbols = []
+        
+        if ticker_symbols:
+            st.write("**Enable/Disable Auto-Trading Per Ticker:**")
+            
+            # Show checkboxes for each ticker
+            selected_tickers = []
+            cols_per_row = 4
+            ticker_rows = [ticker_symbols[i:i+cols_per_row] for i in range(0, len(ticker_symbols), cols_per_row)]
+            
+            # Track if we need to show migration warning
+            needs_migration = False
+            
+            for row in ticker_rows:
+                cols = st.columns(cols_per_row)
+                for idx, ticker in enumerate(row):
+                    with cols[idx]:
+                        # Get current auto-trade status
+                        ticker_data = ticker_mgr.get_ticker(ticker)
+                        current_enabled = ticker_data.get('auto_trade_enabled', False) if ticker_data else False
+                        
+                        # Checkbox for enabling auto-trade
+                        enabled = st.checkbox(
+                            f"✅ {ticker}",
+                            value=current_enabled,
+                            key=f"auto_trade_{ticker}",
+                            help=f"Enable auto-trading for {ticker}"
+                        )
+                        
+                        if enabled:
+                            selected_tickers.append(ticker)
+                            # Update database if changed
+                            if enabled != current_enabled:
+                                success = ticker_mgr.set_auto_trade(ticker, enabled, trading_mode)
+                                if not success:
+                                    needs_migration = True
+            
+            if needs_migration:
+                st.error("⚠️ **Database Migration Required**")
+                st.warning("The auto-trade columns are missing from your database. Please run this SQL in your Supabase SQL Editor:")
+                st.code("""
+ALTER TABLE saved_tickers 
+ADD COLUMN IF NOT EXISTS auto_trade_enabled BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
+                """, language="sql")
+                st.info("📁 Full migration script available at: `migrations/add_auto_trade_columns.sql`")
+            
+            if not selected_tickers:
+                st.info("👆 Check the boxes above to enable auto-trading for specific tickers")
+        else:
+            st.warning("No tickers in your watchlist. Add some in the '⭐ My Tickers' tab first!")
+            selected_tickers = []
+        
+        st.divider()
+        
+        # Control buttons
+        st.subheader("🎮 Controls")
+        
+        col_btn1, col_btn2, col_btn3 = st.columns(3)
+        
+        with col_btn1:
+            if st.button("🚀 Start Auto-Trader", type="primary", disabled=len(selected_tickers) == 0):
+                if not st.session_state.tradier_client:
+                    st.error("❌ Tradier not connected! Go to 🏦 Tradier Account tab to connect.")
+                else:
+                    try:
+                        from services.auto_trader import create_auto_trader, AutoTraderConfig
+                        from services.ai_trading_signals import create_ai_signal_generator
+                        
+                        # Create config
+                        config = AutoTraderConfig(
+                            enabled=True,
+                            scan_interval_minutes=scan_interval,
+                            min_confidence=min_confidence,
+                            max_daily_orders=max_daily_orders,
+                            use_bracket_orders=use_bracket_orders,
+                            risk_tolerance=risk_tolerance,
+                            paper_trading=paper_trading,
+                            trading_mode=trading_mode,
+                            scalping_take_profit_pct=scalp_take_profit,
+                            scalping_stop_loss_pct=scalp_stop_loss,
+                            allow_short_selling=allow_short_selling if paper_trading else False
+                        )
+                        
+                        # Create signal generator
+                        signal_gen = create_ai_signal_generator()
+                        
+                        # Create and start auto-trader
+                        auto_trader = create_auto_trader(
+                            tradier_client=st.session_state.tradier_client,
+                            signal_generator=signal_gen,
+                            watchlist=selected_tickers,
+                            config=config,
+                            use_smart_scanner=use_smart_scanner
+                        )
+                        
+                        auto_trader.start()
+                        st.session_state.auto_trader = auto_trader
+                        
+                        st.success("✅ Auto-Trader started successfully!")
+                        if use_smart_scanner:
+                            st.info(f"🧠 Smart Scanner enabled: Will dynamically find top tickers for {trading_mode} strategy each scan")
+                        else:
+                            st.info(f"Monitoring {len(selected_tickers)} tickers: {', '.join(selected_tickers)}")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Failed to start Auto-Trader: {e}")
+                        logger.error(f"Auto-trader start error: {e}", exc_info=True)
+        
+        with col_btn2:
+            if st.button("🛑 Stop Auto-Trader", disabled=st.session_state.auto_trader is None):
+                if st.session_state.auto_trader:
+                    st.session_state.auto_trader.stop()
+                    st.session_state.auto_trader = None
+                    st.success("Auto-Trader stopped")
+                    st.rerun()
+        
+        with col_btn3:
+            if st.button("🔄 Refresh Status"):
+                st.rerun()
+        
+        st.divider()
+        
+        # Status display
+        st.subheader("📊 Status")
+        
+        if st.session_state.auto_trader:
+            status = st.session_state.auto_trader.get_status()
+            
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            
+            with col_stat1:
+                status_icon = "🟢" if status['is_running'] else "🔴"
+                st.metric("Status", f"{status_icon} {'Running' if status['is_running'] else 'Stopped'}")
+            
+            with col_stat2:
+                st.metric("Daily Orders", f"{status['daily_orders']}/{status['max_daily_orders']}")
+            
+            with col_stat3:
+                st.metric("Watchlist Size", status['watchlist_size'])
+            
+            with col_stat4:
+                hours_status = "✅ Yes" if status['in_trading_hours'] else "❌ No"
+                st.metric("Trading Hours", hours_status)
+            
+            # Short positions display (if enabled)
+            if status.get('short_positions', 0) > 0:
+                st.divider()
+                st.subheader("📉 Active Short Positions")
+                short_details = status.get('short_positions_details', [])
+                for short_pos in short_details:
+                    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                    with col_s1:
+                        st.write(f"**{short_pos['symbol']}**")
+                    with col_s2:
+                        st.write(f"Qty: {short_pos['quantity']}")
+                    with col_s3:
+                        st.write(f"Entry: ${short_pos['entry_price']:.2f}")
+                    with col_s4:
+                        st.write(f"Time: {short_pos['entry_time'][:16]}")
+            
+            # Configuration display
+            with st.expander("⚙️ Current Configuration"):
+                st.json(status['config'])
+            
+            # Execution history
+            st.subheader("📜 Execution History")
+            history = st.session_state.auto_trader.get_execution_history()
+            
+            if history:
+                st.write(f"**Total Executions:** {len(history)}")
+                
+                for idx, execution in enumerate(reversed(history[-10:]), 1):  # Show last 10
+                    with st.expander(f"{idx}. {execution['symbol']} - {execution['signal']} ({execution['timestamp']})"):
+                        col_ex1, col_ex2, col_ex3 = st.columns(3)
+                        
+                        with col_ex1:
+                            st.write(f"**Confidence:** {execution['confidence']:.1f}%")
+                            st.write(f"**Quantity:** {execution['quantity']}")
+                        
+                        with col_ex2:
+                            st.write(f"**Entry:** ${execution['entry_price']:.2f}")
+                            st.write(f"**Target:** ${execution['target_price']:.2f}")
+                        
+                        with col_ex3:
+                            st.write(f"**Stop Loss:** ${execution['stop_loss']:.2f}")
+                            
+                            profit_pct = ((execution['target_price'] - execution['entry_price']) / execution['entry_price'] * 100) if execution['entry_price'] else 0
+                            st.write(f"**Potential:** {profit_pct:+.1f}%")
+            else:
+                st.info("No executions yet. The bot will execute when it finds high-confidence signals.")
+        else:
+            st.info("Auto-Trader is not running. Configure settings above and click 'Start Auto-Trader'.")
+        
+        # Help section
+        with st.expander("❓ How It Works"):
+            st.markdown("""
+### Automated Trading Process
+
+1. **Monitoring**: The bot scans your watchlist every X minutes
+2. **Analysis**: Generates AI signals using comprehensive analysis
+3. **Filtering**: Only executes signals above your confidence threshold
+4. **Execution**: Places bracket orders with stop-loss and take-profit
+5. **Safety**: Respects daily limits and trading hours
+
+### Safety Features
+
+- ✅ **Trading Hours**: Only trades during market hours (9:30 AM - 3:30 PM ET)
+- ✅ **Daily Limits**: Stops after max daily orders reached
+- ✅ **Confidence Filter**: Only executes high-confidence signals
+- ✅ **Bracket Orders**: Automatic stop-loss protection
+- ✅ **Paper Trading**: Test mode before using real money
+- ✅ **Position Checks**: Won't add to existing positions
+- ✅ **Short Selling**: Supports shorting in paper trading mode
+
+### Short Selling (Advanced - Disabled by Default)
+
+⚠️ **NOT recommended for scalping or cash account strategies!**
+
+When enabled (paper trading only), SELL signals can open short positions:
+- **Requires**: Margin account with sufficient equity
+- **Best for**: Advanced swing trading or hedge strategies
+- **Not for**: Scalping, day trading with cash accounts
+- **BUY signals**: Opens long positions or covers shorts
+- **SELL signals**: Closes long positions or opens shorts
+
+**For scalping**: Keep this DISABLED. Only sell stocks you own!
+
+### Trading Modes
+
+**STOCKS**: Standard stock trading with AI signals
+**OPTIONS**: Options strategies (coming soon)
+**SCALPING**: Fast intraday trades with tight stops
+- Default: 2% profit target, 1% stop loss
+- Orders close same day
+- Scan interval: 5-15 minutes recommended
+- Best for: High-volume, liquid stocks
+
+**ALL**: Combines all strategies
+
+### Best Practices
+
+1. **Start with Paper Trading** - Test for at least a week
+2. **Monitor Daily** - Check execution history regularly
+3. **Start Small** - Use low max daily orders (5-10)
+4. **High Confidence** - Keep min confidence at 75%+
+5. **Diversify** - Monitor 5-10 different tickers
+6. **Review Results** - Analyze what works and adjust
+7. **Scalping Tips**: Use 5-10 min intervals, liquid stocks only
+
+### Risk Warning
+
+⚠️ Automated trading carries significant risk. Past performance doesn't guarantee future results. 
+Always start with paper trading and only risk capital you can afford to lose.
+            """)
 
 
 if __name__ == "__main__":

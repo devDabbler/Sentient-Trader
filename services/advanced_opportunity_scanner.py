@@ -32,6 +32,7 @@ class ScanType(Enum):
     BREAKOUTS = "breakouts"
     MOMENTUM = "momentum"
     BUZZING = "buzzing"
+    HOTTEST_STOCKS = "hottest_stocks"
     ALL = "all"
 
 
@@ -160,36 +161,35 @@ class AdvancedOpportunityScanner:
         'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'NFLX', 'DIS',
         'INTC', 'ADBE', 'CRM', 'ORCL', 'CSCO', 'AVGO', 'QCOM', 'TXN', 'UBER', 'LYFT',
         
-        # Growth/momentum stocks
-        'PLTR', 'SOFI', 'HOOD', 'COIN', 'RBLX', 'SNAP', 'ABNB', 'DASH', 'SQ', 'SHOP',
+        # Growth/momentum stocks (removed delisted: SQ)
+        'PLTR', 'SOFI', 'HOOD', 'COIN', 'RBLX', 'SNAP', 'ABNB', 'DASH', 'SHOP',
         'SNOW', 'NET', 'CRWD', 'ZS', 'DDOG', 'MDB', 'U', 'PATH', 'GTLB', 'S',
         
-        # Meme/Reddit stocks
-        'GME', 'AMC', 'BB', 'NOK', 'BBBY', 'CLOV', 'WISH', 'SKLZ',
+        # Meme/Reddit stocks (removed delisted: WISH)
+        'GME', 'AMC', 'BB', 'NOK', 'BBBY', 'CLOV', 'SKLZ',
         
-        # EV/Clean energy (high volatility)
-        'NIO', 'LCID', 'RIVN', 'PLUG', 'FCEL', 'BE', 'QS', 'BLNK', 'CHPT', 'FSR',
-        'GOEV', 'WKHS', 'RIDE', 'HYLN', 'NKLA', 'EVGO', 'MAXN', 'RUN', 'NOVA', 'SEDG', 'ENPH',
+        # EV/Clean energy (high volatility) (removed delisted: FSR, RIDE, NKLA, NOVA)
+        'NIO', 'LCID', 'RIVN', 'PLUG', 'FCEL', 'BE', 'QS', 'BLNK', 'CHPT',
+        'GOEV', 'WKHS', 'HYLN', 'EVGO', 'MAXN', 'RUN', 'SEDG', 'ENPH',
         
-        # Biotech/Pharma (catalyst-driven)
+        # Biotech/Pharma (catalyst-driven) (removed delisted: FREQ, TPTX, BLUE)
         'MRNA', 'BNTX', 'NVAX', 'VXRT', 'OCGN', 'BNGO', 'SAVA', 'SNDL',
-        'NVCR', 'ZLAB', 'CASI', 'FREQ', 'CRBP', 'DVAX', 'RGNX', 'AKBA', 'ARDX',
-        'TPTX', 'VKTX', 'ALNY', 'BLUE', 'SGMO', 'CRSP', 'EDIT', 'NTLA',
+        'NVCR', 'ZLAB', 'CASI', 'CRBP', 'DVAX', 'RGNX', 'AKBA', 'ARDX',
+        'VKTX', 'ALNY', 'SGMO', 'CRSP', 'EDIT', 'NTLA',
         
         # Crypto-related (high beta)
         'MARA', 'RIOT', 'BITF', 'HUT', 'CLSK', 'ARBK', 'MSTR', 'SI', 'BTBT',
         'CAN', 'SOS', 'EBON', 'FTFT', 'GREE', 'BTCM', 'WULF',
         
-        # AI/Tech emerging
+        # AI/Tech emerging (removed delisted: VLDR)
         'SOUN', 'BBAI', 'AI', 'KSCP', 'VRAR', 'VUZI', 'KOPN', 'AEHR',
-        'WOLF', 'MVIS', 'LAZR', 'LIDR', 'OUST', 'VLDR', 'INVZ',
+        'WOLF', 'MVIS', 'LAZR', 'LIDR', 'OUST', 'INVZ',
         
-        # Cannabis (news-driven)
-        'TLRY', 'CGC', 'ACB', 'HEXO', 'OGI', 'CRON', 'SNDL',
+        # Cannabis (news-driven) (removed delisted: HEXO)
+        'TLRY', 'CGC', 'ACB', 'OGI', 'CRON', 'SNDL',
         
-        # Small cap high volatility
-        'GSAT', 'ZOM', 'TXMD', 'IDEX', 'SIRI', 'SENS', 'CLVS',
-        'MULN', 'FFIE', 'GFAI', 'ATAI', 'HOLO', 'IMPP',
+        # Penny stocks/speculative (high risk/reward) (removed delisted: ZOM, IDEX, CLVS, MULN, FFIE, GFAI, ATAI, HOLO, IMPP)
+        'GSAT', 'TXMD', 'SIRI', 'SENS',
         
         # Finance/FinTech
         'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'V', 'MA', 'AXP', 'PYPL',
@@ -215,6 +215,7 @@ class AdvancedOpportunityScanner:
         self,
         scan_type: ScanType = ScanType.ALL,
         top_n: int = 20,
+        trading_style: str = "SWING_TRADE",
         filters: Optional[ScanFilters] = None,
         custom_tickers: Optional[List[str]] = None,
         use_extended_universe: bool = True
@@ -234,7 +235,10 @@ class AdvancedOpportunityScanner:
         """
         filters = filters or ScanFilters()
         
-        logger.info(f"Starting {scan_type.value} scan for top {top_n} opportunities")
+        # Store trading style for use in _analyze_opportunity
+        self._current_trading_style = trading_style
+        
+        logger.info(f"Starting {scan_type.value} scan for top {top_n} opportunities with {trading_style} style")
         logger.info(f"Filters: min_score={filters.min_score}, min_price={filters.min_price}, max_price={filters.max_price}")
         
         # Determine ticker universe
@@ -273,6 +277,7 @@ class AdvancedOpportunityScanner:
     def scan_buzzing_stocks(
         self,
         top_n: int = 20,
+        trading_style: str = "SWING_TRADE",
         lookback_days: int = 5,
         min_buzz_score: float = 15.0,  # Lowered to 15 to capture social buzz without tech requirements
         max_tickers_to_scan: Optional[int] = None  # Limit number of tickers to scan for faster results
@@ -295,13 +300,16 @@ class AdvancedOpportunityScanner:
         Returns:
             List of buzzing opportunities
         """
+        # Store trading style for use in analysis
+        self._current_trading_style = trading_style
+        
         # Limit ticker universe if requested for faster scans
         ticker_universe = self.EXTENDED_UNIVERSE
         if max_tickers_to_scan:
             ticker_universe = ticker_universe[:max_tickers_to_scan]
-            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers (limited) for buzzing stocks (top {top_n}, min score={min_buzz_score})")
+            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers (limited) for buzzing stocks (top {top_n}, min score={min_buzz_score}, style={trading_style})")
         else:
-            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers for buzzing stocks (top {top_n}, min score={min_buzz_score})")
+            logger.info(f"🔥 Scanning {len(ticker_universe)} tickers for buzzing stocks (top {top_n}, min score={min_buzz_score}, style={trading_style})")
         
         opportunities = []
         
@@ -408,14 +416,18 @@ class AdvancedOpportunityScanner:
     ) -> Optional[OpportunityResult]:
         """Analyze a single ticker for opportunities"""
         try:
-            # Get comprehensive analysis
-            analysis = ComprehensiveAnalyzer.analyze_stock(ticker, "SWING_TRADE")
+            # Get comprehensive analysis (use trading_style from instance if available)
+            style = getattr(self, '_current_trading_style', "SWING_TRADE")
+            analysis = ComprehensiveAnalyzer.analyze_stock(ticker, style)
             
             if not analysis:
                 return None
             
+            # Calculate score based on scan type
+            score = self._calculate_score(analysis, scan_type, filters)
+
             # Apply filters first (early exit)
-            if not self._passes_filters(analysis, filters):
+            if not self._passes_filters(analysis, filters, score):
                 return None
             
             # Get market cap and sector info
@@ -423,9 +435,6 @@ class AdvancedOpportunityScanner:
             info = stock.info
             market_cap = info.get('marketCap', 0) / 1_000_000 if info.get('marketCap') else None
             sector = info.get('sector', 'Unknown')
-            
-            # Calculate score based on scan type
-            score = self._calculate_score(analysis, scan_type, filters)
             
             # Get volume ratio
             volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 0
@@ -505,9 +514,13 @@ class AdvancedOpportunityScanner:
             logger.debug(f"Error analyzing {ticker}: {e}")
             return None
     
-    def _passes_filters(self, analysis: StockAnalysis, filters: ScanFilters) -> bool:
+    def _passes_filters(self, analysis: StockAnalysis, filters: ScanFilters, score: float) -> bool:
         """Check if analysis passes all filters"""
         
+        # Score filter (primary)
+        if filters.min_score is not None and score < filters.min_score:
+            return False
+
         # Price filters
         if filters.min_price is not None and analysis.price < filters.min_price:
             return False
@@ -585,6 +598,7 @@ class AdvancedOpportunityScanner:
         """Calculate opportunity score based on scan type"""
         
         base_score = analysis.confidence_score
+        volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 0
         
         # Adjust based on scan type
         if scan_type == ScanType.OPTIONS:
@@ -607,6 +621,17 @@ class AdvancedOpportunityScanner:
             if analysis.ema_power_zone:
                 base_score += 10
         
+        elif scan_type == ScanType.HOTTEST_STOCKS:
+            # Set a base score for stocks meeting hot criteria
+            score = 0
+            if analysis.change_pct > 10:
+                score += 40
+            if volume_ratio > 5:
+                score += 30
+            if analysis.trend == "STRONG UPTREND":
+                score += 30
+            base_score = score
+
         elif scan_type == ScanType.PENNY_STOCKS:
             # Boost for low price with volume
             if analysis.price < 1.0:
@@ -617,7 +642,6 @@ class AdvancedOpportunityScanner:
                 base_score += 5
         
         # Volume boost
-        volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 0
         if volume_ratio > 2.5:
             base_score += 10
         elif volume_ratio > 1.5:

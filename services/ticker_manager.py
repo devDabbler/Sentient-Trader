@@ -43,7 +43,8 @@ class TickerManager:
             return False
 
     def add_ticker(self, ticker: str, name: str = None, sector: str = None, 
-                   ticker_type: str = 'stock', notes: str = None, tags: List[str] = None) -> bool:
+                   ticker_type: str = 'stock', notes: str = None, tags: List[str] = None,
+                   auto_trade_enabled: bool = False, auto_trade_strategy: str = None) -> bool:
         if not self._check_client(): 
             logger.error("Supabase client not available")
             return False
@@ -60,6 +61,8 @@ class TickerManager:
                 'tags': tags,
                 'last_accessed': current_time,
                 'access_count': 0,  # Initialize access_count
+                'auto_trade_enabled': auto_trade_enabled,
+                'auto_trade_strategy': auto_trade_strategy,
             }
             
             data_to_upsert = {k: v for k, v in data_to_upsert.items() if v is not None}
@@ -157,6 +160,36 @@ class TickerManager:
                 }).eq('ticker', ticker.upper()).execute()
         except Exception as e:
             logger.error(f"Error recording access for {ticker}: {e}")
+    
+    def set_auto_trade(self, ticker: str, enabled: bool, strategy: str = None) -> bool:
+        """Enable/disable auto-trading for a specific ticker"""
+        if not self._check_client(): return False
+        try:
+            update_data = {'auto_trade_enabled': enabled}
+            if strategy:
+                update_data['auto_trade_strategy'] = strategy
+            
+            self.supabase.table('saved_tickers').update(update_data).eq('ticker', ticker.upper()).execute()
+            logger.info(f"Updated auto-trade for {ticker}: enabled={enabled}, strategy={strategy}")
+            return True
+        except Exception as e:
+            # Check if error is due to missing columns
+            error_str = str(e)
+            if 'auto_trade_enabled' in error_str or 'auto_trade_strategy' in error_str:
+                logger.warning(f"Auto-trade columns not found in database. Please run the migration script: migrations/add_auto_trade_columns.sql")
+            else:
+                logger.error(f"Error updating auto-trade for {ticker}: {e}")
+            return False
+    
+    def get_auto_trade_tickers(self) -> List[Dict]:
+        """Get all tickers with auto-trading enabled"""
+        if not self._check_client(): return []
+        try:
+            response = self.supabase.table('saved_tickers').select('*').eq('auto_trade_enabled', True).execute()
+            return response.data
+        except Exception as e:
+            logger.error(f"Error getting auto-trade tickers: {e}")
+            return []
 
     def search_tickers(self, query: str) -> List[Dict]:
         if not self._check_client(): return []
