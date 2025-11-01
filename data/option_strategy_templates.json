@@ -1,127 +1,4 @@
 {
-  "poor_mans_covered_call": {
-    "strategy_id": "poor_mans_covered_call",
-    "name": "Poor Man's Covered Call (PMCC)",
-    "description": "Buy a deep ITM LEAPS call and sell shorter-term OTM calls against it. Capital-efficient alternative to covered calls.",
-    "strategy_type": "SPREAD",
-    "direction": "BULLISH",
-    "risk_level": "Medium",
-    "max_loss": "Net debit paid (LEAPS cost - credits collected)",
-    "max_gain": "Limited to short call strike - long call strike - net debit",
-    "experience_level": "Intermediate",
-    "capital_requirement": "Medium",
-    "best_for": [
-      "Bullish long-term outlook",
-      "Want covered call benefits without buying 100 shares",
-      "Lower capital requirement than traditional covered call",
-      "Stable to rising stock price"
-    ],
-    "ideal_iv_rank": "Medium (30-60)",
-    "ideal_market_outlook": [
-      "Bullish"
-    ],
-    "typical_dte": "Long leg: 12-24 months (LEAPS), Short leg: 30-45 days",
-    "typical_win_rate": "60-70%",
-    "profit_target": "50-75% of short call credit",
-    "stop_loss": "Close if stock drops significantly below long call strike",
-    "option_alpha_compatible": true,
-    "option_alpha_action": "DIAGONAL_SPREAD",
-    "setup_steps": [
-      "Buy deep ITM call (Delta 0.70-0.80) with 12-24 months to expiration",
-      "Sell OTM call (Delta 0.20-0.30) with 30-45 days to expiration",
-      "Ensure long call strike is lower than short call strike",
-      "Net debit should be significantly less than buying 100 shares"
-    ],
-    "management_rules": [
-      "Roll short call when it reaches 50-75% profit or at 21 DTE",
-      "If stock drops significantly, consider closing entire position",
-      "If stock rises past short call, can roll up and out for credit",
-      "Monitor long call value - should maintain extrinsic value"
-    ],
-    "examples": [
-      "Stock at $100: Buy $80 call (24 months) for $25, Sell $110 call (45 days) for $2",
-      "Net cost: $2,300 vs $10,000 for 100 shares",
-      "Collect $200/month selling calls against LEAPS"
-    ],
-    "warnings": [
-      "\u26a0\ufe0f Long call loses value if stock drops significantly",
-      "\u26a0\ufe0f Requires active management of short calls",
-      "\u26a0\ufe0f Early assignment risk on short calls (especially before dividends)",
-      "\u26a0\ufe0f Less profitable than covered calls in strong bull markets"
-    ],
-    "notes": "Great strategy for bullish traders with limited capital. Mimics covered call mechanics with 70-80% less capital.",
-    "created_date": "2025-10-29T16:46:16.879019",
-    "source": "Option Alpha Community",
-    "tags": [
-      "diagonal",
-      "leaps",
-      "income",
-      "bullish",
-      "capital-efficient"
-    ]
-  },
-  "jade_lizard": {
-    "strategy_id": "jade_lizard",
-    "name": "Jade Lizard",
-    "description": "Sell an OTM call spread and an OTM put. No upside risk, profit if stock stays flat or rises moderately.",
-    "strategy_type": "MULTI_LEG",
-    "direction": "NEUTRAL",
-    "risk_level": "Medium-High",
-    "max_loss": "Put strike - net credit (downside only)",
-    "max_gain": "Net credit received",
-    "experience_level": "Advanced",
-    "capital_requirement": "High",
-    "best_for": [
-      "High IV environment",
-      "Neutral to slightly bullish bias",
-      "Want to eliminate upside risk",
-      "Comfortable with downside risk"
-    ],
-    "ideal_iv_rank": "High (>60)",
-    "ideal_market_outlook": [
-      "Neutral",
-      "Bullish"
-    ],
-    "typical_dte": "30-45 days",
-    "typical_win_rate": "65-75%",
-    "profit_target": "50% of credit received",
-    "stop_loss": "2x credit received or stock breaks put strike",
-    "option_alpha_compatible": true,
-    "option_alpha_action": "JADE_LIZARD",
-    "setup_steps": [
-      "Sell OTM put (Delta ~0.30)",
-      "Sell OTM call (Delta ~0.30)",
-      "Buy further OTM call to cap upside risk",
-      "Ensure total credit > width of call spread (eliminates upside risk)"
-    ],
-    "management_rules": [
-      "Close at 50% profit to reduce risk",
-      "If stock drops toward put, consider rolling put down and out",
-      "If stock rises, call spread provides protection",
-      "Monitor for early assignment on short options"
-    ],
-    "examples": [
-      "Stock at $100: Sell $95 put for $2, Sell $110 call for $2, Buy $115 call for $0.50",
-      "Net credit: $3.50 ($350 per contract)",
-      "No upside risk since credit ($3.50) > call spread width ($5)"
-    ],
-    "warnings": [
-      "\u26a0\ufe0f Significant downside risk if stock drops",
-      "\u26a0\ufe0f Requires margin for naked put component",
-      "\u26a0\ufe0f Best in high IV - credit must exceed call spread width",
-      "\u26a0\ufe0f Complex position management"
-    ],
-    "notes": "Advanced neutral strategy that eliminates upside risk. Named after the jade lizard which has no natural predators from above.",
-    "created_date": "2025-10-29T16:46:16.879019",
-    "source": "tastytrade",
-    "tags": [
-      "neutral",
-      "high-iv",
-      "income",
-      "defined-risk-upside",
-      "advanced"
-    ]
-  },
   "covered_call": {
     "strategy_id": "covered_call",
     "name": "Covered Call",
@@ -173,7 +50,7 @@
       "\u26a0\ufe0f Early assignment risk before dividends"
     ],
     "notes": "Great income strategy for stock owners. Provides downside protection through premium collected.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "income",
@@ -233,7 +110,7 @@
       "\u26a0\ufe0f Assignment risk if stock drops"
     ],
     "notes": "Excellent strategy for buying stocks you want at a discount. Part of The Wheel strategy.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "income",
@@ -293,7 +170,7 @@
       "\u26a0\ufe0f Requires stock to move significantly"
     ],
     "notes": "Capital-efficient way to get bullish exposure. Use deep ITM calls for stock replacement.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "directional",
@@ -353,7 +230,7 @@
       "\u26a0\ufe0f Requires stock to move significantly"
     ],
     "notes": "Excellent for portfolio protection. Acts as insurance against stock decline.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "protection",
@@ -416,7 +293,7 @@
       "\u26a0\ufe0f Can tie up capital for extended periods"
     ],
     "notes": "Excellent income strategy for patient investors. Combines put selling and covered calls.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "income",
@@ -476,7 +353,7 @@
       "\u26a0\ufe0f Time decay affects both legs"
     ],
     "notes": "Great for moderate bullish plays with defined risk. Lower cost than long calls.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "spread",
@@ -536,7 +413,7 @@
       "\u26a0\ufe0f Time decay affects both legs"
     ],
     "notes": "Great for moderate bearish plays with defined risk. Lower cost than long puts.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "spread",
@@ -596,7 +473,7 @@
       "\u26a0\ufe0f Complex position management"
     ],
     "notes": "Excellent neutral strategy for high IV environments. Defined risk and reward.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "neutral",
@@ -656,7 +533,7 @@
       "\u26a0\ufe0f Complex Greeks management"
     ],
     "notes": "Great for time decay plays. Requires stock to stay near strike at short expiration.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "time-decay",
@@ -717,7 +594,7 @@
       "\u26a0\ufe0f Very risky strategy"
     ],
     "notes": "High-risk strategy for experienced traders. Requires stock to stay exactly flat.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "neutral",
@@ -778,7 +655,7 @@
       "\u26a0\ufe0f Very risky strategy"
     ],
     "notes": "Wider profit zone than straddle but still high risk. Better for range-bound markets.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "neutral",
@@ -838,7 +715,7 @@
       "\u26a0\ufe0f Early assignment risk on short calls"
     ],
     "notes": "Precise strategy requiring stock to be exactly at middle strike. Low cost, high reward potential.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "neutral",
@@ -898,7 +775,7 @@
       "\u26a0\ufe0f Early assignment risk"
     ],
     "notes": "Combines straddle and butterfly. Requires precise stock movement for max profit.",
-    "created_date": "2025-10-29T20:16:28.147913",
+    "created_date": "2025-10-30T15:05:36.337029",
     "source": "Options Trading Strategies Guide",
     "tags": [
       "neutral",
@@ -906,6 +783,129 @@
       "butterfly",
       "advanced",
       "defined-risk"
+    ]
+  },
+  "poor_mans_covered_call": {
+    "strategy_id": "poor_mans_covered_call",
+    "name": "Poor Man's Covered Call (PMCC)",
+    "description": "Buy a deep ITM LEAPS call and sell shorter-term OTM calls against it. Capital-efficient alternative to covered calls.",
+    "strategy_type": "SPREAD",
+    "direction": "BULLISH",
+    "risk_level": "Medium",
+    "max_loss": "Net debit paid (LEAPS cost - credits collected)",
+    "max_gain": "Limited to short call strike - long call strike - net debit",
+    "experience_level": "Intermediate",
+    "capital_requirement": "Medium",
+    "best_for": [
+      "Bullish long-term outlook",
+      "Want covered call benefits without buying 100 shares",
+      "Lower capital requirement than traditional covered call",
+      "Stable to rising stock price"
+    ],
+    "ideal_iv_rank": "Medium (30-60)",
+    "ideal_market_outlook": [
+      "Bullish"
+    ],
+    "typical_dte": "Long leg: 12-24 months (LEAPS), Short leg: 30-45 days",
+    "typical_win_rate": "60-70%",
+    "profit_target": "50-75% of short call credit",
+    "stop_loss": "Close if stock drops significantly below long call strike",
+    "option_alpha_compatible": true,
+    "option_alpha_action": "DIAGONAL_SPREAD",
+    "setup_steps": [
+      "Buy deep ITM call (Delta 0.70-0.80) with 12-24 months to expiration",
+      "Sell OTM call (Delta 0.20-0.30) with 30-45 days to expiration",
+      "Ensure long call strike is lower than short call strike",
+      "Net debit should be significantly less than buying 100 shares"
+    ],
+    "management_rules": [
+      "Roll short call when it reaches 50-75% profit or at 21 DTE",
+      "If stock drops significantly, consider closing entire position",
+      "If stock rises past short call, can roll up and out for credit",
+      "Monitor long call value - should maintain extrinsic value"
+    ],
+    "examples": [
+      "Stock at $100: Buy $80 call (24 months) for $25, Sell $110 call (45 days) for $2",
+      "Net cost: $2,300 vs $10,000 for 100 shares",
+      "Collect $200/month selling calls against LEAPS"
+    ],
+    "warnings": [
+      "\u26a0\ufe0f Long call loses value if stock drops significantly",
+      "\u26a0\ufe0f Requires active management of short calls",
+      "\u26a0\ufe0f Early assignment risk on short calls (especially before dividends)",
+      "\u26a0\ufe0f Less profitable than covered calls in strong bull markets"
+    ],
+    "notes": "Great strategy for bullish traders with limited capital. Mimics covered call mechanics with 70-80% less capital.",
+    "created_date": "2025-10-30T15:05:36.337029",
+    "source": "Option Alpha Community",
+    "tags": [
+      "diagonal",
+      "leaps",
+      "income",
+      "bullish",
+      "capital-efficient"
+    ]
+  },
+  "jade_lizard": {
+    "strategy_id": "jade_lizard",
+    "name": "Jade Lizard",
+    "description": "Sell an OTM call spread and an OTM put. No upside risk, profit if stock stays flat or rises moderately.",
+    "strategy_type": "MULTI_LEG",
+    "direction": "NEUTRAL",
+    "risk_level": "Medium-High",
+    "max_loss": "Put strike - net credit (downside only)",
+    "max_gain": "Net credit received",
+    "experience_level": "Advanced",
+    "capital_requirement": "High",
+    "best_for": [
+      "High IV environment",
+      "Neutral to slightly bullish bias",
+      "Want to eliminate upside risk",
+      "Comfortable with downside risk"
+    ],
+    "ideal_iv_rank": "High (>60)",
+    "ideal_market_outlook": [
+      "Neutral",
+      "Bullish"
+    ],
+    "typical_dte": "30-45 days",
+    "typical_win_rate": "65-75%",
+    "profit_target": "50% of credit received",
+    "stop_loss": "2x credit received or stock breaks put strike",
+    "option_alpha_compatible": true,
+    "option_alpha_action": "JADE_LIZARD",
+    "setup_steps": [
+      "Sell OTM put (Delta ~0.30)",
+      "Sell OTM call (Delta ~0.30)",
+      "Buy further OTM call to cap upside risk",
+      "Ensure total credit > width of call spread (eliminates upside risk)"
+    ],
+    "management_rules": [
+      "Close at 50% profit to reduce risk",
+      "If stock drops toward put, consider rolling put down and out",
+      "If stock rises, call spread provides protection",
+      "Monitor for early assignment on short options"
+    ],
+    "examples": [
+      "Stock at $100: Sell $95 put for $2, Sell $110 call for $2, Buy $115 call for $0.50",
+      "Net credit: $3.50 ($350 per contract)",
+      "No upside risk since credit ($3.50) > call spread width ($5)"
+    ],
+    "warnings": [
+      "\u26a0\ufe0f Significant downside risk if stock drops",
+      "\u26a0\ufe0f Requires margin for naked put component",
+      "\u26a0\ufe0f Best in high IV - credit must exceed call spread width",
+      "\u26a0\ufe0f Complex position management"
+    ],
+    "notes": "Advanced neutral strategy that eliminates upside risk. Named after the jade lizard which has no natural predators from above.",
+    "created_date": "2025-10-30T15:05:36.337029",
+    "source": "tastytrade",
+    "tags": [
+      "neutral",
+      "high-iv",
+      "income",
+      "defined-risk-upside",
+      "advanced"
     ]
   }
 }

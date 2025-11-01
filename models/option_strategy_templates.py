@@ -76,7 +76,7 @@ class OptionStrategyTemplateManager:
         """Load templates from JSON file"""
         if os.path.exists(self.templates_file):
             try:
-                with open(self.templates_file, 'r') as f:
+                with open(self.templates_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for strategy_id, template_data in data.items():
                         self.templates[strategy_id] = OptionStrategyTemplate(**template_data)
@@ -92,8 +92,8 @@ class OptionStrategyTemplateManager:
                 }
                 for strategy_id, template in self.templates.items()
             }
-            with open(self.templates_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            with open(self.templates_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
             print(f"Error saving templates: {e}")

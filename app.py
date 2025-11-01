@@ -8995,6 +8995,462 @@ TRADIER_API_URL=https://sandbox.tradier.com
         if 'auto_trader' not in st.session_state:
             st.session_state.auto_trader = None
         
+        # ========================================================================
+        # BACKGROUND TRADER CONFIGURATION MANAGER
+        # ========================================================================
+        
+        st.divider()
+        st.subheader("⚙️ Background Trader Configuration")
+        st.write("Configure your background auto-trader settings. Changes save to `config_background_trader.py`.")
+        
+        # Helper functions for config file management
+        def load_background_config():
+            """Load settings from config_background_trader.py"""
+            try:
+                import config_background_trader as cfg
+                return {
+                    'trading_mode': cfg.TRADING_MODE,
+                    'scan_interval': cfg.SCAN_INTERVAL_MINUTES,
+                    'min_confidence': cfg.MIN_CONFIDENCE,
+                    'max_daily_orders': cfg.MAX_DAILY_ORDERS,
+                    'max_position_size_pct': cfg.MAX_POSITION_SIZE_PCT,
+                    'use_bracket_orders': cfg.USE_BRACKET_ORDERS,
+                    'scalping_take_profit_pct': cfg.SCALPING_TAKE_PROFIT_PCT,
+                    'scalping_stop_loss_pct': cfg.SCALPING_STOP_LOSS_PCT,
+                    'risk_per_trade_pct': cfg.RISK_PER_TRADE_PCT,
+                    'max_daily_loss_pct': cfg.MAX_DAILY_LOSS_PCT,
+                    'use_smart_scanner': cfg.USE_SMART_SCANNER,
+                    'watchlist': cfg.WATCHLIST,
+                    'allow_short_selling': cfg.ALLOW_SHORT_SELLING,
+                    'use_settled_funds_only': cfg.USE_SETTLED_FUNDS_ONLY,
+                }
+            except ImportError:
+                return None
+        
+        def save_background_config(config_dict):
+            """Save settings to config_background_trader.py"""
+            try:
+                # Read the template
+                config_content = f'''"""
+Configuration for Background Auto-Trader
+Customize your trading bot settings here
+Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+"""
+
+# ==============================================================================
+# TRADING CONFIGURATION
+# ==============================================================================
+
+# Trading Mode: "SCALPING", "STOCKS", "OPTIONS", "ALL"
+TRADING_MODE = "{config_dict['trading_mode']}"
+
+# Scan Interval (minutes)
+SCAN_INTERVAL_MINUTES = {config_dict['scan_interval']}
+
+# Minimum Confidence % (only execute signals above this)
+MIN_CONFIDENCE = {config_dict['min_confidence']}
+
+# Risk Management
+MAX_DAILY_ORDERS = {config_dict['max_daily_orders']}
+MAX_POSITION_SIZE_PCT = {config_dict['max_position_size_pct']}
+RISK_PER_TRADE_PCT = {config_dict['risk_per_trade_pct']}
+MAX_DAILY_LOSS_PCT = {config_dict['max_daily_loss_pct']}
+
+# Bracket Orders (Stop-Loss & Take-Profit)
+USE_BRACKET_ORDERS = {config_dict['use_bracket_orders']}
+SCALPING_TAKE_PROFIT_PCT = {config_dict['scalping_take_profit_pct']}
+SCALPING_STOP_LOSS_PCT = {config_dict['scalping_stop_loss_pct']}
+
+# PDT-Safe Cash Management
+USE_SETTLED_FUNDS_ONLY = {config_dict['use_settled_funds_only']}
+CASH_BUCKETS = 3
+T_PLUS_SETTLEMENT_DAYS = 2
+RESERVE_CASH_PCT = 0.05
+
+# ==============================================================================
+# TICKER SELECTION
+# ==============================================================================
+
+# Use Smart Scanner (finds best tickers automatically)
+USE_SMART_SCANNER = {config_dict['use_smart_scanner']}
+
+# Your Custom Watchlist (used only if USE_SMART_SCANNER = False)
+WATCHLIST = {config_dict['watchlist']}
+
+# ==============================================================================
+# ADVANCED OPTIONS
+# ==============================================================================
+
+# Short Selling (ONLY works in paper trading)
+ALLOW_SHORT_SELLING = {config_dict['allow_short_selling']}
+
+# Multi-Agent System
+USE_AGENT_SYSTEM = False
+'''
+                
+                with open('config_background_trader.py', 'w') as f:
+                    f.write(config_content)
+                return True
+            except Exception as e:
+                st.error(f"Error saving config: {e}")
+                return False
+        
+        # Load current config
+        current_config = load_background_config()
+        
+        if current_config:
+            st.success("✅ Loaded current configuration from `config_background_trader.py`")
+            
+            # Create tabs for organization
+            cfg_tab1, cfg_tab2, cfg_tab3 = st.tabs(["📊 Strategy & Tickers", "⚖️ Risk Management", "💾 Save Configuration"])
+            
+            with cfg_tab1:
+                st.subheader("Strategy Settings")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    trading_mode = st.selectbox(
+                        "Trading Mode",
+                        options=["SCALPING", "STOCKS", "OPTIONS", "ALL"],
+                        index=["SCALPING", "STOCKS", "OPTIONS", "ALL"].index(current_config['trading_mode']),
+                        help="SCALPING: Fast intraday | STOCKS: Swing trades | OPTIONS: Options trading"
+                    )
+                    
+                    scan_interval = st.slider(
+                        "Scan Interval (minutes)",
+                        min_value=5,
+                        max_value=60,
+                        value=int(current_config['scan_interval']),
+                        step=5,
+                        help="How often to scan for new opportunities"
+                    )
+                
+                with col2:
+                    min_confidence = st.slider(
+                        "Minimum Confidence %",
+                        min_value=60,
+                        max_value=95,
+                        value=int(current_config['min_confidence']),
+                        step=5,
+                        help="Only execute signals above this confidence level"
+                    )
+                    
+                    use_bracket_orders = st.checkbox(
+                        "Use Bracket Orders (Stop-Loss + Take-Profit)",
+                        value=current_config['use_bracket_orders'],
+                        help="Automatically set protective orders"
+                    )
+                
+                st.divider()
+                st.subheader("Ticker Selection")
+                
+                use_smart_scanner = st.checkbox(
+                    "🧠 Use Smart Scanner (Auto-discover best tickers)",
+                    value=current_config['use_smart_scanner'],
+                    help="When enabled, ignores watchlist and automatically finds opportunities"
+                )
+                
+                # Get checked tickers from the watchlist section
+                def get_selected_tickers_from_ui():
+                    """Get tickers that are checked in the main watchlist"""
+                    selected = []
+                    try:
+                        ticker_mgr = TickerManager()
+                        all_tickers = ticker_mgr.get_all_tickers()
+                        if all_tickers:
+                            for t in all_tickers:
+                                ticker = t['ticker']
+                                checkbox_key = f"auto_trade_{ticker}"
+                                if checkbox_key in st.session_state and st.session_state[checkbox_key]:
+                                    selected.append(ticker)
+                    except Exception:
+                        pass
+                    return selected
+                
+                # Add sync button
+                col_sync1, col_sync2 = st.columns([3, 1])
+                with col_sync1:
+                    st.write("**Quick Actions:**")
+                with col_sync2:
+                    if st.button("📋 Copy Checked Tickers", help="Copy tickers you checked in the Watchlist section below"):
+                        checked_tickers = get_selected_tickers_from_ui()
+                        if checked_tickers:
+                            # Update both session state keys to ensure text area updates
+                            st.session_state['synced_watchlist'] = ", ".join(checked_tickers)
+                            st.session_state['watchlist_text_area'] = ", ".join(checked_tickers)
+                            st.success(f"✅ Copied {len(checked_tickers)} tickers!")
+                            st.info(f"📋 **Tickers ready to save:** {', '.join(checked_tickers[:10])}{'...' if len(checked_tickers) > 10 else ''}")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ No tickers checked in Watchlist section below. Scroll down and check some first!")
+                
+                # Use synced watchlist if available
+                if 'synced_watchlist' in st.session_state:
+                    default_watchlist = st.session_state['synced_watchlist']
+                    # Clear the synced state so it doesn't persist forever
+                    if st.session_state.get('clear_sync', False):
+                        del st.session_state['synced_watchlist']
+                        st.session_state['clear_sync'] = False
+                else:
+                    default_watchlist = ", ".join(current_config['watchlist'])
+                
+                if not use_smart_scanner:
+                    st.info("💡 Smart Scanner disabled - will use your custom watchlist below")
+                    watchlist_str = st.text_area(
+                        "Custom Watchlist (comma-separated)",
+                        value=default_watchlist,
+                        help="Enter tickers separated by commas. Example: TSLA, NVDA, AMD, AAPL\nTip: Use '📋 Copy Checked Tickers' to auto-fill from your checked tickers below!",
+                        height=100,
+                        key="watchlist_text_area"
+                    )
+                else:
+                    st.warning("⚠️ Smart Scanner enabled - watchlist below will be IGNORED")
+                    watchlist_str = st.text_area(
+                        "Custom Watchlist (not used when Smart Scanner enabled)",
+                        value=default_watchlist,
+                        help="These tickers are ignored while Smart Scanner is enabled",
+                        height=100,
+                        disabled=True,
+                        key="watchlist_text_area_disabled"
+                    )
+            
+            with cfg_tab2:
+                st.subheader("Risk Management")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    max_daily_orders = st.number_input(
+                        "Max Daily Orders",
+                        min_value=1,
+                        max_value=50,
+                        value=int(current_config['max_daily_orders']),
+                        help="Maximum number of trades per day"
+                    )
+                    
+                    max_position_size_pct = st.slider(
+                        "Max Position Size %",
+                        min_value=5.0,
+                        max_value=50.0,
+                        value=float(current_config['max_position_size_pct']),
+                        step=5.0,
+                        help="Maximum % of account per single trade"
+                    )
+                    
+                    risk_per_trade_pct = st.slider(
+                        "Risk Per Trade %",
+                        min_value=0.5,
+                        max_value=5.0,
+                        value=float(current_config['risk_per_trade_pct'] * 100),
+                        step=0.5,
+                        help="Risk % of account per trade"
+                    ) / 100.0
+                
+                with col2:
+                    max_daily_loss_pct = st.slider(
+                        "Max Daily Loss %",
+                        min_value=1.0,
+                        max_value=10.0,
+                        value=float(current_config['max_daily_loss_pct'] * 100),
+                        step=0.5,
+                        help="Stop trading if down this % in a day"
+                    ) / 100.0
+                    
+                    scalping_take_profit_pct = st.slider(
+                        "Take-Profit % (Scalping)",
+                        min_value=0.5,
+                        max_value=10.0,
+                        value=float(current_config['scalping_take_profit_pct']),
+                        step=0.5,
+                        help="Target profit % for scalping mode"
+                    )
+                    
+                    scalping_stop_loss_pct = st.slider(
+                        "Stop-Loss % (Scalping)",
+                        min_value=0.25,
+                        max_value=5.0,
+                        value=float(current_config['scalping_stop_loss_pct']),
+                        step=0.25,
+                        help="Stop loss % for scalping mode"
+                    )
+                
+                st.divider()
+                st.subheader("Advanced Options")
+                
+                col3, col4 = st.columns(2)
+                
+                with col3:
+                    use_settled_funds_only = st.checkbox(
+                        "PDT-Safe: Use Settled Funds Only",
+                        value=current_config['use_settled_funds_only'],
+                        help="Avoids Pattern Day Trader restrictions"
+                    )
+                
+                with col4:
+                    allow_short_selling = st.checkbox(
+                        "Allow Short Selling (Paper Only)",
+                        value=current_config['allow_short_selling'],
+                        help="⚠️ Advanced: Enable short selling in paper trading"
+                    )
+            
+            with cfg_tab3:
+                st.subheader("💾 Save Configuration")
+                
+                st.info("""
+                **What happens when you save:**
+                1. ✅ Settings are written to `config_background_trader.py`
+                2. ✅ File is automatically updated
+                3. ⚠️ **You must restart the background trader** to apply changes
+                
+                **To apply changes:**
+                ```powershell
+                # Stop trader
+                .\\stop_autotrader.bat
+                
+                # Start trader
+                .\\start_autotrader_background.bat
+                ```
+                """)
+                
+                st.divider()
+                
+                # Show what will be saved
+                with st.expander("👁️ Preview Configuration"):
+                    preview_config = {
+                        'Trading Mode': trading_mode,
+                        'Scan Interval': f"{scan_interval} minutes",
+                        'Min Confidence': f"{min_confidence}%",
+                        'Smart Scanner': "Enabled" if use_smart_scanner else "Disabled",
+                        'Watchlist': watchlist_str if not use_smart_scanner else "(Using Smart Scanner)",
+                        'Max Daily Orders': max_daily_orders,
+                        'Max Position Size': f"{max_position_size_pct}%",
+                        'Risk Per Trade': f"{risk_per_trade_pct * 100:.1f}%",
+                        'Max Daily Loss': f"{max_daily_loss_pct * 100:.1f}%",
+                        'Use Bracket Orders': "Yes" if use_bracket_orders else "No",
+                        'Take-Profit': f"{scalping_take_profit_pct}%",
+                        'Stop-Loss': f"{scalping_stop_loss_pct}%",
+                    }
+                    st.json(preview_config)
+                
+                st.divider()
+                
+                # Save button
+                if st.button("💾 Save Configuration to File", type="primary", use_container_width=True):
+                    # Parse watchlist
+                    if not use_smart_scanner:
+                        watchlist_tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+                        if not watchlist_tickers:
+                            st.error("❌ Watchlist cannot be empty when Smart Scanner is disabled!")
+                            st.stop()
+                    else:
+                        watchlist_tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+                        if not watchlist_tickers:
+                            watchlist_tickers = ['SPY', 'QQQ', 'AAPL']  # Fallback
+                    
+                    # Prepare config dict
+                    new_config = {
+                        'trading_mode': trading_mode,
+                        'scan_interval': scan_interval,
+                        'min_confidence': min_confidence,
+                        'max_daily_orders': max_daily_orders,
+                        'max_position_size_pct': max_position_size_pct,
+                        'use_bracket_orders': use_bracket_orders,
+                        'scalping_take_profit_pct': scalping_take_profit_pct,
+                        'scalping_stop_loss_pct': scalping_stop_loss_pct,
+                        'risk_per_trade_pct': risk_per_trade_pct,
+                        'max_daily_loss_pct': max_daily_loss_pct,
+                        'use_smart_scanner': use_smart_scanner,
+                        'watchlist': watchlist_tickers,
+                        'allow_short_selling': allow_short_selling,
+                        'use_settled_funds_only': use_settled_funds_only,
+                    }
+                    
+                    # Save to file
+                    if save_background_config(new_config):
+                        st.success("✅ Configuration saved successfully to `config_background_trader.py`!")
+                        
+                        st.warning("""
+                        **⚠️ RESTART REQUIRED**
+                        
+                        To apply these changes, restart the background trader:
+                        
+                        **Windows PowerShell:**
+                        ```powershell
+                        .\\stop_autotrader.bat
+                        .\\start_autotrader_background.bat
+                        ```
+                        
+                        **Or manually:**
+                        ```powershell
+                        Stop-Process -Name pythonw -Force
+                        Start-Process pythonw -ArgumentList "run_autotrader_background.py" -WorkingDirectory "C:\\Users\\seaso\\Sentient Trader"
+                        ```
+                        
+                        **Verify new settings in logs:**
+                        ```powershell
+                        Get-Content logs\\autotrader_background.log -Tail 20
+                        ```
+                        """)
+                        
+                        # Clear synced watchlist after saving
+                        if 'synced_watchlist' in st.session_state:
+                            del st.session_state['synced_watchlist']
+                        
+                        # Force page reload to show updated config
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to save configuration. Check file permissions.")
+        else:
+            st.warning("""
+            ⚠️ Configuration file not found!
+            
+            The file `config_background_trader.py` doesn't exist yet.
+            
+            **To create it:**
+            1. Use the configuration below to set your preferences
+            2. Click "Save Configuration" 
+            3. File will be created automatically
+            """)
+            
+            # Show default form for creating new config
+            st.info("📝 Using default settings. Customize below and save to create the config file.")
+            
+            trading_mode = st.selectbox("Trading Mode", ["SCALPING", "STOCKS", "OPTIONS", "ALL"], index=0)
+            scan_interval = st.slider("Scan Interval (minutes)", 5, 60, 15, 5)
+            min_confidence = st.slider("Min Confidence %", 60, 95, 75, 5)
+            use_smart_scanner = st.checkbox("Use Smart Scanner", value=True)
+            watchlist_str = st.text_area("Watchlist", value="SPY, QQQ, AAPL, TSLA, NVDA")
+            
+            if st.button("💾 Create Configuration File"):
+                watchlist_tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+                new_config = {
+                    'trading_mode': trading_mode,
+                    'scan_interval': scan_interval,
+                    'min_confidence': min_confidence,
+                    'max_daily_orders': 10,
+                    'max_position_size_pct': 20.0,
+                    'use_bracket_orders': True,
+                    'scalping_take_profit_pct': 2.0,
+                    'scalping_stop_loss_pct': 1.0,
+                    'risk_per_trade_pct': 0.02,
+                    'max_daily_loss_pct': 0.04,
+                    'use_smart_scanner': use_smart_scanner,
+                    'watchlist': watchlist_tickers,
+                    'allow_short_selling': False,
+                    'use_settled_funds_only': True,
+                }
+                if save_background_config(new_config):
+                    st.success("✅ Configuration file created!")
+                    st.rerun()
+        
+        st.divider()
+        
+        # ========================================================================
+        # END BACKGROUND TRADER CONFIGURATION MANAGER
+        # ========================================================================
+        
         # Configuration section
         st.subheader("⚙️ Configuration")
         
@@ -9245,6 +9701,41 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                 st.rerun()
         
         st.divider()
+        
+        # Check for background auto-trader
+        def check_background_trader():
+            """Check if background auto-trader is running"""
+            try:
+                import psutil
+                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                    try:
+                        if proc.info['name'] in ['pythonw.exe', 'python.exe']:
+                            cmdline = proc.info.get('cmdline', [])
+                            if cmdline and any('run_autotrader_background' in str(cmd) for cmd in cmdline):
+                                return True, proc.info['pid']
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+            except ImportError:
+                pass  # psutil not installed
+            return False, None
+        
+        bg_running, bg_pid = check_background_trader()
+        
+        if bg_running:
+            st.info(f"""
+            🟢 **Background Auto-Trader Detected**
+            
+            A background auto-trader is currently running (PID: {bg_pid})
+            
+            ⚠️ **IMPORTANT**: Don't start another auto-trader here to avoid duplicate trades!
+            
+            📊 **Monitor it via:**
+            - Logs: `logs/autotrader_background.log`
+            - State: `data/trade_state.json`
+            - Command: `Get-Content logs\\autotrader_background.log -Tail 50 -Wait`
+            
+            🛑 **To stop it:** Run `stop_autotrader.bat` or kill process {bg_pid}
+            """)
         
         # Status display
         st.subheader("📊 Status")

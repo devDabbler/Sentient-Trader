@@ -253,6 +253,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
 - Position size should not exceed 20% of account balance
 - Stop loss should be 1-3% below entry for day trades
 - Return ONLY valid JSON, no other text
+- **CRITICAL JSON FORMATTING**: Keep all string values on a SINGLE LINE. Do NOT use newlines inside strings. Keep reasoning brief and on one line.
 """
         
         return prompt
@@ -280,7 +281,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
                     "messages": [
                         {
                             "role": "system",
-                            "content": "You are an expert day trader. Always respond with valid JSON only."
+                            "content": "You are an expert day trader. Always respond with valid JSON only. CRITICAL: All string values must be on a single line with no newline characters. Keep text concise."
                         },
                         {
                             "role": "user",
@@ -304,6 +305,32 @@ Analyze all the data above and provide a trading recommendation. Consider:
     
     
     
+    def _clean_json_string(self, json_str: str) -> str:
+        """Clean JSON string to handle malformed responses from LLM"""
+        import re
+        
+        # Remove markdown code blocks
+        json_str = re.sub(r'```json\s*', '', json_str)
+        json_str = re.sub(r'```\s*$', '', json_str)
+        
+        # Fix common LLM issues: Replace actual newlines inside strings with \n
+        # This is tricky - we need to find strings and replace newlines only inside them
+        def replace_newlines_in_strings(match):
+            """Replace actual newlines with \n inside JSON string values"""
+            string_content = match.group(1)
+            # Replace newlines with space (safer than \n which could also break)
+            cleaned = string_content.replace('\n', ' ').replace('\r', ' ')
+            # Also remove other control characters
+            cleaned = re.sub(r'[\x00-\x1F\x7F]', ' ', cleaned)
+            # Collapse multiple spaces
+            cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+            return f'"{cleaned}"'
+        
+        # Match string values in JSON (between quotes, handling escaped quotes)
+        json_str = re.sub(r'"((?:[^"\\]|\\.)*)(?:")', replace_newlines_in_strings, json_str)
+        
+        return json_str.strip()
+    
     def _parse_signal(self, response: str, symbol: str) -> Optional[TradingSignal]:
         """Parse LLM response into TradingSignal"""
         try:
@@ -312,9 +339,14 @@ Analyze all the data above and provide a trading recommendation. Consider:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
-                data = json.loads(json_str)
             else:
-                data = json.loads(response)
+                json_str = response
+            
+            # Clean the JSON string to handle malformed responses
+            json_str = self._clean_json_string(json_str)
+            
+            # Parse JSON
+            data = json.loads(json_str)
             
             # Create TradingSignal
             signal = TradingSignal(
@@ -339,9 +371,45 @@ Analyze all the data above and provide a trading recommendation. Consider:
             logger.info(f"Generated signal for {symbol}: {signal.signal} (confidence: {signal.confidence}%)")
             return signal
         
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed for {symbol}: {e}")
+            logger.error(f"Response was: {response[:500]}...")
+            
+            # Try fallback extraction using regex
+            try:
+                import re
+                signal_match = re.search(r'"signal":\s*"(BUY|SELL|HOLD)"', response, re.IGNORECASE)
+                confidence_match = re.search(r'"confidence":\s*(\d+)', response)
+                
+                if signal_match and confidence_match:
+                    fallback_signal = TradingSignal(
+                        symbol=symbol,
+                        signal=signal_match.group(1).upper(),
+                        confidence=float(confidence_match.group(1)),
+                        entry_price=None,
+                        target_price=None,
+                        stop_loss=None,
+                        position_size=0,
+                        reasoning="Fallback parsing due to malformed JSON response",
+                        risk_level="HIGH",
+                        time_horizon="DAY_TRADE",
+                        technical_score=0,
+                        sentiment_score=0,
+                        news_score=0,
+                        social_score=0,
+                        discord_score=0,
+                        timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    )
+                    logger.warning(f"Using fallback parsing for {symbol}: {fallback_signal.signal} ({fallback_signal.confidence}%)")
+                    return fallback_signal
+            except Exception as fallback_error:
+                logger.error(f"Fallback parsing also failed: {fallback_error}")
+            
+            return None
+        
         except Exception as e:
             logger.error(f"Error parsing signal: {e}")
-            logger.error(f"Response was: {response}")
+            logger.error(f"Response was: {response[:500]}...")
             return None
     
     def batch_analyze(

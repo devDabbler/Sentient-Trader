@@ -20,3 +20,4 @@ nest-asyncio>=1.5.0  # Critical for Windows async subprocess support
 praw>=7.7.0  # Reddit API for social sentiment (avoids rate limiting)
 feedparser>=6.0.0  # Fast RSS feed parsing for Reddit (no rate limits!)
 httpx>=0.24.0  # Modern async HTTP client for RSS feeds
+apscheduler>=3.10.0  # Scheduled event detection

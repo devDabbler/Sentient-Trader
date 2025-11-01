@@ -11,9 +11,17 @@ from typing import List, Dict, Optional
 import threading
 from dataclasses import dataclass
 from services.cash_manager import CashManager, CashManagerConfig
+from services.trade_state_manager import TradeStateManager
 
 logger = logging.getLogger(__name__)
 
+# Define custom exception for API errors
+class APIError(Exception):
+    pass
+
+# Define custom exception for data processing errors
+class DataProcessingError(Exception):
+    pass
 
 @dataclass
 class AutoTraderConfig:
@@ -22,7 +30,7 @@ class AutoTraderConfig:
     scan_interval_minutes: int = 15  # How often to scan for signals
     min_confidence: float = 75.0  # Minimum confidence to auto-execute
     max_daily_orders: int = 10
-    max_position_size_pct: float = 20.0  # Max % of account per trade
+    max_position_size_pct: float = 5.0  # Max % of total capital per trade
     trading_start_hour: int = 9  # 9:30 AM ET
     trading_start_minute: int = 30
     trading_end_hour: int = 15  # 3:30 PM ET (close before market close)
@@ -33,6 +41,10 @@ class AutoTraderConfig:
     trading_mode: str = "STOCKS"  # STOCKS, OPTIONS, SCALPING, SLOW_SCALPER, MICRO_SWING, ALL
     scalping_take_profit_pct: float = 2.0  # For scalping mode
     scalping_stop_loss_pct: float = 1.0  # For scalping mode
+    # Capital Management (NEW)
+    total_capital: float = 10000.0  # YOUR TOTAL ACCOUNT BALANCE
+    reserve_cash_pct: float = 10.0  # Keep 10% in reserve
+    max_capital_utilization_pct: float = 80.0  # Max 80% of usable capital deployed
     # PDT-safe cash/risk controls
     use_settled_funds_only: bool = True
     cash_buckets: int = 3
@@ -40,7 +52,6 @@ class AutoTraderConfig:
     risk_per_trade_pct: float = 0.02
     max_daily_loss_pct: float = 0.04
     max_consecutive_losses: int = 2
-    reserve_cash_pct: float = 0.05
     # Multi-agent mode (new architecture for SLOW_SCALPER/MICRO_SWING)
     use_agent_system: bool = False  # Enable multi-agent architecture
     # Short selling support (paper trading only)
@@ -77,6 +88,18 @@ class AutoTrader:
         self._daily_realized_pnl: float = 0.0
         self._consecutive_losses: int = 0
         
+        # Trade state manager (persistent state across restarts)
+        self.state_manager = TradeStateManager()
+        
+        # Capital Manager (NEW - tracks total capital and allocations)
+        from services.capital_manager import get_capital_manager
+        self._capital_manager = get_capital_manager(
+            total_capital=config.total_capital,
+            max_position_pct=config.max_position_size_pct,
+            reserve_cash_pct=config.reserve_cash_pct
+        )
+        logger.info(f"💰 Capital Manager initialized: ${config.total_capital:,.2f} total, {config.reserve_cash_pct}% reserve")
+        
         # Short position tracking (for paper trading)
         # Format: {symbol: {'quantity': int, 'entry_price': float, 'entry_time': datetime}}
         self._short_positions: Dict[str, Dict] = {}
@@ -86,7 +109,31 @@ class AutoTrader:
         self._agent_loop = None
         self._agent_thread = None
         
+        # Sync state with broker on startup
+        self._sync_state_on_startup()
+        
         logger.info(f"AutoTrader initialized with {len(watchlist)} tickers, smart_scanner={use_smart_scanner}, agent_system={config.use_agent_system}")
+    
+    def _sync_state_on_startup(self):
+        """Sync our state manager with actual broker positions on startup"""
+        try:
+            success, positions = self.tradier_client.get_positions()
+            if not success:
+                raise APIError("Failed to retrieve positions")
+            if not positions:
+                logger.info("📊 No open positions found at startup")
+                return
+            
+            logger.info(f"🔄 Syncing state with {len(positions)} broker positions...")
+            self.state_manager.sync_with_broker(positions)
+            
+            # Log what we found
+            for symbol, trade in self.state_manager.get_all_open_positions().items():
+                logger.info(f"  ✅ Tracking {symbol}: {trade.side} {trade.quantity} @ ${trade.entry_price:.2f}")
+        except APIError as e:
+            logger.error(f"❌ API Error syncing state on startup: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error syncing state on startup: {e}")
     
     def start(self):
         """Start the auto-trader in background thread"""
@@ -336,19 +383,51 @@ class AutoTrader:
             
             try:
                 success, bal_data = self.tradier_client.get_account_balance()
-                if success and isinstance(bal_data, dict):
-                    b = bal_data.get('balances', {})
-                    settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
-                    account_balance = float(b.get('total_equity', settled_cash or 10000.0))
+                if not success:
+                    raise APIError("Failed to retrieve account balance")
+                if not isinstance(bal_data, dict):
+                    raise DataProcessingError("Invalid account balance data")
+                
+                b = bal_data.get('balances', {})
+                settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
+                account_balance = float(b.get('total_equity', settled_cash or 10000.0))
+                
+                # SYNC CAPITAL MANAGER WITH LIVE BALANCE (NEW)
+                if self._capital_manager:
+                    # Update capital manager's total based on live broker balance
+                    broker_total = account_balance
+                    config_total = self.config.total_capital
+                    
+                    # If broker balance differs significantly from config, log it
+                    diff_pct = abs(broker_total - config_total) / config_total * 100 if config_total > 0 else 0
+                    if diff_pct > 5:  # More than 5% difference
+                        logger.warning(f"💰 Broker balance (${broker_total:,.2f}) differs from config (${config_total:,.2f}) by {diff_pct:.1f}%")
+                        logger.info(f"💰 Using LIVE broker balance: ${broker_total:,.2f}")
+                        # Update capital manager's total to match broker
+                        self._capital_manager.total_capital = broker_total
+                        self._capital_manager.usable_capital = broker_total * (1 - self._capital_manager.reserve_cash_pct / 100)
+                
+            except APIError as e:
+                logger.error(f"API Error getting account balance: {e}")
+            except DataProcessingError as e:
+                logger.error(f"Error processing account balance data: {e}")
             except Exception as e:
                 logger.error(f"Error getting account balance: {e}")
             
             # Get current positions to inform AI
             try:
                 success, positions = self.tradier_client.get_positions()
-                if success and positions:
+                if not success:
+                    raise APIError("Failed to retrieve positions")
+                
+                if not positions or positions == []:
+                    logger.info("📊 No open positions found")
+                    current_positions = []  # Empty list, not early return!
+                else:
                     current_positions = [pos.get('symbol') for pos in positions if pos.get('symbol')]
                     logger.info(f"📊 Current positions: {current_positions}")
+            except APIError as e:
+                logger.error(f"API Error getting positions: {e}")
             except Exception as e:
                 logger.error(f"Error getting positions: {e}")
 
@@ -385,16 +464,13 @@ class AutoTrader:
             
             # Check current positions with retry handling
             success, positions = self.tradier_client.get_positions()
+            if not success:
+                raise APIError("Failed to retrieve positions")
+            
             has_position = False
             position_quantity = 0
             
-            if not success:
-                logger.error(f"⚠️ Failed to retrieve positions for {signal.symbol} - API may be experiencing issues")
-                logger.warning(f"⚠️ Skipping {signal.signal} order for {signal.symbol} due to position check failure (safety measure)")
-                return
-            
-            # Parse positions if successful
-            if success and positions:
+            if positions:
                 for pos in positions:
                     if pos.get('symbol') == signal.symbol:
                         has_position = True
@@ -427,13 +503,28 @@ class AutoTrader:
                 if has_short_position:
                     # Covering a short position
                     logger.info(f"✅ BUY signal validated - covering {short_quantity} share SHORT position in {signal.symbol}")
-                elif has_position:
+                elif has_position or self.state_manager.has_open_position(signal.symbol):
                     # Already long - skip adding to position
                     logger.info(f"Already have LONG position in {signal.symbol} ({position_quantity} shares), skipping additional BUY")
                     return
                 else:
                     # Opening a long position
                     logger.info(f"✅ BUY signal validated - opening LONG position in {signal.symbol}")
+                    
+                    # CHECK CAPITAL AVAILABILITY (NEW)
+                    if self._capital_manager:
+                        available = self._capital_manager.get_available_capital()
+                        utilization = self._capital_manager.get_utilization_pct()
+                        
+                        if utilization >= self.config.max_capital_utilization_pct:
+                            logger.warning(f"⚠️ Capital utilization too high ({utilization:.1f}% >= {self.config.max_capital_utilization_pct}%), skipping {signal.symbol}")
+                            return
+                        
+                        if available <= 0:
+                            logger.warning(f"⚠️ No capital available (${available:.2f}), skipping {signal.symbol}")
+                            return
+                        
+                        logger.info(f"💰 Capital check: ${available:,.2f} available ({utilization:.1f}% utilization)")
             
             # Guardrails: daily loss and consecutive losses
             if self._daily_realized_pnl <= -abs(self.config.max_daily_loss_pct) * 100.0:
@@ -453,27 +544,41 @@ class AutoTrader:
                         signal.stop_loss = signal.entry_price * (1 - self.config.scalping_stop_loss_pct / 100)
                     else:  # SELL
                         if has_position:
-                            # Closing a LONG position - target is higher, stop is lower
-                            signal.target_price = signal.entry_price * (1 + self.config.scalping_take_profit_pct / 100)
-                            signal.stop_loss = signal.entry_price * (1 - self.config.scalping_stop_loss_pct / 100)
+                            # Closing a LONG position - DON'T USE BRACKET ORDER (just place simple sell)
+                            # Set targets to None so bracket order won't be used
+                            signal.target_price = None
+                            signal.stop_loss = None
+                            logger.info(f"📊 Scalping mode (SELL/CLOSING LONG): Entry=${signal.entry_price:.2f} - Using simple SELL order (no bracket)")
                         else:
                             # Opening a SHORT position - target is LOWER (profit when price drops), stop is HIGHER (stop when price rises)
                             signal.target_price = signal.entry_price * (1 - self.config.scalping_take_profit_pct / 100)
                             signal.stop_loss = signal.entry_price * (1 + self.config.scalping_stop_loss_pct / 100)
-                    
-                    position_type = "LONG" if signal.signal == 'BUY' else ("CLOSING LONG" if has_position else "SHORT")
-                    logger.info(f"📊 Scalping mode ({signal.signal}/{position_type}): Entry=${signal.entry_price:.2f}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f}")
+                            position_type = "SHORT"
+                            logger.info(f"📊 Scalping mode ({signal.signal}/{position_type}): Entry=${signal.entry_price:.2f}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f}")
             
             # PDT-safe position sizing using settled funds
-            if signal.entry_price and signal.stop_loss and self._cash_manager:
+            # Skip position sizing for closing orders (use position quantity instead)
+            if signal.signal == 'SELL' and has_position:
+                # Closing a LONG position - use existing position quantity
+                signal.position_size = position_quantity
+                logger.info(f"📊 Closing {position_quantity} shares of {signal.symbol}")
+            elif signal.signal == 'BUY' and has_short_position:
+                # Covering a SHORT position - use existing short quantity
+                signal.position_size = short_quantity
+                logger.info(f"📊 Covering {short_quantity} shares SHORT of {signal.symbol}")
+            elif signal.entry_price and signal.stop_loss and self._cash_manager:
                 try:
                     bal_success, bal_data = self.tradier_client.get_account_balance()
+                    if not bal_success:
+                        raise APIError("Failed to retrieve account balance")
+                    if not isinstance(bal_data, dict):
+                        raise DataProcessingError("Invalid account balance data")
+                    
                     settled_cash = None
                     total_equity = 10000.0
-                    if bal_success and isinstance(bal_data, dict):
-                        b = bal_data.get('balances', {})
-                        settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
-                        total_equity = float(b.get('total_equity', settled_cash or 10000.0))
+                    b = bal_data.get('balances', {})
+                    settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
+                    total_equity = float(b.get('total_equity', settled_cash or 10000.0))
                     settled_cash = self._cash_manager.get_settled_cash(settled_cash)
 
                     bucket_idx = self._cash_manager.select_active_bucket()
@@ -496,20 +601,55 @@ class AutoTrader:
                         settled_cash=bucket_cash,
                         reserve_pct=self.config.reserve_cash_pct,
                     )
-                    max_by_pct = int((total_equity * (self.config.max_position_size_pct / 100.0)) // signal.entry_price)
+                    
+                    # Use capital manager max position size (NEW)
+                    max_position_dollars = self._capital_manager.get_max_position_size() if self._capital_manager else (total_equity * (self.config.max_position_size_pct / 100.0))
+                    max_by_pct = int(max_position_dollars // signal.entry_price)
+                    
+                    # Also check available capital (NEW)
+                    if self._capital_manager:
+                        available_capital = self._capital_manager.get_available_capital()
+                        max_by_available = int(available_capital // signal.entry_price)
+                        max_by_pct = min(max_by_pct, max_by_available)
+                        logger.info(f"📊 Position sizing: risk-based={shares_by_risk}, affordable={affordable}, max_pct={max_by_pct}, avail_cap={max_by_available}")
+                    
                     final_shares = max(0, min(affordable, max_by_pct))
                     if final_shares <= 0:
-                        logger.info("No settled cash available for this entry; skipping")
+                        logger.info("No settled cash or capital available for this entry; skipping")
                         return
                     signal.position_size = final_shares
+                except APIError as e:
+                    logger.error(f"API Error sizing position with settled funds: {e}")
+                except DataProcessingError as e:
+                    logger.error(f"Error processing account balance data: {e}")
                 except Exception as e:
                     logger.error(f"Error sizing position with settled funds: {e}")
                     return
 
-            # Place bracket order if enabled
-            if self.config.use_bracket_orders and signal.entry_price and signal.target_price and signal.stop_loss:
+            # Place order
+            # For closing positions, use simple market/limit order (no bracket)
+            if (signal.signal == 'SELL' and has_position) or (signal.signal == 'BUY' and has_short_position):
+                # Closing a position - use simple market order for immediate execution
+                logger.info(f"📤 Placing simple MARKET order to close position: {signal.signal} {signal.position_size} {signal.symbol}")
+                
+                order_data = {
+                    'class': 'equity',
+                    'symbol': signal.symbol,
+                    'side': signal.signal.lower(),
+                    'quantity': str(signal.position_size),
+                    'type': 'market',
+                    'duration': 'day',
+                    'tag': f"AUTOCLOSE{self.config.trading_mode}{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                }
+                
+                success, result = self.tradier_client.place_order(order_data)
+                
+            # For opening positions, use bracket order if enabled
+            elif self.config.use_bracket_orders and signal.entry_price and signal.target_price and signal.stop_loss:
                 # Determine duration based on mode
                 duration = 'day' if self.config.trading_mode == "SCALPING" else 'gtc'
+                
+                logger.info(f"📤 Placing BRACKET order to open position: {signal.signal} {signal.position_size} {signal.symbol}")
                 
                 success, result = self.tradier_client.place_bracket_order(
                     symbol=signal.symbol,
@@ -547,6 +687,79 @@ class AutoTrader:
                 }
                 self.execution_history.append(execution_record)
                 
+                # Record trade in state manager
+                try:
+                    # Determine if this is opening or closing a position
+                    if (signal.signal == 'SELL' and has_position) or (signal.signal == 'BUY' and has_short_position):
+                        # Closing a position
+                        self.state_manager.record_trade_closed(
+                            symbol=signal.symbol,
+                            exit_price=signal.entry_price,
+                            reason=f"Signal (confidence: {signal.confidence}%)"
+                        )
+                        
+                        # RELEASE CAPITAL (NEW)
+                        if self._capital_manager:
+                            # Calculate P&L
+                            pnl = 0.0
+                            if has_position and positions:
+                                for pos in positions:
+                                    if pos.get('symbol') == signal.symbol:
+                                        cost_basis = float(pos.get('cost_basis', 0))
+                                        current_value = signal.entry_price * signal.position_size
+                                        pnl = current_value - cost_basis
+                                        break
+                            
+                            self._capital_manager.release_capital(signal.symbol, pnl=pnl)
+                            
+                            # Store P/L for Discord notification
+                            if not hasattr(self, '_last_pnl'):
+                                self._last_pnl = {}
+                            self._last_pnl[signal.symbol] = pnl
+                            
+                            logger.info(f"💰 Released capital for {signal.symbol} (P&L: ${pnl:+,.2f})")
+                            logger.info(f"📊 Capital status: ${self._capital_manager.get_available_capital():,.2f} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)")
+                    else:
+                        # Opening a position
+                        # Extract order IDs from result
+                        order_id = None
+                        bracket_ids = None
+                        if isinstance(result, dict):
+                            order_id = result.get('id') or result.get('order', {}).get('id')
+                            # For bracket orders, Tradier returns multiple order IDs
+                            if 'orders' in result:
+                                orders = result['orders'].get('order', [])
+                                if isinstance(orders, list) and len(orders) >= 3:
+                                    # Typically: [entry, take_profit, stop_loss]
+                                    bracket_ids = [orders[1].get('id'), orders[2].get('id')]
+                        
+                        self.state_manager.record_trade_opened(
+                            symbol=signal.symbol,
+                            side=signal.signal,
+                            quantity=signal.position_size,
+                            entry_price=signal.entry_price,
+                            order_id=str(order_id) if order_id else None,
+                            bracket_order_ids=bracket_ids,
+                            reason=f"Signal (confidence: {signal.confidence}%)"
+                        )
+                        
+                        # ALLOCATE CAPITAL (NEW)
+                        if self._capital_manager and signal.entry_price and signal.position_size:
+                            capital_allocated = signal.entry_price * signal.position_size
+                            strategy = self.config.trading_mode
+                            allocation = self._capital_manager.allocate_capital(
+                                ticker=signal.symbol,
+                                strategy=strategy,
+                                position_size_pct=(capital_allocated / self.config.total_capital * 100),
+                                entry_price=signal.entry_price,
+                                quantity=signal.position_size
+                            )
+                            if allocation:
+                                logger.info(f"💰 Allocated ${allocation.capital_allocated:,.2f} for {signal.symbol} ({strategy})")
+                                logger.info(f"📊 Capital status: ${self._capital_manager.get_available_capital():,.2f} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)")
+                except Exception as e:
+                    logger.error(f"❌ Error recording trade in state manager: {e}")
+                
                 # Track short positions for paper trading
                 if self.config.paper_trading and self.config.allow_short_selling:
                     if signal.signal == 'SELL' and not has_position:
@@ -582,12 +795,128 @@ class AutoTrader:
                         execution_record['settled_cash_after'] = self._cash_manager.get_settled_cash()
                 except Exception:
                     pass
+                
+                # Send Discord notification
+                try:
+                    self._send_discord_notification(signal, execution_record, has_position, has_short_position)
+                except Exception as e:
+                    logger.error(f"Failed to send Discord notification: {e}")
+                
                 logger.info(f"✅ Order placed successfully for {signal.symbol}")
             else:
                 logger.error(f"❌ Failed to place order for {signal.symbol}: {result}")
                 
+        except APIError as e:
+            logger.error(f"API Error executing signal for {signal.symbol}: {e}")
         except Exception as e:
             logger.error(f"Error executing signal for {signal.symbol}: {e}", exc_info=True)
+    
+    def _send_discord_notification(self, signal, execution_record, has_position, has_short_position):
+        """Send Discord notification for trade execution"""
+        import os
+        import requests
+        
+        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        if not webhook_url:
+            logger.debug('DISCORD_WEBHOOK_URL not set. Skipping Discord notification.')
+            return
+        
+        # Determine action type and get P/L for closed positions
+        pnl = None
+        if (signal.signal == 'SELL' and has_position) or (signal.signal == 'BUY' and has_short_position):
+            action = "CLOSED"
+            emoji = "📤"
+            
+            # Get P/L from the stored value (most reliable)
+            if hasattr(self, '_last_pnl') and signal.symbol in self._last_pnl:
+                pnl = self._last_pnl[signal.symbol]
+                # Clean up the stored value after using it
+                del self._last_pnl[signal.symbol]
+            
+            # Set color based on P/L
+            if pnl is not None:
+                color = 65280 if pnl > 0 else 16711680  # Green for profit, Red for loss
+            else:
+                color = 15844367  # Orange if P/L unknown
+        else:
+            action = "OPENED"
+            emoji = "📥"
+            color = 3447003  # Blue
+        
+        # Build embed
+        embed = {
+            'title': f'{emoji} {action} {signal.signal} Position: {signal.symbol}',
+            'description': f"Auto-Trader executed {signal.signal} signal for **{signal.symbol}**",
+            'color': color,
+            'timestamp': datetime.now().isoformat(),
+            'fields': [
+                {
+                    'name': '💵 Entry Price',
+                    'value': f"${signal.entry_price:.2f}" if signal.entry_price else "Market",
+                    'inline': True
+                },
+                {
+                    'name': '📦 Quantity',
+                    'value': str(signal.position_size),
+                    'inline': True
+                },
+                {
+                    'name': '📊 Confidence',
+                    'value': f"{signal.confidence:.1f}%",
+                    'inline': True
+                }
+            ],
+            'footer': {
+                'text': f"Trading Mode: {self.config.trading_mode} | Auto-Trader"
+            }
+        }
+        
+        # Add P/L for closed positions
+        if action == "CLOSED" and pnl is not None:
+            pnl_emoji = "💰" if pnl > 0 else "💸"
+            pnl_sign = "+" if pnl > 0 else ""
+            embed['fields'].append({
+                'name': f'{pnl_emoji} Profit/Loss',
+                'value': f"${pnl_sign}{pnl:.2f}",
+                'inline': True
+            })
+        
+        # Add target and stop for opening positions
+        if action == "OPENED" and signal.target_price and signal.stop_loss:
+            embed['fields'].extend([
+                {
+                    'name': '🎯 Target',
+                    'value': f"${signal.target_price:.2f}",
+                    'inline': True
+                },
+                {
+                    'name': '🛑 Stop Loss',
+                    'value': f"${signal.stop_loss:.2f}",
+                    'inline': True
+                },
+                {
+                    'name': '⚖️ R/R Ratio',
+                    'value': f"{((signal.target_price - signal.entry_price) / (signal.entry_price - signal.stop_loss)):.2f}:1" if signal.entry_price and signal.stop_loss else "N/A",
+                    'inline': True
+                }
+            ])
+        
+        # Add reasoning if available
+        if hasattr(signal, 'reasoning') and signal.reasoning:
+            embed['fields'].append({
+                'name': '💡 Reasoning',
+                'value': signal.reasoning[:1024],  # Discord limit
+                'inline': False
+            })
+        
+        payload = {'embeds': [embed]}
+        
+        try:
+            response = requests.post(webhook_url, json=payload, timeout=5)
+            response.raise_for_status()
+            logger.info(f'✅ Discord notification sent for {signal.symbol}')
+        except requests.exceptions.RequestException as e:
+            logger.error(f'❌ Failed to send Discord notification: {e}')
     
     def get_status(self) -> Dict:
         """Get current status of auto-trader"""
@@ -633,13 +962,16 @@ class AutoTrader:
             
             # Get account balance
             success, bal_data = self.tradier_client.get_account_balance()
-            if success and isinstance(bal_data, dict):
-                b = bal_data.get('balances', {})
-                settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
-                total_equity = float(b.get('total_equity', settled_cash or 10000.0))
-            else:
-                settled_cash = 10000.0
-                total_equity = 10000.0
+            if not success:
+                raise APIError("Failed to retrieve account balance")
+            if not isinstance(bal_data, dict):
+                raise DataProcessingError("Invalid account balance data")
+            
+            settled_cash = None
+            total_equity = 10000.0
+            b = bal_data.get('balances', {})
+            settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
+            total_equity = float(b.get('total_equity', settled_cash or 10000.0))
             
             # Create orchestrator
             self._orchestrator = AgentOrchestrator(
@@ -669,6 +1001,10 @@ class AutoTrader:
             logger.info("🤖 Multi-agent system started successfully")
             return True
             
+        except APIError as e:
+            logger.error(f"API Error starting agent system: {e}")
+        except DataProcessingError as e:
+            logger.error(f"Error processing account balance data: {e}")
         except Exception as e:
             logger.error(f"Failed to start agent system: {e}", exc_info=True)
             self.is_running = False

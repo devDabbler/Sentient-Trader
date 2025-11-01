@@ -67,6 +67,9 @@ trading_signals.log
 # Databases
 # data/*.db
 
+# Runtime trade state data
+data/trade_state.json
+
 # Excluded directories
 tests/
 documentation/
@@ -77,3 +80,4 @@ archive/
 
 # Cursor
 .cursorignore
+.cursor/

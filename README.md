@@ -9,6 +9,33 @@
 
 ## 🆕 Latest Updates (October 2025)
 
+### **🎯 Dynamic Multi-Strategy System** 🆕 NEW!
+- ✅ **Intelligent Strategy Selection** - Each ticker gets the optimal strategy based on its characteristics
+- ✅ **Capital Management** - Tracks available capital, position sizing, and intelligent allocation
+- ✅ **Automatic Strategy Detection** - PLUG → Scalping | PLTR → Swing | RIOT → Breakout | AMC → Mean Reversion
+- ✅ **6 Trading Strategies** - Scalping, Swing, Mean Reversion, Breakout, Options Wheel, Buy & Hold
+- ✅ **Per-Ticker Optimization** - Volatility, trend, RSI, volume analyzed to pick best approach
+- ✅ **Risk-Aware Position Sizing** - Dynamic position sizes (3-10%) based on strategy and confidence
+- ✅ **Capital Utilization Tracking** - Real-time monitoring of allocated vs available capital
+- ✅ **Reserve Cash Management** - Keeps 10% cash reserve, never over-allocates
+
+**Example**: On a $10,000 account, system might allocate:
+- PLUG (Scalping): $300 (3%) - High volatility, quick 2% profits
+- PLTR (Swing): $500 (5%) - Strong uptrend, EMA reclaim, target 10%
+- SOFI (Options Wheel): $800 (8%) - High IV, sell puts for 3%/month
+- AMC (Mean Reversion): $400 (4%) - Oversold RSI 25, target 7% bounce
+
+### **🔔 Enhanced Event Alert System** 🆕
+- ✅ **Earnings Detection** - Upcoming earnings with IV rank, position warnings, and countdown alerts
+- ✅ **News Monitoring** - Real-time news with sentiment analysis (positive/negative/critical)
+- ✅ **SEC Filing Alerts** - Material events (8-K), insider trading (Form 4), quarterly reports
+- ✅ **Economic Calendar** - Fed decisions, CPI, jobs reports with sector impact analysis
+- ✅ **Trading Decision Alerts** - Buy/Sell signals and speculation opportunities with R/R ratios
+- ✅ **Rich Discord Embeds** - Beautiful notifications with all relevant details and links
+- ✅ **Automated Scheduling** - Runs detectors at optimal times (earnings daily 4PM, news every 30min, SEC hourly)
+- ✅ **Watchlist Filtering** - All alerts automatically filtered to your saved tickers
+- ✅ **Multi-Source Data** - yfinance (free), Finnhub, NewsAPI, SEC EDGAR API support
+
 ### **🤖 PDT-Safe Trading System** 🆕
 - ✅ **Multi-Agent Architecture** - Event-driven agents for data, setups, risk, execution, and journaling
 - ✅ **SLOW_SCALPER Mode** - Intraday ORB/VWAP strategies with 3-bucket cash rotation
@@ -424,8 +451,14 @@ TRADIER_PROD_ACCOUNT_ID=XYZ789
 TRADIER_PROD_ACCESS_TOKEN=xxxx_prod_token
 TRADIER_PROD_API_URL=https://api.tradier.com
 
-# Discord Alerts (optional)
+# Discord Alerts (REQUIRED for event notifications)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Optional API Keys for Enhanced Data
+FINNHUB_API_KEY=your_finnhub_key        # For news & economic calendar
+NEWSAPI_KEY=your_newsapi_key            # For additional news sources
+SEC_API_KEY=your_sec_key                # For SEC filing rate limits (optional)
+TRADING_ECONOMICS_API_KEY=your_te_key   # For economic calendar (optional)
 
 # Legacy LLM Keys (optional, for direct API access)
 OPENAI_API_KEY=sk-...
@@ -433,9 +466,661 @@ ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 ```
 
+---
+
+## 🔔 Enhanced Event Alert System
+
+Your trading platform now includes a comprehensive event detection and notification system that monitors earnings, news, SEC filings, and economic events - all automatically sent to Discord with rich formatting.
+
+### **What Gets Monitored**
+
+#### **📅 Earnings Events**
+- **Upcoming earnings dates** with countdown (1-30 days ahead)
+- **EPS estimates** and historical performance
+- **IV Rank** to gauge option premium levels
+- **Active position warnings** if you hold the stock
+- **Priority levels**:
+  - 🔥 CRITICAL: Earnings in 1-3 days
+  - ⚠️ HIGH: Earnings in 4-7 days OR active position
+  - 📅 MEDIUM: Earnings in 8-14 days
+  - ℹ️ LOW: Earnings in 15-30 days
+
+**Example Alert:**
+```
+🔥 CRITICAL Alert: NVDA
+⚠️ Earnings TOMORROW (2024-11-15)
+📅 Days Until: 1
+💰 EPS Estimate: $0.74
+📊 IV Rank: 78.5%
+⚠️ Position Status: ACTIVE POSITION
+```
+
+#### **📰 Major News**
+- **Real-time news** from yfinance (free) and Finnhub
+- **Sentiment analysis** (positive/negative/critical)
+- **Keyword detection** for major events
+- **Critical keywords**: bankruptcy, SEC investigation, fraud, lawsuit, recall, delisting
+- **Positive keywords**: breakthrough, approval, partnership, acquisition, beat estimates
+
+**Example Alert:**
+```
+🚨 CRITICAL Alert: TSLA
+📉 NEGATIVE News (fraud, investigation): 
+"SEC Launches Investigation into Tesla Autopilot Claims"
+📰 News Items: 3
+📡 Source: Reuters
+🔗 Link: [Read Article](https://...)
+```
+
+#### **📋 SEC Filings**
+- **8-K filings** (material events) - CRITICAL priority
+- **Form 4** (insider trading) - HIGH priority
+- **10-Q/10-K** (quarterly/annual reports) - MEDIUM priority
+- **Direct links** to SEC EDGAR filings
+
+**Example Alert:**
+```
+🚨 CRITICAL Alert: AAPL
+📋 SEC Filing: 8-K - Material Event Report (2 hours ago)
+📋 Form Type: 8-K
+📄 Description: Material Event Report
+🔗 Filing Link: [View on SEC EDGAR](https://sec.gov/...)
+```
+
+#### **📊 Economic Calendar**
+- **Fed rate decisions** (CRITICAL)
+- **CPI, jobs reports** (CRITICAL)
+- **Sector-specific events** (housing, manufacturing, retail)
+- **Automatic sector matching** to your watchlist
+
+**Example Alert:**
+```
+🔥 CRITICAL Alert: SPY
+🔥 Economic Event TODAY at 02:00 PM ET: Fed Rate Decision
+📅 Days Until: 0
+💥 Impact: HIGH
+🏢 Affected Sectors: All Sectors
+```
+
+#### **🎯 Trading Decision Alerts**
+- **BUY signals** with entry/target/stop prices
+- **SELL signals** with profit percentages
+- **SPECULATION opportunities** (higher risk/reward)
+- **REVIEW REQUIRED** for manual evaluation
+- **Risk/Reward ratios** and position sizing
+
+**Example Alert:**
+```
+🟢 HIGH Alert: NVDA
+🟢 BUY SIGNAL - Entry: $145.50 | Target: $160.00 | Stop: $138.00 | R/R: 1.93:1
+💵 Entry Price: $145.50
+🎯 Target: $160.00
+🛑 Stop Loss: $138.00
+⚖️ Risk/Reward: 1.93:1
+📦 Position Size: Large (3-5% of portfolio)
+💡 Reasoning: EMA reclaim + oversold DeMarker + strong sector RS
+```
+
+### **Automated Scheduling**
+
+The system runs detectors at optimal times automatically:
+
+| Detector | Schedule | Reason |
+|----------|----------|--------|
+| **Earnings** | Daily at 4:00 PM ET | After market close |
+| **News** | Every 30 minutes | Catch breaking news during trading |
+| **SEC Filings** | Every hour | Filings can come anytime |
+| **Economic Calendar** | Daily at 8:00 AM ET | Before market open |
+
+### **Setup Instructions**
+
+#### **1. Get Discord Webhook URL**
+
+1. Open Discord and go to your server
+2. Right-click the channel → **Edit Channel**
+3. Go to **Integrations** → **Webhooks**
+4. Click **New Webhook** or **Copy Webhook URL**
+5. Add to your `.env` file:
+
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/1234567890/abcdefg...
+```
+
+#### **2. Install Dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+New dependency: `apscheduler>=3.10.0`
+
+#### **3. Test the System**
+
+Run the test script to verify everything works:
+
+```bash
+python test_event_alerts.py
+```
+
+This will:
+- ✅ Test Discord connection
+- ✅ Test earnings detector (NVDA, AAPL, MSFT)
+- ✅ Test news detector (NVDA, TSLA)
+- ✅ Test trading decision alerts
+- ✅ Verify scheduler configuration
+
+#### **4. Start the Scheduler**
+
+**Option A: Integrate with Auto-Trader**
+
+The event scheduler automatically starts when you run the auto-trader:
+
+```python
+from services.auto_trader import AutoTrader
+from services.event_scheduler import get_event_scheduler
+
+# Scheduler starts automatically with auto-trader
+trader = AutoTrader(config, tradier_client, signal_generator, watchlist)
+trader.start()
+```
+
+**Option B: Run Standalone (with Position Checking)**
+
+```python
+from services.alert_system import get_alert_system
+from services.ticker_manager import TickerManager
+from services.event_scheduler import get_event_scheduler
+from src.integrations.tradier_client import TradierClient, TradierMode
+
+# Initialize
+alert_system = get_alert_system()
+ticker_manager = TickerManager()
+
+# Optional: Setup broker client for position checking
+tradier_client = TradierClient(
+    account_id=os.getenv('TRADIER_PAPER_ACCOUNT_ID'),
+    access_token=os.getenv('TRADIER_PAPER_ACCESS_TOKEN'),
+    mode=TradierMode.PAPER
+)
+
+# Create and start scheduler with position checking
+scheduler = get_event_scheduler(
+    alert_system=alert_system,
+    ticker_manager=ticker_manager,
+    tradier_client=tradier_client  # Enables position warnings
+)
+scheduler.start()
+
+# Scheduler runs in background
+# Your app continues normally
+```
+
+**For IBKR Users:**
+
+```python
+from ib_insync import IB
+
+# Connect to IBKR
+ib = IB()
+ib.connect('127.0.0.1', 7497, clientId=1)  # TWS paper trading
+
+# Create scheduler with IBKR
+scheduler = get_event_scheduler(
+    alert_system=alert_system,
+    ticker_manager=ticker_manager,
+    ibkr_client=ib  # Enables position warnings
+)
+scheduler.start()
+```
+
+**Option C: Manual Triggers**
+
+Run detectors on-demand:
+
+```python
+# Run specific detector immediately
+scheduler.run_detector_now('earnings')
+scheduler.run_detector_now('news')
+scheduler.run_detector_now('sec')
+scheduler.run_detector_now('economic')
+
+# Check status
+status = scheduler.get_status()
+print(f"Running: {status['is_running']}")
+print(f"Jobs: {len(status['jobs'])}")
+print(f"Stats: {status['statistics']}")
+```
+
+### **Optional API Keys for Enhanced Data**
+
+While the system works with free data sources (yfinance, SEC EDGAR), you can add API keys for more comprehensive coverage:
+
+```bash
+# Finnhub (free tier available) - News + Economic Calendar
+FINNHUB_API_KEY=your_key_here
+# Get free key: https://finnhub.io/register
+
+# NewsAPI (500 requests/month free) - Additional news sources
+NEWSAPI_KEY=your_key_here
+# Get free key: https://newsapi.org/register
+
+# Trading Economics (optional) - Enhanced economic calendar
+TRADING_ECONOMICS_API_KEY=your_key_here
+```
+
+**Without API keys**, the system uses:
+- **yfinance** for earnings and news (free, no key needed)
+- **SEC EDGAR API** for filings (free, no key needed)
+- **Mock economic calendar** with common events
+
+### **Position Checking Integration** 🆕
+
+The alert system can check your active positions from **Tradier or IBKR** and warn you about earnings/news when you hold the stock!
+
+**How It Works:**
+
+When you provide a broker client to the scheduler, the earnings detector will:
+1. Check if you have an active position in the ticker
+2. Upgrade alert priority if you hold the stock
+3. Add "⚠️ ACTIVE POSITION" warning to the alert
+4. Help you avoid being caught off-guard by earnings
+
+**Example Earnings Alert with Position:**
+```
+🔥 CRITICAL Alert: NVDA
+⚠️ Earnings TOMORROW (2024-11-15) | EPS Est: $0.74 | IV: 78.5%
+
+📅 Days Until: 1
+💰 EPS Estimate: $0.74
+📊 IV Rank: 78.5%
+⚠️ Position Status: ACTIVE POSITION  ← You hold this stock!
+```
+
+**Priority Boost:**
+- Normal: Earnings in 8-14 days = MEDIUM priority
+- With Position: Earnings in 8-14 days = **HIGH priority** (upgraded!)
+
+**Setup:**
+
+```python
+# Pass your broker client when creating the scheduler
+from services.event_scheduler import get_event_scheduler
+
+scheduler = get_event_scheduler(
+    alert_system=alert_system,
+    ticker_manager=ticker_manager,
+    tradier_client=your_tradier_client,  # or ibkr_client=your_ib_connection
+)
+```
+
+That's it! The system automatically checks positions and adjusts alerts accordingly.
+
+### **Watchlist Filtering**
+
+All alerts are automatically filtered to your saved tickers ("My Tickers"):
+
+1. Add tickers to your watchlist in the app
+2. Event detectors only check those tickers
+3. Economic events check if they affect your sectors
+4. Position checking works across your entire portfolio
+5. Reduces noise and focuses on what matters to you
+
+### **Discord Embed Examples**
+
+Alerts appear in Discord with rich formatting:
+
+**Earnings Alert:**
+```
+🚨 CRITICAL Alert: NVDA
+⚠️ Earnings in 2 days (2024-11-15) | EPS Est: $0.74 | IV: 78.5%
+
+📅 Days Until: 2
+💰 EPS Estimate: $0.74
+📊 IV Rank: 78.5%
+
+Alert Type: Earnings Upcoming
+```
+
+**News Alert:**
+```
+🚨 HIGH Alert: TSLA
+📈 POSITIVE News (breakthrough, approval): 
+"Tesla Receives Full Self-Driving Approval in California"
+
+📈 Sentiment: POSITIVE
+📰 News Items: 5
+📡 Source: Bloomberg
+🔗 Link: [Read Article](https://...)
+
+Alert Type: Major News
+```
+
+### **Architecture**
+
+```
+EventScheduler
+├── EarningsDetector (daily 4PM)
+├── NewsDetector (every 30min)
+├── SECDetector (hourly)
+└── EconomicDetector (daily 8AM)
+     ↓
+AlertSystem → Discord Webhook
+     ↓
+logs/trading_alerts.json (local backup)
+```
+
+### **Files Added**
+
+- `services/event_detectors/base_detector.py` - Base class for all detectors
+- `services/event_detectors/earnings_detector.py` - Earnings monitoring
+- `services/event_detectors/news_detector.py` - News monitoring with sentiment
+- `services/event_detectors/sec_detector.py` - SEC filing monitoring
+- `services/event_detectors/economic_detector.py` - Economic calendar
+- `services/event_scheduler.py` - Automated scheduling service
+- `services/trading_decision_alerts.py` - Buy/sell/speculation alerts
+- `test_event_alerts.py` - Comprehensive test suite
+- `models/alerts.py` - Extended with new alert types
+
+### **Troubleshooting**
+
+**No alerts appearing?**
+1. Check `.env` has `DISCORD_WEBHOOK_URL` set
+2. Run `python test_event_alerts.py` to verify connection
+3. Check logs: `logs/trading_alerts.json`
+4. Verify tickers are in your watchlist
+
+**Too many alerts?**
+1. Adjust priority filtering in Discord
+2. Reduce watchlist size
+3. Modify detector schedules in `event_scheduler.py`
+
+**API rate limits?**
+1. yfinance: No limits, but may be slow
+2. SEC EDGAR: Requires User-Agent header (already configured)
+3. Finnhub: 60 calls/min on free tier
+4. NewsAPI: 500 calls/month on free tier
+
+---
+
+## 🎯 Dynamic Multi-Strategy Trading System
+
+The platform now features an **intelligent, analysis-driven multi-strategy system** that automatically selects the optimal trading strategy for each ticker based on its unique characteristics - volatility, trend, momentum, IV rank, and more.
+
+### **How It Works**
+
+Instead of forcing all tickers into one strategy (e.g., scalping everything), the system analyzes each ticker and recommends the best approach:
+
+```python
+from services.dynamic_strategy_selector import get_strategy_for_ticker
+from services.capital_manager import get_capital_manager
+
+# Analyze ticker and get optimal strategy
+recommendation = get_strategy_for_ticker('PLTR')
+
+print(f"{recommendation.ticker}: {recommendation.strategy.value}")
+print(f"Confidence: {recommendation.confidence:.1f}%")
+print(f"Reasoning: {recommendation.reasoning}")
+print(f"Position Size: {recommendation.position_size_pct}%")
+print(f"Profit Target: {recommendation.profit_target_pct}%")
+print(f"Stop Loss: {recommendation.stop_loss_pct}%")
+```
+
+**Output Example**:
+```
+PLTR: SWING
+Confidence: 85.0%
+Reasoning: Strong uptrend - excellent for swings | EMA reclaim - quality entry | 
+           Power zone active | RSI 58 - healthy range | Timeframes aligned
+Position Size: 5.0%
+Profit Target: 10.0%
+Stop Loss: 4.0%
+```
+
+### **6 Trading Strategies**
+
+| Strategy | Best For | Hold Time | Win Rate | Profit Target | When Recommended |
+|----------|----------|-----------|----------|---------------|------------------|
+| **Scalping** | High volatility, liquid stocks | Minutes-Hours | 65-70% | 2% | Volume >2x, price moving >3% |
+| **Swing Trading** | Trending stocks, quality setups | 1-5 Days | 60-70% | 10% | EMA reclaim + power zone + uptrend |
+| **Mean Reversion** | Oversold/overbought extremes | 1-3 Days | 55-65% | 7% | RSI <30 with volume spike |
+| **Breakout** | High volume, catalysts | 1-7 Days | 45-55% | 15% | Volume >5x, price +10%, news catalyst |
+| **Options Wheel** | High IV, quality stocks | 30-45 Days | 70-80% | 3%/month | IV rank >60%, stable trend |
+| **Buy & Hold** | Strong fundamentals, long trends | Weeks-Months | 70-80% | 30% | Strong uptrend + quality ticker |
+
+### **Real Example: Your Watchlist**
+
+Here's how the system might analyze your tickers:
+
+#### **PLUG** (FuelCell Energy)
+- **Analysis**: High volatility (change +8%), volume 3.2x average, no clear trend
+- **Recommended Strategy**: **SCALPING**
+- **Reasoning**: "Strong intraday move +8.2% | High volume 3.2x avg | High liquidity"
+- **Trade Plan**: 3% position, 2% profit target, 1% stop, hold minutes-hours
+- **Why**: Too volatile for swings, perfect for quick in/out profits
+
+#### **PLTR** (Palantir)
+- **Analysis**: Strong uptrend, EMA reclaim, power zone active, RSI 58
+- **Recommended Strategy**: **SWING TRADING**
+- **Reasoning**: "Strong uptrend - excellent for swings | EMA reclaim - quality entry | Power zone active | RSI 58 - healthy range"
+- **Trade Plan**: 5% position, 10% profit target, 4% stop, hold 1-5 days
+- **Why**: High-quality setup with clear trend, let it run for bigger gains
+
+#### **RIOT** (Bitcoin miner)
+- **Analysis**: Bitcoin correlation, volume 5.8x average, +12% move, crypto news
+- **Recommended Strategy**: **BREAKOUT**
+- **Reasoning**: "Massive volume 5.8x | Explosive move +12.3% | Catalyst detected: Bitcoin rally"
+- **Trade Plan**: 3% position, 15% profit target, 6% stop, hold 1-7 days
+- **Why**: Event-driven explosive move, ride the momentum
+
+#### **AMC** (AMC Entertainment)
+- **Analysis**: RSI 24 (oversold), down -8%, volume 2.4x average
+- **Recommended Strategy**: **MEAN REVERSION**
+- **Reasoning**: "Extreme oversold RSI 24 | Down -8.1% + oversold | Volume spike 2.4x | Known mean-reverting ticker"
+- **Trade Plan**: 4% position, 7% profit target, 3% stop, hold 1-3 days
+- **Why**: Oversold bounce play, historically mean-reverts
+
+#### **SOFI** (SoFi Technologies)
+- **Analysis**: IV rank 72%, uptrend, price $11.50, volume 8M
+- **Recommended Strategy**: **OPTIONS WHEEL**
+- **Reasoning**: "High IV rank 72% | Good trend for ownership: UPTREND | Good price range $11.50 | High liquidity - good option spreads | Quality ticker for wheel"
+- **Trade Plan**: 8% position, 3% monthly premium, sell $10.50 put 45 DTE
+- **Why**: High IV = expensive premiums, quality company you'd want to own
+
+### **Capital Management**
+
+The system intelligently manages your capital to prevent over-allocation and ensure diversification:
+
+```python
+from services.capital_manager import get_capital_manager
+
+# Initialize with your account balance
+capital_mgr = get_capital_manager(total_capital=10000.0)
+
+# System allocates based on strategy recommendations
+# PLTR (Swing): 5% = $500
+# PLUG (Scalp): 3% = $300
+# RIOT (Breakout): 3% = $300
+# AMC (Mean Rev): 4% = $400
+# SOFI (Options): 8% = $800
+# Total Allocated: 23% = $2,300
+# Available: $6,700 (67% free + 10% reserve)
+```
+
+**Features**:
+- ✅ **Reserve Cash**: Always keeps 10% in reserve (never fully deploys)
+- ✅ **Position Limits**: Max 5% per position (configurable)
+- ✅ **Real-Time Tracking**: Knows exactly how much capital is available
+- ✅ **Smart Allocation**: Won't allocate more than available
+- ✅ **Per-Strategy Tracking**: See which strategies are using what capital
+- ✅ **P&L Integration**: Updates total capital as trades close with profit/loss
+
+**Check Status**:
+```python
+capital_mgr.print_summary()
+```
+
+**Output**:
+```
+================================================================================
+💰 CAPITAL MANAGEMENT SUMMARY
+================================================================================
+
+📊 Capital Overview:
+   Total Capital:      $   10,500.00
+   Usable Capital:     $    9,450.00
+   Reserve Cash:       $    1,050.00
+   Allocated:          $    2,300.00
+   Available:          $    7,150.00
+   Utilization:                24.3%
+
+📈 Performance:
+   Unrealized P&L:     $      125.00
+   Realized P&L:       $      375.00
+   Total P&L:          $      500.00
+
+🎯 Positions:
+   Open:                          4
+   Closed (Total):               12
+
+📋 Strategy Breakdown:
+   SWING                $     500.00 ( 5.3%)
+   SCALPING             $     300.00 ( 3.2%)
+   BREAKOUT             $     700.00 ( 7.4%)
+   OPTIONS_WHEEL        $     800.00 ( 8.5%)
+
+💼 Open Positions:
+   PLTR   | SWING           | $    500.00 | P&L: $+45.00
+   PLUG   | SCALPING        | $    300.00 | P&L: $+12.00
+   RIOT   | BREAKOUT        | $    700.00 | P&L: $+78.00
+   SOFI   | OPTIONS_WHEEL   | $    800.00 | P&L: $-10.00
+================================================================================
+```
+
+### **Integration with Auto-Trader**
+
+The dynamic strategy selector integrates seamlessly with your existing auto-trader:
+
+```python
+from services.auto_trader import AutoTrader, AutoTraderConfig
+from services.dynamic_strategy_selector import get_strategy_for_ticker
+from services.capital_manager import get_capital_manager
+
+# Initialize capital manager with your account balance
+capital_mgr = get_capital_manager(total_capital=10000.0)
+
+# Auto-trader config
+config = AutoTraderConfig(
+    enabled=True,
+    scan_interval_minutes=15,
+    trading_mode="AUTO",  # Let analyzer decide strategy per ticker
+    paper_trading=True
+)
+
+# Your watchlist
+watchlist = ['PLTR', 'PLUG', 'RIOT', 'AMC', 'SOFI', 'AFRM', 'MARA']
+
+# Start auto-trader
+trader = AutoTrader(config, tradier_client, signal_generator, watchlist)
+
+# For each ticker, system will:
+# 1. Analyze characteristics (volatility, trend, RSI, IV, etc.)
+# 2. Recommend optimal strategy
+# 3. Check available capital
+# 4. Execute with appropriate position size and targets
+trader.start()
+```
+
+### **Strategy Selection Logic**
+
+The system scores each strategy 0-100 based on ticker analysis:
+
+#### **Scalping Score**
+- ✅ Volume ratio >2x (+30 points)
+- ✅ Price movement >3% (+25 points)
+- ✅ High liquidity >5M volume (+15 points)
+- ✅ Low entropy (structured market) (+10 points)
+- ❌ Slow movement <0.5% (-20 points)
+
+#### **Swing Score**
+- ✅ Strong uptrend (+35 points)
+- ✅ EMA reclaim (+25 points)
+- ✅ Power zone active (+20 points)
+- ✅ RSI 40-65 (healthy) (+15 points)
+- ✅ Timeframes aligned (+15 points)
+- ❌ Downtrend (-20 points)
+
+#### **Mean Reversion Score**
+- ✅ RSI <25 extreme oversold (+40 points)
+- ✅ Volume spike >2.5x (+25 points)
+- ✅ Down >5% with oversold RSI (+20 points)
+- ✅ Known mean-reverting ticker (+15 points)
+- ❌ RSI neutral 40-60 (-20 points)
+
+#### **Breakout Score**
+- ✅ Volume >5x average (+35 points)
+- ✅ Price movement >10% (+30 points)
+- ✅ News catalyst detected (+20 points)
+- ✅ Positive sentiment (+15 points)
+- ❌ Low volume <1.5x (-20 points)
+
+#### **Options Wheel Score**
+- ✅ IV rank >60% (+35 points)
+- ✅ Uptrend or sideways (+20 points)
+- ✅ Price $10-$100 (good range) (+15 points)
+- ✅ Quality ticker (AAPL, MSFT, etc.) (+15 points)
+- ❌ No IV data available (-30 points)
+
+**Winner**: Strategy with highest score gets recommended
+
+### **Files Added**
+
+- `services/dynamic_strategy_selector.py` - Analysis-driven strategy selection engine
+- `services/capital_manager.py` - Intelligent capital allocation and tracking
+- `services/multi_strategy_orchestrator.py` - Run multiple strategies simultaneously
+
+### **Configuration**
+
+Enable dynamic multi-strategy in your config:
+
+```python
+# config_background_trader.py (or any config file)
+
+# Set to "AUTO" to let analyzer decide strategy per ticker
+TRADING_MODE = "AUTO"
+
+# Capital Management Settings
+TOTAL_CAPITAL = 10000.0  # Your account balance
+MAX_POSITION_SIZE_PCT = 5.0  # Max 5% per position
+RESERVE_CASH_PCT = 10.0  # Keep 10% in reserve
+
+# Strategy-Specific Settings (used when selected)
+SCALPING_TAKE_PROFIT_PCT = 2.0
+SCALPING_STOP_LOSS_PCT = 1.0
+SWING_TAKE_PROFIT_PCT = 10.0
+SWING_STOP_LOSS_PCT = 4.0
+MEAN_REVERSION_TAKE_PROFIT_PCT = 7.0
+MEAN_REVERSION_STOP_LOSS_PCT = 3.0
+```
+
+### **Best Practices**
+
+✅ **Diversify Strategies**: Let different tickers use different strategies
+✅ **Monitor Capital**: Check utilization regularly (keep below 80%)
+✅ **Review Recommendations**: Verify strategy makes sense for each ticker
+✅ **Adjust Allocations**: Tune max position size based on account size
+✅ **Track Performance**: See which strategies work best for you
+
+⚠️ **Avoid**:
+- ❌ Forcing all tickers into one strategy
+- ❌ Over-allocating capital (>90% deployed)
+- ❌ Ignoring strategy recommendations
+- ❌ Trading without capital management
+
+---
+
 ## 🤖 Automated Trading Bot
 
-The platform includes a fully automated trading system that monitors your watchlist and executes high-confidence trades automatically. **NEW**: Multi-agent architecture for PDT-safe trading!
+The platform includes a fully automated trading system that monitors your watchlist and executes high-confidence trades automatically. **NEW**: Multi-agent architecture for PDT-safe trading AND dynamic multi-strategy selection!
 
 ### **Features**
 
