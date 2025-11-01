@@ -9112,9 +9112,9 @@ USE_AGENT_SYSTEM = False
                 with col1:
                     trading_mode = st.selectbox(
                         "Trading Mode",
-                        options=["SCALPING", "STOCKS", "OPTIONS", "ALL"],
-                        index=["SCALPING", "STOCKS", "OPTIONS", "ALL"].index(current_config['trading_mode']),
-                        help="SCALPING: Fast intraday | STOCKS: Swing trades | OPTIONS: Options trading"
+                        options=["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"],
+                        index=["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"].index(current_config.get('trading_mode', 'SCALPING')) if current_config.get('trading_mode', 'SCALPING') in ["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"] else 0,
+                        help="SCALPING: Fast intraday | WARRIOR_SCALPING: Gap & Go (9:30-10:00 AM) | STOCKS: Swing trades | OPTIONS: Options trading"
                     )
                     
                     scan_interval = st.slider(
@@ -9417,7 +9417,7 @@ USE_AGENT_SYSTEM = False
             # Show default form for creating new config
             st.info("📝 Using default settings. Customize below and save to create the config file.")
             
-            trading_mode = st.selectbox("Trading Mode", ["SCALPING", "STOCKS", "OPTIONS", "ALL"], index=0)
+            trading_mode = st.selectbox("Trading Mode", ["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"], index=0, help="SCALPING: Fast intraday | WARRIOR_SCALPING: Gap & Go (9:30-10:00 AM)")
             scan_interval = st.slider("Scan Interval (minutes)", 5, 60, 15, 5)
             min_confidence = st.slider("Min Confidence %", 60, 95, 75, 5)
             use_smart_scanner = st.checkbox("Use Smart Scanner", value=True)
@@ -9539,9 +9539,9 @@ USE_AGENT_SYSTEM = False
         with col_mode1:
             trading_mode = st.selectbox(
                 "Strategy Type",
-                options=["STOCKS", "OPTIONS", "SCALPING", "ALL"],
+                options=["STOCKS", "OPTIONS", "SCALPING", "WARRIOR_SCALPING", "ALL"],
                 index=2,  # Default to SCALPING
-                help="SCALPING: Fast intraday trades with tight stops (2% profit, 1% stop)"
+                help="SCALPING: Fast intraday trades | WARRIOR_SCALPING: Gap & Go strategy (9:30-10:00 AM)"
             )
         
         with col_mode2:
@@ -9851,6 +9851,13 @@ When enabled (paper trading only), SELL signals can open short positions:
 - Orders close same day
 - Scan interval: 5-15 minutes recommended
 - Best for: High-volume, liquid stocks
+
+**WARRIOR_SCALPING**: Gap & Go strategy (Ross Cameron's approach)
+- Focus: 9:30-10:00 AM momentum window
+- Filters: $2-$20 price, 4-10% gap, 2-3x volume
+- Setups: Gap & Go, Micro Pullback, Red-to-Green, Bull Flag
+- Targets: 2% profit, 1% stop loss
+- Best for: Premarket gappers with morning momentum
 
 **ALL**: Combines all strategies
 

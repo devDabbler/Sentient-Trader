@@ -9,6 +9,50 @@
 
 ## 🆕 Latest Updates (October 2025)
 
+### **⚔️ Warrior Trading Scalping System** 🆕 NEW!
+- ✅ **Gap & Go Strategy** - Trade premarket gappers with momentum continuation
+- ✅ **1-Minute Entry Triggers** - Breakout, micro pullback, red-to-green detection
+- ✅ **Market-Wide Scanner** 🔥 **NEW!** - Scan entire S&P 500/NASDAQ 100 for gappers automatically
+- ✅ **Automated Discovery** - No manual screening needed, finds best setups for you
+- ✅ **Tight Risk Management** - 1% stop, 2% profit, scale-out exits
+- ✅ **Morning Momentum Window** - Focus on 9:30 AM - 10:00 AM for best setups
+- ✅ **Hybrid Data Approach** - yfinance (free) + Tradier (real-time) for cost-effective scanning
+
+**Market-Wide Scanning Features:** 🔥 **NEW!**
+- Scan 500+ stocks (S&P 500) or 100+ stocks (NASDAQ 100) in < 60 seconds
+- Automatic gapper discovery: 2-20% gap, 1.5-10x volume
+- Parallel processing with ThreadPoolExecutor for speed
+- Configurable universes: SP500, NASDAQ100, ALL, CUSTOM, WATCHLIST
+- Batch processing to avoid API rate limits
+- Intelligent fallback: Tradier → yfinance if needed
+
+**Core Filters:**
+- Price filter: $2-$20
+- Gap filter: 2-20% premarket gap (adjustable)
+- Volume filter: 1.5-10x average volume (adjustable)
+- Trading window: 9:30 AM - 10:00 AM ET
+- Profit target: 2% (scale out)
+- Stop loss: 1% (low of breakout candle)
+
+**Supported Setups:**
+- **Gap & Go**: Breakout above premarket high after 9:30 AM
+- **Micro Pullback**: 0.2-0.5% pullback in uptrend, bounce off 9 EMA
+- **Red-to-Green**: Reversal after red candles, above premarket low
+- **Bull Flag**: Breakout above flag high with volume confirmation
+
+**Integration:**
+- Fully integrated with dynamic strategy selector
+- Auto-Trader mode: `WARRIOR_SCALPING`
+- Config file: `config_warrior_scalping.py`
+- Toggle: `USE_MARKET_WIDE_SCAN = True/False`
+- PDT-safe (cash account compatible)
+- Paper trading mode only (for now)
+
+**Documentation:**
+- 📚 Implementation Guide: `documentation/WARRIOR_MARKET_SCANNER_IMPLEMENTATION.md`
+- ⚡ Quick Start: `documentation/WARRIOR_SCANNER_QUICK_START.md`
+- 🧪 Test Suite: `tests/test_warrior_market_scanner.py`
+
 ### **🎯 Dynamic Multi-Strategy System** 🆕 NEW!
 - ✅ **Intelligent Strategy Selection** - Each ticker gets the optimal strategy based on its characteristics
 - ✅ **Capital Management** - Tracks available capital, position sizing, and intelligent allocation
@@ -1167,6 +1211,34 @@ Perfect for paper trading and learning automated strategies:
 - Executes bracket orders with 2% profit target and 1% stop-loss
 - All orders close same day (no overnight risk)
 - Ideal for liquid, high-volume stocks (MAIA, NOK, PLUG, SOFI, TLRY)
+
+### **Warrior Trading Mode (Gap & Go)** 🆕
+
+Based on Ross Cameron's Gap & Go approach - focuses on morning momentum:
+
+```
+✅ Trading Mode: WARRIOR_SCALPING
+✅ Scan Interval: 1 minute (during 9:30-10:00 AM window)
+✅ Min Confidence: 70%
+✅ Max Daily Orders: 10
+✅ Take Profit: 2%
+✅ Stop Loss: 1%
+✅ Paper Trading: ON
+✅ Bracket Orders: ON
+```
+
+**How Warrior Trading Works:**
+- Scans premarket gappers (4-10% gap, 2-3x volume, $2-$20 price)
+- Focuses on 9:30-10:00 AM momentum window
+- Detects Gap & Go, Micro Pullback, Red-to-Green, Bull Flag setups
+- 1-minute chart analysis for precise entries
+- Tight stops (1%) and quick profits (2%)
+- Level 2 placeholders ready for future integration
+
+**Setup Examples:**
+- **Gap & Go**: Stock gaps up 5% premarket, breaks above premarket high at 9:35 AM → Entry
+- **Micro Pullback**: Stock pulls back 0.3% from high, bounces off 9 EMA → Entry
+- **Red-to-Green**: 3 red candles, then green reversal candle with volume → Entry
 
 ### **Setup Instructions**
 

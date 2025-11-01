@@ -38,7 +38,7 @@ class AutoTraderConfig:
     use_bracket_orders: bool = True  # Use stop-loss/take-profit
     risk_tolerance: str = "MEDIUM"
     paper_trading: bool = True  # Safety: start with paper trading
-    trading_mode: str = "STOCKS"  # STOCKS, OPTIONS, SCALPING, SLOW_SCALPER, MICRO_SWING, ALL
+    trading_mode: str = "STOCKS"  # STOCKS, OPTIONS, SCALPING, WARRIOR_SCALPING, SLOW_SCALPER, MICRO_SWING, ALL
     scalping_take_profit_pct: float = 2.0  # For scalping mode
     scalping_stop_loss_pct: float = 1.0  # For scalping mode
     # Capital Management (NEW)
@@ -276,6 +276,13 @@ class AutoTrader:
                     'PLTR', 'SOFI', 'RIVN', 'PLUG', 'NOK', 'AMC', 'GME', 'MARA',
                     'RIOT', 'COIN', 'HOOD', 'SNAP', 'UBER', 'LYFT', 'NIO', 'LCID'
                 ],
+                "WARRIOR_SCALPING": [
+                    # Liquid, gap-prone stocks perfect for Gap & Go ($2-$20 range)
+                    'AAPL', 'AMD', 'TSLA', 'NVDA', 'PLTR', 'SOFI', 'RIVN',
+                    'MARA', 'RIOT', 'NOK', 'AMC', 'GME', 'SNAP', 'HOOD',
+                    'NIO', 'LCID', 'PLUG', 'FCEL', 'TLRY', 'SNDL', 'AFRM',
+                    'PINS', 'RBLX', 'DASH', 'UBER', 'LYFT'
+                ],
                 "STOCKS": [
                     # Solid stocks for swing trading
                     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
@@ -303,6 +310,7 @@ class AutoTrader:
             # Map trading mode to scan type and trading style
             scan_config = {
                 "SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
+                "WARRIOR_SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
                 "STOCKS": {"scan_type": ScanType.ALL, "trading_style": "SWING_TRADE", "top_n": 15},
                 "OPTIONS": {"scan_type": ScanType.OPTIONS, "trading_style": "OPTIONS", "top_n": 15},
                 "ALL": {"scan_type": ScanType.ALL, "trading_style": "SWING_TRADE", "top_n": 20}
@@ -338,6 +346,10 @@ class AutoTrader:
     def _scan_for_signals(self) -> List:
         """Scan watchlist for trading signals"""
         try:
+            # Use Warrior Trading detector for WARRIOR_SCALPING mode
+            if self.config.trading_mode == "WARRIOR_SCALPING":
+                return self._scan_warrior_trading_signals()
+            
             from analyzers.comprehensive import ComprehensiveAnalyzer
             
             # Use smart scanner if enabled, otherwise use watchlist
@@ -457,6 +469,100 @@ class AutoTrader:
             logger.error(f"Error scanning for signals: {e}")
             return []
     
+    def _scan_warrior_trading_signals(self) -> List:
+        """Scan for Warrior Trading Gap & Go signals"""
+        try:
+            from services.warrior_trading_detector import WarriorTradingDetector
+            from services.ai_trading_signals import TradingSignal
+            
+            # Initialize detector with config
+            detector = WarriorTradingDetector(
+                min_gap_pct=self.config.MIN_GAP_PCT if hasattr(self.config, 'MIN_GAP_PCT') else 2.0,
+                max_gap_pct=self.config.MAX_GAP_PCT if hasattr(self.config, 'MAX_GAP_PCT') else 20.0,
+                min_price=self.config.MIN_PRICE if hasattr(self.config, 'MIN_PRICE') else 2.0,
+                max_price=self.config.MAX_PRICE if hasattr(self.config, 'MAX_PRICE') else 20.0,
+                min_volume_ratio=self.config.MIN_VOLUME_RATIO if hasattr(self.config, 'MIN_VOLUME_RATIO') else 1.5,
+                max_volume_ratio=self.config.MAX_VOLUME_RATIO if hasattr(self.config, 'MAX_VOLUME_RATIO') else 10.0,
+                config=self.config,
+                watchlist=self.watchlist
+            )
+            
+            # NEW: Check if market-wide scan is enabled
+            use_market_scan = getattr(self.config, 'USE_MARKET_WIDE_SCAN', False)
+            
+            tickers_to_scan = self.watchlist  # Default to watchlist
+            
+            if use_market_scan:
+                # Market-wide scan: discover tickers automatically
+                logger.info("🌍 Market-wide scan enabled, discovering gappers...")
+                gappers = detector.scan_market_for_gappers(
+                    tradier_client=self.tradier_client,
+                    use_yfinance=getattr(self.config, 'USE_YFINANCE_HISTORICAL', True)
+                )
+                
+                # Extract ticker symbols from results
+                tickers_to_scan = [g['ticker'] for g in gappers]
+                
+                # Log discovered gappers
+                if gappers:
+                    logger.info(f"✅ Market scan found {len(gappers)} qualified gappers")
+                    for g in gappers[:5]:  # Show top 5
+                        logger.info(f"  {g['ticker']}: {g['gap_pct']:+.2f}% gap, "
+                                  f"{g['volume_ratio']:.1f}x volume, ${g['current_price']:.2f}")
+                else:
+                    logger.info("No gappers found in market scan")
+                    return []
+            else:
+                # Traditional approach: use watchlist
+                logger.info(f"📋 Using watchlist: {len(self.watchlist)} tickers")
+            
+            # Continue with existing scan_for_setups logic
+            # Scan for setups during trading window (9:30-10:00 AM)
+            warrior_signals = detector.scan_for_setups(
+                tickers=tickers_to_scan,
+                trading_window_start=dt_time(
+                    getattr(self.config, 'TRADING_START_HOUR', 9),
+                    getattr(self.config, 'TRADING_START_MINUTE', 30)
+                ),
+                trading_window_end=dt_time(
+                    getattr(self.config, 'TRADING_END_HOUR', 10),
+                    getattr(self.config, 'TRADING_END_MINUTE', 0)
+                )
+            )
+            
+            if not warrior_signals:
+                logger.debug("No Warrior Trading setups found")
+                return []
+            
+            # Convert Warrior Trading signals to TradingSignal format
+            signals = []
+            for warrior_signal in warrior_signals:
+                # Check confidence threshold
+                if warrior_signal.confidence < self.config.min_confidence:
+                    logger.debug(f"{warrior_signal.ticker}: Warrior setup confidence {warrior_signal.confidence:.1f}% below threshold {self.config.min_confidence}%")
+                    continue
+                
+                # Create TradingSignal object
+                signal = TradingSignal(
+                    symbol=warrior_signal.ticker,
+                    signal='BUY',  # Warrior Trading focuses on long setups
+                    confidence=warrior_signal.confidence,
+                    entry_price=warrior_signal.entry_price,
+                    target_price=warrior_signal.profit_target,
+                    stop_loss=warrior_signal.stop_loss,
+                    reasoning=f"Warrior {warrior_signal.setup_type.value}: {warrior_signal.reasoning}",
+                    timestamp=warrior_signal.timestamp
+                )
+                
+                signals.append(signal)
+                logger.info(f"⚔️ Warrior Trading signal: {warrior_signal.ticker} - {warrior_signal.setup_type.value} (confidence: {warrior_signal.confidence:.1f}%)")
+            
+            return signals
+            
+        except Exception as e:
+            logger.error(f"Error scanning for Warrior Trading signals: {e}", exc_info=True)
+            return []
+    
     def _execute_signal(self, signal):
         """Execute a trading signal"""
         try:
@@ -556,6 +662,22 @@ class AutoTrader:
                             position_type = "SHORT"
                             logger.info(f"📊 Scalping mode ({signal.signal}/{position_type}): Entry=${signal.entry_price:.2f}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f}")
             
+            # Adjust for Warrior Trading scalping mode
+            elif self.config.trading_mode == "WARRIOR_SCALPING":
+                # Warrior Trading: 2% profit, 1% stop (Gap & Go strategy)
+                if signal.entry_price:
+                    if signal.signal == 'BUY':
+                        # For BUY (LONG): 2% profit target, 1% stop loss
+                        signal.target_price = signal.entry_price * 1.02  # 2% target
+                        signal.stop_loss = signal.entry_price * 0.99  # 1% stop
+                        logger.info(f"⚔️ Warrior Trading (BUY): Entry=${signal.entry_price:.2f}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f}")
+                    else:  # SELL
+                        if has_position:
+                            # Closing a LONG position
+                            signal.target_price = None
+                            signal.stop_loss = None
+                            logger.info(f"⚔️ Warrior Trading (SELL/CLOSING): Entry=${signal.entry_price:.2f} - Using simple SELL order")
+            
             # PDT-safe position sizing using settled funds
             # Skip position sizing for closing orders (use position quantity instead)
             if signal.signal == 'SELL' and has_position:
@@ -647,7 +769,7 @@ class AutoTrader:
             # For opening positions, use bracket order if enabled
             elif self.config.use_bracket_orders and signal.entry_price and signal.target_price and signal.stop_loss:
                 # Determine duration based on mode
-                duration = 'day' if self.config.trading_mode == "SCALPING" else 'gtc'
+                duration = 'day' if self.config.trading_mode in ["SCALPING", "WARRIOR_SCALPING"] else 'gtc'
                 
                 logger.info(f"📤 Placing BRACKET order to open position: {signal.signal} {signal.position_size} {signal.symbol}")
                 

@@ -1,0 +1,8 @@
+# Custom Universe File
+# Add your custom ticker symbols here (one per line)
+# Lines starting with # are comments and will be ignored
+# Example:
+# AAPL
+# TSLA
+# AMD
+

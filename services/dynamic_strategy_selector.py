@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 class TradingStrategy(Enum):
     """Available trading strategies"""
     SCALPING = "SCALPING"           # 2% profit, 1% stop, minutes-hours
+    WARRIOR_SCALPING = "WARRIOR_SCALPING"  # Gap & Go, 2% profit, 1% stop, 9:30-10:00 AM
     SWING = "SWING"                 # 10% profit, 4% stop, 1-5 days
     MEAN_REVERSION = "MEAN_REVERSION"  # 5-10% profit, 3% stop, 1-3 days
     BREAKOUT = "BREAKOUT"           # 10-50% profit, 8% stop, 1-7 days
@@ -63,6 +64,7 @@ class DynamicStrategySelector:
         # Calculate strategy scores
         scores = {
             TradingStrategy.SCALPING: DynamicStrategySelector._score_scalping(analysis),
+            TradingStrategy.WARRIOR_SCALPING: DynamicStrategySelector._score_warrior_scalping(analysis),
             TradingStrategy.SWING: DynamicStrategySelector._score_swing(analysis),
             TradingStrategy.MEAN_REVERSION: DynamicStrategySelector._score_mean_reversion(analysis),
             TradingStrategy.BREAKOUT: DynamicStrategySelector._score_breakout(analysis),
@@ -156,6 +158,82 @@ class DynamicStrategySelector:
                 'volume_ratio': volume_ratio,
                 'change_pct': analysis.change_pct,
                 'entropy': analysis.entropy or 0
+            }
+        }
+    
+    @staticmethod
+    def _score_warrior_scalping(analysis: StockAnalysis) -> Dict:
+        """Score suitability for Warrior Trading Gap & Go scalping"""
+        score = 35  # Base score
+        reasoning = []
+        
+        # Price filter: $2-$20 (Warrior Trading requirement)
+        if 2.0 <= analysis.price <= 20.0:
+            score += 20
+            reasoning.append(f"Price ${analysis.price:.2f} in range")
+        else:
+            score -= 30
+            reasoning.append(f"Price ${analysis.price:.2f} outside $2-$20 range")
+        
+        # Gap requirement: Need 4-10% premarket gap (use change_pct as proxy)
+        # In real implementation, would check premarket gap specifically
+        if 4.0 <= abs(analysis.change_pct) <= 10.0:
+            score += 35
+            reasoning.append(f"Gap {analysis.change_pct:+.1f}% in 4-10% range")
+        elif abs(analysis.change_pct) > 10.0:
+            score -= 10
+            reasoning.append(f"Gap {analysis.change_pct:+.1f}% too large (>10%)")
+        elif abs(analysis.change_pct) < 4.0:
+            score -= 15
+            reasoning.append(f"Gap {analysis.change_pct:+.1f}% too small (<4%)")
+        
+        # Volume filter: 2-3x average volume (critical for Warrior Trading)
+        volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 0
+        if 2.0 <= volume_ratio <= 3.0:
+            score += 30
+            reasoning.append(f"Volume {volume_ratio:.1f}x (ideal range)")
+        elif volume_ratio > 3.0:
+            score += 20  # Still good, just higher
+            reasoning.append(f"Volume {volume_ratio:.1f}x (above ideal)")
+        elif volume_ratio < 2.0:
+            score -= 25
+            reasoning.append(f"Volume {volume_ratio:.1f}x (insufficient)")
+        
+        # Momentum requirement: Strong intraday move
+        if abs(analysis.change_pct) > 5.0:
+            score += 15
+            reasoning.append("Strong momentum")
+        
+        # Liquidity: Need high volume for tight spreads
+        if analysis.volume > 1_000_000:
+            score += 10
+            reasoning.append("High liquidity")
+        elif analysis.volume < 500_000:
+            score -= 15
+            reasoning.append("Low liquidity")
+        
+        # Trading window: Best during 9:30-10:00 AM (would check time in real implementation)
+        # For now, just check if we're in morning (using current hour as proxy)
+        from datetime import datetime
+        current_hour = datetime.now().hour
+        if 9 <= current_hour < 10:
+            score += 10
+            reasoning.append("Morning momentum window")
+        elif current_hour >= 10:
+            score -= 5
+            reasoning.append("Past optimal window (10 AM)")
+        
+        return {
+            'score': max(0, min(100, score)),
+            'reasoning': " | ".join(reasoning) if reasoning else "Warrior Trading conditions",
+            'position_size': 3.0,  # 3% per trade
+            'profit_target': 2.0,  # 2% profit target
+            'stop_loss': 1.0,  # 1% stop loss
+            'hold_time': "9:30-10:00 AM",
+            'indicators': {
+                'gap_pct': analysis.change_pct,
+                'volume_ratio': volume_ratio,
+                'price': analysis.price
             }
         }
     
