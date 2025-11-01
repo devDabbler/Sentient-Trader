@@ -57,6 +57,7 @@ class AutoTraderConfig:
     # Short selling support (paper trading only)
     # WARNING: Requires margin account in real trading. Only enable if you understand the risks.
     allow_short_selling: bool = False  # Enable short selling in paper trading mode (DISABLED by default)
+    test_mode: bool = False  # Enable test mode to bypass market hours check (for testing when market is closed)
 
 
 class AutoTrader:
@@ -191,7 +192,20 @@ class AutoTrader:
                 
                 # Scan for signals
                 logger.info(f"🔍 Scanning {len(self.watchlist)} tickers for signals...")
+                scan_start_time = time.time()
                 signals = self._scan_for_signals()
+                scan_duration = time.time() - scan_start_time
+                
+                # Send Discord scan alert (if enabled)
+                try:
+                    scan_info = {
+                        'tickers_found': self.watchlist if not self.use_smart_scanner else self._get_smart_watchlist(),
+                        'signals_count': len(signals) if signals else 0,
+                        'duration_seconds': scan_duration
+                    }
+                    self._send_discord_scan_alert(scan_info)
+                except Exception as e:
+                    logger.debug(f"Error sending scan alert: {e}")
                 
                 # Execute high-confidence signals
                 if signals:
@@ -235,6 +249,11 @@ class AutoTrader:
     
     def _is_trading_hours(self) -> bool:
         """Check if current time is within trading hours (Eastern Time)"""
+        # Test mode: bypass market hours check
+        if self.config.test_mode:
+            logger.info("🧪 Test mode enabled: Bypassing market hours check")
+            return True
+        
         from datetime import timezone, timedelta
         
         # Get current time in ET (UTC-5 for EST, UTC-4 for EDT)
@@ -264,83 +283,119 @@ class AutoTrader:
         return in_hours
     
     def _get_smart_watchlist(self) -> List[str]:
-        """Use Advanced Scanner to find optimal tickers for current trading mode"""
+        """
+        Use Enhanced Multi-Source Discovery to find optimal tickers
+        Combines: Technical scanner + Sentiment + Market screeners
+        """
         try:
-            from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType
+            # Check if enhanced discovery is enabled
+            use_enhanced = getattr(self.config, 'USE_ENHANCED_DISCOVERY', True)
             
-            # Define focused ticker lists for each strategy (faster scanning)
-            strategy_universes = {
-                "SCALPING": [
-                    # High volume, liquid stocks perfect for scalping
-                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
-                    'PLTR', 'SOFI', 'RIVN', 'PLUG', 'NOK', 'AMC', 'GME', 'MARA',
-                    'RIOT', 'COIN', 'HOOD', 'SNAP', 'UBER', 'LYFT', 'NIO', 'LCID'
-                ],
-                "WARRIOR_SCALPING": [
-                    # Liquid, gap-prone stocks perfect for Gap & Go ($2-$20 range)
-                    'AAPL', 'AMD', 'TSLA', 'NVDA', 'PLTR', 'SOFI', 'RIVN',
-                    'MARA', 'RIOT', 'NOK', 'AMC', 'GME', 'SNAP', 'HOOD',
-                    'NIO', 'LCID', 'PLUG', 'FCEL', 'TLRY', 'SNDL', 'AFRM',
-                    'PINS', 'RBLX', 'DASH', 'UBER', 'LYFT'
-                ],
-                "STOCKS": [
-                    # Solid stocks for swing trading
-                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
-                    'NFLX', 'DIS', 'PLTR', 'SOFI', 'COIN', 'RBLX', 'ABNB', 'DASH',
-                    'SHOP', 'SNOW', 'CRWD', 'ZS', 'DDOG', 'NIO', 'RIVN', 'PLUG',
-                    'MRNA', 'BNTX', 'JPM', 'BAC', 'WFC', 'GS', 'MS', 'XOM', 'CVX'
-                ],
-                "OPTIONS": [
-                    # High IV stocks for options
-                    'TSLA', 'AMD', 'NVDA', 'PLTR', 'SOFI', 'RIVN', 'LCID', 'NIO',
-                    'PLUG', 'GME', 'AMC', 'COIN', 'HOOD', 'SNAP', 'RBLX', 'DASH',
-                    'MRNA', 'BNTX', 'MARA', 'RIOT', 'TLRY', 'SNDL', 'ACB', 'CGC'
-                ],
-                "ALL": [
-                    # Balanced mix
-                    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
-                    'PLTR', 'SOFI', 'COIN', 'RIVN', 'PLUG', 'NIO', 'LCID', 'GME',
-                    'AMC', 'MARA', 'RIOT', 'MRNA', 'BNTX', 'SNAP', 'RBLX', 'DASH'
-                ]
-            }
+            if use_enhanced:
+                # Use Enhanced Ticker Discovery (multi-source)
+                from services.enhanced_ticker_discovery import get_enhanced_discovery
+                
+                logger.info(f"🚀 Enhanced Multi-Source Discovery enabled for {self.config.trading_mode}")
+                
+                # Define fallback universe for this strategy
+                strategy_universes = {
+                    "SCALPING": [
+                        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
+                        'PLTR', 'SOFI', 'RIVN', 'PLUG', 'NOK', 'AMC', 'GME', 'MARA',
+                        'RIOT', 'COIN', 'HOOD', 'SNAP', 'UBER', 'LYFT', 'NIO', 'LCID'
+                    ],
+                    "WARRIOR_SCALPING": [
+                        'AAPL', 'AMD', 'TSLA', 'NVDA', 'PLTR', 'SOFI', 'RIVN',
+                        'MARA', 'RIOT', 'NOK', 'AMC', 'GME', 'SNAP', 'HOOD',
+                        'NIO', 'LCID', 'PLUG', 'FCEL', 'TLRY', 'SNDL', 'AFRM',
+                        'PINS', 'RBLX', 'DASH', 'UBER', 'LYFT'
+                    ],
+                    "STOCKS": [
+                        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
+                        'NFLX', 'DIS', 'PLTR', 'SOFI', 'COIN', 'RBLX', 'ABNB', 'DASH',
+                        'SHOP', 'SNOW', 'CRWD', 'ZS', 'DDOG', 'NIO', 'RIVN', 'PLUG'
+                    ],
+                }
+                
+                fallback_universe = strategy_universes.get(self.config.trading_mode, strategy_universes["WARRIOR_SCALPING"])
+                
+                # Get enhanced discovery system
+                discovery = get_enhanced_discovery(
+                    tradier_client=self.tradier_client,
+                    min_confidence=60.0
+                )
+                
+                # Discover tickers using multiple sources
+                discovered_tickers = discovery.discover_tickers(
+                    strategy=self.config.trading_mode,
+                    use_sentiment=getattr(self.config, 'USE_SENTIMENT_DISCOVERY', True),
+                    use_screeners=getattr(self.config, 'USE_SCREENER_DISCOVERY', True),
+                    use_social=getattr(self.config, 'USE_SOCIAL_DISCOVERY', False),
+                    max_tickers=20,
+                    fallback_universe=fallback_universe
+                )
+                
+                if discovered_tickers:
+                    logger.info(f"✅ Enhanced Discovery found {len(discovered_tickers)} high-confidence tickers")
+                    return discovered_tickers
+                else:
+                    logger.warning("⚠️ Enhanced Discovery found no tickers, using fallback universe")
+                    return fallback_universe[:15]
             
-            # Get focused universe for this strategy
-            custom_universe = strategy_universes.get(self.config.trading_mode, strategy_universes["ALL"])
-            
-            # Map trading mode to scan type and trading style
-            scan_config = {
-                "SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
-                "WARRIOR_SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
-                "STOCKS": {"scan_type": ScanType.ALL, "trading_style": "SWING_TRADE", "top_n": 15},
-                "OPTIONS": {"scan_type": ScanType.OPTIONS, "trading_style": "OPTIONS", "top_n": 15},
-                "ALL": {"scan_type": ScanType.ALL, "trading_style": "SWING_TRADE", "top_n": 20}
-            }
-            
-            config = scan_config.get(self.config.trading_mode, scan_config["ALL"])
-            
-            logger.info(f"🔍 Smart Scanner: Scanning {len(custom_universe)} curated tickers for {self.config.trading_mode} strategy...")
-            
-            scanner = AdvancedOpportunityScanner(use_ai=False)  # Quick scan without AI for speed
-            opportunities = scanner.scan_opportunities(
-                scan_type=config["scan_type"],
-                trading_style=config["trading_style"],
-                top_n=config["top_n"],
-                custom_tickers=custom_universe,  # Use curated list instead of extended universe
-                use_extended_universe=False
-            )
-            
-            # Extract ticker symbols
-            smart_tickers = [opp.ticker for opp in opportunities if opp.score >= 60]
-            
-            if smart_tickers:
-                logger.info(f"✅ Smart Scanner found {len(smart_tickers)} optimal tickers: {', '.join(smart_tickers[:5])}...")
-                return smart_tickers
             else:
-                logger.warning("⚠️ Smart Scanner found no tickers, falling back to watchlist")
-                return self.watchlist
+                # Fall back to original Smart Scanner (technical only)
+                from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType
+                
+                strategy_universes = {
+                    "SCALPING": [
+                        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
+                        'PLTR', 'SOFI', 'RIVN', 'PLUG', 'NOK', 'AMC', 'GME', 'MARA',
+                        'RIOT', 'COIN', 'HOOD', 'SNAP', 'UBER', 'LYFT', 'NIO', 'LCID'
+                    ],
+                    "WARRIOR_SCALPING": [
+                        'AAPL', 'AMD', 'TSLA', 'NVDA', 'PLTR', 'SOFI', 'RIVN',
+                        'MARA', 'RIOT', 'NOK', 'AMC', 'GME', 'SNAP', 'HOOD',
+                        'NIO', 'LCID', 'PLUG', 'FCEL', 'TLRY', 'SNDL', 'AFRM',
+                        'PINS', 'RBLX', 'DASH', 'UBER', 'LYFT'
+                    ],
+                    "STOCKS": [
+                        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD',
+                        'NFLX', 'DIS', 'PLTR', 'SOFI', 'COIN', 'RBLX', 'ABNB', 'DASH'
+                    ],
+                }
+                
+                custom_universe = strategy_universes.get(self.config.trading_mode, strategy_universes["WARRIOR_SCALPING"])
+                
+                scan_config = {
+                    "SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
+                    "WARRIOR_SCALPING": {"scan_type": ScanType.MOMENTUM, "trading_style": "SCALP", "top_n": 10},
+                    "STOCKS": {"scan_type": ScanType.ALL, "trading_style": "SWING_TRADE", "top_n": 15},
+                }
+                
+                config = scan_config.get(self.config.trading_mode, scan_config["WARRIOR_SCALPING"])
+                
+                logger.info(f"🔍 Smart Scanner: Scanning {len(custom_universe)} curated tickers for {self.config.trading_mode} strategy...")
+                
+                scanner = AdvancedOpportunityScanner(use_ai=False)
+                opportunities = scanner.scan_opportunities(
+                    scan_type=config["scan_type"],
+                    trading_style=config["trading_style"],
+                    top_n=config["top_n"],
+                    custom_tickers=custom_universe,
+                    use_extended_universe=False
+                )
+                
+                smart_tickers = [opp.ticker for opp in opportunities if opp.score >= 60]
+                
+                if smart_tickers:
+                    logger.info(f"✅ Smart Scanner found {len(smart_tickers)} optimal tickers: {', '.join(smart_tickers[:5])}...")
+                    return smart_tickers
+                else:
+                    logger.warning("⚠️ Smart Scanner found no tickers, falling back to watchlist")
+                    return self.watchlist
                 
         except Exception as e:
-            logger.error(f"Error in smart scanner: {e}")
+            logger.error(f"Error in smart discovery: {e}", exc_info=True)
             return self.watchlist
     
     def _scan_for_signals(self) -> List:
@@ -487,12 +542,17 @@ class AutoTrader:
                 watchlist=self.watchlist
             )
             
-            # NEW: Check if market-wide scan is enabled
-            use_market_scan = getattr(self.config, 'USE_MARKET_WIDE_SCAN', False)
-            
-            tickers_to_scan = self.watchlist  # Default to watchlist
-            
-            if use_market_scan:
+            # Check if Smart Scanner is enabled (takes priority)
+            if self.use_smart_scanner:
+                logger.info("🧠 Smart Scanner enabled: Finding best opportunities automatically...")
+                tickers_to_scan = self._get_smart_watchlist()
+                if not tickers_to_scan:
+                    logger.warning("⚠️ Smart Scanner found no tickers, falling back to watchlist")
+                    tickers_to_scan = self.watchlist
+                else:
+                    logger.info(f"✅ Smart Scanner found {len(tickers_to_scan)} optimal tickers: {', '.join(tickers_to_scan[:10])}{'...' if len(tickers_to_scan) > 10 else ''}")
+            # Check if market-wide scan is enabled
+            elif getattr(self.config, 'USE_MARKET_WIDE_SCAN', False):
                 # Market-wide scan: discover tickers automatically
                 logger.info("🌍 Market-wide scan enabled, discovering gappers...")
                 gappers = detector.scan_market_for_gappers(
@@ -514,10 +574,50 @@ class AutoTrader:
                     return []
             else:
                 # Traditional approach: use watchlist
-                logger.info(f"📋 Using watchlist: {len(self.watchlist)} tickers")
+                logger.info(f"📋 Using watchlist: {len(self.watchlist)} tickers: {', '.join(self.watchlist[:10])}{'...' if len(self.watchlist) > 10 else ''}")
+            
+            # Filter tickers by price range first (for WARRIOR_SCALPING)
+            min_price = getattr(self.config, 'MIN_PRICE', 2.0)
+            max_price = getattr(self.config, 'MAX_PRICE', 20.0)
+            
+            # Filter watchlist by price range before scanning
+            if min_price or max_price:
+                logger.info(f"⚔️ Filtering watchlist by price range: ${min_price}-${max_price}")
+                try:
+                    # Get current prices for watchlist tickers and filter
+                    filtered_tickers = []
+                    for ticker in tickers_to_scan:
+                        try:
+                            success, quote = self.tradier_client.get_quote(ticker)
+                            if success and quote:
+                                price = float(quote.get('last', 0) or quote.get('bid', 0) or 0)
+                                if min_price <= price <= max_price:
+                                    filtered_tickers.append(ticker)
+                                    logger.debug(f"  ✅ {ticker}: ${price:.2f} (in range)")
+                                else:
+                                    logger.debug(f"  ❌ {ticker}: ${price:.2f} (outside ${min_price}-${max_price} range)")
+                            else:
+                                # If we can't get quote, include it and let detector filter it
+                                filtered_tickers.append(ticker)
+                        except Exception as e:
+                            logger.debug(f"Error checking price for {ticker}: {e}")
+                            # Include it and let detector filter it
+                            filtered_tickers.append(ticker)
+                    
+                    if filtered_tickers:
+                        tickers_to_scan = filtered_tickers
+                        logger.info(f"✅ Filtered to {len(filtered_tickers)} tickers in price range ${min_price}-${max_price}: {', '.join(filtered_tickers[:10])}{'...' if len(filtered_tickers) > 10 else ''}")
+                    else:
+                        logger.warning(f"⚠️ No tickers in price range ${min_price}-${max_price}, using original watchlist")
+                except Exception as e:
+                    logger.warning(f"Error filtering watchlist by price: {e}, using original watchlist")
             
             # Continue with existing scan_for_setups logic
-            # Scan for setups during trading window (9:30-10:00 AM)
+            # Scan for setups during trading window (9:30-10:00 AM), or bypass for test mode
+            bypass_window = getattr(self.config, 'test_mode', False)
+            if bypass_window:
+                logger.info("🧪 Test mode: Bypassing trading window check")
+            
             warrior_signals = detector.scan_for_setups(
                 tickers=tickers_to_scan,
                 trading_window_start=dt_time(
@@ -527,7 +627,8 @@ class AutoTrader:
                 trading_window_end=dt_time(
                     getattr(self.config, 'TRADING_END_HOUR', 10),
                     getattr(self.config, 'TRADING_END_MINUTE', 0)
-                )
+                ),
+                bypass_window_check=bypass_window
             )
             
             if not warrior_signals:
@@ -934,7 +1035,7 @@ class AutoTrader:
             logger.error(f"Error executing signal for {signal.symbol}: {e}", exc_info=True)
     
     def _send_discord_notification(self, signal, execution_record, has_position, has_short_position):
-        """Send Discord notification for trade execution"""
+        """Send Discord notification for trade execution - Enhanced for Warrior Scalping"""
         import os
         import requests
         
@@ -945,6 +1046,7 @@ class AutoTrader:
         
         # Determine action type and get P/L for closed positions
         pnl = None
+        pnl_pct = None
         if (signal.signal == 'SELL' and has_position) or (signal.signal == 'BUY' and has_short_position):
             action = "CLOSED"
             emoji = "📤"
@@ -952,6 +1054,11 @@ class AutoTrader:
             # Get P/L from the stored value (most reliable)
             if hasattr(self, '_last_pnl') and signal.symbol in self._last_pnl:
                 pnl = self._last_pnl[signal.symbol]
+                # Calculate P/L percentage if we have entry price
+                if signal.entry_price and signal.position_size:
+                    cost_basis = signal.entry_price * signal.position_size
+                    if cost_basis > 0:
+                        pnl_pct = (pnl / cost_basis) * 100
                 # Clean up the stored value after using it
                 del self._last_pnl[signal.symbol]
             
@@ -962,71 +1069,126 @@ class AutoTrader:
                 color = 15844367  # Orange if P/L unknown
         else:
             action = "OPENED"
-            emoji = "📥"
-            color = 3447003  # Blue
+            emoji = "⚔️" if self.config.trading_mode == "WARRIOR_SCALPING" else "📥"
+            color = 15158332  # Red/Orange for Warrior Scalping entries
         
-        # Build embed
+        # Enhanced title for Warrior Scalping
+        if self.config.trading_mode == "WARRIOR_SCALPING":
+            if action == "OPENED":
+                title = f'{emoji} WARRIOR SCALPING: {signal.symbol} GAP & GO!'
+            else:
+                title = f'{emoji} CLOSED: {signal.symbol} {"🎉 PROFIT" if pnl and pnl > 0 else "💔 LOSS"}'
+        else:
+            title = f'{emoji} {action} {signal.signal} Position: {signal.symbol}'
+        
+        # Build enhanced embed
         embed = {
-            'title': f'{emoji} {action} {signal.signal} Position: {signal.symbol}',
-            'description': f"Auto-Trader executed {signal.signal} signal for **{signal.symbol}**",
+            'title': title,
+            'description': f"**{signal.signal}** signal executed for **{signal.symbol}**",
             'color': color,
             'timestamp': datetime.now().isoformat(),
-            'fields': [
+            'fields': [],
+            'footer': {
+                'text': f"Mode: {self.config.trading_mode} | Paper Trading: {self.config.paper_trading}"
+            }
+        }
+        
+        # Add fields based on action
+        if action == "OPENED":
+            # Entry information
+            embed['fields'].extend([
                 {
                     'name': '💵 Entry Price',
                     'value': f"${signal.entry_price:.2f}" if signal.entry_price else "Market",
                     'inline': True
                 },
                 {
-                    'name': '📦 Quantity',
+                    'name': '📦 Shares',
                     'value': str(signal.position_size),
+                    'inline': True
+                },
+                {
+                    'name': '💰 Position Size',
+                    'value': f"${signal.entry_price * signal.position_size:,.2f}" if signal.entry_price and signal.position_size else "N/A",
+                    'inline': True
+                },
+                {
+                    'name': '🎯 Target',
+                    'value': f"${signal.target_price:.2f} (+{((signal.target_price / signal.entry_price - 1) * 100):.1f}%)" if signal.target_price and signal.entry_price else "N/A",
+                    'inline': True
+                },
+                {
+                    'name': '🛑 Stop Loss',
+                    'value': f"${signal.stop_loss:.2f} ({((signal.stop_loss / signal.entry_price - 1) * 100):.1f}%)" if signal.stop_loss and signal.entry_price else "N/A",
+                    'inline': True
+                },
+                {
+                    'name': '⚖️ Risk/Reward',
+                    'value': f"{((signal.target_price - signal.entry_price) / (signal.entry_price - signal.stop_loss)):.2f}:1" if signal.entry_price and signal.stop_loss and signal.target_price else "N/A",
                     'inline': True
                 },
                 {
                     'name': '📊 Confidence',
                     'value': f"{signal.confidence:.1f}%",
                     'inline': True
-                }
-            ],
-            'footer': {
-                'text': f"Trading Mode: {self.config.trading_mode} | Auto-Trader"
-            }
-        }
-        
-        # Add P/L for closed positions
-        if action == "CLOSED" and pnl is not None:
-            pnl_emoji = "💰" if pnl > 0 else "💸"
-            pnl_sign = "+" if pnl > 0 else ""
-            embed['fields'].append({
-                'name': f'{pnl_emoji} Profit/Loss',
-                'value': f"${pnl_sign}{pnl:.2f}",
-                'inline': True
-            })
-        
-        # Add target and stop for opening positions
-        if action == "OPENED" and signal.target_price and signal.stop_loss:
-            embed['fields'].extend([
+                },
                 {
-                    'name': '🎯 Target',
-                    'value': f"${signal.target_price:.2f}",
+                    'name': '🕐 Time',
+                    'value': datetime.now().strftime('%I:%M:%S %p ET'),
                     'inline': True
                 },
                 {
-                    'name': '🛑 Stop Loss',
-                    'value': f"${signal.stop_loss:.2f}",
-                    'inline': True
-                },
-                {
-                    'name': '⚖️ R/R Ratio',
-                    'value': f"{((signal.target_price - signal.entry_price) / (signal.entry_price - signal.stop_loss)):.2f}:1" if signal.entry_price and signal.stop_loss else "N/A",
+                    'name': '📍 Status',
+                    'value': "🟢 LIVE" if not self.config.paper_trading else "📝 PAPER",
                     'inline': True
                 }
             ])
+        else:
+            # Exit information
+            embed['fields'].extend([
+                {
+                    'name': '💵 Exit Price',
+                    'value': f"${signal.entry_price:.2f}" if signal.entry_price else "Market",
+                    'inline': True
+                },
+                {
+                    'name': '📦 Shares',
+                    'value': str(signal.position_size),
+                    'inline': True
+                },
+                {
+                    'name': '🕐 Time',
+                    'value': datetime.now().strftime('%I:%M:%S %p ET'),
+                    'inline': True
+                }
+            ])
+            
+            # Add P/L if available
+            if pnl is not None:
+                pnl_emoji = "💰" if pnl > 0 else "💸"
+                pnl_sign = "+" if pnl > 0 else ""
+                embed['fields'].extend([
+                    {
+                        'name': f'{pnl_emoji} Profit/Loss',
+                        'value': f"${pnl_sign}{pnl:.2f}",
+                        'inline': True
+                    },
+                    {
+                        'name': '📈 P/L %',
+                        'value': f"{pnl_sign}{pnl_pct:.2f}%" if pnl_pct else "N/A",
+                        'inline': True
+                    },
+                    {
+                        'name': '📍 Status',
+                        'value': "🟢 LIVE" if not self.config.paper_trading else "📝 PAPER",
+                        'inline': True
+                    }
+                ])
         
-        # Add reasoning if available
+        # Add reasoning if available (Warrior Trading setup info)
         if hasattr(signal, 'reasoning') and signal.reasoning:
             embed['fields'].append({
-                'name': '💡 Reasoning',
+                'name': '💡 Setup Details',
                 'value': signal.reasoning[:1024],  # Discord limit
                 'inline': False
             })
@@ -1039,6 +1201,84 @@ class AutoTrader:
             logger.info(f'✅ Discord notification sent for {signal.symbol}')
         except requests.exceptions.RequestException as e:
             logger.error(f'❌ Failed to send Discord notification: {e}')
+    
+    def _send_discord_scan_alert(self, scan_info: Dict):
+        """Send Discord notification for scan results - helpful for monitoring"""
+        import os
+        import requests
+        
+        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        if not webhook_url:
+            return
+        
+        # Only send scan alerts if configured (to avoid spam)
+        send_scan_alerts = os.getenv('DISCORD_SEND_SCAN_ALERTS', 'false').lower() == 'true'
+        if not send_scan_alerts:
+            return
+        
+        # Build scan summary embed
+        tickers_found = scan_info.get('tickers_found', [])
+        signals_found = scan_info.get('signals_count', 0)
+        scan_duration = scan_info.get('duration_seconds', 0)
+        
+        if signals_found > 0:
+            # Found signals - send alert
+            color = 15158332  # Orange/Red
+            title = f"⚔️ {signals_found} Warrior Setup{'s' if signals_found > 1 else ''} Found!"
+            description = f"Smart Scanner detected **{len(tickers_found)} qualified tickers** and found **{signals_found} tradeable setup{'s' if signals_found > 1 else ''}**"
+        else:
+            # No signals - only send every 5 scans to avoid spam
+            if not hasattr(self, '_scan_count'):
+                self._scan_count = 0
+            self._scan_count += 1
+            
+            if self._scan_count % 5 != 0:  # Only send every 5th scan
+                return
+            
+            color = 3447003  # Blue
+            title = "🔍 Scan Complete - No Setups"
+            description = f"Scanned {len(tickers_found)} tickers, no qualified Gap & Go setups found"
+        
+        embed = {
+            'title': title,
+            'description': description,
+            'color': color,
+            'timestamp': datetime.now().isoformat(),
+            'fields': [
+                {
+                    'name': '📊 Tickers Scanned',
+                    'value': ', '.join(tickers_found[:10]) + ('...' if len(tickers_found) > 10 else ''),
+                    'inline': False
+                },
+                {
+                    'name': '⏱️ Scan Duration',
+                    'value': f"{scan_duration:.1f}s",
+                    'inline': True
+                },
+                {
+                    'name': '🕐 Time',
+                    'value': datetime.now().strftime('%I:%M:%S %p ET'),
+                    'inline': True
+                },
+                {
+                    'name': '📍 Status',
+                    'value': "🟢 LIVE" if not self.config.paper_trading else "📝 PAPER",
+                    'inline': True
+                }
+            ],
+            'footer': {
+                'text': f"Mode: {self.config.trading_mode} | Next scan in {self.config.scan_interval_minutes}min"
+            }
+        }
+        
+        payload = {'embeds': [embed]}
+        
+        try:
+            response = requests.post(webhook_url, json=payload, timeout=5)
+            response.raise_for_status()
+            logger.debug(f'✅ Discord scan alert sent')
+        except requests.exceptions.RequestException as e:
+            logger.debug(f'Failed to send Discord scan alert: {e}')
     
     def get_status(self) -> Dict:
         """Get current status of auto-trader"""
@@ -1065,7 +1305,8 @@ class AutoTrader:
                 'min_confidence': self.config.min_confidence,
                 'use_bracket_orders': self.config.use_bracket_orders,
                 'paper_trading': self.config.paper_trading,
-                'allow_short_selling': self.config.allow_short_selling
+                'allow_short_selling': self.config.allow_short_selling,
+                'test_mode': self.config.test_mode
             }
         }
     

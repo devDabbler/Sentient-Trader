@@ -9147,7 +9147,7 @@ USE_AGENT_SYSTEM = False
                 
                 use_smart_scanner = st.checkbox(
                     "🧠 Use Smart Scanner (Auto-discover best tickers)",
-                    value=current_config['use_smart_scanner'],
+                    value=current_config.get('use_smart_scanner', True),  # Default to True if config missing
                     help="When enabled, ignores watchlist and automatically finds opportunities"
                 )
                 
@@ -9503,12 +9503,27 @@ USE_AGENT_SYSTEM = False
                 help="⚠️ Enable short selling for SELL signals. NOT recommended for scalping or cash accounts. Only for margin accounts and advanced strategies.",
                 disabled=not paper_trading
             )
+            test_mode = st.checkbox(
+                "🧪 Test Mode (Bypass Market Hours)",
+                value=False,
+                help="⚠️ TESTING ONLY: Allows trading when market is closed. Use this to test your scalping setup while the market is closed. Make sure you're in Paper Trading mode!"
+            )
+        
+        if test_mode:
+            st.warning("""
+            🧪 **Test Mode Enabled**
+            
+            - ✅ Market hours check is **DISABLED** - you can test even when the market is closed
+            - ⚠️ **FOR TESTING ONLY** - Only use this when testing your setup
+            - ✅ Make sure **Paper Trading** is enabled to avoid real trades
+            - 📝 The scalper will run and scan for signals even outside market hours
+            """)
         
         # Smart Scanner option
         st.divider()
         use_smart_scanner = st.checkbox(
             "🧠 Use Smart Scanner (Advanced)",
-            value=False,
+            value=True,  # Default to True - automatically finds opportunities
             help="IGNORES your ticker selections and automatically finds the best tickers using the Advanced Scanner. Leave unchecked to only scan YOUR selected tickers."
         )
         
@@ -9659,7 +9674,8 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                             trading_mode=trading_mode,
                             scalping_take_profit_pct=scalp_take_profit,
                             scalping_stop_loss_pct=scalp_stop_loss,
-                            allow_short_selling=allow_short_selling if paper_trading else False
+                            allow_short_selling=allow_short_selling if paper_trading else False,
+                            test_mode=test_mode
                         )
                         
                         # Create signal generator
@@ -9678,6 +9694,8 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                         st.session_state.auto_trader = auto_trader
                         
                         st.success("✅ Auto-Trader started successfully!")
+                        if test_mode:
+                            st.warning("🧪 Test Mode enabled: Market hours check is bypassed. You can test while the market is closed.")
                         if use_smart_scanner:
                             st.info(f"🧠 Smart Scanner enabled: Will dynamically find top tickers for {trading_mode} strategy each scan")
                         else:
@@ -9756,7 +9774,10 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                 st.metric("Watchlist Size", status['watchlist_size'])
             
             with col_stat4:
-                hours_status = "✅ Yes" if status['in_trading_hours'] else "❌ No"
+                if status['config'].get('test_mode', False):
+                    hours_status = "🧪 Test Mode"
+                else:
+                    hours_status = "✅ Yes" if status['in_trading_hours'] else "❌ No"
                 st.metric("Trading Hours", hours_status)
             
             # Short positions display (if enabled)

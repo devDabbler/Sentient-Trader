@@ -67,10 +67,17 @@ TRADING_MODE = "WARRIOR_SCALPING"
 # Scan Interval (minutes) - More frequent during morning window
 SCAN_INTERVAL_MINUTES = 1  # Check every minute during 9:30-10:00 AM window
 
-# Smart Scanner (Advanced)
-# Set to True to use Advanced Scanner to find optimal tickers
-# Set to False to use market-wide scan or watchlist
-USE_SMART_SCANNER = False  # Disabled when using market-wide scan
+# ===== ENHANCED TICKER DISCOVERY =====
+# Multi-source intelligent ticker discovery system
+USE_SMART_SCANNER = True  # Enable smart ticker discovery
+
+# Enhanced Discovery (combines multiple sources for better results)
+USE_ENHANCED_DISCOVERY = True  # 🚀 NEW: Multi-source discovery (technical + sentiment + screeners)
+
+# Discovery sources (only used if USE_ENHANCED_DISCOVERY = True)
+USE_SENTIMENT_DISCOVERY = True  # Discover tickers with strong positive news sentiment
+USE_SCREENER_DISCOVERY = True   # Discover tickers with unusual volume, gaps, breakouts
+USE_SOCIAL_DISCOVERY = False    # Social media trends (Reddit, Twitter) - coming soon
 
 # Minimum Confidence %
 MIN_CONFIDENCE = 70  # Slightly lower than standard scalping for more opportunities
@@ -86,6 +93,10 @@ MAX_DAILY_LOSS_DOLLARS = 100.0  # Absolute dollar limit
 USE_BRACKET_ORDERS = True
 WARRIOR_TAKE_PROFIT_PCT = 2.0  # 2% profit target (scale out)
 WARRIOR_STOP_LOSS_PCT = 1.0  # 1% stop loss (low of breakout candle)
+
+# Aliases for backward compatibility with background runner
+SCALPING_TAKE_PROFIT_PCT = WARRIOR_TAKE_PROFIT_PCT
+SCALPING_STOP_LOSS_PCT = WARRIOR_STOP_LOSS_PCT
 
 # ====================================================================
 # GAP & GO FILTERS (Warrior Trading Criteria)
@@ -119,7 +130,7 @@ MAX_CAPITAL_UTILIZATION_PCT = 80.0  # Max 80% deployed
 PAPER_TRADING = True  # ✅ PAPER TRADING MODE (change to False for live trading)
 ALLOW_SHORT_SELLING = False  # Warrior Trading focuses on long setups
 USE_AGENT_SYSTEM = False  # Keep simple for now
-USE_SMART_SCANNER = False  # Use custom watchlist
+# NOTE: USE_SMART_SCANNER is set above at line 73 - DO NOT duplicate here to avoid conflicts
 
 # Setup Preferences
 PREFERRED_SETUPS = [
@@ -132,3 +143,5 @@ PREFERRED_SETUPS = [
 # Max positions during morning window
 MAX_POSITIONS_DURING_WINDOW = 5  # Max 5 concurrent positions in 9:30-10:00 window
 
+# Test Mode (for testing when market is closed)
+TEST_MODE = True  # Enable to bypass market hours check for testing

@@ -780,7 +780,8 @@ class WarriorTradingDetector:
     
     def scan_for_setups(self, tickers: Optional[List[str]] = None, 
                        trading_window_start: dt_time = dt_time(9, 30),
-                       trading_window_end: dt_time = dt_time(10, 0)) -> List[WarriorTradingSignal]:
+                       trading_window_end: dt_time = dt_time(10, 0),
+                       bypass_window_check: bool = False) -> List[WarriorTradingSignal]:
         """
         Scan for all Warrior Trading setups
         
@@ -788,17 +789,19 @@ class WarriorTradingDetector:
             tickers: List of tickers to scan (uses default if None)
             trading_window_start: Start of trading window (default 9:30 AM)
             trading_window_end: End of trading window (default 10:00 AM)
+            bypass_window_check: If True, skip trading window check (for test mode)
             
         Returns:
             List of WarriorTradingSignal objects
         """
         signals = []
         
-        # Check if within trading window
-        now = datetime.now().time()
-        if not (trading_window_start <= now <= trading_window_end):
-            logger.debug(f"Outside trading window: {now} not in {trading_window_start}-{trading_window_end}")
-            return signals
+        # Check if within trading window (unless bypassed for test mode)
+        if not bypass_window_check:
+            now = datetime.now().time()
+            if not (trading_window_start <= now <= trading_window_end):
+                logger.debug(f"Outside trading window: {now} not in {trading_window_start}-{trading_window_end}")
+                return signals
         
         # Get premarket gappers first
         gappers = self.get_premarket_gappers(tickers)
