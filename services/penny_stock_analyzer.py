@@ -496,8 +496,90 @@ class PennyStockScorer:
 class PennyStockAnalyzer:
     """Comprehensive penny stock analysis"""
     
+    # Penny stock classification thresholds
+    PENNY_STOCK_CRITERIA = {
+        'MAX_PRICE': 5.0,
+        'MAX_MARKET_CAP': 300_000_000,  # $300M
+        'MIN_FLOAT': 1_000_000,  # 1M shares minimum
+        'MICRO_CAP_THRESHOLD': 50_000_000,  # $50M
+    }
+    
     def __init__(self):
         self.scorer = PennyStockScorer()
+    
+    @classmethod
+    def classify_stock_type(cls, price: float, market_cap: float, float_shares: float, 
+                           exchange: str = "") -> Dict[str, any]:
+        """
+        Classify stock as penny stock based on multiple factors, not just price.
+        
+        Args:
+            price: Current stock price
+            market_cap: Market capitalization
+            float_shares: Number of shares in float
+            exchange: Exchange listing (NASDAQ, NYSE, OTC, etc.)
+            
+        Returns:
+            Dict with classification details
+        """
+        is_penny = False
+        risk_level = "LOW"
+        classification = "STANDARD"
+        reasons = []
+        
+        # Price check
+        price_is_low = price < cls.PENNY_STOCK_CRITERIA['MAX_PRICE']
+        
+        # Market cap check
+        is_micro_cap = market_cap < cls.PENNY_STOCK_CRITERIA['MAX_MARKET_CAP']
+        is_nano_cap = market_cap < cls.PENNY_STOCK_CRITERIA['MICRO_CAP_THRESHOLD']
+        
+        # Float check
+        has_low_float = float_shares > 0 and float_shares < cls.PENNY_STOCK_CRITERIA['MIN_FLOAT']
+        
+        # Exchange check (OTC is higher risk)
+        is_otc = 'OTC' in exchange.upper() or 'PINK' in exchange.upper()
+        
+        # Classification logic
+        if price_is_low and is_micro_cap:
+            is_penny = True
+            classification = "PENNY_STOCK"
+            reasons.append(f"Price ${price:.2f} < ${cls.PENNY_STOCK_CRITERIA['MAX_PRICE']}")
+            reasons.append(f"Market cap ${market_cap/1e6:.1f}M < ${cls.PENNY_STOCK_CRITERIA['MAX_MARKET_CAP']/1e6:.0f}M")
+            
+            if is_nano_cap:
+                risk_level = "VERY_HIGH"
+                classification = "NANO_CAP"
+                reasons.append("Nano-cap (<$50M)")
+            elif is_otc:
+                risk_level = "VERY_HIGH"
+                reasons.append("OTC/Pink Sheets listing")
+            else:
+                risk_level = "HIGH"
+        elif price_is_low and not is_micro_cap:
+            # Low price but sizeable market cap (like BYND scenario)
+            classification = "LOW_PRICED"
+            risk_level = "MEDIUM"
+            reasons.append(f"Low price ${price:.2f} but market cap ${market_cap/1e6:.1f}M")
+        elif is_micro_cap and not price_is_low:
+            classification = "MICRO_CAP"
+            risk_level = "HIGH"
+            reasons.append(f"Micro-cap ${market_cap/1e6:.1f}M")
+        
+        if has_low_float:
+            reasons.append(f"Low float {float_shares/1e6:.1f}M shares")
+            if risk_level in ["LOW", "MEDIUM"]:
+                risk_level = "HIGH"
+        
+        return {
+            'is_penny_stock': is_penny,
+            'classification': classification,
+            'risk_level': risk_level,
+            'reasons': reasons,
+            'price_is_low': price_is_low,
+            'is_micro_cap': is_micro_cap,
+            'is_otc': is_otc
+        }
     
     def analyze_stock(self, ticker: str, existing_data: Optional[Dict] = None) -> Dict:
         """
@@ -527,6 +609,19 @@ class PennyStockAnalyzer:
             
             # Calculate technical indicators
             rsi = self._calculate_rsi(hist['Close'])
+            atr = self._calculate_atr(hist)
+            
+            # Calculate ATR-based stops and targets
+            atr_stops = self._calculate_atr_stops_and_targets(current_price, atr)
+            
+            # Stock classification
+            market_cap = info.get('marketCap', 0)
+            float_shares = info.get('floatShares', 0)
+            exchange = info.get('exchange', '')
+            
+            stock_classification = self.classify_stock_type(
+                current_price, market_cap, float_shares, exchange
+            )
             
             # Prepare data dictionary
             data = {
@@ -536,12 +631,16 @@ class PennyStockAnalyzer:
                 'volume': int(hist['Volume'].iloc[-1]) if 'Volume' in hist else 0,
                 'avg_volume': int(hist['Volume'].mean()) if 'Volume' in hist else 0,
                 'rsi': rsi,
+                'atr': atr,
                 'technical_score': self._calculate_technical_score(hist),
                 'pe_ratio': info.get('trailingPE', info.get('forwardPE', None)),
                 'revenue_growth': info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else None,
                 'profit_margin': info.get('profitMargins', 0) * 100 if info.get('profitMargins') else None,
-                'market_cap': info.get('marketCap', 0),
-                'float_m': info.get('floatShares', 0) / 1_000_000 if info.get('floatShares') else 0,
+                'market_cap': market_cap,
+                'float_m': float_shares / 1_000_000 if float_shares else 0,
+                'exchange': exchange,
+                **stock_classification,
+                **atr_stops
             }
             
             # Merge with existing data if provided
@@ -583,6 +682,100 @@ class PennyStockAnalyzer:
             return round(rsi.iloc[-1], 2)
         except:
             return 50.0
+    
+    @staticmethod
+    def _calculate_atr(hist: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range"""
+        try:
+            high = hist['High']
+            low = hist['Low']
+            close = hist['Close']
+            
+            tr1 = high - low
+            tr2 = abs(high - close.shift(1))
+            tr3 = abs(low - close.shift(1))
+            
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = true_range.rolling(window=period).mean()
+            
+            return float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0.0
+        except:
+            return 0.0
+    
+    def _calculate_atr_stops_and_targets(self, current_price: float, atr: float, 
+                                        trading_style: str = "SCALP") -> dict:
+        """
+        Calculate ATR-based stops and targets based on trading style.
+        
+        Args:
+            current_price: Current stock price
+            atr: Average True Range value
+            trading_style: SCALP (tight), SWING (medium), POSITION (wide)
+            
+        Returns:
+            Dict with stop_loss, target, stop_pct, target_pct, risk_reward
+        """
+        try:
+            # Adjust multipliers based on trading style
+            if trading_style == "SCALP":
+                stop_multiplier = 1.0  # Tight 1.0 ATR stop
+                rr_ratio = 2.0  # 2:1 R/R
+            elif trading_style == "SWING":
+                stop_multiplier = 1.5  # Medium 1.5 ATR stop
+                rr_ratio = 2.5  # 2.5:1 R/R
+            else:  # POSITION
+                stop_multiplier = 2.0  # Wide 2.0 ATR stop
+                rr_ratio = 3.0  # 3:1 R/R
+            
+            # For penny stocks, ensure minimum stop isn't too wide
+            stop_distance = atr * stop_multiplier
+            stop_pct = (stop_distance / current_price) * 100
+            
+            # Cap penny stock stops at 12% max (avoid -68% stops like BYND example)
+            if stop_pct > 12.0:
+                stop_pct = 12.0
+                stop_distance = current_price * 0.12
+            
+            stop_loss = current_price - stop_distance
+            target = current_price + (stop_distance * rr_ratio)
+            target_pct = (target - current_price) / current_price * 100
+            
+            # Alternative: percentage-based stops for very low ATR
+            if atr < current_price * 0.02:  # If ATR < 2% of price
+                # Use fixed percentage stops
+                if trading_style == "SCALP":
+                    stop_pct = 3.0
+                    target_pct = 6.0
+                elif trading_style == "SWING":
+                    stop_pct = 5.0
+                    target_pct = 12.0
+                else:
+                    stop_pct = 8.0
+                    target_pct = 20.0
+                
+                stop_loss = current_price * (1 - stop_pct / 100)
+                target = current_price * (1 + target_pct / 100)
+                rr_ratio = target_pct / stop_pct
+            
+            return {
+                'atr_stop_loss': round(stop_loss, 2),
+                'atr_target': round(target, 2),
+                'atr_stop_pct': round(stop_pct, 2),
+                'atr_target_pct': round(target_pct, 2),
+                'atr_risk_reward': round(rr_ratio, 2),
+                'trading_style': trading_style
+            }
+        except Exception as e:
+            logger.error(f"Error calculating ATR stops: {e}")
+            # Fallback to conservative fixed percentages
+            return {
+                'atr_stop_loss': round(current_price * 0.92, 2),  # 8% stop
+                'atr_target': round(current_price * 1.16, 2),  # 16% target
+                'atr_stop_pct': 8.0,
+                'atr_target_pct': 16.0,
+                'atr_risk_reward': 2.0,
+                'trading_style': trading_style
+            }
     
     @staticmethod
     def _calculate_technical_score(hist: pd.DataFrame) -> float:

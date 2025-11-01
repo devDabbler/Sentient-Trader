@@ -42,6 +42,109 @@ class TechnicalAnalyzer:
             return pd.Series([0.5] * len(df), index=df.index)
 
     @staticmethod
+    def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
+        """
+        Calculate Average True Range (ATR).
+        Used for volatility-based stop loss placement.
+        
+        Args:
+            df: DataFrame with High, Low, Close columns
+            period: ATR period (default 14)
+            
+        Returns:
+            Current ATR value
+        """
+        try:
+            high = pd.to_numeric(df['High'], errors='coerce')
+            low = pd.to_numeric(df['Low'], errors='coerce')
+            close = pd.to_numeric(df['Close'], errors='coerce')
+            
+            # True Range = max(H-L, abs(H-Cp), abs(L-Cp))
+            tr1 = high - low
+            tr2 = abs(high - close.shift(1))
+            tr3 = abs(low - close.shift(1))
+            
+            true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            atr = true_range.rolling(window=period).mean()
+            
+            return float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0.0
+        except Exception as e:
+            logger.error(f"Error calculating ATR: {e}")
+            return 0.0
+
+    @staticmethod
+    def calculate_atr_stop_loss(current_price: float, atr: float, multiplier: float = 1.5, 
+                                 is_long: bool = True) -> float:
+        """
+        Calculate ATR-based stop loss.
+        
+        Args:
+            current_price: Current stock price
+            atr: Average True Range value
+            multiplier: ATR multiplier (1.0-2.0 typical, default 1.5)
+            is_long: True for long positions, False for short positions
+            
+        Returns:
+            Stop loss price
+        """
+        if is_long:
+            return round(current_price - (atr * multiplier), 2)
+        else:
+            return round(current_price + (atr * multiplier), 2)
+
+    @staticmethod
+    def calculate_atr_targets(current_price: float, atr: float, 
+                              risk_reward_ratio: float = 2.0, is_long: bool = True) -> dict:
+        """
+        Calculate ATR-based targets and stops for complete risk/reward setup.
+        
+        Args:
+            current_price: Current stock price
+            atr: Average True Range value
+            risk_reward_ratio: Target R:R ratio (default 2:1)
+            is_long: True for long positions, False for short positions
+            
+        Returns:
+            Dict with stop_loss, target_1, target_2, stop_pct, target_pct
+        """
+        try:
+            # Standard ATR-based stop (1.5x ATR)
+            stop_distance = atr * 1.5
+            
+            if is_long:
+                stop_loss = current_price - stop_distance
+                target_1 = current_price + (stop_distance * risk_reward_ratio)
+                target_2 = current_price + (stop_distance * risk_reward_ratio * 1.5)
+            else:
+                stop_loss = current_price + stop_distance
+                target_1 = current_price - (stop_distance * risk_reward_ratio)
+                target_2 = current_price - (stop_distance * risk_reward_ratio * 1.5)
+            
+            stop_pct = abs((stop_loss - current_price) / current_price * 100)
+            target_pct = abs((target_1 - current_price) / current_price * 100)
+            
+            return {
+                'stop_loss': round(stop_loss, 2),
+                'target_1': round(target_1, 2),
+                'target_2': round(target_2, 2),
+                'stop_pct': round(stop_pct, 2),
+                'target_pct': round(target_pct, 2),
+                'atr_value': round(atr, 2),
+                'risk_reward': round(risk_reward_ratio, 2)
+            }
+        except Exception as e:
+            logger.error(f"Error calculating ATR targets: {e}")
+            return {
+                'stop_loss': current_price * 0.95 if is_long else current_price * 1.05,
+                'target_1': current_price * 1.10 if is_long else current_price * 0.90,
+                'target_2': current_price * 1.15 if is_long else current_price * 0.85,
+                'stop_pct': 5.0,
+                'target_pct': 10.0,
+                'atr_value': 0.0,
+                'risk_reward': 2.0
+            }
+
+    @staticmethod
     def detect_ema_power_zone_and_reclaim(
         df: pd.DataFrame,
         ema8: pd.Series,

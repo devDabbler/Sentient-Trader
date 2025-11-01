@@ -47,8 +47,11 @@ from services.ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrad
 from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
 from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
+from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
 from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
+from services.event_detectors.sec_detector import SECDetector
+from services.enhanced_catalyst_detector import EnhancedCatalystDetector
 
 # Add caching for better performance with new Streamlit features
 @st.cache_data(ttl=60)  # Cache for 1 minute for more real-time data
@@ -2247,8 +2250,227 @@ def main():
                 st.write("🎯 Identifying catalysts...")
                 time.sleep(0.5)
                 
+                st.write("📄 Fetching SEC filings (8-K, 10-Q, 10-K)...")
+                time.sleep(0.3)
+                
                 st.write(f"🤖 Generating {trading_style_display} recommendations...")
                 analysis = ComprehensiveAnalyzer.analyze_stock(search_ticker, trading_style)
+                
+                # Fetch SEC filings and enhanced catalyst data
+                sec_filings = []
+                enhanced_catalysts = []
+                if analysis:
+                    try:
+                        logger.info(f"📄 Fetching SEC filings for {search_ticker}...")
+                        # Create a temporary SEC detector instance (we don't need alert system for just fetching)
+                        from services.event_detectors.base_detector import BaseEventDetector
+                        
+                        # Get company CIK for SEC filings
+                        try:
+                            stock = yf.Ticker(search_ticker)
+                            info = stock.info
+                            # Try to get CIK from info or look it up
+                            cik = None
+                            if 'cik' in info:
+                                cik = str(info['cik']).zfill(10)  # CIK should be 10 digits
+                            
+                            # If no CIK in info, try to look it up from SEC
+                            if not cik:
+                                logger.info(f"🔍 CIK not found in yfinance info, looking up from SEC...")
+                                try:
+                                    import requests
+                                    url = "https://www.sec.gov/files/company_tickers.json"
+                                    headers = {'User-Agent': "Sentient Trader/1.0 (trading@example.com)"}
+                                    response = requests.get(url, headers=headers, timeout=10)
+                                    response.raise_for_status()
+                                    companies = response.json()
+                                    for company in companies.values():
+                                        if company.get('ticker', '').upper() == search_ticker.upper():
+                                            cik = str(company.get('cik_str', '')).zfill(10)
+                                            logger.info(f"✅ Found CIK for {search_ticker}: {cik}")
+                                            break
+                                except Exception as lookup_error:
+                                    logger.warning(f"Could not lookup CIK for {search_ticker}: {lookup_error}")
+                            
+                            # Log CIK status
+                            if cik:
+                                logger.info(f"✅ CIK found for {search_ticker}: {cik}")
+                            else:
+                                logger.warning(f"⚠️ No CIK available for {search_ticker}, skipping SEC filings")
+                            
+                            if cik:
+                                # Create SEC detector instance (using None for alert_system since we just want data)
+                                class TempSECDetector:
+                                    def __init__(self):
+                                        self.user_agent = "Sentient Trader/1.0 (trading@example.com)"
+                                    
+                                    def get_company_cik(self, ticker: str):
+                                        # Already have it
+                                        return cik
+                                    
+                                    def get_recent_filings(self, ticker: str, cik: str, hours_back: int = 168):
+                                        """Get recent SEC filings (last 7 days)"""
+                                        try:
+                                            import requests
+                                            from datetime import datetime, timedelta
+                                            
+                                            url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+                                            headers = {'User-Agent': self.user_agent}
+                                            
+                                            response = requests.get(url, headers=headers, timeout=10)
+                                            response.raise_for_status()
+                                            
+                                            data = response.json()
+                                            recent_filings = data.get('filings', {}).get('recent', {})
+                                            
+                                            if not recent_filings:
+                                                return []
+                                            
+                                            filings = []
+                                            cutoff_time = datetime.now() - timedelta(hours=hours_back)
+                                            
+                                            filing_dates = recent_filings.get('filingDate', [])
+                                            form_types = recent_filings.get('form', [])
+                                            accession_numbers = recent_filings.get('accessionNumber', [])
+                                            primary_documents = recent_filings.get('primaryDocument', [])
+                                            
+                                            # Check last 20 filings
+                                            for i in range(min(len(filing_dates), 20)):
+                                                try:
+                                                    filing_date = datetime.strptime(filing_dates[i], '%Y-%m-%d')
+                                                    
+                                                    if filing_date >= cutoff_time:
+                                                        form_type = form_types[i]
+                                                        accession = accession_numbers[i]
+                                                        primary_doc = primary_documents[i] if i < len(primary_documents) else ''
+                                                        
+                                                        # Build filing URL
+                                                        accession_clean = accession.replace('-', '')
+                                                        cik_clean = cik.lstrip('0')  # Remove leading zeros
+                                                        filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik_clean}/{accession_clean}/{primary_doc}"
+                                                        
+                                                        # Get filing description
+                                                        filing_descriptions = {
+                                                            '8-K': 'Material Event Report',
+                                                            '8-K/A': 'Amended Material Event',
+                                                            '4': 'Insider Trading Statement',
+                                                            '10-Q': 'Quarterly Report',
+                                                            '10-K': 'Annual Report',
+                                                            '10-Q/A': 'Amended Quarterly Report',
+                                                            '10-K/A': 'Amended Annual Report',
+                                                            'S-1': 'IPO Registration',
+                                                            'S-3': 'Securities Registration',
+                                                            'DEF 14A': 'Proxy Statement'
+                                                        }
+                                                        
+                                                        filings.append({
+                                                            'ticker': ticker,
+                                                            'form_type': form_type,
+                                                            'filing_date': filing_date.strftime('%Y-%m-%d'),
+                                                            'description': filing_descriptions.get(form_type, form_type),
+                                                            'url': filing_url,
+                                                            'days_ago': (datetime.now() - filing_date).days,
+                                                            'is_critical': form_type in ['8-K', '8-K/A', '4', 'S-1']
+                                                        })
+                                                except Exception as e:
+                                                    logger.debug(f"Error parsing filing {i}: {e}")
+                                                    continue
+                                            
+                                            return sorted(filings, key=lambda x: x['filing_date'], reverse=True)[:10]  # Last 10
+                                            
+                                        except Exception as e:
+                                            logger.error(f"Error fetching SEC filings: {e}")
+                                            return []
+                                
+                                sec_detector = TempSECDetector()
+                                sec_filings = sec_detector.get_recent_filings(search_ticker, cik, hours_back=168)  # Last 7 days
+                                logger.info(f"✅ Retrieved {len(sec_filings)} recent SEC filings for {search_ticker}")
+                                
+                                # Analyze filings for catalysts
+                                if sec_filings:
+                                    for filing in sec_filings:
+                                        if filing['form_type'] == '8-K':
+                                            # Parse 8-K for material events
+                                            try:
+                                                # Note: Full parsing would require fetching filing content
+                                                # For now, we'll just flag 8-Ks as material events
+                                                enhanced_catalysts.append({
+                                                    'type': 'SEC Filing - 8-K',
+                                                    'date': filing['filing_date'],
+                                                    'days_away': -filing['days_ago'],  # Negative means in the past
+                                                    'impact': 'HIGH',
+                                                    'description': f"Material event filing: {filing['description']}",
+                                                    'filing_url': filing['url'],
+                                                    'is_critical': filing['is_critical']
+                                                })
+                                            except Exception as e:
+                                                logger.debug(f"Error parsing 8-K: {e}")
+                        except Exception as e:
+                            logger.warning(f"Could not fetch SEC filings for {search_ticker}: {e}")
+                            sec_filings = []
+                    except Exception as e:
+                        logger.error(f"Error fetching SEC filings data for {search_ticker}: {e}", exc_info=True)
+                        sec_filings = []
+                
+                # Store filings in session state
+                st.session_state.sec_filings = sec_filings
+                st.session_state.enhanced_catalysts = enhanced_catalysts
+                
+                # Run unified penny stock analysis if applicable
+                penny_stock_analysis = None
+                if analysis and analysis.price < 5.0:
+                    logger.info(f"💰 PENNY STOCK DETECTED: {search_ticker} @ ${analysis.price:.2f} (< $5.0)")
+                    st.write("💰 Running enhanced penny stock analysis...")
+                    try:
+                        unified_analyzer = UnifiedPennyStockAnalysis()
+                        logger.info(f"✅ UnifiedPennyStockAnalysis initialized for {search_ticker}")
+                        
+                        # Map trading style for penny stock analysis
+                        penny_style_map = {
+                            "DAY_TRADE": "SCALP",
+                            "SWING_TRADE": "SWING",
+                            "SCALP": "SCALP",
+                            "BUY_HOLD": "POSITION",
+                            "OPTIONS": "SWING"
+                        }
+                        penny_trading_style = penny_style_map.get(trading_style, "SWING")
+                        logger.info(f"📊 Trading style mapped: {trading_style} -> {penny_trading_style} for penny stock analysis")
+                        
+                        logger.info(f"🔍 Starting comprehensive penny stock analysis for {search_ticker}...")
+                        penny_stock_analysis = unified_analyzer.analyze_comprehensive(
+                            ticker=search_ticker,
+                            trading_style=penny_trading_style,
+                            include_backtest=False,  # Skip backtest for speed
+                            check_options=(trading_style == "OPTIONS")
+                        )
+                        
+                        if penny_stock_analysis:
+                            if 'error' in penny_stock_analysis:
+                                logger.error(f"❌ Penny stock analysis error for {search_ticker}: {penny_stock_analysis['error']}")
+                                st.error(f"⚠️ Penny stock analysis encountered an error: {penny_stock_analysis['error']}")
+                            else:
+                                logger.info(f"✅ Penny stock analysis completed for {search_ticker}")
+                                logger.info(f"   Classification: {penny_stock_analysis.get('classification', 'N/A')}")
+                                logger.info(f"   ATR Stop: ${penny_stock_analysis.get('atr_stop_loss', 'N/A')} ({penny_stock_analysis.get('atr_stop_pct', 0):.1f}%)")
+                                logger.info(f"   Risk Level: {penny_stock_analysis.get('risk_level', 'N/A')}")
+                                
+                                if 'final_recommendation' in penny_stock_analysis:
+                                    final_rec = penny_stock_analysis['final_recommendation']
+                                    logger.info(f"   Final Decision: {final_rec.get('decision', 'N/A')}")
+                        else:
+                            logger.warning(f"⚠️ Penny stock analysis returned None for {search_ticker}")
+                        
+                        st.session_state.penny_stock_analysis = penny_stock_analysis
+                        logger.info(f"💾 Penny stock analysis stored in session state for {search_ticker}")
+                    except Exception as e:
+                        logger.error(f"❌ ERROR running unified penny stock analysis for {search_ticker}: {e}", exc_info=True)
+                        st.error(f"⚠️ Error running enhanced penny stock analysis: {str(e)}")
+                        penny_stock_analysis = None
+                else:
+                    if analysis:
+                        logger.info(f"ℹ️ {search_ticker} @ ${analysis.price:.2f} is NOT a penny stock (>= $5.0)")
+                    else:
+                        logger.warning(f"⚠️ No analysis available for {search_ticker} to check penny stock status")
 
                 # --- Generate Premium AI Trading Signal ---
                 st.session_state.ai_trading_signal = None
@@ -2303,6 +2525,14 @@ def main():
                     volume_vs_avg = ((analysis.volume / analysis.avg_volume - 1) * 100) if analysis.avg_volume > 0 else 0
                     is_runner = volume_vs_avg > 200 and analysis.change_pct > 10  # 200%+ volume spike and 10%+ gain
                     
+                    # Get unified penny stock analysis if available
+                    penny_stock_analysis = st.session_state.get('penny_stock_analysis')
+                    if is_penny_stock:
+                        if penny_stock_analysis:
+                            logger.info(f"✅ Found penny stock analysis in session state for {analysis.ticker}")
+                        else:
+                            logger.warning(f"⚠️ Penny stock detected but no enhanced analysis found for {analysis.ticker}")
+                    
                     # Header metrics
                     st.success(f"✅ Analysis complete for {analysis.ticker}")
 
@@ -2336,7 +2566,14 @@ def main():
                         st.warning(f"🚀 **RUNNER DETECTED!** {volume_vs_avg:+.0f}% volume spike with {analysis.change_pct:+.1f}% price move!")
                     
                     if is_penny_stock:
-                        st.info(f"💰 **PENNY STOCK** (${analysis.price:.4f}) - High risk/high reward. Use caution and proper position sizing.")
+                        if penny_stock_analysis and 'classification' in penny_stock_analysis:
+                            classification = penny_stock_analysis.get('classification', 'PENNY_STOCK')
+                            if classification == 'LOW_PRICED':
+                                st.info(f"💰 **LOW-PRICED STOCK** (${analysis.price:.2f}) - Price < $5 but market cap suggests established company. Moderate risk.")
+                            else:
+                                st.warning(f"💰 **{classification}** (${analysis.price:.4f}) - High risk/high reward. Use enhanced risk management.")
+                        else:
+                            st.info(f"💰 **PENNY STOCK** (${analysis.price:.4f}) - High risk/high reward. Use caution and proper position sizing.")
                     
                     if is_otc:
                         st.warning("⚠️ **OTC STOCK** - Lower liquidity, wider spreads, higher risk. Limited data may be available.")
@@ -2502,22 +2739,95 @@ def main():
                     # Catalysts
                     st.subheader("📅 Upcoming Catalysts")
                     
-                    if analysis.catalysts:
-                        for catalyst in analysis.catalysts:
+                    # Combine regular catalysts with enhanced catalysts from SEC filings
+                    all_catalysts = list(analysis.catalysts) if analysis.catalysts else []
+                    enhanced_catalysts = st.session_state.get('enhanced_catalysts', [])
+                    if enhanced_catalysts:
+                        all_catalysts.extend(enhanced_catalysts)
+                        logger.info(f"✅ Added {len(enhanced_catalysts)} enhanced catalysts from SEC filings")
+                    
+                    if all_catalysts:
+                        for catalyst in all_catalysts:
                             impact_color = {
                                 'HIGH': '🔴',
                                 'MEDIUM': '🟡',
                                 'LOW': '🟢'
                             }.get(catalyst['impact'], '⚪')
                             
-                            with st.expander(f"{impact_color} {catalyst['type']} - {catalyst['date']} ({catalyst.get('days_away', 'N/A')} days away)"):
+                            # Format days away display
+                            days_away = catalyst.get('days_away', 'N/A')
+                            if isinstance(days_away, int):
+                                if days_away < 0:
+                                    days_text = f"{abs(days_away)} days ago"
+                                elif days_away == 0:
+                                    days_text = "Today"
+                                else:
+                                    days_text = f"{days_away} days away"
+                            else:
+                                days_text = str(days_away)
+                            
+                            expander_title = f"{impact_color} {catalyst['type']} - {catalyst['date']} ({days_text})"
+                            
+                            with st.expander(expander_title):
                                 st.write(f"**Impact Level:** {catalyst['impact']}")
                                 st.write(f"**Details:** {catalyst['description']}")
                                 
-                                if catalyst['type'] == 'Earnings Report' and catalyst.get('days_away', 999) <= 7:
+                                # Add filing URL if available
+                                if 'filing_url' in catalyst:
+                                    st.write(f"[📄 View SEC Filing]({catalyst['filing_url']})")
+                                
+                                if catalyst['type'] == 'Earnings Report' and isinstance(days_away, int) and days_away >= 0 and days_away <= 7:
                                     st.warning("⚠️ Earnings within 7 days - expect high volatility!")
+                                
+                                if catalyst.get('is_critical'):
+                                    st.error("🔴 **CRITICAL FILING** - Review immediately for material events")
                     else:
                         st.info("No major catalysts identified in the next 60 days")
+                    
+                    # SEC Filings Section
+                    sec_filings = st.session_state.get('sec_filings', [])
+                    if sec_filings:
+                        st.subheader("📄 Recent SEC Filings (Last 7 Days)")
+                        logger.info(f"📄 Displaying {len(sec_filings)} SEC filings for {analysis.ticker}")
+                        
+                        filings_col1, filings_col2 = st.columns([3, 1])
+                        
+                        with filings_col1:
+                            for filing in sec_filings[:10]:  # Show last 10
+                                filing_icon = "🔴" if filing['is_critical'] else "🟡"
+                                filing_desc = f"{filing_icon} **{filing['form_type']}** - {filing['description']}"
+                                
+                                with st.expander(f"{filing_desc} ({filing['filing_date']}, {filing['days_ago']} days ago)"):
+                                    st.write(f"**Filing Type:** {filing['form_type']}")
+                                    st.write(f"**Description:** {filing['description']}")
+                                    st.write(f"**Filing Date:** {filing['filing_date']}")
+                                    
+                                    if filing['is_critical']:
+                                        st.error("⚠️ **CRITICAL FILING** - Material event (8-K) or significant filing")
+                                    
+                                    if filing.get('url'):
+                                        st.write(f"[📄 View Filing on SEC.gov]({filing['url']})")
+                        
+                        with filings_col2:
+                            critical_count = sum(1 for f in sec_filings if f['is_critical'])
+                            total_count = len(sec_filings)
+                            
+                            st.metric("Total Filings", total_count)
+                            if critical_count > 0:
+                                st.metric("Critical Filings", critical_count, delta="Review Required")
+                            
+                            # Filing type breakdown
+                            filing_types = {}
+                            for f in sec_filings:
+                                form_type = f['form_type']
+                                filing_types[form_type] = filing_types.get(form_type, 0) + 1
+                            
+                            if filing_types:
+                                st.write("**Filing Types:**")
+                                for form_type, count in sorted(filing_types.items(), key=lambda x: x[1], reverse=True)[:5]:
+                                    st.caption(f"{form_type}: {count}")
+                    else:
+                        logger.info(f"ℹ️ No recent SEC filings found for {analysis.ticker} in the last 7 days")
                     
                     # News & Sentiment
                     st.subheader("📰 Recent News & Sentiment")
@@ -2584,8 +2894,118 @@ def main():
                             st.write("• Yahoo Finance API limitations")
                             st.write("• Try refreshing the news or check back later")
                     
-                    # Penny Stock Risk Assessment (if applicable)
-                    if is_penny_stock:
+                    # Enhanced Penny Stock Analysis (if applicable)
+                    logger.info(f"🔍 Checking enhanced penny stock display: is_penny_stock={is_penny_stock}, has_penny_analysis={penny_stock_analysis is not None}")
+                    if is_penny_stock and penny_stock_analysis:
+                        logger.info(f"✅ DISPLAYING Enhanced Penny Stock Analysis for {analysis.ticker}")
+                        st.subheader("💰 Enhanced Penny Stock Analysis")
+                        st.success(f"✅ Enhanced analysis available for {analysis.ticker} - Showing detailed results below")
+                        
+                        # Classification
+                        if 'classification' in penny_stock_analysis:
+                            classification = penny_stock_analysis.get('classification', 'UNKNOWN')
+                            risk_level = penny_stock_analysis.get('risk_level', 'UNKNOWN')
+                            
+                            class_col1, class_col2 = st.columns(2)
+                            with class_col1:
+                                st.metric("Stock Classification", classification)
+                            with class_col2:
+                                st.metric("Risk Level", risk_level)
+                        
+                        # ATR-Based Stop Loss & Targets
+                        if 'atr_stop_loss' in penny_stock_analysis and penny_stock_analysis['atr_stop_loss']:
+                            st.subheader("🎯 ATR-Based Risk Management")
+                            
+                            stop_loss = penny_stock_analysis.get('atr_stop_loss')
+                            target = penny_stock_analysis.get('atr_target')
+                            stop_pct = penny_stock_analysis.get('atr_stop_pct', 0)
+                            target_pct = penny_stock_analysis.get('atr_target_pct', 0)
+                            rr_ratio = penny_stock_analysis.get('atr_risk_reward', 0)
+                            
+                            stop_col1, stop_col2, stop_col3 = st.columns(3)
+                            with stop_col1:
+                                st.metric("Stop Loss", f"${stop_loss:.4f}", f"{stop_pct:.1f}%")
+                                if stop_pct > 12:
+                                    st.error("⚠️ STOP EXCEEDS 12% MAX - Consider skipping or reducing position")
+                                elif stop_pct > 8:
+                                    st.warning("⚠️ Wide stop - Use smaller position size")
+                                else:
+                                    st.success("✅ Acceptable stop width")
+                            with stop_col2:
+                                st.metric("Target", f"${target:.4f}", f"{target_pct:.1f}%")
+                            with stop_col3:
+                                st.metric("Risk/Reward", f"{rr_ratio:.1f}:1")
+                                if rr_ratio >= 2.0:
+                                    st.success("✅ Good R/R ratio")
+                                else:
+                                    st.warning("⚠️ R/R below 2:1")
+                            
+                            # Stop recommendation
+                            if 'stop_recommendation' in penny_stock_analysis:
+                                st.info(penny_stock_analysis['stop_recommendation'])
+                        
+                        # Stock Liquidity Check
+                        if 'liquidity_check' in penny_stock_analysis:
+                            liquidity = penny_stock_analysis['liquidity_check']
+                            st.subheader("💧 Stock Liquidity Analysis")
+                            
+                            liq_col1, liq_col2, liq_col3 = st.columns(3)
+                            with liq_col1:
+                                overall_risk = liquidity.get('overall_risk', 'UNKNOWN')
+                                risk_color = {
+                                    'CRITICAL': '🔴',
+                                    'HIGH': '🟠',
+                                    'MEDIUM': '🟡',
+                                    'LOW': '🟢'
+                                }.get(overall_risk, '⚪')
+                                st.metric("Overall Risk", f"{risk_color} {overall_risk}")
+                            with liq_col2:
+                                max_pos_pct = liquidity.get('max_position_pct_of_volume', 0)
+                                st.metric("Max Position", f"{max_pos_pct:.1f}% of daily volume")
+                            with liq_col3:
+                                avg_vol = liquidity.get('avg_daily_volume', 0)
+                                st.metric("Avg Volume", f"{avg_vol:,}")
+                            
+                            if overall_risk == "CRITICAL":
+                                st.error("❌ **CRITICAL LIQUIDITY RISK** - Cannot execute safely. AVOID or use extreme caution.")
+                            elif overall_risk == "HIGH":
+                                st.warning("⚠️ **HIGH RISK** - Use limit orders only, small position size")
+                            
+                            if liquidity.get('warnings'):
+                                for warning in liquidity['warnings']:
+                                    st.warning(warning)
+                        
+                        # Final Recommendation
+                        if 'final_recommendation' in penny_stock_analysis:
+                            final_rec = penny_stock_analysis['final_recommendation']
+                            st.subheader("📊 Final Recommendation")
+                            
+                            decision = final_rec.get('decision', 'UNKNOWN')
+                            emoji = final_rec.get('emoji', '⚠️')
+                            reason = final_rec.get('reason', 'N/A')
+                            
+                            st.markdown(f"## {emoji} **{decision}**")
+                            st.write(f"**Reason:** {reason}")
+                            
+                            if final_rec.get('blockers'):
+                                st.error("**Blockers:**")
+                                for blocker in final_rec['blockers']:
+                                    st.write(f"  {blocker}")
+                            
+                            if final_rec.get('warnings'):
+                                st.warning("**Warnings:**")
+                                for warning in final_rec['warnings']:
+                                    st.write(f"  {warning}")
+                            
+                            if final_rec.get('signals'):
+                                st.success("**Positive Signals:**")
+                                for signal in final_rec['signals']:
+                                    st.write(f"  {signal}")
+                        
+                        logger.info(f"✅ Enhanced penny stock analysis display completed for {analysis.ticker}")
+                    elif is_penny_stock:
+                        logger.warning(f"⚠️ Penny stock detected but enhanced analysis not available - using fallback display")
+                        # Fallback to basic penny stock assessment if enhanced analysis not available
                         st.subheader("⚠️ Penny Stock Risk Assessment")
                         
                         risk_col1, risk_col2 = st.columns(2)
@@ -2612,23 +3032,6 @@ def main():
 - ✅ Watch for unusual volume spikes
 - ✅ Avoid stocks with no news/catalysts
                             """)
-                        
-                        # Calculate penny stock score
-                        penny_score = 0
-                        if volume_vs_avg > 100: penny_score += 25
-                        if analysis.change_pct > 5: penny_score += 20
-                        if analysis.rsi < 70: penny_score += 20
-                        if len(analysis.recent_news) > 0: penny_score += 20
-                        if analysis.sentiment_score > 0: penny_score += 15
-                        
-                        st.metric("Penny Stock Opportunity Score", f"{penny_score}/100")
-                        
-                        if penny_score > 70:
-                            st.success("🟢 Strong opportunity - but still use caution!")
-                        elif penny_score > 50:
-                            st.info("🟡 Moderate opportunity - proceed carefully")
-                        else:
-                            st.warning("🔴 Weak setup - consider waiting for better entry")
                     
                     # Timeframe-Specific Analysis
                     st.subheader(f"⏰ {trading_style_display} Analysis")
