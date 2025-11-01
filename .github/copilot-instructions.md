@@ -165,7 +165,7 @@ except Exception as e:
 
 ### Data Flow
 1. **Market Data** → yfinance/Tradier → **Analysis Engine** → Technical indicators
-2. **News/Events** → News APIs → **Sentiment Analysis** → Trading catalysts  
+2. **News/Events** → News APIs → **Sentiment Analysis** → Trading catalysts
 3. **AI Models** → OpenAI/Claude/Gemini → **Signal Generation** → Trading decisions
 4. **Execution** → Tradier API → **Order Management** → Position tracking
 5. **Notifications** → Discord webhooks → **Real-time alerts** → User notifications
