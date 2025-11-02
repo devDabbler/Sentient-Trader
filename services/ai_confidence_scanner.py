@@ -52,16 +52,28 @@ class AIConfidenceScanner:
         if self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
+                api_key = os.getenv('OPENROUTER_API_KEY')
                 model = os.getenv('AI_CONFIDENCE_MODEL', 'google/gemini-2.0-flash-exp:free')
-                self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model)
-                logger.info(f"AI Confidence Scanner initialized with OpenRouter using model: {model}")
+                
+                if not api_key:
+                    logger.error("❌ OPENROUTER_API_KEY not found - AI analysis disabled")
+                    self.use_llm = False
+                    self.llm_analyzer = None
+                else:
+                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model)
+                    logger.info(f"✅ AI Confidence Scanner initialized with OpenRouter")
+                    logger.info(f"   Model: {model}")
+                    logger.info(f"   API Key: {'*' * (len(api_key) - 8) + api_key[-8:]}")
             except Exception as e:
-                logger.warning(f"LLM not available for AI Confidence Scanner: {e}")
+                logger.error(f"❌ LLM initialization failed: {e}", exc_info=True)
                 self.use_llm = False
     
     def _check_llm_available(self) -> bool:
         """Check if OpenRouter LLM API key is available"""
-        return bool(os.getenv('OPENROUTER_API_KEY'))
+        has_key = bool(os.getenv('OPENROUTER_API_KEY'))
+        if not has_key:
+            logger.warning("⚠️ OpenRouter API key not found in environment")
+        return has_key
     
     def _generate_ai_confidence(self, trade: TopTrade, trade_type: str) -> Dict:
         """
@@ -83,7 +95,7 @@ class AIConfidenceScanner:
             prompt = self._create_analysis_prompt(trade, trade_type)
             
             # Get LLM response
-            response = self._query_llm(prompt)
+            response = self._query_llm(prompt, ticker=trade.ticker)
             
             # Parse response
             return self._parse_llm_response(response)
@@ -178,7 +190,7 @@ Provide:
 Be concise but insightful. Focus on actionable analysis.
 """
     
-    def _query_llm(self, prompt: str) -> str:
+    def _query_llm(self, prompt: str, ticker: str = None) -> str:
         """Query LLM for analysis"""
         try:
             # Use the LLM analyzer's _call_llm method directly
@@ -194,11 +206,15 @@ Be concise but insightful. Focus on actionable analysis."""
             full_prompt = f"{system_prompt}\n\n{prompt}"
             
             # Call LLM directly
+            ticker_str = f" on {ticker}" if ticker else ""
+            logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")
             response = self.llm_analyzer._call_openrouter(full_prompt)
             
             if not response:
+                logger.error(f"❌ Empty LLM response{ticker_str}")
                 raise Exception("Empty LLM response")
             
+            logger.info(f"✅ Received LLM response{ticker_str} ({len(response)} characters)")
             return response
         except Exception as e:
             logger.error(f"LLM query failed: {e}")

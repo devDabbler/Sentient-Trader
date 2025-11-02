@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from models.analysis import StockAnalysis
+from services.penny_stock_constants import PENNY_THRESHOLDS
 
 logger = logging.getLogger(__name__)
 
@@ -458,9 +459,9 @@ class DynamicStrategySelector:
         elif analysis.price > 200:
             score -= 10
             reasoning.append(f"Expensive ${analysis.price:.2f}")
-        elif analysis.price < 5:
+        elif analysis.price < PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE:
             score -= 10
-            reasoning.append(f"Too cheap ${analysis.price:.2f}")
+            reasoning.append(f"Too cheap ${analysis.price:.2f} (penny stock)")
         
         # Liquidity (need good option volume)
         if analysis.volume > 2_000_000:

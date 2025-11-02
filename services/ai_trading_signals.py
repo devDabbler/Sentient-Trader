@@ -266,18 +266,26 @@ Analyze all the data above and provide a trading recommendation. Consider:
             import requests
             
             api_key = self.api_key or os.getenv('OPENROUTER_API_KEY')
+            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
+            
             if not api_key:
-                logger.error("No OpenRouter API key found")
+                logger.error("❌ No OpenRouter API key found - cannot make API calls")
+                logger.error("Set OPENROUTER_API_KEY in your .env file")
                 return None
+            
+            logger.info(f"🤖 Calling OpenRouter API with model: {model}")
+            logger.debug(f"API Key present: {bool(api_key)}, Length: {len(api_key)}")
             
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/sentient-trader",
+                    "X-Title": "Sentient Trader"
                 },
                 json={
-                    "model": os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free'),
+                    "model": model,
                     "messages": [
                         {
                             "role": "system",
@@ -292,15 +300,21 @@ Analyze all the data above and provide a trading recommendation. Consider:
                 timeout=30
             )
             
+            logger.info(f"OpenRouter response status: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
-                return data['choices'][0]['message']['content']
+                content = data['choices'][0]['message']['content']
+                logger.info(f"✅ OpenRouter API call successful - received {len(content)} characters")
+                return content
             else:
-                logger.error(f"OpenRouter API error: {response.status_code}")
+                logger.error(f"❌ OpenRouter API error: {response.status_code}")
+                logger.error(f"Response: {response.text[:500]}")
                 return None
         
         except Exception as e:
-            logger.error(f"Error calling OpenRouter: {e}")
+            logger.error(f"❌ Error calling OpenRouter: {e}")
+            logger.error(f"API Key configured: {bool(api_key)}")
             return None
     
     

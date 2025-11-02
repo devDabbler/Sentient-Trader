@@ -166,13 +166,18 @@ Focus on practical, actionable insights for options trading. Consider the specif
     def _call_llm_api(self, prompt: str) -> str:
         """Call the selected LLM API. Returns string or empty on error."""
         try:
-            logger.debug(f"Calling {self.provider} API with model: {self.model}")
+            logger.info(f"🤖 Calling {self.provider} API with model: {self.model}")
             logger.debug(f"Base URL: {self.base_url}")
+            logger.debug(f"API Key present: {bool(self.api_key)}, Length: {len(self.api_key) if self.api_key else 0}")
             
             import openai
             client = openai.OpenAI(
                 api_key=self.api_key,
-                base_url=self.base_url
+                base_url=self.base_url,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/sentient-trader",
+                    "X-Title": "Sentient Trader"
+                }
             )
             
             logger.debug(f"Created OpenAI client for {self.provider}")
@@ -188,11 +193,15 @@ Focus on practical, actionable insights for options trading. Consider the specif
             )
             
             content = getattr(response.choices[0].message, 'content', None)
-            logger.debug(f"{self.provider} API response received: {str(content)[:200]}...")
+            logger.info(f"✅ {self.provider} API call successful - received {len(content) if content else 0} characters")
+            logger.debug(f"{self.provider} API response: {str(content)[:200]}...")
             return content or ""
             
         except Exception as e:
-            logger.error(f"{self.provider} API error: {e}", exc_info=True)
+            logger.error(f"❌ {self.provider} API error: {e}", exc_info=True)
+            logger.error(f"API Key configured: {bool(self.api_key)}")
+            logger.error(f"Model: {self.model}")
+            logger.error(f"Base URL: {self.base_url}")
             return ""
     
     def _call_openrouter(self, prompt: str) -> Optional[str]:
@@ -201,14 +210,17 @@ Focus on practical, actionable insights for options trading. Consider the specif
         This is a simplified wrapper around _call_llm_api for direct calls
         """
         try:
-            logger.debug(f"Direct OpenRouter call with model: {self.model}")
+            logger.info(f"🤖 Direct OpenRouter call with model: {self.model}")
+            logger.debug(f"API Key present: {bool(self.api_key)}")
             
             # Use requests for direct API call
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/sentient-trader",
+                    "X-Title": "Sentient Trader"
                 },
                 json={
                     "model": self.model,
@@ -224,17 +236,21 @@ Focus on practical, actionable insights for options trading. Consider the specif
                 timeout=30
             )
             
+            logger.info(f"OpenRouter response status: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
                 content = data['choices'][0]['message']['content']
-                logger.debug(f"OpenRouter response received: {str(content)[:200]}...")
+                logger.info(f"✅ OpenRouter API call successful - received {len(content)} characters")
+                logger.debug(f"OpenRouter response: {str(content)[:200]}...")
                 return content
             else:
-                logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
+                logger.error(f"❌ OpenRouter API error: {response.status_code} - {response.text}")
                 return None
         
         except Exception as e:
-            logger.error(f"Error calling OpenRouter: {e}", exc_info=True)
+            logger.error(f"❌ Error calling OpenRouter: {e}", exc_info=True)
+            logger.error(f"API Key configured: {bool(self.api_key)}")
             return None
     
     def _parse_analysis_response(self, response: str, bot_config: Dict) -> StrategyAnalysis:

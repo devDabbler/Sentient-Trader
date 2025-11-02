@@ -306,14 +306,42 @@ class AutoTrader:
         if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
             return False
         
-        start_time = dt_time(self.config.trading_start_hour, self.config.trading_start_minute)
-        end_time = dt_time(self.config.trading_end_hour, self.config.trading_end_minute)
         current_time_et = now_et.time()
         
-        in_hours = start_time <= current_time_et <= end_time
+        # Regular trading hours
+        start_time = dt_time(self.config.trading_start_hour, self.config.trading_start_minute)
+        end_time = dt_time(self.config.trading_end_hour, self.config.trading_end_minute)
+        
+        in_regular_hours = start_time <= current_time_et <= end_time
+        
+        # Pre-market hours (if enabled)
+        in_premarket = False
+        if hasattr(self.config, 'enable_premarket') and self.config.enable_premarket:
+            premarket_start = dt_time(
+                getattr(self.config, 'premarket_start_hour', 7),
+                getattr(self.config, 'premarket_start_minute', 0)
+            )
+            premarket_end = start_time  # Pre-market ends when regular hours begin
+            in_premarket = premarket_start <= current_time_et < premarket_end
+        
+        # After-hours (if enabled)
+        in_afterhours = False
+        if hasattr(self.config, 'enable_afterhours') and self.config.enable_afterhours:
+            afterhours_start = end_time  # After-hours starts when regular hours end
+            afterhours_end = dt_time(
+                getattr(self.config, 'afterhours_end_hour', 20),
+                getattr(self.config, 'afterhours_end_minute', 0)
+            )
+            in_afterhours = afterhours_start < current_time_et <= afterhours_end
+        
+        in_hours = in_regular_hours or in_premarket or in_afterhours
         
         if not in_hours:
             logger.debug(f"Outside trading hours: ET time is {current_time_et.strftime('%H:%M')}, market hours are {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}")
+        elif in_premarket:
+            logger.debug(f"🌅 Pre-market hours: {current_time_et.strftime('%H:%M')} ET")
+        elif in_afterhours:
+            logger.debug(f"🌙 After-hours: {current_time_et.strftime('%H:%M')} ET")
         
         return in_hours
     

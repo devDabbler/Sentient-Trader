@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 import yfinance as yf
 import logging
+from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock
+from services.fda_catalyst_detector import FDACatalystDetector
 
 logger = logging.getLogger(__name__)
 
@@ -496,16 +498,17 @@ class PennyStockScorer:
 class PennyStockAnalyzer:
     """Comprehensive penny stock analysis"""
     
-    # Penny stock classification thresholds
+    # Penny stock classification thresholds (using centralized constants)
     PENNY_STOCK_CRITERIA = {
-        'MAX_PRICE': 5.0,
-        'MAX_MARKET_CAP': 300_000_000,  # $300M
-        'MIN_FLOAT': 1_000_000,  # 1M shares minimum
-        'MICRO_CAP_THRESHOLD': 50_000_000,  # $50M
+        'MAX_PRICE': PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE,
+        'MAX_MARKET_CAP': PENNY_THRESHOLDS.MAX_MARKET_CAP,
+        'MIN_FLOAT': PENNY_THRESHOLDS.MIN_FLOAT,
+        'MICRO_CAP_THRESHOLD': PENNY_THRESHOLDS.MICRO_CAP_THRESHOLD,
     }
     
     def __init__(self):
         self.scorer = PennyStockScorer()
+        self.fda_detector = FDACatalystDetector()
     
     @classmethod
     def classify_stock_type(cls, price: float, market_cap: float, float_shares: float, 
@@ -623,6 +626,10 @@ class PennyStockAnalyzer:
                 current_price, market_cap, float_shares, exchange
             )
             
+            # Detect FDA/Healthcare catalysts
+            is_healthcare, healthcare_sector = self.fda_detector.is_healthcare_stock(ticker, info)
+            fda_catalyst_info = self.fda_detector.get_catalyst_summary(ticker)
+            
             # Prepare data dictionary
             data = {
                 'ticker': ticker,
@@ -639,6 +646,9 @@ class PennyStockAnalyzer:
                 'market_cap': market_cap,
                 'float_m': float_shares / 1_000_000 if float_shares else 0,
                 'exchange': exchange,
+                'is_healthcare': is_healthcare,
+                'healthcare_sector': healthcare_sector,
+                'fda_catalyst': fda_catalyst_info.get('catalyst_description', ''),
                 **stock_classification,
                 **atr_stops
             }
@@ -649,6 +659,28 @@ class PennyStockAnalyzer:
             
             # Calculate all scores
             scores = self.scorer.calculate_all_scores(data)
+            
+            # Apply FDA catalyst boost if detected
+            catalyst_score_boost = 0
+            catalyst_description_enhanced = scores.reasoning
+            
+            if fda_catalyst_info.get('has_catalyst'):
+                catalyst_score_boost = fda_catalyst_info.get('score_boost', 0)
+                catalyst_desc = fda_catalyst_info.get('catalyst_description', '')
+                
+                # Enhance composite score with FDA boost
+                boosted_composite = min(100, scores.composite_score + (catalyst_score_boost * 0.6))
+                scores = StockScores(
+                    momentum_score=scores.momentum_score,
+                    valuation_score=scores.valuation_score,
+                    catalyst_score=min(100, scores.catalyst_score + catalyst_score_boost),
+                    composite_score=boosted_composite,
+                    confidence_level=self.scorer.get_confidence_level(boosted_composite),
+                    reasoning=f"{scores.reasoning} | 💊 FDA: {fda_catalyst_info.get('catalyst_type', '').replace('_', ' ')}",
+                    risk_narrative=scores.risk_narrative
+                )
+                
+                logger.info(f"🎯 FDA BOOST for {ticker}: +{catalyst_score_boost:.0f} points → Composite: {scores.composite_score:.0f}")
             
             # Combine everything
             result = {

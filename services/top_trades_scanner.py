@@ -12,6 +12,7 @@ from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 import logging
 from .penny_stock_analyzer import PennyStockAnalyzer
+from services.penny_stock_constants import PENNY_THRESHOLDS, get_price_tier_bonus
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -344,7 +345,7 @@ class TopTradesScanner:
         
         # 5. Recent price momentum (15 points)
         if len(closes) >= 5:
-            momentum_5d = (closes[-1] / closes[-5] - 1)
+            momentum_5d = (closes.iloc[-1] / closes.iloc[-5] - 1)
             if momentum_5d > 0.10:
                 score += 15
                 reasons.append(f"🚀 Strong 5D momentum (+{momentum_5d*100:.1f}%)")
@@ -376,17 +377,11 @@ class TopTradesScanner:
             
             # Filter: Only true penny stocks (<$5) and obscure plays
             # Prioritize lower prices with higher breakout potential
-            if current_price > 5.0:
+            if current_price > PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE:
                 return None  # Skip higher-priced stocks
             
             # Bonus for ultra-low prices (more breakout room)
-            ultra_low_bonus = 0
-            if current_price < 1.0:
-                ultra_low_bonus = 15
-            elif current_price < 2.0:
-                ultra_low_bonus = 10
-            elif current_price < 3.0:
-                ultra_low_bonus = 5
+            ultra_low_bonus = get_price_tier_bonus(current_price)
             
             # Detect breakout potential
             breakout_score, breakout_reasons = self._detect_breakout_potential(hist, current_price)
@@ -406,6 +401,16 @@ class TopTradesScanner:
             
             # Build reason from scoring components
             reasons = []
+            
+            # Check for FDA/Healthcare catalyst (highest priority)
+            is_healthcare = result.get('is_healthcare', False)
+            healthcare_sector = result.get('healthcare_sector', '')
+            fda_catalyst = result.get('fda_catalyst', '')
+            
+            if fda_catalyst:
+                reasons.append(f"💊 FDA CATALYST: {fda_catalyst[:50]}")
+            elif is_healthcare:
+                reasons.append(f"🏥 Healthcare ({healthcare_sector})")
             
             momentum = result.get('momentum_score', 0)
             if momentum >= 70:

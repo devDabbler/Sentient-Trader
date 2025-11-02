@@ -13,6 +13,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from services.penny_stock_constants import PENNY_THRESHOLDS, get_price_tier_bonus
 
 from .top_trades_scanner import TopTradesScanner, TopTrade
 from .ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrade
@@ -633,13 +634,10 @@ class AdvancedOpportunityScanner:
             base_score = score
 
         elif scan_type == ScanType.PENNY_STOCKS:
-            # Boost for low price with volume
-            if analysis.price < 1.0:
-                base_score += 15
-            elif analysis.price < 2.0:
-                base_score += 10
-            elif analysis.price < 5.0:
-                base_score += 5
+            # Boost for low price with volume (using centralized bonus calculation)
+            price_bonus = get_price_tier_bonus(analysis.price)
+            if price_bonus > 0 or analysis.price < PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE:
+                base_score += price_bonus
         
         # Volume boost
         if volume_ratio > 2.5:

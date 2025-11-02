@@ -48,6 +48,7 @@ from services.alpha_factors import AlphaFactorCalculator
 from services.ml_enhanced_scanner import MLEnhancedScanner, MLEnhancedTrade
 from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
 from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
+from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
 from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
 from services.event_detectors.sec_detector import SECDetector
@@ -1143,10 +1144,10 @@ def _apply_filter_preset(filters: ScanFilters, filter_name: str) -> None:
     if filter_name == "High Confidence Only (Score ≥70)":
         filters.min_score = 70.0
     elif filter_name == "Ultra-Low Price (<$1)":
-        filters.max_price = 1.0
+        filters.max_price = PENNY_THRESHOLDS.ULTRA_LOW_PRICE
     elif filter_name == "Penny Stocks ($1-$5)":
-        filters.min_price = 1.0
-        filters.max_price = 5.0
+        filters.min_price = PENNY_THRESHOLDS.ULTRA_LOW_PRICE
+        filters.max_price = PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE
     elif filter_name == "Volume Surge (>2x avg)":
         filters.min_volume_ratio = 2.0
     elif filter_name == "Strong Momentum (>5% change)":
@@ -2522,8 +2523,8 @@ def main():
                 
                 # Run unified penny stock analysis if applicable
                 penny_stock_analysis = None
-                if analysis and analysis.price < 5.0:
-                    logger.info(f"💰 PENNY STOCK DETECTED: {search_ticker} @ ${analysis.price:.2f} (< $5.0)")
+                if analysis and is_penny_stock(analysis.price):
+                    logger.info(f"💰 PENNY STOCK DETECTED: {search_ticker} @ ${analysis.price:.2f} (< ${PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE})")
                     st.write("💰 Running enhanced penny stock analysis...")
                     try:
                         unified_analyzer = UnifiedPennyStockAnalysis()
@@ -2624,14 +2625,14 @@ def main():
                     logger.info(f"✅ Analysis stored. Quick trade flag status: {st.session_state.get('show_quick_trade', False)}")
                     
                     # Detect penny stock and runner characteristics
-                    is_penny_stock = analysis.price < 5.0
+                    is_penny_stock_flag = is_penny_stock(analysis.price)
                     is_otc = analysis.ticker.endswith(('.OTC', '.PK', '.QB'))
                     volume_vs_avg = ((analysis.volume / analysis.avg_volume - 1) * 100) if analysis.avg_volume > 0 else 0
                     is_runner = volume_vs_avg > 200 and analysis.change_pct > 10  # 200%+ volume spike and 10%+ gain
                     
                     # Get unified penny stock analysis if available
                     penny_stock_analysis = st.session_state.get('penny_stock_analysis')
-                    if is_penny_stock:
+                    if is_penny_stock_flag:
                         if penny_stock_analysis:
                             logger.info(f"✅ Found penny stock analysis in session state for {analysis.ticker}")
                         else:
@@ -2669,7 +2670,7 @@ def main():
                     if is_runner:
                         st.warning(f"🚀 **RUNNER DETECTED!** {volume_vs_avg:+.0f}% volume spike with {analysis.change_pct:+.1f}% price move!")
                     
-                    if is_penny_stock:
+                    if is_penny_stock_flag:
                         if penny_stock_analysis and 'classification' in penny_stock_analysis:
                             classification = penny_stock_analysis.get('classification', 'PENNY_STOCK')
                             if classification == 'LOW_PRICED':
@@ -2685,7 +2686,7 @@ def main():
                     metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
                     
                     with metric_col1:
-                        price_display = f"${analysis.price:.4f}" if is_penny_stock else f"${analysis.price:.2f}"
+                        price_display = f"${analysis.price:.4f}" if is_penny_stock_flag else f"${analysis.price:.2f}"
                         st.metric("Price", price_display, f"{analysis.change_pct:+.2f}%")
                     with metric_col2:
                         st.metric("Trend", analysis.trend)
@@ -2730,7 +2731,7 @@ def main():
                         
                         with runner_col4:
                             # Risk level for runners
-                            runner_risk = "EXTREME" if is_penny_stock and volume_vs_avg > 300 else "VERY HIGH" if volume_vs_avg > 200 else "HIGH"
+                            runner_risk = "EXTREME" if is_penny_stock_flag and volume_vs_avg > 300 else "VERY HIGH" if volume_vs_avg > 200 else "HIGH"
                             st.metric("Runner Risk", runner_risk)
                             st.caption("⚠️ Use stops!")
                         
@@ -2999,8 +3000,8 @@ def main():
                             st.write("• Try refreshing the news or check back later")
                     
                     # Enhanced Penny Stock Analysis (if applicable)
-                    logger.info(f"🔍 Checking enhanced penny stock display: is_penny_stock={is_penny_stock}, has_penny_analysis={penny_stock_analysis is not None}")
-                    if is_penny_stock and penny_stock_analysis:
+                    logger.info(f"🔍 Checking enhanced penny stock display: is_penny_stock={is_penny_stock_flag}, has_penny_analysis={penny_stock_analysis is not None}")
+                    if is_penny_stock_flag and penny_stock_analysis:
                         logger.info(f"✅ DISPLAYING Enhanced Penny Stock Analysis for {analysis.ticker}")
                         st.subheader("💰 Enhanced Penny Stock Analysis")
                         st.success(f"✅ Enhanced analysis available for {analysis.ticker} - Showing detailed results below")
@@ -3107,7 +3108,7 @@ def main():
                                     st.write(f"  {signal}")
                         
                         logger.info(f"✅ Enhanced penny stock analysis display completed for {analysis.ticker}")
-                    elif is_penny_stock:
+                    elif is_penny_stock_flag:
                         logger.warning(f"⚠️ Penny stock detected but enhanced analysis not available - using fallback display")
                         # Fallback to basic penny stock assessment if enhanced analysis not available
                         st.subheader("⚠️ Penny Stock Risk Assessment")
@@ -3177,7 +3178,7 @@ def main():
                             timeframe_score += 15
                             reasons.append("✅ RSI in tradeable range (not overbought/oversold)")
                         
-                        if not is_penny_stock:
+                        if not is_penny_stock_flag:
                             timeframe_score += 10
                             reasons.append("✅ Not a penny stock - better liquidity for day trading")
                         else:
@@ -3237,7 +3238,7 @@ def main():
                             timeframe_score += 15
                             reasons.append(f"✅ Active news flow ({len(analysis.recent_news)} articles) - sustained interest")
                         
-                        if not is_penny_stock or (is_penny_stock and volume_vs_avg > 200):
+                        if not is_penny_stock_flag or (is_penny_stock_flag and volume_vs_avg > 200):
                             timeframe_score += 10
                             reasons.append("✅ Sufficient liquidity for swing trading")
                         else:
@@ -3324,7 +3325,7 @@ def main():
                             timeframe_score += 20
                             reasons.append(f"✅ Very positive sentiment ({analysis.sentiment_score:.2f}) - market confidence")
                         
-                        if not is_penny_stock:
+                        if not is_penny_stock_flag:
                             timeframe_score += 15
                             reasons.append("✅ Established stock - lower bankruptcy risk")
                         else:
@@ -3346,7 +3347,7 @@ def main():
                         else:
                             st.warning("🔴 **POOR** for position trading - better for short-term trades")
                         
-                        if is_penny_stock:
+                        if is_penny_stock_flag:
                             st.error("⚠️ **WARNING:** Penny stocks are extremely risky for long-term holds due to bankruptcy risk!")
                         
                         st.write("**Position Trading Strategy:**")
@@ -3398,7 +3399,7 @@ def main():
                             st.markdown(analysis.recommendation)
                         else:
                             # Add penny stock context to recommendation
-                            if is_penny_stock and trading_style in ["BUY_HOLD", "SWING_TRADE"]:
+                            if is_penny_stock_flag and trading_style in ["BUY_HOLD", "SWING_TRADE"]:
                                 st.warning("⚠️ **Penny Stock Alert:** High risk/high reward - use proper position sizing and tight stops")
                             
                             # Display recommendation with proper formatting
@@ -3885,7 +3886,7 @@ def main():
                     st.write("**⚠️ Key Considerations:**")
                     considerations = []
                     
-                    if is_penny_stock:
+                    if is_penny_stock_flag:
                         considerations.append("🔴 **Penny Stock Risk:** High volatility, use tight stops and small position size")
                     
                     if is_runner:
@@ -4508,10 +4509,10 @@ def main():
                 filters.min_score = 70.0
                 min_buzz_score = 60.0
             elif quick_filter == "Ultra-Low Price (<$1)":
-                filters.max_price = 1.0
+                filters.max_price = PENNY_THRESHOLDS.ULTRA_LOW_PRICE
             elif quick_filter == "Penny Stocks ($1-$5)":
-                filters.min_price = 1.0
-                filters.max_price = 5.0
+                filters.min_price = PENNY_THRESHOLDS.ULTRA_LOW_PRICE
+                filters.max_price = PENNY_THRESHOLDS.MAX_PENNY_STOCK_PRICE
             elif quick_filter == "Volume Surge (>2x avg)":
                 filters.min_volume_ratio = 2.0
                 min_buzz_score = 40.0  # Higher threshold for volume surge
@@ -5176,7 +5177,7 @@ def main():
                                     tm.update_analysis(ticker_symbol, analysis.__dict__)
                                     
                                     # Detect characteristics
-                                    is_penny_stock = analysis.price < 5.0
+                                    is_penny_stock_check = is_penny_stock(analysis.price)
                                     is_otc = analysis.ticker.endswith(('.OTC', '.PK', '.QB'))
                                     volume_vs_avg = ((analysis.volume / analysis.avg_volume - 1) * 100) if analysis.avg_volume > 0 else 0
                                     is_runner = volume_vs_avg > 200 and analysis.change_pct > 10
@@ -8638,7 +8639,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                             scalp_status.update(label=f"✅ Scalp analysis complete for {scalp_ticker}", state="complete")
                             
                             # Detect characteristics
-                            is_penny = analysis.price < 5.0
+                            is_penny = is_penny_stock(analysis.price)
                             volume_vs_avg = ((analysis.volume / analysis.avg_volume - 1) * 100) if analysis.avg_volume > 0 else 0
                             is_runner = volume_vs_avg > 200 and abs(analysis.change_pct) > 10
                             
