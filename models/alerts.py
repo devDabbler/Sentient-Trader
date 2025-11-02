@@ -2,6 +2,8 @@
 Data models for trading alerts.
 """
 
+# Requesting full codebase review via Copilot
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
