@@ -58,6 +58,11 @@ class AutoTraderConfig:
     # WARNING: Requires margin account in real trading. Only enable if you understand the risks.
     allow_short_selling: bool = False  # Enable short selling in paper trading mode (DISABLED by default)
     test_mode: bool = False  # Enable test mode to bypass market hours check (for testing when market is closed)
+    # AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO)
+    use_ml_enhanced_scanner: bool = False  # Enable ML-Enhanced Scanner (40% ML + 35% LLM + 25% Quant)
+    use_ai_validation: bool = False  # Enable AI pre-trade validation (secondary knockout check)
+    min_ensemble_score: float = 70.0  # Minimum ensemble score for ML-Enhanced Scanner (0-100)
+    min_ai_validation_confidence: float = 0.7  # Minimum AI validation confidence (0-1)
 
 
 class AutoTrader:
@@ -109,6 +114,36 @@ class AutoTrader:
         self._orchestrator = None
         self._agent_loop = None
         self._agent_thread = None
+        
+        # AI-Powered Hybrid System (1-2 KNOCKOUT COMBO)
+        self._ml_scanner = None
+        self._ai_validator = None
+        
+        if config.use_ml_enhanced_scanner:
+            try:
+                from services.ml_enhanced_scanner import MLEnhancedScanner
+                self._ml_scanner = MLEnhancedScanner(use_ml=True, use_llm=True)
+                logger.info("🧠 ML-Enhanced Scanner ENABLED: Triple validation (40% ML + 35% LLM + 25% Quant)")
+            except Exception as e:
+                logger.warning(f"⚠️ ML-Enhanced Scanner initialization failed: {e}, falling back to standard mode")
+                config.use_ml_enhanced_scanner = False
+        
+        if config.use_ai_validation:
+            try:
+                from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                self._ai_validator = LLMStrategyAnalyzer(provider="openrouter")
+                logger.info("🛡️ AI Pre-Trade Validation ENABLED: Secondary knockout check before execution")
+            except Exception as e:
+                logger.warning(f"⚠️ AI Validator initialization failed: {e}, proceeding without validation")
+                config.use_ai_validation = False
+        
+        # Log hybrid mode status
+        if config.use_ml_enhanced_scanner and config.use_ai_validation:
+            logger.info("🥊 HYBRID MODE ACTIVE: ML-Enhanced Scanner + AI Validation (1-2 KNOCKOUT COMBO)")
+        elif config.use_ml_enhanced_scanner:
+            logger.info("🥊 ML-Enhanced Scanner mode active (triple validation)")
+        elif config.use_ai_validation:
+            logger.info("🥊 AI Validation mode active (standard signals + AI check)")
         
         # Sync state with broker on startup
         self._sync_state_on_startup()
@@ -398,12 +433,181 @@ class AutoTrader:
             logger.error(f"Error in smart discovery: {e}", exc_info=True)
             return self.watchlist
     
+    def _scan_with_ml_enhanced(self) -> List:
+        """
+        Scan using ML-Enhanced Scanner (Triple Validation)
+        Combines: 40% ML + 35% LLM + 25% Quantitative Analysis
+        
+        This is the 1st PUNCH of the 1-2 KNOCKOUT COMBO
+        """
+        try:
+            logger.info("🧠 Starting ML-Enhanced Scanner (Triple Validation)...")
+            
+            if not self._ml_scanner:
+                logger.error("ML-Enhanced Scanner not initialized, falling back to standard scan")
+                return []
+            
+            # Determine scan type based on trading mode
+            if self.config.trading_mode in ["SCALPING", "WARRIOR_SCALPING", "STOCKS", "ALL"]:
+                # Scan for stock/options opportunities
+                logger.info(f"📊 Scanning for {self.config.trading_mode} opportunities with ML-Enhanced Scanner...")
+                
+                ml_trades = self._ml_scanner.scan_top_options_with_ml(
+                    top_n=20,
+                    min_ensemble_score=self.config.min_ensemble_score
+                )
+                
+                logger.info(f"✅ ML-Enhanced Scanner found {len(ml_trades)} high-confidence opportunities")
+                
+                # Convert ML trades to TradingSignals
+                from services.ai_trading_signals import TradingSignal
+                signals = []
+                
+                for trade in ml_trades:
+                    # Map ML trade to signal format
+                    signal = TradingSignal(
+                        symbol=trade.ticker,
+                        signal='BUY',  # ML scanner focuses on long opportunities
+                        confidence=trade.combined_score,  # Use ensemble score as confidence
+                        entry_price=trade.price,
+                        target_price=trade.price * 1.05,  # 5% target (adjust based on mode)
+                        stop_loss=trade.price * 0.98,  # 2% stop
+                        position_size=0,  # Will be calculated later
+                        reasoning=f"ML-Enhanced: {trade.ai_reasoning} | ML Score: {trade.ml_prediction_score:.1f}, LLM: {trade.ai_rating*10:.1f}, Quant: {trade.score:.1f}",
+                        risk_level=trade.risk_level,
+                        time_horizon='DAY_TRADE' if self.config.trading_mode in ['SCALPING', 'WARRIOR_SCALPING'] else 'SWING',
+                        technical_score=trade.score,
+                        sentiment_score=0.0,
+                        news_score=0.0,
+                        social_score=0.0,
+                        discord_score=0.0
+                    )
+                    signals.append(signal)
+                    
+                    logger.info(f"  🎯 {trade.ticker}: Combined Score {trade.combined_score:.1f}% "
+                              f"(ML:{trade.ml_prediction_score:.1f} + LLM:{trade.ai_rating*10:.1f} + Quant:{trade.score:.1f})")
+                
+                return signals
+            else:
+                logger.warning(f"ML-Enhanced Scanner not configured for {self.config.trading_mode} mode")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error in ML-Enhanced Scanner: {e}", exc_info=True)
+            return []
+    
+    def _validate_trade_with_ai(self, signal) -> tuple[bool, str, float]:
+        """
+        AI Pre-Trade Validation (2nd PUNCH of 1-2 KNOCKOUT COMBO)
+        
+        Uses LLM to perform final risk assessment before execution.
+        
+        Args:
+            signal: TradingSignal to validate
+            
+        Returns:
+            (should_execute, reasoning, confidence_score)
+        """
+        try:
+            if not self._ai_validator:
+                # No validator, approve by default
+                return True, "AI validation disabled", 1.0
+            
+            logger.info(f"🛡️ Running AI Pre-Trade Validation for {signal.symbol}...")
+            
+            # Get current portfolio status
+            open_positions = self.state_manager.get_all_open_positions()
+            available_capital = self._capital_manager.get_available_capital() if self._capital_manager else 0
+            utilization = self._capital_manager.get_utilization_pct() if self._capital_manager else 0
+            
+            # Build validation prompt
+            position_value = signal.entry_price * max(signal.position_size, 100) if signal.entry_price else 0
+            risk_reward = ((signal.target_price - signal.entry_price) / (signal.entry_price - signal.stop_loss)) if (signal.entry_price and signal.stop_loss and signal.target_price) else 0
+            
+            prompt = f"""You are an expert risk manager. Perform a final validation check on this trade before execution.
+
+TRADE DETAILS:
+Symbol: {signal.symbol}
+Signal: {signal.signal}
+Entry Price: ${signal.entry_price:.2f}
+Target Price: ${signal.target_price:.2f} ({((signal.target_price/signal.entry_price-1)*100):.1f}% gain)
+Stop Loss: ${signal.stop_loss:.2f} ({((signal.stop_loss/signal.entry_price-1)*100):.1f}% loss)
+Position Value: ${position_value:,.2f}
+Risk/Reward Ratio: {risk_reward:.2f}:1
+Confidence: {signal.confidence:.1f}%
+Reasoning: {signal.reasoning}
+
+PORTFOLIO STATUS:
+Available Capital: ${available_capital:,.2f}
+Utilization: {utilization:.1f}%
+Open Positions: {len(open_positions)}
+Current Holdings: {list(open_positions.keys())}
+
+RISK ASSESSMENT CRITERIA:
+1. Is the risk/reward ratio acceptable (minimum 1.5:1)?
+2. Is position sizing appropriate for available capital?
+3. Does this trade diversify or concentrate portfolio risk?
+4. Are there any red flags in the reasoning or setup?
+5. Is the confidence level justified?
+
+RESPOND IN THIS EXACT FORMAT:
+DECISION: APPROVE or REJECT
+CONFIDENCE: [0.0-1.0]
+REASONING: [Your brief 1-2 sentence risk assessment]
+
+Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio fit."""
+
+            # Get AI response
+            response = self._ai_validator._call_openrouter(prompt)
+            
+            if not response:
+                logger.warning("⚠️ AI validation failed to return response, approving by default")
+                return True, "AI validation timeout, proceeding with caution", 0.7
+            
+            # Parse response
+            response_upper = response.upper()
+            
+            # Extract decision
+            if "DECISION:" in response_upper and "APPROVE" in response_upper.split("DECISION:")[1].split("\n")[0]:
+                decision = True
+            elif "DECISION:" in response_upper and "REJECT" in response_upper.split("DECISION:")[1].split("\n")[0]:
+                decision = False
+            else:
+                # Fallback parsing
+                decision = "APPROVE" in response_upper and "REJECT" not in response_upper
+            
+            # Extract confidence
+            import re
+            confidence_match = re.search(r'CONFIDENCE:\s*([\d.]+)', response, re.IGNORECASE)
+            confidence = float(confidence_match.group(1)) if confidence_match else 0.7
+            
+            # Extract reasoning
+            reasoning_match = re.search(r'REASONING:\s*(.+?)(?:\n|$)', response, re.IGNORECASE | re.DOTALL)
+            reasoning = reasoning_match.group(1).strip() if reasoning_match else response.split('\n')[-1]
+            
+            # Log validation result
+            decision_icon = "✅" if decision else "🚫"
+            logger.info(f"{decision_icon} AI Validation: {'APPROVED' if decision else 'REJECTED'} "
+                       f"(confidence: {confidence:.2f}) - {reasoning[:100]}")
+            
+            return decision, reasoning, confidence
+            
+        except Exception as e:
+            logger.error(f"Error in AI validation: {e}", exc_info=True)
+            # On error, be cautious but don't block trade completely
+            return True, f"AI validation error: {str(e)[:100]}", 0.6
+    
     def _scan_for_signals(self) -> List:
         """Scan watchlist for trading signals"""
         try:
-            # Use Warrior Trading detector for WARRIOR_SCALPING mode
+            # WARRIOR_SCALPING mode: Multi-stage pipeline
             if self.config.trading_mode == "WARRIOR_SCALPING":
-                return self._scan_warrior_trading_signals()
+                return self._scan_warrior_scalping_pipeline()
+            
+            # PUNCH 1: Use ML-Enhanced Scanner if enabled (Triple Validation)
+            if self.config.use_ml_enhanced_scanner and self._ml_scanner:
+                logger.info("🥊 PUNCH 1: ML-Enhanced Scanner (Triple Validation)")
+                return self._scan_with_ml_enhanced()
             
             from analyzers.comprehensive import ComprehensiveAnalyzer
             
@@ -583,34 +787,52 @@ class AutoTrader:
             # Filter watchlist by price range before scanning
             if min_price or max_price:
                 logger.info(f"⚔️ Filtering watchlist by price range: ${min_price}-${max_price}")
+                logger.info(f"   📋 Checking prices for {len(tickers_to_scan)} tickers...")
                 try:
                     # Get current prices for watchlist tickers and filter
                     filtered_tickers = []
+                    checked_count = 0
+                    error_count = 0
+                    
                     for ticker in tickers_to_scan:
                         try:
-                            success, quote = self.tradier_client.get_quote(ticker)
-                            if success and quote:
+                            checked_count += 1
+                            if checked_count % 5 == 0:  # Log progress every 5 tickers
+                                logger.info(f"   🔍 Progress: {checked_count}/{len(tickers_to_scan)} tickers checked...")
+                            
+                            quote = self.tradier_client.get_quote(ticker)
+                            if quote:
                                 price = float(quote.get('last', 0) or quote.get('bid', 0) or 0)
+                                if price == 0:
+                                    # No valid price, skip this ticker
+                                    logger.info(f"  ⚠️ {ticker}: No valid price available, skipping")
+                                    continue
+                                    
                                 if min_price <= price <= max_price:
                                     filtered_tickers.append(ticker)
-                                    logger.debug(f"  ✅ {ticker}: ${price:.2f} (in range)")
+                                    logger.info(f"  ✅ {ticker}: ${price:.2f} (IN RANGE)")
                                 else:
-                                    logger.debug(f"  ❌ {ticker}: ${price:.2f} (outside ${min_price}-${max_price} range)")
+                                    logger.info(f"  ❌ {ticker}: ${price:.2f} (outside ${min_price}-${max_price} range)")
                             else:
-                                # If we can't get quote, include it and let detector filter it
-                                filtered_tickers.append(ticker)
+                                # If we can't get quote, skip it (don't include)
+                                logger.info(f"  ⚠️ {ticker}: Failed to get quote, skipping")
+                                error_count += 1
                         except Exception as e:
-                            logger.debug(f"Error checking price for {ticker}: {e}")
-                            # Include it and let detector filter it
-                            filtered_tickers.append(ticker)
+                            logger.warning(f"  ⚠️ Error checking price for {ticker}: {e}")
+                            error_count += 1
+                            # Skip tickers with errors (don't include)
+                            continue
+                    
+                    logger.info(f"   ✅ Price check complete: {checked_count} checked, {len(filtered_tickers)} passed, {error_count} errors")
                     
                     if filtered_tickers:
                         tickers_to_scan = filtered_tickers
-                        logger.info(f"✅ Filtered to {len(filtered_tickers)} tickers in price range ${min_price}-${max_price}: {', '.join(filtered_tickers[:10])}{'...' if len(filtered_tickers) > 10 else ''}")
+                        logger.info(f"✅ Filtered to {len(filtered_tickers)} tickers in price range ${min_price}-${max_price}: {', '.join(filtered_tickers)}")
                     else:
-                        logger.warning(f"⚠️ No tickers in price range ${min_price}-${max_price}, using original watchlist")
+                        logger.warning(f"⚠️ No tickers in price range ${min_price}-${max_price}, will scan original watchlist")
+                        # Don't replace tickers_to_scan if nothing passed filter
                 except Exception as e:
-                    logger.warning(f"Error filtering watchlist by price: {e}, using original watchlist")
+                    logger.error(f"❌ Error filtering watchlist by price: {e}, using original watchlist", exc_info=True)
             
             # Continue with existing scan_for_setups logic
             # Scan for setups during trading window (9:30-10:00 AM), or bypass for test mode
@@ -663,6 +885,225 @@ class AutoTrader:
         except Exception as e:
             logger.error(f"Error scanning for Warrior Trading signals: {e}", exc_info=True)
             return []
+    
+    def _scan_warrior_scalping_pipeline(self) -> List:
+        """
+        WARRIOR_SCALPING Multi-Stage Pipeline:
+        1. Warrior Scalping Screener (Gap & Go detection)
+        2. ML Enhanced Scanner (if enabled) - Triple validation
+        3. AI Validation happens automatically in _execute_signal
+        
+        This implements the full 1-2 KNOCKOUT COMBO for Warrior Scalping:
+        - PUNCH 1: Warrior Screener finds gap & go setups
+        - PUNCH 2: ML Enhanced Scanner adds ML + LLM + Quant analysis
+        - PUNCH 3: AI Pre-Trade Validation (final check before execution)
+        """
+        try:
+            logger.info("⚔️ WARRIOR_SCALPING PIPELINE: Starting multi-stage analysis...")
+            
+            # STAGE 1: Warrior Scalping Screener
+            logger.info("=" * 60)
+            logger.info("⚔️ STAGE 1: Warrior Scalping Screener (Gap & Go Detection)")
+            logger.info("=" * 60)
+            warrior_signals = self._scan_warrior_trading_signals()
+            
+            if not warrior_signals:
+                logger.info("⚠️ Warrior Screener found no setups, pipeline complete")
+                return []
+            
+            logger.info(f"✅ Warrior Screener found {len(warrior_signals)} initial setups")
+            for sig in warrior_signals:
+                logger.info(f"  📊 {sig.symbol}: {sig.confidence:.1f}% confidence - {sig.reasoning[:100]}")
+            
+            # STAGE 2: ML Enhanced Scanner (if enabled)
+            if self.config.use_ml_enhanced_scanner and self._ml_scanner:
+                logger.info("=" * 60)
+                logger.info("🧠 STAGE 2: ML-Enhanced Scanner (Triple Validation)")
+                logger.info("=" * 60)
+                logger.info("Applying ML + LLM + Quantitative analysis to Warrior setups...")
+                
+                enhanced_signals = []
+                for warrior_signal in warrior_signals:
+                    try:
+                        # Get ticker symbol
+                        ticker = warrior_signal.symbol
+                        
+                        # Enhance this specific ticker with ML+LLM+Quant analysis
+                        # We need to analyze the ticker directly rather than scanning the whole universe
+                        ml_enhanced_signal = self._enhance_warrior_signal_with_ml(warrior_signal, ticker)
+                        
+                        if ml_enhanced_signal:
+                            enhanced_signals.append(ml_enhanced_signal)
+                            logger.info(f"  ✅ {ticker}: Passed ML-Enhanced filter (Combined: {ml_enhanced_signal.confidence:.1f}%)")
+                        else:
+                            # ML enhancement failed or below threshold
+                            logger.info(f"  ⚠️ {ticker}: Failed ML-Enhanced filter, excluding from results")
+                            continue
+                            
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Error enhancing {warrior_signal.symbol} with ML: {e}")
+                        # If ML enhancement fails, exclude the signal (fail-safe mode)
+                        continue
+                
+                # Filter by ML ensemble score threshold
+                before_count = len(enhanced_signals)
+                enhanced_signals = [
+                    sig for sig in enhanced_signals 
+                    if sig.confidence >= self.config.min_ensemble_score
+                ]
+                
+                if len(enhanced_signals) < before_count:
+                    logger.info(f"  📉 Filtered {before_count - len(enhanced_signals)} signals below ML ensemble threshold ({self.config.min_ensemble_score}%)")
+                
+                logger.info(f"✅ ML-Enhanced Scanner: {len(enhanced_signals)} signals passed triple validation")
+                
+                # STAGE 3 info (AI Validation happens in _execute_signal)
+                logger.info("=" * 60)
+                logger.info("🛡️ STAGE 3: AI Pre-Trade Validation will run before execution")
+                logger.info("=" * 60)
+                logger.info(f"🥊 WARRIOR SCALPING PIPELINE COMPLETE: {len(enhanced_signals)} high-quality setups ready")
+                
+                return enhanced_signals
+            else:
+                # ML Enhanced Scanner not enabled, return original Warrior signals
+                logger.info("⚠️ ML-Enhanced Scanner not enabled, using Warrior Screener results only")
+                logger.info("🛡️ AI Pre-Trade Validation will still run before execution")
+                return warrior_signals
+            
+        except Exception as e:
+            logger.error(f"Error in Warrior Scalping pipeline: {e}", exc_info=True)
+            # Fallback to basic warrior scan
+            return self._scan_warrior_trading_signals()
+    
+    def _enhance_warrior_signal_with_ml(self, warrior_signal, ticker: str):
+        """
+        Enhance a Warrior Trading signal with ML+LLM+Quant analysis
+        
+        Args:
+            warrior_signal: TradingSignal from Warrior screener
+            ticker: Ticker symbol
+            
+        Returns:
+            Enhanced TradingSignal with ML scores, or None if below threshold
+        """
+        try:
+            from services.top_trades_scanner import TopTrade
+            from services.ai_confidence_scanner import AIConfidenceTrade
+            import yfinance as yf
+            
+            # Get current market data for the ticker
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            current_price = warrior_signal.entry_price or (info.get('regularMarketPrice') or info.get('currentPrice') or 0)
+            if not current_price:
+                logger.warning(f"  ⚠️ {ticker}: Could not get price data")
+                return None
+            
+            # Get historical data for volume calculation
+            hist = stock.history(period="5d", interval="1d")
+            if not hist.empty:
+                current_volume = info.get('regularMarketVolume') or info.get('volume') or hist['Volume'].iloc[-1] if len(hist) > 0 else 0
+                avg_volume = info.get('averageVolume') or info.get('averageVolume10days') or hist['Volume'].mean() if len(hist) > 0 else 0
+                volume_ratio = (current_volume / avg_volume) if avg_volume > 0 else 1.0
+                
+                # Calculate price change
+                if len(hist) > 1:
+                    prev_close = hist['Close'].iloc[-2]
+                    change_pct = ((current_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0
+                else:
+                    change_pct = 0
+            else:
+                volume_ratio = 1.0
+                change_pct = 0
+            
+            # Create a TopTrade-like object for ML scanner
+            from dataclasses import dataclass
+            
+            @dataclass
+            class SimpleTopTrade:
+                ticker: str
+                score: float
+                price: float
+                change_pct: float
+                volume: int
+                volume_ratio: float
+                reason: str
+                trade_type: str
+                confidence: str
+                risk_level: str
+            
+            top_trade = SimpleTopTrade(
+                ticker=ticker,
+                score=warrior_signal.confidence,  # Use warrior confidence as base
+                price=current_price,
+                change_pct=change_pct,
+                volume=int(info.get('regularMarketVolume', 0) or info.get('volume', 0)),
+                volume_ratio=volume_ratio,
+                reason=warrior_signal.reasoning or "Warrior Scalping setup",
+                trade_type='options',
+                confidence='HIGH' if warrior_signal.confidence >= 70 else 'MEDIUM',
+                risk_level='M'
+            )
+            
+            # Get AI confidence analysis (LLM + Quant)
+            ai_trade = self._ml_scanner.ai_scanner._generate_ai_confidence(top_trade, 'options')
+            if not ai_trade:
+                logger.warning(f"  ⚠️ {ticker}: AI analysis failed")
+                return None
+            
+            # Enhance with ML (alpha factors)
+            ml_enhanced = self._ml_scanner._enhance_with_ml(
+                AIConfidenceTrade(
+                    ticker=ticker,
+                    score=top_trade.score,
+                    price=current_price,
+                    change_pct=change_pct,
+                    volume=top_trade.volume,
+                    volume_ratio=volume_ratio,
+                    reason=top_trade.reason,
+                    trade_type='options',
+                    confidence=top_trade.confidence,
+                    risk_level=top_trade.risk_level,
+                    ai_confidence=ai_trade.get('ai_confidence', 'MEDIUM'),
+                    ai_reasoning=ai_trade.get('ai_reasoning', ''),
+                    ai_risks=ai_trade.get('ai_risks', ''),
+                    ai_rating=ai_trade.get('ai_rating', 5.0)
+                ),
+                'options'
+            )
+            
+            # Check if combined score meets threshold
+            if ml_enhanced.combined_score < self.config.min_ensemble_score:
+                logger.debug(f"  ✗ {ticker}: Combined score {ml_enhanced.combined_score:.1f} < {self.config.min_ensemble_score}")
+                return None
+            
+            # Log the enhancement
+            logger.info(f"  🎯 {ticker}: ML Enhanced - "
+                      f"Combined: {ml_enhanced.combined_score:.1f}% "
+                      f"(ML:{ml_enhanced.ml_prediction_score:.1f} + "
+                      f"LLM:{ml_enhanced.ai_rating*10:.1f} + "
+                      f"Quant:{ml_enhanced.score:.1f})")
+            
+            # Update warrior signal with ML scores
+            warrior_signal.confidence = ml_enhanced.combined_score
+            
+            # Update reasoning with ML analysis
+            original_reasoning = warrior_signal.reasoning
+            ml_reasoning = ml_enhanced.ai_reasoning[:200] if ml_enhanced.ai_reasoning else ""
+            warrior_signal.reasoning = (
+                f"Warrior + ML-Enhanced: {original_reasoning} | "
+                f"ML Analysis: {ml_reasoning} | "
+                f"ML Score: {ml_enhanced.ml_prediction_score:.1f}, "
+                f"LLM: {ml_enhanced.ai_rating*10:.1f}, "
+                f"Quant: {ml_enhanced.score:.1f}"
+            )
+            
+            return warrior_signal
+            
+        except Exception as e:
+            logger.error(f"Error enhancing {ticker} with ML: {e}", exc_info=True)
+            return None
     
     def _execute_signal(self, signal):
         """Execute a trading signal"""
@@ -732,6 +1173,24 @@ class AutoTrader:
                             return
                         
                         logger.info(f"💰 Capital check: ${available:,.2f} available ({utilization:.1f}% utilization)")
+            
+            # PUNCH 2: AI Pre-Trade Validation (2nd knockout check)
+            if self.config.use_ai_validation and self._ai_validator:
+                logger.info("🥊 PUNCH 2: AI Pre-Trade Validation (Final Risk Check)")
+                
+                should_execute, validation_reasoning, validation_confidence = self._validate_trade_with_ai(signal)
+                
+                if not should_execute:
+                    logger.warning(f"🚫 AI VALIDATION REJECTED trade for {signal.symbol}")
+                    logger.warning(f"   Reason: {validation_reasoning}")
+                    return  # Block the trade
+                elif validation_confidence < self.config.min_ai_validation_confidence:
+                    logger.warning(f"⚠️ AI validation confidence too low ({validation_confidence:.2f} < {self.config.min_ai_validation_confidence}), skipping {signal.symbol}")
+                    logger.warning(f"   Reason: {validation_reasoning}")
+                    return  # Block the trade
+                else:
+                    logger.info(f"✅ AI VALIDATION APPROVED trade for {signal.symbol} (confidence: {validation_confidence:.2f})")
+                    logger.info(f"   Reason: {validation_reasoning}")
             
             # Guardrails: daily loss and consecutive losses
             if self._daily_realized_pnl <= -abs(self.config.max_daily_loss_pct) * 100.0:

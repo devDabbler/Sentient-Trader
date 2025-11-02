@@ -67,6 +67,23 @@ def get_cached_stock_data(ticker: str):
         # Return empty DataFrame and empty info to avoid NoneType errors
         return pd.DataFrame(), {}
 
+@st.cache_resource
+def get_ticker_manager():
+    """Cached TickerManager instance to avoid repeated initialization"""
+    return TickerManager()
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_cached_news_for_ticker(ticker: str, max_articles: int = 10):
+    """Cache news fetching to avoid repeated API calls for the same ticker"""
+    from analyzers.news import get_stock_news
+    try:
+        news_data = get_stock_news(ticker, max_articles)
+        logger.info(f"Fetched and cached {len(news_data) if news_data else 0} news articles for {ticker}")
+        return news_data
+    except Exception as e:
+        logger.error(f"Error fetching cached news for {ticker}: {e}")
+        return []
+
 @st.cache_data(ttl=180)  # Cache for 3 minutes
 def get_cached_news(ticker: str):
     """Cache news data to improve performance"""
@@ -1530,6 +1547,32 @@ def main():
     if 'current_analysis' not in st.session_state:
         st.session_state.current_analysis = None
     
+    # CRITICAL: Initialize trading_mode to PAPER by default for safety
+    # This MUST happen before get_trading_mode_manager() is called
+    if 'trading_mode' not in st.session_state:
+        st.session_state.trading_mode = TradingMode.PAPER
+        logger.info("🔒 Initialized trading_mode to PAPER (safe default)")
+    else:
+        # Validate trading_mode by comparing values (enum identity can change after Streamlit serialization)
+        current_mode_value = getattr(st.session_state.trading_mode, 'value', None)
+        if current_mode_value not in ['paper', 'production']:
+            # Safety check: if trading_mode is corrupted/invalid, reset to PAPER
+            logger.warning(f"⚠️ Invalid trading_mode in session state: {st.session_state.trading_mode}. Resetting to PAPER for safety.")
+            st.session_state.trading_mode = TradingMode.PAPER
+        elif current_mode_value == 'paper':
+            # Ensure it's the correct enum instance (fixes serialization issues)
+            st.session_state.trading_mode = TradingMode.PAPER
+        elif current_mode_value == 'production':
+            # Ensure it's the correct enum instance
+            st.session_state.trading_mode = TradingMode.PRODUCTION
+    
+    # Initialize background update queue for ticker analysis
+    if 'update_queue' not in st.session_state:
+        from queue import Queue
+        st.session_state.update_queue = Queue()
+        st.session_state.background_processor_started = False
+        st.session_state.background_update_results = {}
+    
     # Sidebar - Configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -1565,11 +1608,18 @@ def main():
                 with col1:
                     if st.button("📝 Paper Mode", disabled=mode_manager.is_paper_mode()):
                         if switch_to_paper_mode():
+                            # Update .env file for background trader
+                            try:
+                                update_env_file_for_paper_trading()
+                                st.info("✅ Updated .env file for paper trading")
+                            except Exception as e:
+                                st.warning(f"⚠️ Updated session state but .env update failed: {e}")
+                            
                             st.success("Switched to Paper Mode")
                             # Refresh Tradier client for new mode
                             if 'tradier_client' in st.session_state:
                                 try:
-                                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
+                                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=TradingMode.PAPER)
                                     st.info("Tradier client refreshed for Paper Mode")
                                 except Exception as e:
                                     st.warning(f"Failed to refresh Tradier client: {e}")
@@ -1578,19 +1628,45 @@ def main():
                             st.error("Failed to switch to Paper Mode")
                 
                 with col2:
-                    if st.button("💰 Production Mode", disabled=mode_manager.is_production_mode()):
-                        if switch_to_production_mode():
-                            st.success("Switched to Production Mode")
-                            # Refresh Tradier client for new mode
-                            if 'tradier_client' in st.session_state:
-                                try:
-                                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
-                                    st.info("Tradier client refreshed for Production Mode")
-                                except Exception as e:
-                                    st.warning(f"Failed to refresh Tradier client: {e}")
+                    # Safety confirmation for live trading
+                    if 'confirm_live_switch' not in st.session_state:
+                        st.session_state.confirm_live_switch = False
+                    
+                    if not st.session_state.confirm_live_switch:
+                        st.warning("⚠️ **LIVE TRADING USES REAL MONEY!**")
+                        if st.button("💰 Switch to Production Mode", disabled=mode_manager.is_production_mode(), key="confirm_live_btn"):
+                            st.session_state.confirm_live_switch = True
                             st.rerun()
-                        else:
-                            st.error("Failed to switch to Production Mode")
+                    else:
+                        st.error("⚠️ **FINAL CONFIRMATION: This will use REAL MONEY**")
+                        col_confirm, col_cancel = st.columns(2)
+                        with col_confirm:
+                            if st.button("✅ Confirm Live Trading", type="primary", key="final_confirm_live"):
+                                if switch_to_production_mode():
+                                    # Update .env file for background trader
+                                    try:
+                                        update_env_file_for_live_trading()
+                                        st.info("✅ Updated .env file for live trading")
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Updated session state but .env update failed: {e}")
+                                    
+                                    st.success("Switched to Production Mode")
+                                    st.session_state.confirm_live_switch = False
+                                    # Refresh Tradier client for new mode
+                                    if 'tradier_client' in st.session_state:
+                                        try:
+                                            st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=TradingMode.PRODUCTION)
+                                            st.info("Tradier client refreshed for Production Mode")
+                                        except Exception as e:
+                                            st.warning(f"Failed to refresh Tradier client: {e}")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to switch to Production Mode")
+                                    st.session_state.confirm_live_switch = False
+                        with col_cancel:
+                            if st.button("❌ Cancel", key="cancel_live_switch"):
+                                st.session_state.confirm_live_switch = False
+                                st.rerun()
             else:
                 current_mode = available_modes[0]
                 st.info(f"Only {current_mode.value.title()} mode available")
@@ -1611,15 +1687,43 @@ def main():
         
         # Legacy paper mode toggle for backward compatibility
         st.subheader("Legacy Settings")
-        paper_mode = st.toggle("Paper Trading Mode (Legacy)", value=mode_manager.is_paper_mode())
-        if paper_mode != mode_manager.is_paper_mode():
+        
+        # Debug information to help diagnose session state issues
+        with st.expander("🔍 Debug Information"):
+            st.write(f"**Debug - Session state mode:** `{st.session_state.get('trading_mode', 'NOT SET')}`")
+            st.write(f"**Debug - mode_manager.is_paper_mode():** `{mode_manager.is_paper_mode()}`")
+            st.write(f"**Debug - mode_manager.get_mode():** `{mode_manager.get_mode()}`")
+        
+        # Double-check mode_manager is synced with session state before displaying banner
+        # Force sync by calling is_paper_mode() which syncs internally
+        is_paper = mode_manager.is_paper_mode()
+        
+        # CRITICAL SAFETY CHECK: If session state says paper but manager says production (or vice versa),
+        # force sync and default to paper mode for safety
+        session_state_mode = st.session_state.get('trading_mode', TradingMode.PAPER)
+        if session_state_mode == TradingMode.PAPER and not is_paper:
+            logger.error("🚨 CRITICAL MISMATCH: Session state is PAPER but mode_manager reports PRODUCTION! Forcing PAPER mode for safety.")
+            st.session_state.trading_mode = TradingMode.PAPER
+            mode_manager.set_mode(TradingMode.PAPER)
+            is_paper = True
+            st.error("🚨 Safety override: Reset to PAPER mode due to state mismatch")
+            st.rerun()
+        elif session_state_mode == TradingMode.PRODUCTION and is_paper:
+            logger.warning("⚠️ Mismatch: Session state is PRODUCTION but mode_manager reports PAPER. Syncing to session state.")
+            mode_manager.set_mode(TradingMode.PRODUCTION)
+            is_paper = False
+        
+        paper_mode = st.toggle("Paper Trading Mode (Legacy)", value=is_paper)
+        if paper_mode != is_paper:
             if paper_mode:
                 switch_to_paper_mode()
             else:
                 switch_to_production_mode()
             st.rerun()
         
-        if mode_manager.is_paper_mode():
+        # Final check before displaying banner - always sync one more time
+        is_paper_final = mode_manager.is_paper_mode()
+        if is_paper_final:
             st.info("🔒 Paper trading: Signals logged only")
         else:
             st.warning("⚠️ LIVE TRADING ENABLED")
@@ -4753,11 +4857,8 @@ def main():
         st.header("⭐ My Tickers")
         st.write("Manage your saved tickers and watchlists.")
         
-        # Initialize ticker manager
-        if 'ticker_manager' not in st.session_state:
-            st.session_state.ticker_manager = TickerManager()
-        
-        tm = st.session_state.ticker_manager
+        # Use cached ticker manager instance
+        tm = get_ticker_manager()
         
         # Debug: Show connection status
         if tm.supabase:
@@ -4828,9 +4929,46 @@ def main():
                 st.session_state.refresh_all_tickers = True
                 st.rerun()
         
-        # View saved tickers
+        # View saved tickers with pagination
         st.subheader("📋 Your Saved Tickers")
-        all_tickers = tm.get_all_tickers(limit=50)
+        
+        # Pagination settings
+        import math
+        items_per_page = 10
+        
+        # Initialize pagination state
+        if 'ticker_page' not in st.session_state:
+            st.session_state.ticker_page = 1
+        
+        # Get total count for pagination (get all to count, but only display page)
+        all_tickers_full = tm.get_all_tickers(limit=100)
+        total_tickers = len(all_tickers_full)
+        total_pages = max(1, math.ceil(total_tickers / items_per_page))
+        
+        # Ensure current page is within bounds
+        if st.session_state.ticker_page > total_pages:
+            st.session_state.ticker_page = total_pages
+        
+        # Display pagination controls at top
+        if total_pages > 1:
+            col_p1, col_p2, col_p3, col_p4 = st.columns([1, 2, 2, 1])
+            with col_p1:
+                if st.button("◀ Previous", disabled=st.session_state.ticker_page == 1, key="prev_top"):
+                    st.session_state.ticker_page -= 1
+                    st.rerun()
+            with col_p2:
+                st.write(f"**Page {st.session_state.ticker_page} of {total_pages}**")
+            with col_p3:
+                st.write(f"**Showing {min(items_per_page, total_tickers)} of {total_tickers} tickers**")
+            with col_p4:
+                if st.button("Next ▶", disabled=st.session_state.ticker_page == total_pages, key="next_top"):
+                    st.session_state.ticker_page += 1
+                    st.rerun()
+        
+        # Get only the tickers for current page
+        start_idx = (st.session_state.ticker_page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        all_tickers = all_tickers_full[start_idx:end_idx]
 
         if all_tickers:
             for ticker in all_tickers:
@@ -4943,33 +5081,85 @@ def main():
                             st.divider()
                             st.markdown("**📊 Comprehensive Analysis**")
                             
-                            # Get fresh analysis data for this ticker
+                            # Check if analysis is stale (older than 1 hour)
+                            needs_update = tm.should_update_analysis(ticker_symbol, max_age_hours=1.0)
+                            last_analyzed_str = ticker.get('last_analyzed')
+                            
+                            # Display last analysis timestamp
+                            if last_analyzed_str:
+                                try:
+                                    last_analyzed_dt = datetime.fromisoformat(last_analyzed_str).replace(tzinfo=timezone.utc)
+                                    age_hours = (datetime.now(timezone.utc) - last_analyzed_dt).total_seconds() / 3600
+                                    if age_hours < 1:
+                                        st.info(f"📊 Analysis cached ({age_hours*60:.0f} minutes ago) - Click 'Refresh' for latest data")
+                                    else:
+                                        st.warning(f"⚠️ Analysis is {age_hours:.1f} hours old - Click 'Refresh' for latest data")
+                                except:
+                                    pass
+                            else:
+                                st.info("📊 No recent analysis - Click 'Analyze' to generate")
+                            
+                            # Show analysis button instead of auto-analyzing
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                analyze_btn = st.button(
+                                    f"🔍 {'Refresh' if not needs_update else 'Analyze'} {ticker_symbol}",
+                                    key=f"analyze_btn_{ticker_symbol}",
+                                    help="Run comprehensive analysis with latest data",
+                                    type="primary" if needs_update else "secondary"
+                                )
+                            
+                            with col_btn2:
+                                show_cached = st.button(
+                                    "👁️ View Cached Data",
+                                    key=f"view_cached_{ticker_symbol}",
+                                    help="View last saved analysis data",
+                                    disabled=not last_analyzed_str
+                                )
+                            
+                            # Get fresh analysis data only if requested
+                            analysis = None
                             try:
-                                # Check if this ticker should be refreshed
+                                # Check if user requested fresh analysis
                                 should_refresh = (
+                                    analyze_btn or
                                     st.session_state.get(f"refresh_{ticker_symbol}", False) or 
                                     st.session_state.get('refresh_all_tickers', False) or
                                     st.session_state.get('ml_ticker_to_analyze') == ticker_symbol
                                 )
                                 
                                 if should_refresh:
-                                    with st.spinner(f"Analyzing {ticker_symbol}..."):
+                                    with st.spinner(f"🔄 Analyzing {ticker_symbol} with latest data..."):
                                         analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, st.session_state.get('analysis_timeframe', 'OPTIONS'))
                                     
                                     # Clear refresh flags
                                     if f"refresh_{ticker_symbol}" in st.session_state:
                                         del st.session_state[f"refresh_{ticker_symbol}"]
-                                else:
-                                    # Use cached analysis if available
-                                    cached_analysis = ticker.get('analysis_data')
-                                    if cached_analysis and isinstance(cached_analysis, dict):
-                                        # Convert dict back to StockAnalysis object
-                                        from models.analysis import StockAnalysis
-                                        analysis = StockAnalysis(**cached_analysis)
-                                    else:
-                                        # No cached data, run fresh analysis
-                                        with st.spinner(f"Analyzing {ticker_symbol}..."):
-                                            analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, st.session_state.get('analysis_timeframe', 'OPTIONS'))
+                                    
+                                    st.success(f"✅ Fresh analysis completed for {ticker_symbol}!")
+                                elif show_cached or not needs_update:
+                                    # Show cached data from database without re-analyzing
+                                    # Display metrics from database directly
+                                    st.info(f"📊 Displaying cached analysis data for {ticker_symbol}")
+                                    
+                                    # Show basic metrics from database
+                                    db_col1, db_col2, db_col3, db_col4 = st.columns(4)
+                                    with db_col1:
+                                        st.metric("ML Score", f"{ticker.get('ml_score', 'N/A')}/100" if ticker.get('ml_score') else "N/A")
+                                    with db_col2:
+                                        momentum = ticker.get('momentum', 0)
+                                        st.metric("Momentum", f"{momentum:+.2f}%" if momentum else "N/A")
+                                    with db_col3:
+                                        rsi = ticker.get('rsi')
+                                        st.metric("RSI", f"{rsi:.1f}" if rsi else "N/A")
+                                    with db_col4:
+                                        sentiment = ticker.get('sentiment_score')
+                                        st.metric("Sentiment", f"{sentiment:.2f}" if sentiment is not None else "N/A")
+                                    
+                                    st.info("💡 Click 'Analyze' above to run fresh comprehensive analysis with latest market data")
+                                    
+                                    # Don't show full analysis - just the cached summary
+                                    analysis = None
                                     
                                 if analysis:
                                     # Update ticker with fresh analysis data
@@ -5555,6 +5745,23 @@ def main():
                         if st.button("❌ Close"):
                             del st.session_state.ml_ticker_to_analyze
                             st.rerun()
+            
+            # Pagination controls at bottom
+            if total_pages > 1:
+                st.divider()
+                col_p1_btm, col_p2_btm, col_p3_btm, col_p4_btm = st.columns([1, 2, 2, 1])
+                with col_p1_btm:
+                    if st.button("◀ Previous", disabled=st.session_state.ticker_page == 1, key="prev_bottom"):
+                        st.session_state.ticker_page -= 1
+                        st.rerun()
+                with col_p2_btm:
+                    st.write(f"**Page {st.session_state.ticker_page} of {total_pages}**")
+                with col_p3_btm:
+                    st.write(f"**Showing {min(items_per_page, total_tickers)} of {total_tickers} tickers**")
+                with col_p4_btm:
+                    if st.button("Next ▶", disabled=st.session_state.ticker_page == total_pages, key="next_bottom"):
+                        st.session_state.ticker_page += 1
+                        st.rerun()
         else:
             st.info("No saved tickers yet. Add some above!")
         
@@ -7703,14 +7910,28 @@ def main():
     with tab10:
         # Initialize Tradier client
         from src.integrations.tradier_client import create_tradier_client_from_env
-        if 'tradier_client' not in st.session_state:
-            logger.info("Initializing Tradier client from environment")
+        mode_manager = get_trading_mode_manager()
+        current_mode = mode_manager.get_mode()
+        
+        # Check if we need to initialize or refresh the client
+        should_refresh_client = (
+            'tradier_client' not in st.session_state or
+            st.session_state.tradier_client is None or
+            st.session_state.tradier_client.trading_mode != current_mode
+        )
+        
+        if should_refresh_client:
+            logger.info("Initializing/refreshing Tradier client from environment")
+            logger.info("Current trading mode: %s", current_mode.value)
             try:
                 # Use trading mode manager to get client for current mode
-                mode_manager = get_trading_mode_manager()
-                st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=mode_manager.get_mode())
+                st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=current_mode)
                 logger.info("Tradier client initialized successfully: %s", bool(st.session_state.tradier_client))
-                logger.info("Trading mode: %s", mode_manager.get_mode().value)
+                logger.info("Client trading mode: %s", st.session_state.tradier_client.trading_mode.value if st.session_state.tradier_client else "None")
+                # Clear cached account data when switching modes
+                if 'account_summary' in st.session_state:
+                    del st.session_state.account_summary
+                    logger.info("Cleared cached account summary due to mode change")
             except Exception as e:
                 logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
                 st.session_state.tradier_client = None
@@ -9399,40 +9620,227 @@ TRADIER_API_URL=https://sandbox.tradier.com
             st.session_state.auto_trader = None
         
         # ========================================================================
-        # BACKGROUND TRADER CONFIGURATION MANAGER
+        # BACKGROUND TRADER CONFIGURATION MANAGER - DYNAMIC STRATEGY SYSTEM
         # ========================================================================
         
         st.divider()
-        st.subheader("⚙️ Background Trader Configuration")
-        st.write("Configure your background auto-trader settings. Changes save to `config_background_trader.py`.")
+        st.subheader("⚙️ Dynamic Strategy Configuration")
+        st.write("Select a strategy, modify its settings, and save to its specific config file. The background trader will automatically use your selection.")
+        
+        # Helper functions for .env file management
+        def update_env_file_for_paper_trading():
+            """Update .env file to set paper trading mode"""
+            try:
+                env_file = '.env'
+                if not os.path.exists(env_file):
+                    logger.warning(f".env file not found at {env_file}")
+                    return False
+                
+                with open(env_file, 'r') as f:
+                    content = f.read()
+                
+                # Replace paper trading settings
+                content = content.replace('IS_PAPER_TRADING=False', 'IS_PAPER_TRADING=True')
+                content = content.replace('PAPER_TRADING_MODE=False', 'PAPER_TRADING_MODE=True')
+                
+                # Ensure settings exist if they don't
+                if 'IS_PAPER_TRADING=' not in content:
+                    content += '\nIS_PAPER_TRADING=True\n'
+                if 'PAPER_TRADING_MODE=' not in content:
+                    content += '\nPAPER_TRADING_MODE=True\n'
+                
+                with open(env_file, 'w') as f:
+                    f.write(content)
+                
+                logger.info("✅ Updated .env file for paper trading")
+                return True
+            except Exception as e:
+                logger.error(f"Error updating .env file for paper trading: {e}")
+                return False
+        
+        def update_env_file_for_live_trading():
+            """Update .env file to set live trading mode"""
+            try:
+                env_file = '.env'
+                if not os.path.exists(env_file):
+                    logger.warning(f".env file not found at {env_file}")
+                    return False
+                
+                with open(env_file, 'r') as f:
+                    content = f.read()
+                
+                # Replace live trading settings
+                content = content.replace('IS_PAPER_TRADING=True', 'IS_PAPER_TRADING=False')
+                content = content.replace('PAPER_TRADING_MODE=True', 'PAPER_TRADING_MODE=False')
+                
+                # Ensure settings exist if they don't
+                if 'IS_PAPER_TRADING=' not in content:
+                    content += '\nIS_PAPER_TRADING=False\n'
+                if 'PAPER_TRADING_MODE=' not in content:
+                    content += '\nPAPER_TRADING_MODE=False\n'
+                
+                with open(env_file, 'w') as f:
+                    f.write(content)
+                
+                logger.info("✅ Updated .env file for live trading")
+                return True
+            except Exception as e:
+                logger.error(f"Error updating .env file for live trading: {e}")
+                return False
+        
+        # Load active strategy selector
+        def load_active_strategy():
+            """Load the currently active strategy from active_strategy.json"""
+            import json  # Local import to avoid closure issues
+            try:
+                with open('active_strategy.json', 'r') as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                # Create default if not exists
+                default_strategy = {
+                    "active_strategy": "GENERAL_TRADING",
+                    "config_file": "config_background_trader.py",
+                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "available_strategies": {
+                        "WARRIOR_SCALPING": {
+                            "name": "Warrior Scalping",
+                            "config_file": "config_warrior_scalping.py",
+                            "description": "Gap & Go strategy (9:30-10:00 AM, $2-$20 stocks, 2-20% gaps)",
+                            "trading_mode": "WARRIOR_SCALPING"
+                        },
+                        "GENERAL_TRADING": {
+                            "name": "General Trading",
+                            "config_file": "config_background_trader.py",
+                            "description": "Standard scalping, stocks, or options trading",
+                            "trading_mode": "SCALPING"
+                        },
+                        "OPTIONS_PREMIUM": {
+                            "name": "Options Premium Selling",
+                            "config_file": "config_options_premium.py",
+                            "description": "Wheel strategy, credit spreads, iron condors",
+                            "trading_mode": "OPTIONS"
+                        },
+                        "SWING_TRADING": {
+                            "name": "Swing Trading",
+                            "config_file": "config_swing_trader.py",
+                            "description": "Medium-term positions (1-5 days)",
+                            "trading_mode": "SWING_TRADE"
+                        }
+                    }
+                }
+                with open('active_strategy.json', 'w') as f:
+                    json.dump(default_strategy, f, indent=2)
+                return default_strategy
+        
+        def save_active_strategy(strategy_key):
+            """Save the active strategy selection"""
+            import json  # Local import to avoid closure issues
+            try:
+                logger.info(f"💾 Attempting to save active strategy: {strategy_key}")
+                strategy_config = load_active_strategy()
+                
+                if strategy_key not in strategy_config['available_strategies']:
+                    logger.error(f"❌ Strategy key '{strategy_key}' not found in available strategies")
+                    st.error(f"Strategy '{strategy_key}' not found!")
+                    return False
+                
+                # Update strategy config
+                strategy_config['active_strategy'] = strategy_key
+                strategy_config['config_file'] = strategy_config['available_strategies'][strategy_key]['config_file']
+                strategy_config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                logger.info(f"📝 Updating active_strategy.json: strategy={strategy_key}, config_file={strategy_config['config_file']}")
+                
+                # Write to file with explicit flush and error handling
+                file_path = 'active_strategy.json'
+                try:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(strategy_config, f, indent=2, ensure_ascii=False)
+                        f.flush()
+                        os.fsync(f.fileno())  # Force write to disk
+                    
+                    # Verify the write worked
+                    import time
+                    time.sleep(0.1)  # Brief pause to ensure file system sync
+                    
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        verification = json.load(f)
+                    
+                    if verification.get('active_strategy') == strategy_key:
+                        logger.info(f"✅ Successfully saved and verified active strategy: {strategy_key}")
+                        logger.info(f"   Config file: {verification.get('config_file')}")
+                        return True
+                    else:
+                        logger.error(f"❌ Verification failed! Saved '{strategy_key}' but file shows '{verification.get('active_strategy')}'")
+                        st.error(f"⚠️ Saved {strategy_key} but verification failed! File may be locked.")
+                        return False
+                        
+                except PermissionError as pe:
+                    logger.error(f"❌ Permission denied writing to {file_path}: {pe}")
+                    st.error(f"⚠️ Permission denied! Make sure {file_path} is not open in another program.")
+                    return False
+                except Exception as write_error:
+                    logger.error(f"❌ Error writing to file: {write_error}", exc_info=True)
+                    st.error(f"Error writing to file: {write_error}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"❌ Error saving active strategy: {e}", exc_info=True)
+                st.error(f"Error saving active strategy: {e}")
+            return False
         
         # Helper functions for config file management
-        def load_background_config():
-            """Load settings from config_background_trader.py"""
+        def load_config_file(config_filename):
+            """Load settings from any config file dynamically"""
             try:
-                import config_background_trader as cfg
+                # Remove .py extension and import dynamically
+                module_name = config_filename.replace('.py', '')
+                import importlib
+                import sys
+                
+                # Reload module if already imported to get fresh data
+                if module_name in sys.modules:
+                    importlib.reload(sys.modules[module_name])
+                    cfg = sys.modules[module_name]
+                else:
+                    cfg = importlib.import_module(module_name)
+                
                 return {
-                    'trading_mode': cfg.TRADING_MODE,
-                    'scan_interval': cfg.SCAN_INTERVAL_MINUTES,
-                    'min_confidence': cfg.MIN_CONFIDENCE,
-                    'max_daily_orders': cfg.MAX_DAILY_ORDERS,
-                    'max_position_size_pct': cfg.MAX_POSITION_SIZE_PCT,
-                    'use_bracket_orders': cfg.USE_BRACKET_ORDERS,
-                    'scalping_take_profit_pct': cfg.SCALPING_TAKE_PROFIT_PCT,
-                    'scalping_stop_loss_pct': cfg.SCALPING_STOP_LOSS_PCT,
-                    'risk_per_trade_pct': cfg.RISK_PER_TRADE_PCT,
-                    'max_daily_loss_pct': cfg.MAX_DAILY_LOSS_PCT,
-                    'use_smart_scanner': cfg.USE_SMART_SCANNER,
-                    'watchlist': cfg.WATCHLIST,
-                    'allow_short_selling': cfg.ALLOW_SHORT_SELLING,
-                    'use_settled_funds_only': cfg.USE_SETTLED_FUNDS_ONLY,
+                    'trading_mode': getattr(cfg, 'TRADING_MODE', 'SCALPING'),
+                    'scan_interval': getattr(cfg, 'SCAN_INTERVAL_MINUTES', 15),
+                    'min_confidence': getattr(cfg, 'MIN_CONFIDENCE', 70),
+                    'max_daily_orders': getattr(cfg, 'MAX_DAILY_ORDERS', 10),
+                    'max_position_size_pct': getattr(cfg, 'MAX_POSITION_SIZE_PCT', 15.0),
+                    'use_bracket_orders': getattr(cfg, 'USE_BRACKET_ORDERS', True),
+                    'scalping_take_profit_pct': getattr(cfg, 'SCALPING_TAKE_PROFIT_PCT', 2.0),
+                    'scalping_stop_loss_pct': getattr(cfg, 'SCALPING_STOP_LOSS_PCT', 1.0),
+                    'risk_per_trade_pct': getattr(cfg, 'RISK_PER_TRADE_PCT', 0.02),
+                    'max_daily_loss_pct': getattr(cfg, 'MAX_DAILY_LOSS_PCT', 0.04),
+                    'use_smart_scanner': getattr(cfg, 'USE_SMART_SCANNER', False),
+                    'watchlist': getattr(cfg, 'WATCHLIST', ['SPY', 'QQQ', 'AAPL']),
+                    'allow_short_selling': getattr(cfg, 'ALLOW_SHORT_SELLING', False),
+                    'use_settled_funds_only': getattr(cfg, 'USE_SETTLED_FUNDS_ONLY', True),
+                    # Capital Management
+                    'total_capital': getattr(cfg, 'TOTAL_CAPITAL', 10000.0),
+                    'reserve_cash_pct': getattr(cfg, 'RESERVE_CASH_PCT', 10.0),
+                    'max_capital_utilization_pct': getattr(cfg, 'MAX_CAPITAL_UTILIZATION_PCT', 80.0),
+                    # AI-Powered Hybrid Mode (NEW)
+                    'use_ml_enhanced_scanner': getattr(cfg, 'USE_ML_ENHANCED_SCANNER', True),
+                    'use_ai_validation': getattr(cfg, 'USE_AI_VALIDATION', True),
+                    'min_ensemble_score': getattr(cfg, 'MIN_ENSEMBLE_SCORE', 70.0),
+                    'min_ai_validation_confidence': getattr(cfg, 'MIN_AI_VALIDATION_CONFIDENCE', 0.7),
+                    # Extra fields for special strategies
+                    'config_filename': config_filename,
                 }
-            except ImportError:
+            except Exception as e:
+                st.error(f"Error loading {config_filename}: {e}")
                 return None
         
-        def save_background_config(config_dict):
-            """Save settings to config_background_trader.py"""
+        def save_config_to_file(config_dict, config_filename):
+            """Save settings to any config file dynamically"""
             try:
+                # Determine which template to use based on filename
+                module_name = config_filename.replace('.py', '')
                 # Read the template
                 config_content = f'''"""
 Configuration for Background Auto-Trader
@@ -9444,7 +9852,7 @@ Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 # TRADING CONFIGURATION
 # ==============================================================================
 
-# Trading Mode: "SCALPING", "STOCKS", "OPTIONS", "ALL"
+# Trading Mode: "SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"
 TRADING_MODE = "{config_dict['trading_mode']}"
 
 # Scan Interval (minutes)
@@ -9453,11 +9861,27 @@ SCAN_INTERVAL_MINUTES = {config_dict['scan_interval']}
 # Minimum Confidence % (only execute signals above this)
 MIN_CONFIDENCE = {config_dict['min_confidence']}
 
-# Risk Management
+# ==============================================================================
+# CAPITAL MANAGEMENT
+# ==============================================================================
+
+# Total capital allocated to auto-trading
+TOTAL_CAPITAL = {config_dict['total_capital']}  # ${config_dict['total_capital']:,.0f}
+
+# Reserve cash percentage (kept aside, not used for trading)
+RESERVE_CASH_PCT = {config_dict['reserve_cash_pct']}  # {config_dict['reserve_cash_pct']}% = ${config_dict['total_capital'] * config_dict['reserve_cash_pct'] / 100:,.0f} reserved
+
+# Maximum capital utilization (% of usable capital that can be deployed)
+MAX_CAPITAL_UTILIZATION_PCT = {config_dict['max_capital_utilization_pct']}  # Max {config_dict['max_capital_utilization_pct']}% of usable capital in positions
+
+# ==============================================================================
+# RISK MANAGEMENT
+# ==============================================================================
+
 MAX_DAILY_ORDERS = {config_dict['max_daily_orders']}
-MAX_POSITION_SIZE_PCT = {config_dict['max_position_size_pct']}
-RISK_PER_TRADE_PCT = {config_dict['risk_per_trade_pct']}
-MAX_DAILY_LOSS_PCT = {config_dict['max_daily_loss_pct']}
+MAX_POSITION_SIZE_PCT = {config_dict['max_position_size_pct']}  # Max % per position
+RISK_PER_TRADE_PCT = {config_dict['risk_per_trade_pct']}  # {config_dict['risk_per_trade_pct'] * 100:.1f}% risk per trade
+MAX_DAILY_LOSS_PCT = {config_dict['max_daily_loss_pct']}  # {config_dict['max_daily_loss_pct'] * 100:.1f}% max daily loss
 
 # Bracket Orders (Stop-Loss & Take-Profit)
 USE_BRACKET_ORDERS = {config_dict['use_bracket_orders']}
@@ -9468,7 +9892,6 @@ SCALPING_STOP_LOSS_PCT = {config_dict['scalping_stop_loss_pct']}
 USE_SETTLED_FUNDS_ONLY = {config_dict['use_settled_funds_only']}
 CASH_BUCKETS = 3
 T_PLUS_SETTLEMENT_DAYS = 2
-RESERVE_CASH_PCT = 0.05
 
 # ==============================================================================
 # TICKER SELECTION
@@ -9481,6 +9904,27 @@ USE_SMART_SCANNER = {config_dict['use_smart_scanner']}
 WATCHLIST = {config_dict['watchlist']}
 
 # ==============================================================================
+# AI-POWERED HYBRID MODE (1-2 KNOCKOUT COMBO) 🥊
+# ==============================================================================
+
+# Enable ML-Enhanced Scanner for triple validation (40% ML + 35% LLM + 25% Quant)
+USE_ML_ENHANCED_SCANNER = {config_dict.get('use_ml_enhanced_scanner', True)}  # RECOMMENDED: Superior trade quality
+
+# Enable AI Pre-Trade Validation (final risk check before execution)
+USE_AI_VALIDATION = {config_dict.get('use_ai_validation', True)}  # RECOMMENDED: Blocks high-risk trades
+
+# Minimum ensemble score for ML-Enhanced Scanner (0-100)
+MIN_ENSEMBLE_SCORE = {config_dict.get('min_ensemble_score', 70.0)}  # Only trades passing all 3 systems with 70%+ score
+
+# Minimum AI validation confidence (0-1.0)
+MIN_AI_VALIDATION_CONFIDENCE = {config_dict.get('min_ai_validation_confidence', 0.7)}  # AI must be 70%+ confident to approve
+
+# NOTE: When both are enabled, you get the 1-2 KNOCKOUT COMBO:
+#   PUNCH 1: ML-Enhanced Scanner filters trades (triple validation)
+#   PUNCH 2: AI Validator performs final risk check
+#   Result: Only the highest quality, lowest risk trades execute!
+
+# ==============================================================================
 # ADVANCED OPTIONS
 # ==============================================================================
 
@@ -9491,21 +9935,143 @@ ALLOW_SHORT_SELLING = {config_dict['allow_short_selling']}
 USE_AGENT_SYSTEM = False
 '''
                 
-                with open('config_background_trader.py', 'w') as f:
+                with open(config_filename, 'w', encoding='utf-8') as f:
                     f.write(config_content)
                 return True
             except Exception as e:
                 st.error(f"Error saving config: {e}")
                 return False
         
-        # Load current config
-        current_config = load_background_config()
+        # ========================================================================
+        # STRATEGY SELECTOR
+        # ========================================================================
+        
+        st.markdown("""
+        ### 📋 Configuration Workflow
+        
+        <div style="background: linear-gradient(90deg, #1f77b4, #ff7f0e, #2ca02c); padding: 2px; border-radius: 10px; margin: 10px 0;">
+            <div style="background: white; padding: 20px; border-radius: 8px;">
+                <h4 style="margin: 0 0 10px 0;">Simple 3-Step Process:</h4>
+                <p style="margin: 5px 0;"><strong>1️⃣ SELECT</strong> → Choose which strategy to configure (dropdown loads its settings)</p>
+                <p style="margin: 5px 0;"><strong>2️⃣ EDIT</strong> → Modify settings in tabs below (changes are temporary)</p>
+                <p style="margin: 5px 0;"><strong>3️⃣ SAVE</strong> → Write changes to config file (permanent)</p>
+                <hr style="margin: 10px 0;">
+                <p style="margin: 5px 0; color: #ff6b6b;"><strong>⚠️ To Use Saved Settings:</strong> Click "Activate" (if not active), then restart background trader</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Load strategy config
+        active_strategy_data = load_active_strategy()
+        available_strategies = active_strategy_data['available_strategies']
+        current_active_strategy = active_strategy_data['active_strategy']
+        
+        # Create strategy selector with better visual hierarchy
+        st.subheader("🎯 Step 1: Select Strategy to Configure")
+        
+        col_strategy, col_status, col_action = st.columns([3, 1, 1])
+        
+        with col_strategy:
+            strategy_options = {k: v['name'] for k, v in available_strategies.items()}
+            strategy_descriptions = {k: v['description'] for k, v in available_strategies.items()}
+            
+            selected_strategy = st.selectbox(
+                "Choose which strategy's settings to edit:",
+                options=list(strategy_options.keys()),
+                index=list(strategy_options.keys()).index(current_active_strategy) if current_active_strategy in strategy_options else 0,
+                format_func=lambda x: f"{strategy_options[x]}",
+                help="Selecting a strategy will LOAD its current settings below for editing",
+                key="strategy_selector",
+                label_visibility="collapsed"
+            )
+        
+        with col_status:
+            st.write("")  # Spacing
+            if selected_strategy == current_active_strategy:
+                st.success("✅ **ACTIVE**")
+            else:
+                st.warning("📝 **Editing**")
+        
+        with col_action:
+            st.write("")  # Spacing
+            if selected_strategy != current_active_strategy:
+                if st.button("🎯 Activate", help="Make this the active strategy for background trader"):
+                    if save_active_strategy(selected_strategy):
+                        st.success("✅ Activated!")
+                        # Show what will be loaded
+                        config_file = available_strategies[selected_strategy]['config_file']
+                        st.info(f"📁 Background trader will load: `{config_file}`")
+                        st.info(f"🎯 Trading Mode: {available_strategies[selected_strategy].get('trading_mode', 'UNKNOWN')}")
+                        st.warning("⚠️ **Restart background trader** to apply changes!")
+                        
+                        # Verify file was actually updated
+                        try:
+                            import json
+                            with open('active_strategy.json', 'r') as f:
+                                verify = json.load(f)
+                            if verify.get('active_strategy') == selected_strategy:
+                                st.success(f"✅ Verified: File updated correctly to `{verify.get('active_strategy')}`")
+                            else:
+                                st.error(f"❌ Mismatch! File shows `{verify.get('active_strategy')}` but expected `{selected_strategy}`")
+                        except Exception as e:
+                            st.warning(f"⚠️ Could not verify file: {e}")
+                        
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to save! Check logs for details.")
+        
+        # Show active strategy info with better formatting
+        st.markdown("---")
+        
+        # CRITICAL: Show what background trader will ACTUALLY load
+        try:
+            import json
+            with open('active_strategy.json', 'r') as f:
+                file_content = json.load(f)
+            file_strategy = file_content.get('active_strategy', 'UNKNOWN')
+            file_config = file_content.get('config_file', 'UNKNOWN')
+            
+            st.markdown("### 🔍 Background Trader Configuration")
+            if file_strategy == current_active_strategy:
+                st.success(f"✅ **Active Strategy:** `{file_strategy}` → Config: `{file_config}`")
+            else:
+                st.error(f"⚠️ **MISMATCH DETECTED!**")
+                st.error(f"- Streamlit shows: `{current_active_strategy}`")
+                st.error(f"- File contains: `{file_strategy}` → Config: `{file_config}`")
+                st.warning("🚨 Background trader will use what's in the FILE, not what Streamlit shows!")
+                st.info("💡 Click '🎯 Activate' to sync Streamlit with the file")
+        except Exception as e:
+            st.warning(f"⚠️ Could not read active_strategy.json: {e}")
+        selected_config_file = available_strategies[selected_strategy]['config_file']
+        
+        st.info(f"""
+        **📝 Now Editing:** `{strategy_options[selected_strategy]}`  
+        **📁 Config File:** `{selected_config_file}`  
+        **📖 Description:** {strategy_descriptions[selected_strategy]}
+        
+        ℹ️ **Settings below are loaded from this config file. Changes are NOT saved until you click "💾 Save Configuration" at the bottom.**
+        """)
+        
+        st.divider()
+        
+        st.subheader("🎯 Step 2: Edit Settings Below")
+        st.caption("Make your changes in the tabs below. Settings are loaded from the selected strategy's config file.")
+        
+        # Load config for selected strategy
+        current_config = load_config_file(selected_config_file)
         
         if current_config:
-            st.success("✅ Loaded current configuration from `config_background_trader.py`")
+            st.success(f"✅ Loaded configuration from `{selected_config_file}`")
             
             # Create tabs for organization
-            cfg_tab1, cfg_tab2, cfg_tab3 = st.tabs(["📊 Strategy & Tickers", "⚖️ Risk Management", "💾 Save Configuration"])
+            cfg_tab1, cfg_tab2, cfg_tab3 = st.tabs([
+                "📊 Strategy & Tickers", 
+                "⚖️ Risk & AI Settings", 
+                "💾 Step 3: Save"
+            ])
             
             with cfg_tab1:
                 st.subheader("Strategy Settings")
@@ -9619,11 +10185,53 @@ USE_AGENT_SYSTEM = False
                     )
             
             with cfg_tab2:
-                st.subheader("Risk Management")
+                st.subheader("💰 Capital Management")
+                st.markdown("_Control how much capital the bot can use for trading_")
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
+                    total_capital = st.number_input(
+                        "Total Capital Allocated to Bot",
+                        min_value=100.0,
+                        max_value=1000000.0,
+                        value=float(current_config.get('total_capital', 10000.0)),
+                        step=100.0,
+                        help="💵 Total account balance or capital allocated for auto-trading"
+                    )
+                    
+                    reserve_cash_pct = st.slider(
+                        "Reserve Cash %",
+                        min_value=0.0,
+                        max_value=50.0,
+                        value=float(current_config.get('reserve_cash_pct', 10.0)),
+                        step=5.0,
+                        help="💰 Percentage kept aside, not used for trading (emergency cash)"
+                    )
+                    
+                    st.info(f"**Usable Capital:** ${total_capital * (1 - reserve_cash_pct/100):,.2f}")
+                
+                with col2:
+                    max_capital_utilization_pct = st.slider(
+                        "Max Capital Utilization %",
+                        min_value=20.0,
+                        max_value=100.0,
+                        value=float(current_config.get('max_capital_utilization_pct', 80.0)),
+                        step=5.0,
+                        help="📊 Maximum % of usable capital that can be deployed in positions"
+                    )
+                    
+                    usable_capital = total_capital * (1 - reserve_cash_pct/100)
+                    max_deployed = usable_capital * (max_capital_utilization_pct/100)
+                    st.info(f"**Max Deployed:** ${max_deployed:,.2f}")
+                    st.info(f"**Always Available:** ${usable_capital - max_deployed:,.2f}")
+                
+                st.divider()
+                st.subheader("⚖️ Risk Management")
+                
+                col3, col4 = st.columns(2)
+                
+                with col3:
                     max_daily_orders = st.number_input(
                         "Max Daily Orders",
                         min_value=1,
@@ -9634,11 +10242,11 @@ USE_AGENT_SYSTEM = False
                     
                     max_position_size_pct = st.slider(
                         "Max Position Size %",
-                        min_value=5.0,
+                        min_value=1.0,
                         max_value=50.0,
                         value=float(current_config['max_position_size_pct']),
-                        step=5.0,
-                        help="Maximum % of account per single trade"
+                        step=1.0,
+                        help="Maximum % of total capital per single trade"
                     )
                     
                     risk_per_trade_pct = st.slider(
@@ -9650,7 +10258,7 @@ USE_AGENT_SYSTEM = False
                         help="Risk % of account per trade"
                     ) / 100.0
                 
-                with col2:
+                with col4:
                     max_daily_loss_pct = st.slider(
                         "Max Daily Loss %",
                         min_value=1.0,
@@ -9696,24 +10304,91 @@ USE_AGENT_SYSTEM = False
                         value=current_config['allow_short_selling'],
                         help="⚠️ Advanced: Enable short selling in paper trading"
                     )
+                
+                st.divider()
+                st.subheader("🥊 AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO)")
+                st.markdown("""
+                **The ultimate trade quality system** - Only the best trades survive double validation!
+                
+                - **PUNCH 1**: ML-Enhanced Scanner (40% ML + 35% LLM + 25% Quant)
+                - **PUNCH 2**: AI Pre-Trade Validation (final risk check)
+                - **Result**: Maximum trade quality + risk control
+                """)
+                
+                col_ai1, col_ai2 = st.columns(2)
+                
+                with col_ai1:
+                    use_ml_enhanced_scanner = st.checkbox(
+                        "🧠 Enable ML-Enhanced Scanner (PUNCH 1)",
+                        value=current_config.get('use_ml_enhanced_scanner', True),
+                        help="Triple validation: 40% ML + 35% LLM + 25% Quantitative analysis"
+                    )
+                    
+                    if use_ml_enhanced_scanner:
+                        min_ensemble_score = st.slider(
+                            "Min Ensemble Score %",
+                            min_value=50,
+                            max_value=95,
+                            value=int(current_config.get('min_ensemble_score', 70)),
+                            step=5,
+                            help="Minimum combined score from ML+LLM+Quant (70%+ recommended)"
+                        )
+                    else:
+                        min_ensemble_score = 70.0
+                
+                with col_ai2:
+                    use_ai_validation = st.checkbox(
+                        "🛡️ Enable AI Pre-Trade Validation (PUNCH 2)",
+                        value=current_config.get('use_ai_validation', True),
+                        help="LLM validates risk/reward, portfolio fit, and red flags before execution"
+                    )
+                    
+                    if use_ai_validation:
+                        min_ai_validation_confidence = st.slider(
+                            "Min AI Validation Confidence",
+                            min_value=0.5,
+                            max_value=0.95,
+                            value=float(current_config.get('min_ai_validation_confidence', 0.7)),
+                            step=0.05,
+                            format="%.2f",
+                            help="Minimum confidence for AI to approve trade (0.7+ recommended)"
+                        )
+                    else:
+                        min_ai_validation_confidence = 0.7
+                
+                if use_ml_enhanced_scanner and use_ai_validation:
+                    st.success("🥊 **KNOCKOUT COMBO ACTIVE!** Maximum trade quality & risk control enabled.")
+                elif use_ml_enhanced_scanner:
+                    st.info("🧠 ML-Enhanced Scanner active. Enable AI Validation for full knockout combo!")
+                elif use_ai_validation:
+                    st.info("🛡️ AI Validation active. Enable ML-Enhanced Scanner for full knockout combo!")
+                else:
+                    st.warning("⚠️ AI features disabled. Enable for superior trade quality!")
             
             with cfg_tab3:
-                st.subheader("💾 Save Configuration")
+                st.subheader("🎯 Step 3: Save Configuration")
                 
-                st.info("""
-                **What happens when you save:**
-                1. ✅ Settings are written to `config_background_trader.py`
-                2. ✅ File is automatically updated
-                3. ⚠️ **You must restart the background trader** to apply changes
+                st.markdown(f"""
+                ### 💾 Ready to Save?
                 
-                **To apply changes:**
+                You are editing: **`{strategy_options[selected_strategy]}`**  
+                Config file: **`{selected_config_file}`**
+                
+                **What happens when you click "Save":**
+                1. ✅ Your changes are written to **`{selected_config_file}`**
+                2. ✅ The config file is permanently updated
+                3. ⚠️ Changes take effect only after you **restart the background trader**
+                
+                **To apply saved changes:**
                 ```powershell
                 # Stop trader
                 .\\stop_autotrader.bat
                 
-                # Start trader
+                # Start trader (loads the updated config)
                 .\\start_autotrader_background.bat
                 ```
+                
+                💡 **Tip:** You can edit multiple strategies, save them all, then activate the one you want to use.
                 """)
                 
                 st.divider()
@@ -9726,13 +10401,26 @@ USE_AGENT_SYSTEM = False
                         'Min Confidence': f"{min_confidence}%",
                         'Smart Scanner': "Enabled" if use_smart_scanner else "Disabled",
                         'Watchlist': watchlist_str if not use_smart_scanner else "(Using Smart Scanner)",
+                        '--- Capital Management ---': '---',
+                        'Total Capital': f"${total_capital:,.2f}",
+                        'Reserve Cash': f"{reserve_cash_pct}% (${total_capital * reserve_cash_pct / 100:,.2f})",
+                        'Usable Capital': f"${total_capital * (1 - reserve_cash_pct/100):,.2f}",
+                        'Max Capital Utilization': f"{max_capital_utilization_pct}%",
+                        'Max Deployed Capital': f"${total_capital * (1 - reserve_cash_pct/100) * max_capital_utilization_pct / 100:,.2f}",
+                        '--- Risk Management ---': '---',
                         'Max Daily Orders': max_daily_orders,
-                        'Max Position Size': f"{max_position_size_pct}%",
+                        'Max Position Size': f"{max_position_size_pct}% (${total_capital * max_position_size_pct / 100:,.2f})",
                         'Risk Per Trade': f"{risk_per_trade_pct * 100:.1f}%",
                         'Max Daily Loss': f"{max_daily_loss_pct * 100:.1f}%",
                         'Use Bracket Orders': "Yes" if use_bracket_orders else "No",
                         'Take-Profit': f"{scalping_take_profit_pct}%",
                         'Stop-Loss': f"{scalping_stop_loss_pct}%",
+                        '--- AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO) ---': '🥊',
+                        'ML-Enhanced Scanner (PUNCH 1)': "✅ Enabled" if use_ml_enhanced_scanner else "❌ Disabled",
+                        'Min Ensemble Score': f"{min_ensemble_score}%" if use_ml_enhanced_scanner else "N/A",
+                        'AI Pre-Trade Validation (PUNCH 2)': "✅ Enabled" if use_ai_validation else "❌ Disabled",
+                        'Min AI Validation Confidence': f"{min_ai_validation_confidence:.2f}" if use_ai_validation else "N/A",
+                        'Knockout Combo Status': "🥊 ACTIVE - Maximum Quality!" if (use_ml_enhanced_scanner and use_ai_validation) else "⚠️ Partial" if (use_ml_enhanced_scanner or use_ai_validation) else "❌ Disabled",
                     }
                     st.json(preview_config)
                 
@@ -9767,11 +10455,20 @@ USE_AGENT_SYSTEM = False
                         'watchlist': watchlist_tickers,
                         'allow_short_selling': allow_short_selling,
                         'use_settled_funds_only': use_settled_funds_only,
+                        # Capital Management (NEW)
+                        'total_capital': total_capital,
+                        'reserve_cash_pct': reserve_cash_pct,
+                        'max_capital_utilization_pct': max_capital_utilization_pct,
+                        # AI-Powered Hybrid Mode (NEW)
+                        'use_ml_enhanced_scanner': use_ml_enhanced_scanner,
+                        'use_ai_validation': use_ai_validation,
+                        'min_ensemble_score': min_ensemble_score,
+                        'min_ai_validation_confidence': min_ai_validation_confidence,
                     }
                     
                     # Save to file
-                    if save_background_config(new_config):
-                        st.success("✅ Configuration saved successfully to `config_background_trader.py`!")
+                    if save_config_to_file(new_config, selected_config_file):
+                        st.success(f"✅ Configuration saved successfully to `{selected_config_file}`!")
                         
                         st.warning("""
                         **⚠️ RESTART REQUIRED**
@@ -9806,15 +10503,19 @@ USE_AGENT_SYSTEM = False
                     else:
                         st.error("❌ Failed to save configuration. Check file permissions.")
         else:
-            st.warning("""
+            st.warning(f"""
             ⚠️ Configuration file not found!
             
-            The file `config_background_trader.py` doesn't exist yet.
+            The file `{selected_config_file}` doesn't exist yet.
             
             **To create it:**
             1. Use the configuration below to set your preferences
             2. Click "Save Configuration" 
             3. File will be created automatically
+            
+            **Alternatively:**
+            - Select a different strategy that has an existing config file
+            - Or copy an existing config file and rename it to `{selected_config_file}`
             """)
             
             # Show default form for creating new config

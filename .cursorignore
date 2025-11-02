@@ -1,0 +1,14 @@
+# Cursor ignore file
+# Files listed here will be hidden from Cursor's AI assistant but still excluded from git via .gitignore
+
+# Hide large binary files
+venv/
+*.pyc
+__pycache__/
+
+# Keep logs visible in Cursor for debugging
+# (not listed here so Cursor AI can read them)
+
+# Keep .env hidden for security
+#.env
+

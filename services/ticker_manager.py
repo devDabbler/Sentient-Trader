@@ -332,6 +332,32 @@ class TickerManager:
             logger.debug(f"Attempted data: {update_data if 'update_data' in locals() else 'N/A'}")
             return False
 
+    def should_update_analysis(self, ticker: str, max_age_hours: float = 1.0) -> bool:
+        """
+        Check if ticker analysis needs updating based on staleness.
+        
+        Args:
+            ticker: Ticker symbol
+            max_age_hours: Maximum age in hours before considering analysis stale
+            
+        Returns:
+            True if analysis should be updated, False otherwise
+        """
+        if not self._check_client(): 
+            return True  # Update if we can't check
+        try:
+            response = self.supabase.table('saved_tickers').select('last_analyzed').eq('ticker', ticker.upper()).single().execute()
+            if response.data and response.data.get('last_analyzed'):
+                last_analyzed = datetime.fromisoformat(response.data['last_analyzed']).replace(tzinfo=timezone.utc)
+                age_hours = (datetime.now(timezone.utc) - last_analyzed).total_seconds() / 3600
+                logger.debug(f"Ticker {ticker} analysis age: {age_hours:.2f} hours")
+                return age_hours >= max_age_hours
+            # No last_analyzed timestamp, needs update
+            return True
+        except Exception as e:
+            logger.debug(f"Error checking analysis staleness for {ticker}: {e}")
+            return True  # Update if there's an error
+    
     def get_statistics(self) -> Dict:
         if not self._check_client(): return {}
         try:

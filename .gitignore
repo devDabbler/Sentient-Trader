@@ -59,16 +59,27 @@ ENV/
 # Mac
 .DS_Store
 
-# Logs
+# Logs (kept in .gitignore to avoid committing large log files)
 logs/
 *.log
 trading_signals.log
+*.bat.log
+*log*.bat
+*.bat.out
 
 # Databases
-# data/*.db
+data/*.db
 
 # Runtime trade state data
 data/trade_state.json
+
+# Configuration files (user-specific)
+active_strategy.json
+config_*.py
+run_autotrader_background.py
+
+# Batch scripts (user-specific automation)
+*.bat
 
 # Excluded directories
 tests/
@@ -79,5 +90,5 @@ scripts/
 archive/
 
 # Cursor
-.cursorignore
+# .cursorignore  # Keep this file in git so Cursor settings are shared
 .cursor/

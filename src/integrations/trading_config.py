@@ -159,6 +159,7 @@ class TradingModeManager:
         
         # Check if mode exists by comparing enum values (handles enum identity issues)
         mode_found = False
+        actual_key = None
         for key in self.credentials.keys():
             logger.info(f"🔍 Debug - Comparing {mode} == {key}: {mode == key}, id match: {id(mode) == id(key)}")
             if key.value == mode.value:
@@ -171,13 +172,17 @@ class TradingModeManager:
             logger.error(f"❌ Credentials dict: {self.credentials}")
             return False
         
+        # Use actual_key for both to maintain consistency
         self.current_mode = actual_key
-        st.session_state.trading_mode = mode  # Persist to session state
+        st.session_state.trading_mode = actual_key  # Persist to session state
         logger.info(f"🔄 Switched to {mode.value} trading mode")
         return True
     
     def get_current_credentials(self) -> Optional[TradingCredentials]:
         """Get credentials for the current trading mode"""
+        # Always sync with session state to avoid stale data after rerun
+        if 'trading_mode' in st.session_state:
+            self.current_mode = st.session_state.trading_mode
         # Use value-based lookup to handle enum identity issues
         for key, creds in self.credentials.items():
             if key.value == self.current_mode.value:
@@ -186,14 +191,23 @@ class TradingModeManager:
     
     def get_mode(self) -> TradingMode:
         """Get the current trading mode"""
+        # Always sync with session state to avoid stale data after rerun
+        if 'trading_mode' in st.session_state:
+            self.current_mode = st.session_state.trading_mode
         return self.current_mode
     
     def is_paper_mode(self) -> bool:
         """Check if currently in paper trading mode"""
+        # Always sync with session state to avoid stale data after rerun
+        if 'trading_mode' in st.session_state:
+            self.current_mode = st.session_state.trading_mode
         return self.current_mode == TradingMode.PAPER
     
     def is_production_mode(self) -> bool:
         """Check if currently in production trading mode"""
+        # Always sync with session state to avoid stale data after rerun
+        if 'trading_mode' in st.session_state:
+            self.current_mode = st.session_state.trading_mode
         return self.current_mode == TradingMode.PRODUCTION
     
     def get_available_modes(self) -> list[TradingMode]:
@@ -213,6 +227,9 @@ class TradingModeManager:
     
     def get_mode_display_info(self) -> Dict[str, str]:
         """Get display information for the current mode"""
+        # Always sync with session state to avoid stale data after rerun
+        if 'trading_mode' in st.session_state:
+            self.current_mode = st.session_state.trading_mode
         mode = self.current_mode
         creds = self.get_current_credentials()
         
@@ -297,25 +314,56 @@ class TradingModeManager:
         
         return brokers
 
-# Global instance
-trading_mode_manager = TradingModeManager()
+# Global instance (lazily initialized)
+_trading_mode_manager: Optional[TradingModeManager] = None
 
 def get_trading_mode_manager() -> TradingModeManager:
-    """Get the global trading mode manager instance"""
-    return trading_mode_manager
+    """Get the global trading mode manager instance (lazy initialization)"""
+    global _trading_mode_manager
+    
+    # CRITICAL SAFETY: Ensure session state trading_mode exists and is valid before creating manager
+    if 'trading_mode' not in st.session_state:
+        st.session_state.trading_mode = TradingMode.PAPER
+        logger.info("🔒 get_trading_mode_manager: Initialized trading_mode to PAPER (safe default)")
+    else:
+        # Validate trading_mode by comparing values (enum identity can change after Streamlit serialization)
+        current_mode_value = getattr(st.session_state.trading_mode, 'value', None)
+        if current_mode_value not in ['paper', 'production']:
+            # Safety check: if trading_mode is corrupted/invalid, reset to PAPER
+            logger.warning(f"⚠️ get_trading_mode_manager: Invalid trading_mode in session state: {st.session_state.trading_mode}. Resetting to PAPER for safety.")
+            st.session_state.trading_mode = TradingMode.PAPER
+        elif current_mode_value == 'paper':
+            # Ensure it's the correct enum instance (fixes serialization issues)
+            st.session_state.trading_mode = TradingMode.PAPER
+        elif current_mode_value == 'production':
+            # Ensure it's the correct enum instance
+            st.session_state.trading_mode = TradingMode.PRODUCTION
+    
+    if _trading_mode_manager is None:
+        _trading_mode_manager = TradingModeManager()
+    else:
+        # On Streamlit reruns, ensure the cached manager syncs with session state
+        # This handles cases where session state changed but manager instance persisted
+        if 'trading_mode' in st.session_state:
+            current_session_mode = st.session_state.trading_mode
+            if _trading_mode_manager.current_mode != current_session_mode:
+                logger.info(f"🔄 get_trading_mode_manager: Syncing cached manager with session state ({current_session_mode})")
+                _trading_mode_manager.current_mode = current_session_mode
+    
+    return _trading_mode_manager
 
 def switch_to_paper_mode() -> bool:
     """Switch to paper trading mode"""
-    return trading_mode_manager.set_mode(TradingMode.PAPER)
+    return get_trading_mode_manager().set_mode(TradingMode.PAPER)
 
 def switch_to_production_mode() -> bool:
     """Switch to production trading mode"""
-    return trading_mode_manager.set_mode(TradingMode.PRODUCTION)
+    return get_trading_mode_manager().set_mode(TradingMode.PRODUCTION)
 
 def is_paper_mode() -> bool:
     """Check if currently in paper trading mode"""
-    return trading_mode_manager.is_paper_mode()
+    return get_trading_mode_manager().is_paper_mode()
 
 def is_production_mode() -> bool:
     """Check if currently in production trading mode"""
-    return trading_mode_manager.is_production_mode()
+    return get_trading_mode_manager().is_production_mode()

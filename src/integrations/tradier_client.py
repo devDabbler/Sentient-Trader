@@ -84,10 +84,13 @@ class TradierClient:
         if account_id is None or access_token is None:
             mode_manager = get_trading_mode_manager()
             if trading_mode:
-                if not mode_manager.set_mode(trading_mode):
+                # Get credentials for specified mode without changing global state
+                creds = mode_manager.get_tradier_credentials(trading_mode)
+                if not creds:
                     raise ValueError(f"No trading credentials available for {trading_mode.value} mode. Please configure environment variables.")
+            else:
+                creds = mode_manager.get_current_credentials()
             
-            creds = mode_manager.get_current_credentials()
             if not creds:
                 raise ValueError("No trading credentials available. Please configure environment variables.")
             
