@@ -5082,7 +5082,17 @@ def main():
                             st.markdown("**📊 Comprehensive Analysis**")
                             
                             # Check if analysis is stale (older than 1 hour)
-                            needs_update = tm.should_update_analysis(ticker_symbol, max_age_hours=1.0)
+                            # Ensure tm is properly initialized and has the method
+                            try:
+                                if tm and hasattr(tm, 'should_update_analysis'):
+                                    needs_update = tm.should_update_analysis(ticker_symbol, max_age_hours=1.0)
+                                else:
+                                    # Fallback: check last_analyzed directly from ticker data
+                                    needs_update = True
+                            except (AttributeError, TypeError) as e:
+                                logger.error(f"Error checking analysis staleness for {ticker_symbol}: {e}")
+                                needs_update = True  # Default to needing update if check fails
+                            
                             last_analyzed_str = ticker.get('last_analyzed')
                             
                             # Display last analysis timestamp
