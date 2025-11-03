@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0):
     """
-    Decorator to retry API calls on 504 Gateway Timeout errors with exponential backoff.
+    Decorator to retry API calls on 504 Gateway Timeout and 500 Server Errors with exponential backoff.
     
     Args:
         max_retries: Maximum number of retry attempts
@@ -33,23 +33,26 @@ def retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0):
                 try:
                     return func(*args, **kwargs)
                 except requests.exceptions.HTTPError as e:
-                    # Check if it's a 504 Gateway Timeout error
-                    if e.response is not None and e.response.status_code == 504:
+                    # Check if it's a 504 Gateway Timeout or 500 Server Error
+                    if e.response is not None and e.response.status_code in [500, 504]:
                         last_exception = e
+                        error_code = e.response.status_code
+                        error_name = "504 Gateway Timeout" if error_code == 504 else "500 Server Error"
+                        
                         if attempt < max_retries:
                             logger.warning(
-                                f"⏳ 504 Gateway Timeout on {func.__name__} (attempt {attempt + 1}/{max_retries + 1}). "
-                                f"Retrying in {delay:.1f}s... (Tradier sandbox may be slow)"
+                                f"⏳ {error_name} on {func.__name__} (attempt {attempt + 1}/{max_retries + 1}). "
+                                f"Retrying in {delay:.1f}s... (Tradier sandbox may be experiencing issues)"
                             )
                             time.sleep(delay)
                             delay *= backoff_factor
                             continue
                         else:
                             logger.error(
-                                f"❌ 504 Gateway Timeout on {func.__name__} after {max_retries + 1} attempts. "
+                                f"❌ {error_name} on {func.__name__} after {max_retries + 1} attempts. "
                                 f"Tradier sandbox API is experiencing issues. This is a Tradier server problem, not your code."
                             )
-                    # Re-raise non-504 errors immediately
+                    # Re-raise non-500/504 errors immediately
                     raise
                 except requests.exceptions.Timeout as e:
                     # Handle connection timeouts
@@ -401,6 +404,7 @@ class TradierClient:
             logger.error(f"Error placing equity order: {e}")
             return {}
     
+    @retry_on_timeout(max_retries=5, initial_delay=2.0, backoff_factor=1.5)
     def place_order(self, order_data: Dict) -> Tuple[bool, Dict]:
         """Place an order - Tradier expects form-encoded data"""
         try:
@@ -425,16 +429,17 @@ class TradierClient:
             # Log what we're sending
             logger.info(f"🚀 Placing order with data: {order_data_copy}")
             
-            # Tradier expects form-encoded data, not JSON
+            # IMPORTANT: For form-encoded data, override Content-Type but keep Authorization
+            # The session.post() will merge these headers with session defaults
             headers = {
-                'Authorization': f'Bearer {self.access_token}',
-                'Accept': 'application/json'
+                'Content-Type': 'application/x-www-form-urlencoded'
             }
             
-            response = requests.post(
+            response = self.session.post(
                 f'{self.api_url}/v1/accounts/{self.account_id}/orders',
-                headers=headers,
-                data=order_data_copy  # Send as form data, not JSON
+                data=order_data_copy,  # Send as form data, not JSON
+                headers=headers,  # Merge with session headers (Authorization, Accept still present)
+                timeout=15  # Add explicit timeout to prevent hanging
             )
             
             # Log response before checking status
@@ -444,6 +449,23 @@ class TradierClient:
             response.raise_for_status()
             
             order_response = response.json()
+            
+            # CRITICAL: Check if Tradier rejected the order despite 200 OK
+            # Tradier may return 200 OK but with status != "ok" or with error fields
+            if isinstance(order_response, dict):
+                order_info = order_response.get('order', {})
+                order_status = order_info.get('status', '')
+                
+                # Check for rejected/cancelled status
+                if order_status in ['rejected', 'cancelled', 'error']:
+                    logger.error(f"❌ Order REJECTED by Tradier: {order_response}")
+                    return False, {"error": f"Order {order_status}: {order_response}", "response": order_response}
+                
+                # Also check for error fields in response
+                if 'error' in order_response or 'errors' in order_response:
+                    logger.error(f"❌ Order returned errors: {order_response}")
+                    return False, {"error": "Order contained error fields", "response": order_response}
+            
             logger.info(f"✅ Order placed successfully: {order_response}")
             return True, order_response
             

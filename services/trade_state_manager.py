@@ -234,14 +234,20 @@ class TradeStateManager:
             logger.warning(f"⚠️  Found unknown positions (broker has but we don't know about): {unknown}")
             for symbol in unknown:
                 pos = next(p for p in broker_positions if p['symbol'] == symbol)
+                # Calculate per-share entry price from cost_basis
+                quantity = abs(int(float(pos.get('quantity', 0))))
+                cost_basis = float(pos.get('cost_basis', 0))
+                entry_price = cost_basis / quantity if quantity > 0 else 0
+                
                 # Add them to our tracking
                 self.record_trade_opened(
                     symbol=symbol,
                     side='BUY' if float(pos.get('quantity', 0)) > 0 else 'SELL',
-                    quantity=abs(int(float(pos.get('quantity', 0)))),
-                    entry_price=float(pos.get('cost_basis', 0)),
+                    quantity=quantity,
+                    entry_price=entry_price,
                     reason="Found on startup"
                 )
+                logger.info(f"   📊 {symbol}: {quantity} shares @ ${entry_price:.2f} per share (cost basis: ${cost_basis:.2f})")
         
         if orphaned or unknown:
             self._save_state()

@@ -799,9 +799,35 @@ class WarriorTradingDetector:
         # Check if within trading window (unless bypassed for test mode)
         if not bypass_window_check:
             now = datetime.now().time()
-            if not (trading_window_start <= now <= trading_window_end):
-                logger.debug(f"Outside trading window: {now} not in {trading_window_start}-{trading_window_end}")
-                return signals
+            
+            # Check if premarket is enabled in config
+            enable_premarket = getattr(self.config, 'enable_premarket', False) or \
+                             getattr(self.config, 'ENABLE_PREMARKET', False)
+            
+            if enable_premarket:
+                # Get premarket start time
+                premarket_start_hour = getattr(self.config, 'premarket_start_hour', 
+                                              getattr(self.config, 'PREMARKET_START_HOUR', 7))
+                premarket_start_minute = getattr(self.config, 'premarket_start_minute',
+                                                getattr(self.config, 'PREMARKET_START_MINUTE', 0))
+                premarket_start = dt_time(premarket_start_hour, premarket_start_minute)
+                
+                # For Gap & Go, scan during premarket (7:00 AM - 10:00 AM)
+                # This allows identifying gappers before market open
+                extended_window_start = premarket_start
+                extended_window_end = trading_window_end  # Keep 10:00 AM end time
+                
+                if not (extended_window_start <= now <= extended_window_end):
+                    logger.debug(f"Outside extended trading window (premarket enabled): {now} not in {extended_window_start}-{extended_window_end}")
+                    return signals
+                else:
+                    if now < trading_window_start:
+                        logger.info(f"🌅 Premarket scanning active: {now} (market opens at {trading_window_start})")
+            else:
+                # Standard trading window check (9:30 AM - 10:00 AM)
+                if not (trading_window_start <= now <= trading_window_end):
+                    logger.debug(f"Outside trading window: {now} not in {trading_window_start}-{trading_window_end}")
+                    return signals
         
         # Get premarket gappers first
         gappers = self.get_premarket_gappers(tickers)

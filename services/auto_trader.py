@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from services.cash_manager import CashManager, CashManagerConfig
 from services.trade_state_manager import TradeStateManager
+from services.position_exit_monitor import PositionExitMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,13 @@ class AutoTraderConfig:
     use_ai_validation: bool = False  # Enable AI pre-trade validation (secondary knockout check)
     min_ensemble_score: float = 70.0  # Minimum ensemble score for ML-Enhanced Scanner (0-100)
     min_ai_validation_confidence: float = 0.7  # Minimum AI validation confidence (0-1)
+    # Position Exit Monitoring (CRITICAL SAFETY FEATURE)
+    enable_position_monitoring: bool = True  # Monitor and auto-close positions
+    position_check_interval_seconds: int = 30  # How often to check positions (30s recommended)
+    enable_trailing_stops: bool = True  # Enable trailing stop feature
+    enable_time_limits: bool = True  # Enable time-based position exits
+    enable_break_even_stops: bool = True  # Move stop to breakeven after profit threshold
+    max_position_hold_minutes: int = 480  # Max hold time (8 hours default)
 
 
 class AutoTrader:
@@ -119,6 +127,28 @@ class AutoTrader:
         self._ml_scanner = None
         self._ai_validator = None
         
+        # Position Exit Monitor (CRITICAL - monitors and closes positions)
+        self._position_monitor = None
+        self._position_monitor_thread = None
+        
+        if config.enable_position_monitoring:
+            try:
+                self._position_monitor = PositionExitMonitor(
+                    tradier_client=tradier_client,
+                    state_manager=self.state_manager,
+                    capital_manager=self._capital_manager,
+                    check_interval_seconds=config.position_check_interval_seconds,
+                    enable_trailing_stops=config.enable_trailing_stops,
+                    enable_time_limits=config.enable_time_limits,
+                    enable_break_even_stops=config.enable_break_even_stops
+                )
+                logger.info("🛡️ Position Exit Monitor ENABLED: Active position management")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to initialize Position Exit Monitor: {e}")
+                config.enable_position_monitoring = False
+        else:
+            logger.warning("⚠️ Position Exit Monitor DISABLED: Positions rely on bracket orders only!")
+        
         if config.use_ml_enhanced_scanner:
             try:
                 from services.ml_enhanced_scanner import MLEnhancedScanner
@@ -163,9 +193,30 @@ class AutoTrader:
             logger.info(f"🔄 Syncing state with {len(positions)} broker positions...")
             self.state_manager.sync_with_broker(positions)
             
-            # Log what we found
+            # Log what we found and add to position monitor
             for symbol, trade in self.state_manager.get_all_open_positions().items():
                 logger.info(f"  ✅ Tracking {symbol}: {trade.side} {trade.quantity} @ ${trade.entry_price:.2f}")
+                
+                # Add to position monitor if enabled
+                if self._position_monitor:
+                    # Calculate default stops if not present
+                    entry_price = trade.entry_price
+                    stop_loss = entry_price * 0.99  # 1% default stop
+                    take_profit = entry_price * 1.02  # 2% default target
+                    
+                    self._position_monitor.add_position(
+                        symbol=symbol,
+                        side=trade.side,
+                        quantity=trade.quantity,
+                        entry_price=entry_price,
+                        entry_time=datetime.fromisoformat(trade.entry_time) if isinstance(trade.entry_time, str) else trade.entry_time,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        max_hold_minutes=self.config.max_position_hold_minutes,
+                        bracket_order_ids=trade.bracket_order_ids
+                    )
+                    logger.info(f"  🛡️ Added {symbol} to Position Exit Monitor")
+                    
         except APIError as e:
             logger.error(f"❌ API Error syncing state on startup: {e}")
         except Exception as e:
@@ -178,6 +229,16 @@ class AutoTrader:
             return False
         
         self.is_running = True
+        
+        # Start Position Exit Monitor if enabled
+        if self._position_monitor:
+            self._position_monitor_thread = threading.Thread(
+                target=self._position_monitor.start_monitoring_loop,
+                daemon=True,
+                name="PositionExitMonitor"
+            )
+            self._position_monitor_thread.start()
+            logger.info("🛡️ Position Exit Monitor thread started")
         
         # Use agent system for SLOW_SCALPER/MICRO_SWING modes if enabled
         if self.config.use_agent_system and self.config.trading_mode in ['SLOW_SCALPER', 'MICRO_SWING']:
@@ -193,6 +254,14 @@ class AutoTrader:
     def stop(self):
         """Stop the auto-trader"""
         self.is_running = False
+        
+        # Stop position monitor if running
+        if self._position_monitor:
+            logger.info("⏸️ Stopping Position Exit Monitor...")
+            self._position_monitor.stop()
+            if self._position_monitor_thread:
+                self._position_monitor_thread.join(timeout=10)
+            logger.info("✅ Position Exit Monitor stopped")
         
         # Stop agent system if running
         if self._orchestrator:
@@ -290,23 +359,42 @@ class AutoTrader:
             return True
         
         from datetime import timezone, timedelta
+        import pytz
         
-        # Get current time in ET (UTC-5 for EST, UTC-4 for EDT)
-        # Using a simple approach: assume ET = UTC-5 (adjust for DST if needed)
-        now_utc = datetime.now(timezone.utc)
-        
-        # Convert to ET (UTC-4 during EDT, UTC-5 during EST)
-        # Simple heuristic: use UTC-4 from March-November, UTC-5 otherwise
-        month = now_utc.month
-        is_edt = 3 <= month <= 11  # Approximate DST period
-        et_offset = timedelta(hours=-4 if is_edt else -5)
-        now_et = now_utc + et_offset
+        # Get current time in proper ET timezone with automatic DST handling
+        try:
+            eastern = pytz.timezone('US/Eastern')
+            now_et = datetime.now(eastern)
+            
+            # Log timezone info for debugging
+            tz_name = now_et.strftime('%Z')  # EST or EDT
+            logger.debug(f"🕐 Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z')} (Timezone: {tz_name})")
+        except Exception as e:
+            # Fallback to manual calculation if pytz fails
+            logger.warning(f"⚠️ pytz timezone conversion failed: {e}, using fallback")
+            now_utc = datetime.now(timezone.utc)
+            
+            # Better DST detection: DST is second Sunday in March to first Sunday in November
+            # For 2025: DST starts March 9, ends November 2
+            # Simple approximation: UTC-4 from mid-March to early November
+            month = now_utc.month
+            day = now_utc.day
+            
+            # Approximate DST period (this is a simplification)
+            if month < 3 or (month == 3 and day < 9) or (month == 11 and day >= 2) or month == 12:
+                et_offset = timedelta(hours=-5)  # EST
+            else:
+                et_offset = timedelta(hours=-4)  # EDT
+            
+            now_et = now_utc + et_offset
+            now_et = now_et.replace(tzinfo=None)  # Remove timezone info for comparison
         
         # Check if weekend
         if now_et.weekday() >= 5:  # Saturday=5, Sunday=6
             return False
         
-        current_time_et = now_et.time()
+        # Get time component (handle both timezone-aware and naive datetime)
+        current_time_et = now_et.time() if hasattr(now_et, 'time') else now_et
         
         # Regular trading hours
         start_time = dt_time(self.config.trading_start_hour, self.config.trading_start_minute)
@@ -337,11 +425,11 @@ class AutoTrader:
         in_hours = in_regular_hours or in_premarket or in_afterhours
         
         if not in_hours:
-            logger.debug(f"Outside trading hours: ET time is {current_time_et.strftime('%H:%M')}, market hours are {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}")
+            logger.info(f"❌ Outside trading hours: ET time is {current_time_et.strftime('%H:%M')}, market hours are {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}")
         elif in_premarket:
-            logger.debug(f"🌅 Pre-market hours: {current_time_et.strftime('%H:%M')} ET")
+            logger.info(f"🌅 Pre-market hours: {current_time_et.strftime('%H:%M')} ET")
         elif in_afterhours:
-            logger.debug(f"🌙 After-hours: {current_time_et.strftime('%H:%M')} ET")
+            logger.info(f"🌙 After-hours: {current_time_et.strftime('%H:%M')} ET")
         
         return in_hours
     
@@ -1453,6 +1541,22 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             reason=f"Signal (confidence: {signal.confidence}%)"
                         )
                         
+                        # ADD TO POSITION MONITOR (CRITICAL)
+                        if self._position_monitor and signal.entry_price and signal.stop_loss and signal.target_price:
+                            self._position_monitor.add_position(
+                                symbol=signal.symbol,
+                                side=signal.signal,
+                                quantity=signal.position_size,
+                                entry_price=signal.entry_price,
+                                entry_time=datetime.now(),
+                                stop_loss=signal.stop_loss,
+                                take_profit=signal.target_price,
+                                trailing_stop_pct=2.0 if self.config.enable_trailing_stops else None,  # 2% trailing
+                                max_hold_minutes=self.config.max_position_hold_minutes,
+                                bracket_order_ids=bracket_ids
+                            )
+                            logger.info(f"🛡️ Added {signal.symbol} to Position Exit Monitor")
+                        
                         # ALLOCATE CAPITAL (NEW)
                         if self._capital_manager and signal.entry_price and signal.position_size:
                             capital_allocated = signal.entry_price * signal.position_size
@@ -1769,7 +1873,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
     
     def get_status(self) -> Dict:
         """Get current status of auto-trader"""
-        return {
+        status = {
             'is_running': self.is_running,
             'daily_orders': self.daily_orders,
             'max_daily_orders': self.config.max_daily_orders,
@@ -1793,9 +1897,16 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 'use_bracket_orders': self.config.use_bracket_orders,
                 'paper_trading': self.config.paper_trading,
                 'allow_short_selling': self.config.allow_short_selling,
-                'test_mode': self.config.test_mode
+                'test_mode': self.config.test_mode,
+                'position_monitoring_enabled': self.config.enable_position_monitoring
             }
         }
+        
+        # Add position monitor status if enabled
+        if self._position_monitor:
+            status['position_monitor'] = self._position_monitor.get_status()
+        
+        return status
     
     def get_execution_history(self) -> List[Dict]:
         """Get history of executed trades"""

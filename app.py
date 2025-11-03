@@ -10015,7 +10015,8 @@ USE_AGENT_SYSTEM = False
                         config_file = available_strategies[selected_strategy]['config_file']
                         st.info(f"📁 Background trader will load: `{config_file}`")
                         st.info(f"🎯 Trading Mode: {available_strategies[selected_strategy].get('trading_mode', 'UNKNOWN')}")
-                        st.warning("⚠️ **Restart background trader** to apply changes!")
+                        st.success("🔄 **Config change detected!** Background trader will auto-restart within 60 seconds.")
+                        st.info("💡 If using `start_autotrader_auto_restart.bat`, it will restart automatically. Otherwise, manually restart.")
                         
                         # Verify file was actually updated
                         try:
