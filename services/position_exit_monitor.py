@@ -14,7 +14,7 @@ Features:
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
@@ -67,17 +67,18 @@ class PositionExitMonitor:
     Runs in background and ensures positions don't sit unprotected
     """
     
-    def __init__(self, tradier_client, state_manager, capital_manager=None,
+    def __init__(self, broker_client, state_manager, capital_manager=None,
                  check_interval_seconds: int = 30,
                  max_exit_retries: int = 3,
                  enable_trailing_stops: bool = True,
                  enable_time_limits: bool = True,
-                 enable_break_even_stops: bool = True):
+                 enable_break_even_stops: bool = True,
+                 long_term_holdings: Optional[List[str]] = None):
         """
         Initialize Position Exit Monitor
         
         Args:
-            tradier_client: TradierClient for orders and quotes
+            broker_client: Broker client (TradierClient, IBKRClient, or BrokerAdapter) for orders and quotes
             state_manager: TradeStateManager for state persistence
             capital_manager: CapitalManager for capital tracking
             check_interval_seconds: How often to check positions (default: 30s)
@@ -85,8 +86,11 @@ class PositionExitMonitor:
             enable_trailing_stops: Enable trailing stop feature
             enable_time_limits: Enable time-based exits
             enable_break_even_stops: Enable break-even stop moves
+            long_term_holdings: List of tickers to NEVER auto-sell (e.g., ['BXP', 'AAPL'])
         """
-        self.tradier_client = tradier_client
+        self.broker_client = broker_client
+        # Keep tradier_client as alias for backward compatibility
+        self.tradier_client = broker_client
         self.state_manager = state_manager
         self.capital_manager = capital_manager
         
@@ -96,11 +100,17 @@ class PositionExitMonitor:
         self.enable_time_limits = enable_time_limits
         self.enable_break_even_stops = enable_break_even_stops
         
+        # Long-Term Holdings Protection (CRITICAL SAFETY FEATURE)
+        self.long_term_holdings: Set[str] = set(long_term_holdings) if long_term_holdings else set()
+        
         # Monitored positions
         self.monitored_positions: Dict[str, MonitoredPosition] = {}
         
         # Track pending exit orders (symbol -> order_id)
         self.pending_exit_orders: Dict[str, str] = {}
+        
+        # Blacklist for positions with rejected orders (prevent re-adding)
+        self.rejected_positions: Set[str] = set()
         
         # Tradier error tracking (for circuit breaker pattern)
         self.consecutive_tradier_errors = 0
@@ -154,6 +164,11 @@ class PositionExitMonitor:
             True if added successfully
         """
         try:
+            # CRITICAL: Skip long-term holdings
+            if symbol.upper() in self.long_term_holdings:
+                logger.info(f"🔒 SKIPPING {symbol}: Protected long-term holding - will NOT be monitored or auto-sold")
+                return False
+            
             # Validate inputs
             if not symbol or quantity <= 0:
                 logger.error(f"❌ Invalid position parameters: {symbol}, qty={quantity}")
@@ -253,6 +268,17 @@ class PositionExitMonitor:
             added = 0
             for pos in positions:
                 symbol = pos.get('symbol')
+                
+                # CRITICAL: Skip long-term holdings
+                if symbol and symbol.upper() in self.long_term_holdings:
+                    logger.debug(f"🔒 Skipping {symbol} - protected long-term holding")
+                    continue
+                
+                # Skip positions on the rejected blacklist
+                if symbol and symbol in self.rejected_positions:
+                    logger.debug(f"⏭️ Skipping {symbol} - on rejected positions blacklist")
+                    continue
+                
                 if symbol and symbol not in self.monitored_positions:
                     # Get position details
                     quantity = int(pos.get('quantity', 0))
@@ -514,6 +540,45 @@ class PositionExitMonitor:
                 # This prevents re-submitting duplicate exit orders for the same position.
                 logger.info(f"⏳ Position {symbol} exit order submitted (Order ID: {order_id}). Waiting for fill...")
                 
+                # Check order status after brief delay to detect immediate rejections
+                import time
+                time.sleep(1)  # Give Tradier a moment to process
+                
+                try:
+                    success_check, order_status = self.tradier_client.get_order_status(str(order_id))
+                    if success_check:
+                        status = order_status.get('order', {}).get('status', '').lower()
+                        
+                        if status == 'rejected':
+                            logger.error("=" * 80)
+                            logger.error(f"🚫 ORDER REJECTED BY BROKER: {symbol}")
+                            logger.error(f"   Order ID: {order_id}")
+                            logger.error(f"   This is a broker issue (Tradier paper trading limitation)")
+                            logger.error(f"   STOPPING retry attempts to prevent order spam")
+                            logger.error(f"   Manual intervention required via Tradier web interface")
+                            logger.error("=" * 80)
+                            
+                            # Add to blacklist to prevent re-adding
+                            self.rejected_positions.add(symbol)
+                            logger.info(f"🚫 Added {symbol} to rejected positions blacklist")
+                            
+                            # Remove from monitoring to prevent retry spam
+                            if symbol in self.monitored_positions:
+                                del self.monitored_positions[symbol]
+                                logger.info(f"🗑️ Removed {symbol} from monitoring (rejected order)")
+                            
+                            # Remove pending order tracking
+                            if symbol in self.pending_exit_orders:
+                                del self.pending_exit_orders[symbol]
+                            
+                            return False  # Order was rejected, not successful
+                        elif status == 'open' or status == 'pending':
+                            logger.info(f"✅ Order {order_id} status: {status.upper()} - monitoring for fill")
+                        elif status == 'filled':
+                            logger.info(f"🎉 Order {order_id} FILLED immediately!")
+                except Exception as e:
+                    logger.debug(f"Could not check order status (non-critical): {e}")
+                
                 # Send Discord notification
                 try:
                     self._send_exit_notification(position, current_price, pnl, pnl_pct, exit_reason)
@@ -751,6 +816,36 @@ class PositionExitMonitor:
                 # Log pending exit orders if any
                 if self.pending_exit_orders:
                     logger.info(f"⏳ {len(self.pending_exit_orders)} pending exit orders awaiting fill: {list(self.pending_exit_orders.keys())}")
+                    
+                    # Check status of pending orders to detect rejections
+                    rejected_symbols = []
+                    for symbol, order_id in list(self.pending_exit_orders.items()):
+                        try:
+                            success, order_status = self.tradier_client.get_order_status(str(order_id))
+                            if success:
+                                status = order_status.get('order', {}).get('status', '').lower()
+                                
+                                if status == 'rejected':
+                                    logger.error("=" * 80)
+                                    logger.error(f"🚫 DETECTED REJECTED ORDER: {symbol}")
+                                    logger.error(f"   Order ID: {order_id}")
+                                    logger.error(f"   Broker rejected this exit order")
+                                    logger.error(f"   Removing from monitoring to prevent retry spam")
+                                    logger.error("=" * 80)
+                                    rejected_symbols.append(symbol)
+                                    # Add to blacklist
+                                    self.rejected_positions.add(symbol)
+                                    logger.info(f"🚫 Added {symbol} to rejected positions blacklist")
+                        except Exception as e:
+                            logger.debug(f"Could not check order status for {symbol}: {e}")
+                    
+                    # Remove rejected orders from tracking and monitoring
+                    for symbol in rejected_symbols:
+                        if symbol in self.pending_exit_orders:
+                            del self.pending_exit_orders[symbol]
+                        if symbol in self.monitored_positions:
+                            del self.monitored_positions[symbol]
+                            logger.info(f"🗑️ Removed {symbol} from monitoring due to rejected order")
                 
                 # Check all positions
                 positions_to_exit = self.check_positions()

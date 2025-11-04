@@ -25,6 +25,14 @@ except ImportError:
     TRADING_CONFIG_AVAILABLE = False
     logger.warning("Trading config not available, using legacy mode")
 
+# Import hybrid data fetcher
+try:
+    from .hybrid_data_fetcher import HybridDataFetcher
+    HYBRID_DATA_AVAILABLE = True
+except ImportError:
+    HYBRID_DATA_AVAILABLE = False
+    logger.debug("Hybrid data fetcher not available")
+
 # Fix asyncio event loop issue with Streamlit - CRITICAL FIX
 def setup_event_loop():
     """Setup event loop for Streamlit compatibility"""
@@ -142,7 +150,7 @@ class IBKRClient:
     Supports paper and live trading modes via TradingModeManager
     """
     
-    def __init__(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1, trading_mode: Optional['TradingMode'] = None):
+    def __init__(self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1, trading_mode: Optional['TradingMode'] = None, market_data_source: str = "IBKR"):
         """
         Initialize IBKR client
         
@@ -151,6 +159,7 @@ class IBKRClient:
             port: IB Gateway port (7497 for paper TWS, 7496 for live TWS, 4002 for paper Gateway, 4001 for live Gateway)
             client_id: Unique client ID (1-32)
             trading_mode: Trading mode (PAPER or PRODUCTION). If None, uses provided connection details.
+            market_data_source: Data source ("IBKR", "YFINANCE", or "HYBRID")
         """
         if not IB_INSYNC_AVAILABLE:
             raise ImportError(
@@ -165,6 +174,16 @@ class IBKRClient:
         self.connected = False
         self._event_loop = None
         self._thread = None
+        
+        # Market data configuration
+        self.market_data_source = market_data_source.upper()
+        self.hybrid_fetcher = None
+        
+        # Initialize hybrid data fetcher if needed
+        if HYBRID_DATA_AVAILABLE and self.market_data_source in ["HYBRID", "YFINANCE"]:
+            prefer_yfinance = (self.market_data_source == "YFINANCE")
+            self.hybrid_fetcher = HybridDataFetcher(ibkr_client=self, prefer_yfinance=prefer_yfinance)
+            logger.info(f"📊 Hybrid Data Fetcher initialized (mode: {self.market_data_source})")
         
         mode_str = f" ({trading_mode.value} mode)" if trading_mode else ""
         logger.info(f"IBKR Client initialized for {host}:{port} (client_id={client_id}){mode_str}")
@@ -191,6 +210,14 @@ class IBKRClient:
             # Get account information
             accounts = self.ib.managedAccounts()
             logger.info(f"Successfully connected to IBKR. Accounts: {accounts}")
+            
+            # Request delayed market data (free for paper trading)
+            # Type 3 = delayed data, Type 4 = delayed frozen data
+            try:
+                self.ib.reqMarketDataType(3)
+                logger.info("✅ Delayed market data enabled (free for paper trading)")
+            except Exception as e:
+                logger.warning(f"Could not enable delayed market data: {e}")
             
             return True
             
@@ -553,7 +580,8 @@ class IBKRClient:
     
     def get_market_data(self, symbol: str) -> Optional[Dict]:
         """
-        Get real-time market data for a symbol
+        Get market data for a symbol
+        Uses hybrid data fetcher if configured, otherwise uses IBKR directly
         
         Args:
             symbol: Stock symbol
@@ -562,6 +590,16 @@ class IBKRClient:
             Dictionary with market data or None if error
         """
         try:
+            # Use hybrid fetcher if available and configured
+            if self.hybrid_fetcher and self.market_data_source in ["HYBRID", "YFINANCE"]:
+                use_ibkr = (self.market_data_source == "HYBRID")  # Try IBKR first in hybrid mode
+                quote = self.hybrid_fetcher.get_quote(symbol, use_ibkr=use_ibkr)
+                if quote:
+                    logger.debug(f"📊 {symbol} quote from {quote.get('source', 'unknown')}")
+                    return quote
+                logger.warning(f"Hybrid fetcher failed for {symbol}, falling back to IBKR")
+            
+            # Fallback to direct IBKR data
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return None
@@ -570,22 +608,27 @@ class IBKRClient:
             contract = Stock(symbol, 'SMART', 'USD')
             self.ib.qualifyContracts(contract)
             
-            # Request market data
+            # Request market data (will use delayed if real-time not available)
             self.ib.reqMktData(contract, '', False, False)
-            self.ib.sleep(1)  # Wait for data
+            self.ib.sleep(2)  # Wait longer for delayed data
             
             # Get ticker
             ticker = self.ib.ticker(contract)
             
+            # Use delayed data if available
+            last_price = ticker.last if ticker.last and not (ticker.last != ticker.last) else \
+                        ticker.close if ticker.close and not (ticker.close != ticker.close) else 0
+            
             return {
                 'symbol': symbol,
-                'bid': ticker.bid if ticker.bid else 0,
-                'ask': ticker.ask if ticker.ask else 0,
-                'last': ticker.last if ticker.last else 0,
+                'bid': ticker.bid if ticker.bid and not (ticker.bid != ticker.bid) else 0,
+                'ask': ticker.ask if ticker.ask and not (ticker.ask != ticker.ask) else 0,
+                'last': last_price,
                 'close': ticker.close if ticker.close else 0,
                 'volume': ticker.volume if ticker.volume else 0,
                 'bid_size': ticker.bidSize if ticker.bidSize else 0,
                 'ask_size': ticker.askSize if ticker.askSize else 0,
+                'source': 'IBKR'
             }
             
         except Exception as e:
@@ -689,12 +732,13 @@ class IBKRClient:
             return None
 
 
-def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None) -> Optional[IBKRClient]:
+def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None, market_data_source: str = "IBKR") -> Optional[IBKRClient]:
     """
     Create IBKR client from environment variables or trading mode manager
     
     Args:
         trading_mode: Trading mode (PAPER or PRODUCTION). If None, tries to load from trading mode manager.
+        market_data_source: Data source ("IBKR", "YFINANCE", or "HYBRID")
     
     Environment variables (legacy support):
         IBKR_HOST: IB Gateway/TWS host (default: 127.0.0.1)
@@ -727,7 +771,8 @@ def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None) ->
                             host=creds.host,
                             port=creds.port,
                             client_id=creds.client_id,
-                            trading_mode=trading_mode
+                            trading_mode=trading_mode,
+                            market_data_source=market_data_source
                         )
             else:
                 # Use current mode
@@ -739,7 +784,8 @@ def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None) ->
                         host=creds.host,
                         port=creds.port,
                         client_id=creds.client_id,
-                        trading_mode=current_mode
+                        trading_mode=current_mode,
+                        market_data_source=market_data_source
                     )
         
         # Fall back to legacy environment variables
@@ -748,7 +794,7 @@ def create_ibkr_client_from_env(trading_mode: Optional['TradingMode'] = None) ->
         client_id = int(os.getenv('IBKR_CLIENT_ID', '1'))
         
         logger.info("🔧 Creating IBKR client from legacy environment variables")
-        client = IBKRClient(host=host, port=port, client_id=client_id, trading_mode=trading_mode)
+        client = IBKRClient(host=host, port=port, client_id=client_id, trading_mode=trading_mode, market_data_source=market_data_source)
         return client
         
     except Exception as e:

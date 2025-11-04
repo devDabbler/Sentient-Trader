@@ -71,24 +71,28 @@ class AutoTraderConfig:
     enable_time_limits: bool = True  # Enable time-based position exits
     enable_break_even_stops: bool = True  # Move stop to breakeven after profit threshold
     max_position_hold_minutes: int = 480  # Max hold time (8 hours default)
+    # Long-Term Holdings Protection (CRITICAL SAFETY FEATURE)
+    long_term_holdings: Optional[List[str]] = None  # Tickers to never sell (e.g., ['BXP', 'AAPL'])
 
 
 class AutoTrader:
     """Automated trading service"""
     
-    def __init__(self, config: AutoTraderConfig, tradier_client, signal_generator, watchlist: List[str], use_smart_scanner: bool = False):
+    def __init__(self, config: AutoTraderConfig, broker_client, signal_generator, watchlist: List[str], use_smart_scanner: bool = False):
         """
         Initialize auto-trader
         
         Args:
             config: AutoTraderConfig settings
-            tradier_client: TradierClient instance
+            broker_client: Broker client instance (TradierClient, IBKRClient, or BrokerAdapter)
             signal_generator: AITradingSignalGenerator instance
             watchlist: List of ticker symbols to monitor
             use_smart_scanner: If True, use Advanced Scanner to find best tickers for strategy
         """
         self.config = config
-        self.tradier_client = tradier_client
+        self.broker_client = broker_client
+        # Keep tradier_client as alias for backward compatibility
+        self.tradier_client = broker_client
         self.signal_generator = signal_generator
         self.watchlist = watchlist
         self.use_smart_scanner = use_smart_scanner
@@ -133,15 +137,23 @@ class AutoTrader:
         
         if config.enable_position_monitoring:
             try:
+                # Get long-term holdings list (default to empty list if None)
+                long_term_holdings = config.long_term_holdings if config.long_term_holdings else []
+                
                 self._position_monitor = PositionExitMonitor(
-                    tradier_client=tradier_client,
+                    broker_client=self.broker_client,
                     state_manager=self.state_manager,
                     capital_manager=self._capital_manager,
                     check_interval_seconds=config.position_check_interval_seconds,
                     enable_trailing_stops=config.enable_trailing_stops,
                     enable_time_limits=config.enable_time_limits,
-                    enable_break_even_stops=config.enable_break_even_stops
+                    enable_break_even_stops=config.enable_break_even_stops,
+                    long_term_holdings=long_term_holdings
                 )
+                
+                if long_term_holdings:
+                    logger.info(f"🔒 Long-Term Holdings Protected: {', '.join(long_term_holdings)} - WILL NEVER BE AUTO-SOLD")
+                
                 logger.info("🛡️ Position Exit Monitor ENABLED: Active position management")
             except Exception as e:
                 logger.error(f"⚠️ Failed to initialize Position Exit Monitor: {e}")
@@ -2022,7 +2034,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
 
 
 def create_auto_trader(
-    tradier_client,
+    broker_client,
     signal_generator,
     watchlist: List[str],
     config: Optional[AutoTraderConfig] = None,
@@ -2032,7 +2044,7 @@ def create_auto_trader(
     Create and configure auto-trader
     
     Args:
-        tradier_client: TradierClient instance
+        broker_client: Broker client instance (TradierClient, IBKRClient, or BrokerAdapter)
         signal_generator: AITradingSignalGenerator instance
         watchlist: List of tickers to monitor
         config: Optional AutoTraderConfig (uses defaults if None)
@@ -2044,4 +2056,4 @@ def create_auto_trader(
     if config is None:
         config = AutoTraderConfig()
     
-    return AutoTrader(config, tradier_client, signal_generator, watchlist, use_smart_scanner)
+    return AutoTrader(config, broker_client, signal_generator, watchlist, use_smart_scanner)

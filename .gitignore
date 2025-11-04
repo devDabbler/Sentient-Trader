@@ -67,11 +67,8 @@ trading_signals.log
 *log*.bat
 *.bat.out
 
-# Databases
-data/*.db
-
-# Runtime trade state data
-data/trade_state.json
+# Data folder and all contents
+data/
 
 # Configuration files (user-specific)
 active_strategy.json

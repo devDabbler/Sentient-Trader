@@ -21,3 +21,11 @@ praw>=7.7.0  # Reddit API for social sentiment (avoids rate limiting)
 feedparser>=6.0.0  # Fast RSS feed parsing for Reddit (no rate limits!)
 httpx>=0.24.0  # Modern async HTTP client for RSS feeds
 apscheduler>=3.10.0  # Scheduled event detection
+
+# Performance Optimization Libraries
+ta-lib>=0.4.25  # Ultra-fast technical indicators (C implementation)
+numba>=0.58.0  # JIT compilation for mathematical operations
+polars>=0.20.0  # Fast DataFrame operations (5-10x faster than pandas)
+redis>=4.5.0  # High-speed caching (evaluate vs Supabase)
+tenacity>=8.2.0  # Robust retry logic with exponential backoff
+circuitbreaker>=1.4.0  # Circuit breaker pattern for resilience

@@ -97,8 +97,19 @@ class TopTradesScanner:
         'MULN', 'FFIE', 'AMTD', 'HKD', 'GFAI', 'ATAI', 'HOLO', 'IMPP'
     ]
     
-    def __init__(self):
+    def __init__(self, use_optimizations: bool = True):
         self.penny_analyzer = PennyStockAnalyzer()
+        self.use_optimizations = use_optimizations
+        
+        # Initialize optimizations if enabled
+        if self.use_optimizations:
+            try:
+                from .scanner_integration import create_optimized_scanner
+                self.optimized_scanner = create_optimized_scanner()
+                logger.info("✅ Optimizations enabled for TopTradesScanner")
+            except ImportError:
+                self.use_optimizations = False
+                logger.warning("⚠️ Optimizations not available, falling back to standard processing")
     
     def scan_top_options_trades(self, top_n: int = 20) -> List[TopTrade]:
         """
@@ -112,6 +123,39 @@ class TopTradesScanner:
         """
         logger.info(f"Scanning for top {top_n} options trades...")
         
+        if self.use_optimizations and hasattr(self, 'optimized_scanner'):
+            # Use optimized parallel processing
+            try:
+                logger.info("🚀 Using optimized parallel processing")
+                optimized_results = self.optimized_scanner.analyze_options_opportunities_optimized(
+                    self.OPTIONS_UNIVERSE, top_n
+                )
+                
+                # Convert to TopTrade objects
+                results = []
+                for result in optimized_results:
+                    trade = TopTrade(
+                        ticker=result['ticker'],
+                        score=result['score'],
+                        price=result['price'],
+                        change_pct=result['change_pct'],
+                        volume=result.get('volume', 0),
+                        volume_ratio=result['volume_ratio'],
+                        reason=result['reason'],
+                        trade_type='options',
+                        confidence=result['confidence'],
+                        risk_level=result['risk_level']
+                    )
+                    results.append(trade)
+                
+                logger.info(f"✅ Found {len(results)} options opportunities (optimized)")
+                return results[:top_n]
+                
+            except Exception as e:
+                logger.error(f"Optimization failed, falling back to standard: {e}")
+        
+        # Fallback to standard processing
+        logger.info("📊 Using standard sequential processing")
         results = []
         
         for ticker in self.OPTIONS_UNIVERSE:

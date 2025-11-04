@@ -51,6 +51,7 @@ from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
 from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
 from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
+from analyzers.trading_styles import TradingStyleAnalyzer
 from services.event_detectors.sec_detector import SECDetector
 from services.enhanced_catalyst_detector import EnhancedCatalystDetector
 
@@ -4919,7 +4920,7 @@ def main():
         with col_style:
             analysis_style = st.selectbox(
                 "Trading Style for Analysis",
-                ["OPTIONS", "DAY_TRADE", "SWING_TRADE"],
+                ["AI", "OPTIONS", "DAY_TRADE", "SWING_TRADE", "SCALP", "WARRIOR_SCALPING", "BUY_AND_HOLD"],
                 index=0,
                 help="Select the trading style to analyze your tickers with"
             )
@@ -5142,6 +5143,8 @@ def main():
                                 if should_refresh:
                                     with st.spinner(f"🔄 Analyzing {ticker_symbol} with latest data..."):
                                         analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, st.session_state.get('analysis_timeframe', 'OPTIONS'))
+                                        # Fetch historical data for trading style analysis
+                                        hist, _ = get_cached_stock_data(ticker_symbol)
                                     
                                     # Clear refresh flags
                                     if f"refresh_{ticker_symbol}" in st.session_state:
@@ -5469,6 +5472,32 @@ def main():
                                         else:
                                             st.warning("🔴 **POOR** for day trading - consider other timeframes")
                                     
+                                    elif trading_style == "AI":
+                                        # AI Analysis
+                                        st.write("🤖 **AI-Powered Analysis**")
+                                        ai_results = TradingStyleAnalyzer.analyze_ai_style(analysis, hist)
+                                        
+                                        # Display AI score and prediction
+                                        ai_col1, ai_col2, ai_col3 = st.columns(3)
+                                        with ai_col1:
+                                            st.metric("AI Score", f"{ai_results['score']}/100")
+                                        with ai_col2:
+                                            st.metric("ML Prediction", ai_results.get('ml_prediction', 'N/A'))
+                                        with ai_col3:
+                                            st.metric("Risk Level", ai_results.get('risk_level', 'UNKNOWN'))
+                                        
+                                        # Display signals
+                                        if ai_results.get('signals'):
+                                            st.write("**📊 AI Signals:**")
+                                            for signal in ai_results['signals']:
+                                                st.write(signal)
+                                        
+                                        # Display recommendations
+                                        if ai_results.get('recommendations'):
+                                            st.write("**💡 AI Recommendations:**")
+                                            for rec in ai_results['recommendations']:
+                                                st.write(rec)
+
                                     elif trading_style == "SWING_TRADE":
                                         # Swing trading focus: multi-day moves, wider stops
                                         timeframe_score = 0
@@ -5506,6 +5535,113 @@ def main():
                                         else:
                                             st.warning("🔴 **POOR** for swing trading - wait for better setup")
                                     
+                                    elif trading_style == "SCALP":
+                                        # Scalp Analysis
+                                        st.write("⚡ **Scalping Analysis**")
+                                        scalp_results = TradingStyleAnalyzer.analyze_scalp_style(analysis, hist)
+                                        
+                                        # Display scalp score and risk
+                                        scalp_col1, scalp_col2 = st.columns(2)
+                                        with scalp_col1:
+                                            st.metric("Scalping Score", f"{scalp_results['score']}/100")
+                                        with scalp_col2:
+                                            st.metric("Risk Level", scalp_results.get('risk_level', 'UNKNOWN'))
+                                        
+                                        # Display signals
+                                        if scalp_results.get('signals'):
+                                            st.write("**📊 Scalping Signals:**")
+                                            for signal in scalp_results['signals']:
+                                                st.write(signal)
+                                        
+                                        # Display targets
+                                        if scalp_results.get('targets'):
+                                            st.write("**🎯 Scalping Targets:**")
+                                            for target in scalp_results['targets']:
+                                                st.write(target)
+                                        
+                                        # Display recommendations
+                                        if scalp_results.get('recommendations'):
+                                            st.write("**💡 Scalping Strategy:**")
+                                            for rec in scalp_results['recommendations']:
+                                                st.write(rec)
+
+                                    elif trading_style == "WARRIOR_SCALPING":
+                                        # Warrior Scalping Analysis
+                                        st.write("⚔️ **Warrior Scalping Analysis**")
+                                        warrior_results = TradingStyleAnalyzer.analyze_warrior_scalping_style(analysis, hist)
+                                        
+                                        # Display warrior score and setup type
+                                        warrior_col1, warrior_col2, warrior_col3 = st.columns(3)
+                                        with warrior_col1:
+                                            st.metric("Warrior Score", f"{warrior_results['score']}/100")
+                                        with warrior_col2:
+                                            st.metric("Setup Type", warrior_results.get('setup_type', 'N/A'))
+                                        with warrior_col3:
+                                            st.metric("Risk Level", warrior_results.get('risk_level', 'UNKNOWN'))
+                                        
+                                        # Display signals
+                                        if warrior_results.get('signals'):
+                                            st.write("**📊 Warrior Signals:**")
+                                            for signal in warrior_results['signals']:
+                                                st.write(signal)
+                                        
+                                        # Display targets
+                                        if warrior_results.get('targets'):
+                                            st.write("**🎯 Warrior Targets:**")
+                                            for target in warrior_results['targets']:
+                                                st.write(target)
+                                        
+                                        # Display recommendations
+                                        if warrior_results.get('recommendations'):
+                                            st.write("**💡 Warrior Strategy:**")
+                                            for rec in warrior_results['recommendations']:
+                                                st.write(rec)
+
+                                    elif trading_style == "BUY_AND_HOLD":
+                                        # Buy & Hold Analysis
+                                        st.write("💎 **Buy & Hold Analysis**")
+                                        hold_results = TradingStyleAnalyzer.analyze_buy_and_hold_style(analysis, hist)
+                                        
+                                        # Display hold score and risk
+                                        hold_col1, hold_col2 = st.columns(2)
+                                        with hold_col1:
+                                            st.metric("Investment Score", f"{hold_results['score']}/100")
+                                        with hold_col2:
+                                            st.metric("Risk Level", hold_results.get('risk_level', 'UNKNOWN'))
+                                        
+                                        # Display valuation metrics
+                                        if hold_results.get('valuation'):
+                                            st.write("**📊 Valuation Metrics:**")
+                                            val_col1, val_col2, val_col3 = st.columns(3)
+                                            valuation = hold_results['valuation']
+                                            with val_col1:
+                                                if '200_day_ma' in valuation:
+                                                    st.metric("200-Day MA", valuation['200_day_ma'])
+                                            with val_col2:
+                                                if 'pe_ratio' in valuation:
+                                                    st.metric("P/E Ratio", valuation['pe_ratio'])
+                                            with val_col3:
+                                                if 'dividend_yield' in valuation:
+                                                    st.metric("Dividend Yield", valuation['dividend_yield'])
+                                        
+                                        # Display signals
+                                        if hold_results.get('signals'):
+                                            st.write("**📊 Investment Signals:**")
+                                            for signal in hold_results['signals']:
+                                                st.write(signal)
+                                        
+                                        # Display long-term targets
+                                        if hold_results.get('targets'):
+                                            st.write("**🎯 Long-Term Targets:**")
+                                            for target in hold_results['targets']:
+                                                st.write(target)
+                                        
+                                        # Display recommendations
+                                        if hold_results.get('recommendations'):
+                                            st.write("**💡 Investment Strategy:**")
+                                            for rec in hold_results['recommendations']:
+                                                st.write(rec)
+
                                     else:  # OPTIONS trading
                                         # Options trading focus: IV, time decay, volatility
                                         timeframe_score = 0
@@ -5780,40 +5916,128 @@ def main():
         if st.session_state.get('refresh_all_tickers', False):
             st.session_state.refresh_all_tickers = False
         
-        # Bulk ML Analysis Section
+        # Bulk Analysis Section with Trading Style Support
         if all_tickers:
             st.divider()
-            st.subheader("🧠 Bulk ML Analysis")
-            st.write("Run ML-enhanced analysis on all your saved tickers at once.")
+            st.subheader("🧠 Bulk Analysis")
             
-            if st.button("🚀 Analyze All My Tickers", type="primary", width="stretch"):
+            # Get the selected trading style from above
+            selected_style = st.session_state.get('analysis_timeframe', 'OPTIONS')
+            
+            bulk_col1, bulk_col2 = st.columns([3, 1])
+            with bulk_col1:
+                st.write(f"Run comprehensive analysis on all your saved tickers using **{selected_style}** trading style.")
+            with bulk_col2:
+                max_tickers = st.number_input("Max tickers", min_value=5, max_value=50, value=10, step=5, key="bulk_max")
+            
+            if st.button("🚀 Analyze All My Tickers", type="primary", use_container_width=True):
                 log_stream = io.StringIO()
                 st_handler = logging.StreamHandler(log_stream)
                 st_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-                # Add handler ONLY to the logger of the service we want to capture
                 alpha_factors_logger = logging.getLogger('services.alpha_factors')
                 alpha_factors_logger.addHandler(st_handler)
 
                 results = []
+                style_results = []  # Store trading style-specific results
+                
                 with st.expander("📊 Live Analysis Logs", expanded=True):
                     log_container = st.empty()
-                    with st.status("Analyzing your tickers with ML...", expanded=True) as status:
-                        ticker_list = [t['ticker'] for t in all_tickers[:10]]  # Limit to 10
+                    with st.status(f"Analyzing your tickers with {selected_style} style...", expanded=True) as status:
+                        ticker_list = [t['ticker'] for t in all_tickers[:max_tickers]]
+                        
                         for i, ticker_symbol in enumerate(ticker_list):
                             status.update(label=f"Analyzing {ticker_symbol} ({i+1}/{len(ticker_list)})...", state="running")
                             try:
-                                analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol)
+                                # Run comprehensive analysis with selected trading style
+                                analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, selected_style)
+                                
                                 if analysis:
                                     results.append(analysis.__dict__)
                                     tm.update_analysis(ticker_symbol, analysis.__dict__)
+                                    
+                                    # Run trading style-specific analysis
+                                    hist, _ = get_cached_stock_data(ticker_symbol)
+                                    if not hist.empty:
+                                        if selected_style == "AI":
+                                            style_result = TradingStyleAnalyzer.analyze_ai_style(analysis, hist)
+                                        elif selected_style == "SCALP":
+                                            style_result = TradingStyleAnalyzer.analyze_scalp_style(analysis, hist)
+                                        elif selected_style == "WARRIOR_SCALPING":
+                                            style_result = TradingStyleAnalyzer.analyze_warrior_scalping_style(analysis, hist)
+                                        elif selected_style == "BUY_AND_HOLD":
+                                            style_result = TradingStyleAnalyzer.analyze_buy_and_hold_style(analysis, hist)
+                                        else:
+                                            style_result = None
+                                        
+                                        if style_result:
+                                            style_result['ticker'] = ticker_symbol
+                                            style_result['analysis'] = analysis
+                                            style_results.append(style_result)
+                                            
                             except Exception as e:
                                 logging.error(f"⚠️ Error analyzing {ticker_symbol}: {e}")
                             log_container.code(log_stream.getvalue())
+                        
                         status.update(label="✅ Analysis complete!", state="complete")
                 
                 alpha_factors_logger.removeHandler(st_handler)
 
-                if results:
+                # Display results based on trading style
+                if style_results:
+                    # Sort by style-specific score
+                    style_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+                    st.success(f"✅ Analyzed {len(style_results)} tickers with {selected_style} style")
+                    
+                    st.subheader(f"🏆 Top {selected_style} Opportunities")
+                    
+                    for i, result in enumerate(style_results[:5], 1):
+                        ticker_sym = result['ticker']
+                        score = result.get('score', 0)
+                        analysis = result['analysis']
+                        
+                        # Score-based emoji
+                        emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
+                        
+                        with st.expander(f"{emoji} #{i} - **{ticker_sym}** - Score: {score}/100", expanded=(i <= 3)):
+                            # Basic metrics
+                            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                            with metric_col1:
+                                st.metric("Price", f"${analysis.price:.2f}", f"{analysis.change_pct:+.2f}%")
+                            with metric_col2:
+                                st.metric(f"{selected_style} Score", f"{score}/100")
+                            with metric_col3:
+                                st.metric("Risk Level", result.get('risk_level', 'N/A'))
+                            with metric_col4:
+                                st.metric("Trend", analysis.trend)
+                            
+                            # Style-specific signals
+                            if result.get('signals'):
+                                st.write("**📊 Key Signals:**")
+                                for signal in result['signals'][:5]:  # Top 5 signals
+                                    st.write(signal)
+                            
+                            # Style-specific recommendations
+                            if result.get('recommendations'):
+                                st.write("**💡 Recommendations:**")
+                                for rec in result['recommendations'][:3]:  # Top 3 recommendations
+                                    st.write(rec)
+                            
+                            # Targets if available
+                            if result.get('targets'):
+                                st.write("**🎯 Targets:**")
+                                for target in result['targets']:
+                                    st.write(target)
+                            
+                            # Special fields for specific styles
+                            if selected_style == "AI" and result.get('ml_prediction'):
+                                st.info(f"🤖 **ML Prediction:** {result['ml_prediction']}")
+                            elif selected_style == "WARRIOR_SCALPING" and result.get('setup_type'):
+                                st.info(f"⚔️ **Setup Type:** {result['setup_type']}")
+                            elif selected_style == "BUY_AND_HOLD" and result.get('valuation'):
+                                st.info(f"📊 **Valuation:** {result['valuation']}")
+                
+                elif results:
+                    # Fallback to standard results if no style-specific analysis
                     results.sort(key=lambda x: x['confidence_score'], reverse=True)
                     st.success(f"✅ Analyzed {len(results)} tickers")
                     st.subheader("🏆 Top Opportunities from Your Tickers")
