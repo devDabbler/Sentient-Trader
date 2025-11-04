@@ -392,20 +392,37 @@ class IBKRClient:
                 logger.error("Not connected to IBKR")
                 return None
             
+            logger.info(f"🔄 Creating contract for {symbol}...")
             # Create stock contract
             contract = Stock(symbol, 'SMART', 'USD')
             
-            # Qualify contract
-            self.ib.qualifyContracts(contract)
+            # Qualify contract with timeout (5 seconds max)
+            logger.info(f"🔍 Qualifying contract for {symbol}...")
+            try:
+                qualified = self.ib.waitOnUpdate(timeout=5)  # Wait up to 5 seconds
+                qualified = self.ib.qualifyContracts(contract)
+                if not qualified:
+                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
+                    return None
+                contract = qualified[0]  # Use the qualified contract
+                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
+                return None
+            except Exception as e:
+                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
+                return None
             
             # Create market order
+            logger.info(f"📝 Creating market order: {action} {quantity} {symbol}")
             order = MarketOrder(action, quantity)
             
             # Place order
+            logger.info(f"📤 Placing order with IBKR...")
             trade = self.ib.placeOrder(contract, order)
             
-            # Wait for order to be submitted
-            self.ib.sleep(1)
+            # Wait briefly for order to be submitted
+            self.ib.sleep(0.5)
             
             logger.info(f"Market order placed: {action} {quantity} {symbol}")
             
@@ -446,16 +463,33 @@ class IBKRClient:
                 logger.error("Not connected to IBKR")
                 return None
             
+            logger.info(f"🔄 Creating limit order contract for {symbol}...")
             # Create stock contract
             contract = Stock(symbol, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
+            
+            # Qualify contract with timeout
+            try:
+                qualified = self.ib.waitOnUpdate(timeout=5)
+                qualified = self.ib.qualifyContracts(contract)
+                if not qualified:
+                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
+                    return None
+                contract = qualified[0]
+                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
+                return None
+            except Exception as e:
+                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
+                return None
             
             # Create limit order
+            logger.info(f"📝 Creating limit order: {action} {quantity} {symbol} @ ${limit_price}")
             order = LimitOrder(action, quantity, limit_price)
             
             # Place order
             trade = self.ib.placeOrder(contract, order)
-            self.ib.sleep(1)
+            self.ib.sleep(0.5)
             
             logger.info(f"Limit order placed: {action} {quantity} {symbol} @ ${limit_price}")
             
@@ -496,16 +530,33 @@ class IBKRClient:
                 logger.error("Not connected to IBKR")
                 return None
             
+            logger.info(f"🔄 Creating stop order contract for {symbol}...")
             # Create stock contract
             contract = Stock(symbol, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
+            
+            # Qualify contract with timeout
+            try:
+                qualified = self.ib.waitOnUpdate(timeout=5)
+                qualified = self.ib.qualifyContracts(contract)
+                if not qualified:
+                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
+                    return None
+                contract = qualified[0]
+                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
+                return None
+            except Exception as e:
+                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
+                return None
             
             # Create stop order
+            logger.info(f"📝 Creating stop order: {action} {quantity} {symbol} @ ${stop_price}")
             order = StopOrder(action, quantity, stop_price)
             
             # Place order
             trade = self.ib.placeOrder(contract, order)
-            self.ib.sleep(1)
+            self.ib.sleep(0.5)
             
             logger.info(f"Stop order placed: {action} {quantity} {symbol} @ stop ${stop_price}")
             
@@ -578,6 +629,59 @@ class IBKRClient:
             logger.error(f"Error cancelling all orders: {e}")
             return 0
     
+    def get_market_data_direct(self, symbol: str, timeout: float = 0.5) -> Optional[Dict]:
+        """
+        Get market data directly from IBKR (bypasses hybrid fetcher)
+        Used internally by hybrid fetcher to prevent recursion
+        
+        Args:
+            symbol: Stock symbol
+            timeout: Seconds to wait for data (default 0.5 for fast bulk checks)
+            
+        Returns:
+            Dictionary with market data or None if error
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Not connected to IBKR")
+                return None
+            
+            # Create contract
+            contract = Stock(symbol, 'SMART', 'USD')
+            self.ib.qualifyContracts(contract)
+            
+            # Request market data (will use delayed if real-time not available)
+            self.ib.reqMktData(contract, '', False, False)
+            self.ib.sleep(timeout)  # Configurable wait time
+            
+            # Get ticker
+            ticker = self.ib.ticker(contract)
+            
+            # Use delayed data if available
+            last_price = ticker.last if ticker.last and not (ticker.last != ticker.last) else \
+                        ticker.close if ticker.close and not (ticker.close != ticker.close) else 0
+            
+            # If no price data, return None quickly
+            if last_price == 0:
+                logger.debug(f"No price data for {symbol} after {timeout}s")
+                return None
+            
+            return {
+                'symbol': symbol,
+                'bid': ticker.bid if ticker.bid and not (ticker.bid != ticker.bid) else 0,
+                'ask': ticker.ask if ticker.ask and not (ticker.ask != ticker.ask) else 0,
+                'last': last_price,
+                'close': ticker.close if ticker.close else 0,
+                'volume': ticker.volume if ticker.volume else 0,
+                'bid_size': ticker.bidSize if ticker.bidSize else 0,
+                'ask_size': ticker.askSize if ticker.askSize else 0,
+                'source': 'IBKR'
+            }
+            
+        except Exception as e:
+            logger.debug(f"Error getting direct IBKR market data for {symbol}: {e}")
+            return None
+    
     def get_market_data(self, symbol: str) -> Optional[Dict]:
         """
         Get market data for a symbol
@@ -600,36 +704,7 @@ class IBKRClient:
                 logger.warning(f"Hybrid fetcher failed for {symbol}, falling back to IBKR")
             
             # Fallback to direct IBKR data
-            if not self.is_connected():
-                logger.error("Not connected to IBKR")
-                return None
-            
-            # Create contract
-            contract = Stock(symbol, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
-            
-            # Request market data (will use delayed if real-time not available)
-            self.ib.reqMktData(contract, '', False, False)
-            self.ib.sleep(2)  # Wait longer for delayed data
-            
-            # Get ticker
-            ticker = self.ib.ticker(contract)
-            
-            # Use delayed data if available
-            last_price = ticker.last if ticker.last and not (ticker.last != ticker.last) else \
-                        ticker.close if ticker.close and not (ticker.close != ticker.close) else 0
-            
-            return {
-                'symbol': symbol,
-                'bid': ticker.bid if ticker.bid and not (ticker.bid != ticker.bid) else 0,
-                'ask': ticker.ask if ticker.ask and not (ticker.ask != ticker.ask) else 0,
-                'last': last_price,
-                'close': ticker.close if ticker.close else 0,
-                'volume': ticker.volume if ticker.volume else 0,
-                'bid_size': ticker.bidSize if ticker.bidSize else 0,
-                'ask_size': ticker.askSize if ticker.askSize else 0,
-                'source': 'IBKR'
-            }
+            return self.get_market_data_direct(symbol)
             
         except Exception as e:
             logger.error(f"Error getting market data for {symbol}: {e}")

@@ -78,11 +78,12 @@ class HybridDataFetcher:
         return quote
     
     def _get_ibkr_quote(self, symbol: str) -> Optional[Dict]:
-        """Get quote from IBKR"""
+        """Get quote from IBKR (uses direct method to prevent recursion)"""
         if not self.ibkr_client:
             return None
         
-        market_data = self.ibkr_client.get_market_data(symbol)
+        # Use get_market_data_direct to prevent recursion loop
+        market_data = self.ibkr_client.get_market_data_direct(symbol)
         if not market_data:
             return None
         

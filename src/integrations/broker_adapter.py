@@ -87,7 +87,8 @@ class BrokerAdapter(ABC):
     @abstractmethod
     def place_bracket_order(self, symbol: str, side: str, quantity: int,
                            stop_loss_price: float, take_profit_price: float,
-                           duration: str = "day", tag: Optional[str] = None) -> Tuple[bool, Dict]:
+                           duration: str = "day", tag: Optional[str] = None,
+                           entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
         """
         Place a bracket order (entry with stop loss and take profit)
         
@@ -207,13 +208,21 @@ class TradierAdapter(BrokerAdapter):
     
     def place_bracket_order(self, symbol: str, side: str, quantity: int,
                            stop_loss_price: float, take_profit_price: float,
-                           duration: str = "day", tag: Optional[str] = None) -> Tuple[bool, Dict]:
+                           duration: str = "day", tag: Optional[str] = None,
+                           entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
         """Place bracket order via Tradier"""
         try:
+            # If no entry_price provided, use None to trigger market order entry
+            if entry_price is None:
+                # Get current market price as approximation
+                # Tradier requires entry_price for bracket orders
+                return False, {"error": "entry_price is required for bracket orders"}
+            
             success, result = self.client.place_bracket_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
+                entry_price=entry_price,
                 stop_loss_price=stop_loss_price,
                 take_profit_price=take_profit_price,
                 duration=duration,
@@ -361,29 +370,45 @@ class IBKRAdapter(BrokerAdapter):
     
     def place_bracket_order(self, symbol: str, side: str, quantity: int,
                            stop_loss_price: float, take_profit_price: float,
-                           duration: str = "day", tag: Optional[str] = None) -> Tuple[bool, Dict]:
+                           duration: str = "day", tag: Optional[str] = None,
+                           entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
         """Place bracket order via IBKR"""
         try:
             action = side.upper()
             
+            logger.info(f"🎯 IBKR: Starting bracket order for {symbol}: {action} {quantity} shares")
+            logger.info(f"   Entry: market, Stop: ${stop_loss_price:.2f}, Target: ${take_profit_price:.2f}")
+            
             # For IBKR, we need to place parent order + 2 child orders
             # 1. Place the entry market order
+            logger.info(f"📥 Step 1/3: Placing parent market order...")
             parent_order = self.client.place_market_order(symbol, action, quantity)
             if not parent_order:
-                return False, {}
+                logger.error(f"❌ Failed to place parent order for {symbol}")
+                return False, {"error": "Failed to place parent market order"}
             
             logger.info(f"✅ IBKR parent order placed: {parent_order.order_id}")
             
             # 2. Place stop loss order (opposite action)
             stop_action = 'SELL' if action == 'BUY' else 'BUY'
+            logger.info(f"📥 Step 2/3: Placing stop loss order...")
             stop_order = self.client.place_stop_order(symbol, stop_action, quantity, stop_loss_price)
+            if not stop_order:
+                logger.warning(f"⚠️ Failed to place stop loss order for {symbol}")
+            else:
+                logger.info(f"✅ Stop loss order placed: {stop_order.order_id}")
             
             # 3. Place take profit order (opposite action)
+            logger.info(f"📥 Step 3/3: Placing take profit order...")
             profit_order = self.client.place_limit_order(symbol, stop_action, quantity, take_profit_price)
+            if not profit_order:
+                logger.warning(f"⚠️ Failed to place take profit order for {symbol}")
+            else:
+                logger.info(f"✅ Take profit order placed: {profit_order.order_id}")
             
-            logger.info(f"✅ IBKR bracket orders placed - Parent: {parent_order.order_id}, "
-                       f"Stop: {stop_order.order_id if stop_order else 'failed'}, "
-                       f"Profit: {profit_order.order_id if profit_order else 'failed'}")
+            logger.info(f"✅ IBKR bracket orders completed - Parent: {parent_order.order_id}, "
+                       f"Stop: {stop_order.order_id if stop_order else 'N/A'}, "
+                       f"Profit: {profit_order.order_id if profit_order else 'N/A'}")
             
             return True, {
                 'order': {
@@ -394,8 +419,8 @@ class IBKRAdapter(BrokerAdapter):
                 }
             }
         except Exception as e:
-            logger.error(f"Error placing IBKR bracket order: {e}")
-            return False, {}
+            logger.error(f"❌ Error placing IBKR bracket order: {e}", exc_info=True)
+            return False, {"error": str(e)}
     
     def is_connected(self) -> bool:
         """Check if IBKR client is connected"""

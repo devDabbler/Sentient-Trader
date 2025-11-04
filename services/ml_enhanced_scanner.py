@@ -84,7 +84,9 @@ class MLEnhancedScanner:
     
     def scan_top_options_with_ml(self, 
                                   top_n: int = 20,
-                                  min_ensemble_score: float = 70.0) -> List[MLEnhancedTrade]:
+                                  min_ensemble_score: float = 70.0,
+                                  min_price: float = None,
+                                  max_price: float = None) -> List[MLEnhancedTrade]:
         """
         Scan for top options with ML + LLM confidence.
         
@@ -101,10 +103,13 @@ class MLEnhancedScanner:
         logger.info(f"🎯 Starting ML-Enhanced scan for top {top_n} options (min ensemble score: {min_ensemble_score})...")
         
         # Step 1: Get AI confidence trades (LLM + Quant)
+        # IMPORTANT: Pass price filters HERE to avoid wasting LLM calls on expensive stocks
         ai_trades = self.ai_scanner.scan_top_options_with_ai(
             top_n=top_n * 2,  # Get more candidates for ML filtering
             min_ai_rating=4.0,  # Lower threshold, ML will filter
-            min_score=45.0
+            min_score=45.0,
+            min_price=min_price,  # Filter BEFORE AI analysis
+            max_price=max_price   # Filter BEFORE AI analysis
         )
         
         if not ai_trades:
@@ -113,8 +118,26 @@ class MLEnhancedScanner:
         
         logger.info(f"✓ Got {len(ai_trades)} AI-analyzed trades")
         
+        # Step 1.5: Apply price filters if specified
+        if min_price or max_price:
+            filtered_trades = []
+            price_rejected = 0
+            for trade in ai_trades:
+                if min_price and trade.price < min_price:
+                    price_rejected += 1
+                    continue
+                if max_price and trade.price > max_price:
+                    price_rejected += 1
+                    continue
+                filtered_trades.append(trade)
+            
+            if price_rejected > 0:
+                logger.info(f"💰 Price Filter: Removed {price_rejected} trades outside ${min_price or 0:.2f}-${max_price or 999999:.2f} range")
+            ai_trades = filtered_trades
+        
         # Step 2: Enhance with ML predictions
         ml_trades = []
+        rejected_trades = []
         
         for trade in ai_trades:
             ml_enhanced = self._enhance_with_ml(trade, 'options')
@@ -122,14 +145,27 @@ class MLEnhancedScanner:
             # Only include if ensemble score meets threshold
             if ml_enhanced.combined_score >= min_ensemble_score:
                 ml_trades.append(ml_enhanced)
-                logger.info(f"✓ {trade.ticker}: Combined={ml_enhanced.combined_score:.1f} "
+                logger.info(f"✅ PASS {trade.ticker}: Ensemble={ml_enhanced.combined_score:.1f} "
                           f"(ML={ml_enhanced.ml_prediction_score:.1f}, "
-                          f"AI={trade.ai_rating}, Quant={trade.score:.1f})")
+                          f"AI={trade.ai_rating*10:.1f}, Quant={trade.score:.1f})")
             else:
-                logger.debug(f"✗ {trade.ticker}: Combined score {ml_enhanced.combined_score:.1f} < {min_ensemble_score}")
+                rejected_trades.append((trade.ticker, ml_enhanced.combined_score, 
+                                       ml_enhanced.ml_prediction_score, trade.ai_rating*10, trade.score))
+                logger.info(f"❌ REJECT {trade.ticker}: Ensemble={ml_enhanced.combined_score:.1f} < {min_ensemble_score} "
+                          f"(ML={ml_enhanced.ml_prediction_score:.1f}, "
+                          f"AI={trade.ai_rating*10:.1f}, Quant={trade.score:.1f})")
         
         # Step 3: Sort by combined score
         ml_trades.sort(key=lambda x: x.combined_score, reverse=True)
+        
+        # Log summary of rejections
+        if rejected_trades:
+            logger.info(f"📊 REJECTION SUMMARY: {len(rejected_trades)} trades below threshold of {min_ensemble_score}")
+            # Sort rejected by ensemble score and show top 5
+            rejected_trades.sort(key=lambda x: x[1], reverse=True)
+            logger.info(f"   Top 5 closest to threshold:")
+            for ticker, ens, ml, ai, quant in rejected_trades[:5]:
+                logger.info(f"   • {ticker}: {ens:.1f} (ML:{ml:.1f} AI:{ai:.1f} Q:{quant:.1f}) - missed by {min_ensemble_score-ens:.1f}")
         
         # Step 4: Return top N
         final_trades = ml_trades[:top_n]

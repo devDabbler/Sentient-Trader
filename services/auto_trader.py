@@ -62,8 +62,13 @@ class AutoTraderConfig:
     # AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO)
     use_ml_enhanced_scanner: bool = False  # Enable ML-Enhanced Scanner (40% ML + 35% LLM + 25% Quant)
     use_ai_validation: bool = False  # Enable AI pre-trade validation (secondary knockout check)
+    use_ai_capital_advisor: bool = True  # Enable AI Capital Advisor for dynamic position sizing
+    best_pick_only_mode: bool = True  # Focus on highest confidence trade when capital is limited
     min_ensemble_score: float = 70.0  # Minimum ensemble score for ML-Enhanced Scanner (0-100)
     min_ai_validation_confidence: float = 0.7  # Minimum AI validation confidence (0-1)
+    # Price Filters (for small capital accounts)
+    min_stock_price: Optional[float] = None  # Minimum stock price filter
+    max_stock_price: Optional[float] = None  # Maximum stock price filter
     # Position Exit Monitoring (CRITICAL SAFETY FEATURE)
     enable_position_monitoring: bool = True  # Monitor and auto-close positions
     position_check_interval_seconds: int = 30  # How often to check positions (30s recommended)
@@ -102,9 +107,26 @@ class AutoTrader:
         self.daily_orders = 0
         self.last_reset_date = datetime.now().date()
         self.execution_history = []
-        self._cash_manager: Optional[CashManager] = None
         self._daily_realized_pnl: float = 0.0
         self._consecutive_losses: int = 0
+        
+        # Initialize Cash Manager for PDT-safe position sizing (ALWAYS initialize, even if not using settled funds)
+        self._cash_manager: Optional[CashManager] = None
+        try:
+            from services.cash_manager import CashManager, CashManagerConfig
+            cm_cfg = CashManagerConfig(
+                initial_settled_cash=config.total_capital,
+                num_buckets=config.cash_buckets if config.use_settled_funds_only else 1,  # Single bucket if not using settlement
+                t_plus_days=config.t_plus_settlement_days,
+                use_settled_only=config.use_settled_funds_only,
+            )
+            self._cash_manager = CashManager(cm_cfg)
+            if config.use_settled_funds_only:
+                logger.info(f"💵 Cash Manager initialized: {config.cash_buckets} buckets, T+{config.t_plus_settlement_days} settlement")
+            else:
+                logger.info(f"💵 Cash Manager initialized: 1 bucket (settled funds tracking disabled)")
+        except Exception as e:
+            logger.warning(f"⚠️ Cash Manager initialization failed: {e}")
         
         # Trade state manager (persistent state across restarts)
         self.state_manager = TradeStateManager()
@@ -117,6 +139,16 @@ class AutoTrader:
             reserve_cash_pct=config.reserve_cash_pct
         )
         logger.info(f"💰 Capital Manager initialized: ${config.total_capital:,.2f} total, {config.reserve_cash_pct}% reserve")
+        
+        # AI Capital Advisor (NEW - dynamic position sizing)
+        self._capital_advisor = None
+        if getattr(config, 'use_ai_capital_advisor', True):
+            try:
+                from services.ai_capital_advisor import AICapitalAdvisor
+                self._capital_advisor = AICapitalAdvisor(llm_analyzer=signal_generator if hasattr(signal_generator, 'analyze_with_llm') else None)
+                logger.info("🧠 AI Capital Advisor ENABLED: Dynamic position sizing based on trade quality & capital")
+            except Exception as e:
+                logger.warning(f"⚠️ AI Capital Advisor not available: {e}")
         
         # Short position tracking (for paper trading)
         # Format: {symbol: {'quantity': int, 'entry_price': float, 'entry_time': datetime}}
@@ -326,6 +358,27 @@ class AutoTrader:
                 # Execute high-confidence signals
                 if signals:
                     logger.info(f"Found {len(signals)} signals")
+                    
+                    # BEST-PICK-ONLY MODE: If capital is limited, focus on highest confidence trade
+                    if self._capital_manager and getattr(self.config, 'best_pick_only_mode', True):
+                        available = self._capital_manager.get_available_capital()
+                        utilization = self._capital_manager.get_utilization_pct()
+                        
+                        # Trigger best-pick mode if capital is very limited
+                        if available < 200 or utilization > 85:
+                            # Sort signals by confidence (highest first)
+                            buy_signals = [s for s in signals if s.signal == 'BUY']
+                            if buy_signals:
+                                buy_signals.sort(key=lambda x: x.confidence, reverse=True)
+                                best_signal = buy_signals[0]
+                                
+                                logger.info(f"💎 BEST-PICK-ONLY MODE: Limited capital (${available:.2f}, {utilization:.1f}% utilized)")
+                                logger.info(f"   Focusing on highest confidence trade: {best_signal.symbol} ({best_signal.confidence:.1f}%)")
+                                logger.info(f"   Skipping {len(buy_signals)-1} other opportunities to maximize best setup")
+                                
+                                # Only process the best signal
+                                signals = [best_signal] + [s for s in signals if s.signal == 'SELL']
+                    
                     for signal in signals:
                         # Log signal details
                         logger.info(f"📊 {signal.symbol}: {signal.signal} signal, confidence={signal.confidence:.1f}%, min_required={self.config.min_confidence}%")
@@ -580,12 +633,29 @@ class AutoTrader:
                 # Scan for stock/options opportunities
                 logger.info(f"📊 Scanning for {self.config.trading_mode} opportunities with ML-Enhanced Scanner...")
                 
+                # Get price filters from config if available
+                min_price = getattr(self.config, 'min_stock_price', None)
+                max_price = getattr(self.config, 'max_stock_price', None)
+                
+                if min_price or max_price:
+                    logger.info(f"💰 Price Filter Active: ${min_price or 0:.2f} - ${max_price or 999999:.2f}")
+                
                 ml_trades = self._ml_scanner.scan_top_options_with_ml(
                     top_n=20,
-                    min_ensemble_score=self.config.min_ensemble_score
+                    min_ensemble_score=self.config.min_ensemble_score,
+                    min_price=min_price,
+                    max_price=max_price
                 )
                 
                 logger.info(f"✅ ML-Enhanced Scanner found {len(ml_trades)} high-confidence opportunities")
+                
+                # Log top opportunities with detailed scores
+                if ml_trades:
+                    logger.info(f"📈 TOP OPPORTUNITIES (Ensemble ≥ {self.config.min_ensemble_score}):")
+                    for i, trade in enumerate(ml_trades[:5], 1):
+                        logger.info(f"   #{i}. {trade.ticker}: Ensemble={trade.combined_score:.1f} "
+                                  f"(ML:{trade.ml_prediction_score:.1f} AI:{trade.ai_rating*10:.1f} Q:{trade.score:.1f}) "
+                                  f"Price=${trade.price:.2f}")
                 
                 # Convert ML trades to TradingSignals
                 from services.ai_trading_signals import TradingSignal
@@ -648,8 +718,9 @@ class AutoTrader:
             available_capital = self._capital_manager.get_available_capital() if self._capital_manager else 0
             utilization = self._capital_manager.get_utilization_pct() if self._capital_manager else 0
             
-            # Build validation prompt
-            position_value = signal.entry_price * max(signal.position_size, 100) if signal.entry_price else 0
+            # Build validation prompt - use ACTUAL position size, not inflated default
+            actual_position_size = signal.position_size if signal.position_size and signal.position_size > 0 else 1
+            position_value = signal.entry_price * actual_position_size if signal.entry_price else 0
             risk_reward = ((signal.target_price - signal.entry_price) / (signal.entry_price - signal.stop_loss)) if (signal.entry_price and signal.stop_loss and signal.target_price) else 0
             
             prompt = f"""You are an expert risk manager. Perform a final validation check on this trade before execution.
@@ -833,7 +904,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             if self._cash_manager is None:
                 cm_cfg = CashManagerConfig(
                     initial_settled_cash=float(settled_cash or account_balance),
-                    num_buckets=self.config.cash_buckets,
+                    num_buckets=self.config.cash_buckets if self.config.use_settled_funds_only else 1,  # Single bucket if not using settlement
                     t_plus_days=self.config.t_plus_settlement_days,
                     use_settled_only=self.config.use_settled_funds_only,
                 )
@@ -917,10 +988,15 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 logger.info(f"⚔️ Filtering watchlist by price range: ${min_price}-${max_price}")
                 logger.info(f"   📋 Checking prices for {len(tickers_to_scan)} tickers...")
                 try:
+                    import yfinance as yf
+                    
                     # Get current prices for watchlist tickers and filter
                     filtered_tickers = []
                     checked_count = 0
                     error_count = 0
+                    
+                    # Use yfinance for fast bulk price checks (much faster than IBKR)
+                    logger.info(f"   🚀 Using yfinance for fast bulk price checks...")
                     
                     for ticker in tickers_to_scan:
                         try:
@@ -928,25 +1004,37 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             if checked_count % 5 == 0:  # Log progress every 5 tickers
                                 logger.info(f"   🔍 Progress: {checked_count}/{len(tickers_to_scan)} tickers checked...")
                             
-                            quote = self.tradier_client.get_quote(ticker)
-                            if quote:
-                                price = float(quote.get('last', 0) or quote.get('bid', 0) or 0)
-                                if price == 0:
-                                    # No valid price, skip this ticker
-                                    logger.info(f"  ⚠️ {ticker}: No valid price available, skipping")
-                                    continue
-                                    
-                                if min_price <= price <= max_price:
-                                    filtered_tickers.append(ticker)
-                                    logger.info(f"  ✅ {ticker}: ${price:.2f} (IN RANGE)")
+                            # Use yfinance for fast price check
+                            try:
+                                yf_ticker = yf.Ticker(ticker)
+                                info = yf_ticker.fast_info
+                                price = info.get('lastPrice', 0)
+                                if not price:
+                                    # Fallback to regular info
+                                    info = yf_ticker.info
+                                    price = info.get('currentPrice', info.get('regularMarketPrice', 0))
+                            except:
+                                # Fallback to broker if yfinance fails
+                                quote = self.tradier_client.get_quote(ticker)
+                                if quote:
+                                    price = float(quote.get('last', 0) or quote.get('bid', 0) or 0)
                                 else:
-                                    logger.info(f"  ❌ {ticker}: ${price:.2f} (outside ${min_price}-${max_price} range)")
-                            else:
-                                # If we can't get quote, skip it (don't include)
-                                logger.info(f"  ⚠️ {ticker}: Failed to get quote, skipping")
+                                    price = 0
+                            
+                            if price == 0:
+                                # No valid price, skip this ticker
+                                logger.debug(f"  ⚠️ {ticker}: No valid price available, skipping")
                                 error_count += 1
+                                continue
+                                
+                            if min_price <= price <= max_price:
+                                filtered_tickers.append(ticker)
+                                logger.info(f"  ✅ {ticker}: ${price:.2f} (IN RANGE)")
+                            else:
+                                logger.debug(f"  ❌ {ticker}: ${price:.2f} (outside ${min_price}-${max_price} range)")
+                                
                         except Exception as e:
-                            logger.warning(f"  ⚠️ Error checking price for {ticker}: {e}")
+                            logger.debug(f"  ⚠️ Error checking price for {ticker}: {e}")
                             error_count += 1
                             # Skip tickers with errors (don't include)
                             continue
@@ -1233,6 +1321,135 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             logger.error(f"Error enhancing {ticker} with ML: {e}", exc_info=True)
             return None
     
+    def _calculate_position_size(self, signal, available_capital=None):
+        """
+        Calculate position size for a signal.
+        Returns: (shares, success) tuple
+        """
+        try:
+            # Check prerequisites
+            if not hasattr(signal, 'entry_price') or not signal.entry_price:
+                logger.warning(f"⚠️ Signal for {signal.symbol} missing entry_price")
+                return 0, False
+            if not hasattr(signal, 'stop_loss') or not signal.stop_loss:
+                logger.warning(f"⚠️ Signal for {signal.symbol} missing stop_loss")
+                return 0, False
+            if not self._cash_manager:
+                logger.warning(f"⚠️ Cash manager not initialized")
+                return 0, False
+            
+            bal_success, bal_data = self.tradier_client.get_account_balance()
+            if not bal_success:
+                raise APIError("Failed to retrieve account balance")
+            if not isinstance(bal_data, dict):
+                raise DataProcessingError("Invalid account balance data")
+            
+            settled_cash = None
+            total_equity = 10000.0
+            b = bal_data.get('balances', {})
+            raw_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
+            total_equity = float(b.get('total_equity', raw_cash or 10000.0))
+            logger.info(f"💵 Account balance: raw_cash=${raw_cash:.2f}, total_equity=${total_equity:.2f}")
+            
+            # Use actual broker cash for settlement tracking, but respect config.total_capital limit
+            settled_cash = self._cash_manager.get_settled_cash(raw_cash)
+            logger.info(f"💵 Settled cash after T+{self.config.t_plus_settlement_days}: ${settled_cash:.2f}")
+            
+            # Limit to configured total capital (e.g., only use $800 of $10k account)
+            if settled_cash > self.config.total_capital:
+                logger.info(f"💵 Limiting to configured capital: ${self.config.total_capital:.2f} (broker has ${settled_cash:.2f})")
+                settled_cash = self.config.total_capital
+
+            bucket_idx = self._cash_manager.select_active_bucket()
+            bucket_cash = self._cash_manager.bucket_target_cash(settled_cash, bucket_idx)
+            logger.info(f"💵 Bucket #{bucket_idx} cash: ${bucket_cash:.2f}")
+
+            risk_pct = self.config.risk_per_trade_pct
+            # If down >2% on day, halve risk
+            if self._daily_realized_pnl <= -2.0:
+                risk_pct = max(0.005, risk_pct / 2.0)
+
+            shares_by_risk = self._cash_manager.compute_position_size_by_risk(
+                account_equity=total_equity,
+                risk_perc=risk_pct,
+                entry_price=signal.entry_price,
+                stop_price=signal.stop_loss,
+            )
+            logger.info(f"💵 Calling clamp_to_settled_cash: shares={shares_by_risk}, entry=${signal.entry_price:.2f}, bucket_cash=${bucket_cash:.2f}, reserve={self.config.reserve_cash_pct}%")
+            affordable = self._cash_manager.clamp_to_settled_cash(
+                shares=shares_by_risk,
+                entry_price=signal.entry_price,
+                settled_cash=bucket_cash,
+                reserve_pct=self.config.reserve_cash_pct / 100.0,  # Convert percentage to decimal
+            )
+            logger.info(f"💵 clamp_to_settled_cash returned: {affordable} shares")
+            
+            # Use capital manager max position size
+            max_position_dollars = self._capital_manager.get_max_position_size() if self._capital_manager else (total_equity * (self.config.max_position_size_pct / 100.0))
+            max_by_pct = int(max_position_dollars // signal.entry_price)
+            
+            # Also check available capital
+            if self._capital_manager:
+                if available_capital is None:
+                    available_capital = self._capital_manager.get_available_capital()
+                max_by_available = int(available_capital // signal.entry_price)
+                max_by_pct = min(max_by_pct, max_by_available)
+                logger.info(f"📊 Position sizing: risk-based={shares_by_risk}, affordable={affordable}, max_pct={max_by_pct}, avail_cap={max_by_available}")
+            
+            final_shares = max(0, min(affordable, max_by_pct))
+            logger.info(f"💰 Final position sizing: {final_shares} shares (${final_shares * signal.entry_price:.2f})")
+            
+            # AI Capital Advisor Override
+            if self._capital_advisor and final_shares > 0:
+                try:
+                    # Get current portfolio state
+                    open_positions = len(self.state_manager.get_all_open_positions())
+                    max_positions = getattr(self.config, 'max_concurrent_positions', 10)
+                    
+                    # Get AI recommendation
+                    recommendation = self._capital_advisor.recommend_position_size(
+                        ticker=signal.symbol,
+                        price=signal.entry_price,
+                        signal_confidence=signal.confidence,
+                        risk_level=signal.risk_level if hasattr(signal, 'risk_level') else 'M',
+                        available_capital=available_capital if available_capital else bucket_cash,
+                        total_capital=self.config.total_capital,
+                        current_positions=open_positions,
+                        max_positions=max_positions,
+                        ensemble_score=getattr(signal, 'technical_score', signal.confidence),
+                        ai_reasoning=signal.reasoning if hasattr(signal, 'reasoning') else None,
+                        use_ai_reasoning=True
+                    )
+                    
+                    if recommendation.is_approved and recommendation.recommended_shares > 0:
+                        logger.info(f"🧠 AI Capital Advisor: {recommendation.recommended_shares} shares (${recommendation.recommended_position_value:.2f}, {recommendation.recommended_position_size_pct:.1f}%)")
+                        logger.info(f"   Reasoning: {recommendation.reasoning}")
+                        
+                        # Use AI recommendation if it's more conservative
+                        final_shares = min(final_shares, recommendation.recommended_shares)
+                    else:
+                        logger.warning(f"⚠️ AI Capital Advisor: Position not approved")
+                        for warning in recommendation.warnings:
+                            logger.warning(f"   - {warning}")
+                        if not recommendation.is_approved:
+                            logger.info("AI Capital Advisor rejected this position size; skipping trade")
+                            return 0, False
+                except Exception as e:
+                    logger.error(f"Error getting AI capital recommendation: {e}")
+                    # Continue with traditional sizing on error
+            
+            return final_shares, True
+            
+        except APIError as e:
+            logger.error(f"API Error sizing position: {e}")
+            return 0, False
+        except DataProcessingError as e:
+            logger.error(f"Error processing account balance data: {e}")
+            return 0, False
+        except Exception as e:
+            logger.error(f"Error calculating position size: {e}")
+            return 0, False
+    
     def _execute_signal(self, signal):
         """Execute a trading signal"""
         try:
@@ -1287,20 +1504,32 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                     # Opening a long position
                     logger.info(f"✅ BUY signal validated - opening LONG position in {signal.symbol}")
                     
-                    # CHECK CAPITAL AVAILABILITY (NEW)
+                    # CHECK CAPITAL AVAILABILITY
+                    available_capital = None
                     if self._capital_manager:
-                        available = self._capital_manager.get_available_capital()
+                        available_capital = self._capital_manager.get_available_capital()
                         utilization = self._capital_manager.get_utilization_pct()
                         
                         if utilization >= self.config.max_capital_utilization_pct:
                             logger.warning(f"⚠️ Capital utilization too high ({utilization:.1f}% >= {self.config.max_capital_utilization_pct}%), skipping {signal.symbol}")
                             return
                         
-                        if available <= 0:
-                            logger.warning(f"⚠️ No capital available (${available:.2f}), skipping {signal.symbol}")
+                        if available_capital <= 0:
+                            logger.warning(f"⚠️ No capital available (${available_capital:.2f}), skipping {signal.symbol}")
                             return
                         
-                        logger.info(f"💰 Capital check: ${available:,.2f} available ({utilization:.1f}% utilization)")
+                        logger.info(f"💰 Capital check: ${available_capital:,.2f} available ({utilization:.1f}% utilization)")
+                    
+                    # CALCULATE POSITION SIZE BEFORE AI VALIDATION
+                    # This ensures AI validator sees the correct, affordable position size
+                    calculated_shares, sizing_success = self._calculate_position_size(signal, available_capital)
+                    if not sizing_success or calculated_shares <= 0:
+                        logger.warning(f"⚠️ Position sizing failed or returned 0 shares, skipping {signal.symbol}")
+                        return
+                    
+                    # Update signal with calculated position size
+                    signal.position_size = calculated_shares
+                    logger.info(f"✅ Position size calculated: {calculated_shares} shares (${calculated_shares * signal.entry_price:.2f})")
             
             # PUNCH 2: AI Pre-Trade Validation (2nd knockout check)
             if self.config.use_ai_validation and self._ai_validator:
@@ -1366,8 +1595,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             signal.stop_loss = None
                             logger.info(f"⚔️ Warrior Trading (SELL/CLOSING): Entry=${signal.entry_price:.2f} - Using simple SELL order")
             
-            # PDT-safe position sizing using settled funds
-            # Skip position sizing for closing orders (use position quantity instead)
+            # Position sizing for closing orders (use existing position quantity)
             if signal.signal == 'SELL' and has_position:
                 # Closing a LONG position - use existing position quantity
                 signal.position_size = position_quantity
@@ -1376,65 +1604,8 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 # Covering a SHORT position - use existing short quantity
                 signal.position_size = short_quantity
                 logger.info(f"📊 Covering {short_quantity} shares SHORT of {signal.symbol}")
-            elif signal.entry_price and signal.stop_loss and self._cash_manager:
-                try:
-                    bal_success, bal_data = self.tradier_client.get_account_balance()
-                    if not bal_success:
-                        raise APIError("Failed to retrieve account balance")
-                    if not isinstance(bal_data, dict):
-                        raise DataProcessingError("Invalid account balance data")
-                    
-                    settled_cash = None
-                    total_equity = 10000.0
-                    b = bal_data.get('balances', {})
-                    settled_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
-                    total_equity = float(b.get('total_equity', settled_cash or 10000.0))
-                    settled_cash = self._cash_manager.get_settled_cash(settled_cash)
-
-                    bucket_idx = self._cash_manager.select_active_bucket()
-                    bucket_cash = self._cash_manager.bucket_target_cash(settled_cash, bucket_idx)
-
-                    risk_pct = self.config.risk_per_trade_pct
-                    # If down >2% on day, halve risk
-                    if self._daily_realized_pnl <= -2.0:
-                        risk_pct = max(0.005, risk_pct / 2.0)
-
-                    shares_by_risk = self._cash_manager.compute_position_size_by_risk(
-                        account_equity=total_equity,
-                        risk_perc=risk_pct,
-                        entry_price=signal.entry_price,
-                        stop_price=signal.stop_loss,
-                    )
-                    affordable = self._cash_manager.clamp_to_settled_cash(
-                        shares=shares_by_risk,
-                        entry_price=signal.entry_price,
-                        settled_cash=bucket_cash,
-                        reserve_pct=self.config.reserve_cash_pct,
-                    )
-                    
-                    # Use capital manager max position size (NEW)
-                    max_position_dollars = self._capital_manager.get_max_position_size() if self._capital_manager else (total_equity * (self.config.max_position_size_pct / 100.0))
-                    max_by_pct = int(max_position_dollars // signal.entry_price)
-                    
-                    # Also check available capital (NEW)
-                    if self._capital_manager:
-                        available_capital = self._capital_manager.get_available_capital()
-                        max_by_available = int(available_capital // signal.entry_price)
-                        max_by_pct = min(max_by_pct, max_by_available)
-                        logger.info(f"📊 Position sizing: risk-based={shares_by_risk}, affordable={affordable}, max_pct={max_by_pct}, avail_cap={max_by_available}")
-                    
-                    final_shares = max(0, min(affordable, max_by_pct))
-                    if final_shares <= 0:
-                        logger.info("No settled cash or capital available for this entry; skipping")
-                        return
-                    signal.position_size = final_shares
-                except APIError as e:
-                    logger.error(f"API Error sizing position with settled funds: {e}")
-                except DataProcessingError as e:
-                    logger.error(f"Error processing account balance data: {e}")
-                except Exception as e:
-                    logger.error(f"Error sizing position with settled funds: {e}")
-                    return
+            # For new BUY positions, position size was already calculated before AI validation
+            # No need to recalculate here
 
             # Place order
             # For closing positions, use simple market/limit order (no bracket)
@@ -1466,8 +1637,8 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                     side='buy' if signal.signal == 'BUY' else 'sell',
                     quantity=signal.position_size,
                     entry_price=signal.entry_price,
-                    take_profit_price=signal.target_price,
                     stop_loss_price=signal.stop_loss,
+                    take_profit_price=signal.target_price,
                     duration=duration,
                     tag=f"AUTO{self.config.trading_mode}{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 )

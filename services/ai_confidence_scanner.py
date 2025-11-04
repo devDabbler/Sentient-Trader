@@ -315,7 +315,9 @@ Be concise but insightful. Focus on actionable analysis."""
     
     def scan_top_options_with_ai(self, top_n: int = 20, 
                                   min_ai_rating: float = 5.0,
-                                  min_score: float = 50.0) -> List[AIConfidenceTrade]:
+                                  min_score: float = 50.0,
+                                  min_price: float = None,
+                                  max_price: float = None) -> List[AIConfidenceTrade]:
         """
         Scan for top options with AI confidence analysis
         
@@ -323,6 +325,8 @@ Be concise but insightful. Focus on actionable analysis."""
             top_n: Number of trades to scan (scans more, returns filtered)
             min_ai_rating: Minimum AI rating to include (0-10), default 5.0
             min_score: Minimum quantitative score (0-100), default 50.0
+            min_price: Minimum stock price filter (optional)
+            max_price: Maximum stock price filter (optional)
         
         Returns:
             List of AIConfidenceTrade objects with AI analysis (quality filtered)
@@ -333,6 +337,24 @@ Be concise but insightful. Focus on actionable analysis."""
         scan_count = min(top_n * 3, 50)
         trades = self.scanner.scan_top_options_trades(top_n=scan_count)
         logger.info(f"Base scanner returned {len(trades)} trades before AI filtering")
+        
+        # EARLY PRICE FILTERING (before expensive LLM calls)
+        if min_price or max_price:
+            price_filtered = []
+            price_rejected = 0
+            for trade in trades:
+                if min_price and trade.price < min_price:
+                    price_rejected += 1
+                    continue
+                if max_price and trade.price > max_price:
+                    price_rejected += 1
+                    logger.debug(f"💰 Price Filter: Skipping {trade.ticker} (${trade.price:.2f} > ${max_price:.2f})")
+                    continue
+                price_filtered.append(trade)
+            
+            if price_rejected > 0:
+                logger.info(f"💰 EARLY Price Filter: Removed {price_rejected} trades outside ${min_price or 0:.2f}-${max_price or 999999:.2f} range (BEFORE AI analysis)")
+            trades = price_filtered
         
         # Add AI analysis to each
         ai_trades = []

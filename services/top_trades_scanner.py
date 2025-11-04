@@ -37,25 +37,39 @@ class TopTradesScanner:
     """Scans and identifies top trading opportunities"""
     
     # Popular tickers to scan (can be customized)
+    # EXPANDED UNIVERSE: Focus on affordable stocks for small capital accounts
     OPTIONS_UNIVERSE = [
-        # Large cap tech
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'AMD', 'NFLX', 'DIS',
-        'INTC', 'ADBE', 'CRM', 'ORCL', 'CSCO', 'AVGO', 'QCOM', 'TXN',
-        # Popular growth
-        'PLTR', 'SOFI', 'HOOD', 'COIN', 'RBLX', 'SNAP', 'UBER', 'LYFT', 'ABNB', 'DASH',
-        'SQ', 'SHOP', 'SNOW', 'NET', 'CRWD', 'ZS', 'DDOG', 'MDB',
-        # Meme stocks
-        'GME', 'AMC', 'BB', 'NOK', 'BBBY',
-        # Finance
-        'JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'V', 'MA', 'AXP', 'PYPL',
-        # Energy
-        'XOM', 'CVX', 'COP', 'SLB', 'OXY', 'MPC', 'PSX', 'VLO',
-        # Healthcare/Biotech
-        'JNJ', 'PFE', 'ABBV', 'MRK', 'LLY', 'TMO', 'MRNA', 'BNTX',
-        # Consumer
-        'WMT', 'HD', 'MCD', 'NKE', 'SBUX', 'TGT', 'LOW', 'COST',
-        # Industrial
-        'BA', 'CAT', 'DE', 'GE', 'HON', 'UPS', 'LMT', 'RTX',
+        # Affordable Tech & Growth (Under $50)
+        'SOFI', 'HOOD', 'SNAP', 'PINS', 'RBLX', 'DKNG', 'OPEN', 'PLBY',
+        'INTC', 'AMD', 'QCOM', 'TXN', 'MU', 'WDC', 'STX',
+        # EV & Clean Energy (Under $50)
+        'RIVN', 'LCID', 'NKLA', 'FSR', 'RIDE', 'GOEV', 'WKHS',
+        'PLUG', 'FCEL', 'BLDP', 'BE', 'RUN', 'ENPH', 'SEDG',
+        'CHPT', 'BLNK', 'EVGO', 'QS', 'STEM', 'CLSK',
+        # Crypto & Fintech (Under $50)
+        'COIN', 'MARA', 'RIOT', 'CLSK', 'HUT', 'BITF', 'ARBK',
+        'SQ', 'PYPL', 'AFRM', 'UPST', 'LC', 'NU', 'PAYO',
+        # Telecom (Under $50)
+        'NOK', 'ERIC', 'T', 'VZ', 'TMUS', 'LUMN', 'SATS',
+        # Meme & High Volume (Under $50)
+        'GME', 'AMC', 'BB', 'BBBY', 'EXPR', 'KOSS',
+        # Finance (Under $50)
+        'BAC', 'WFC', 'C', 'USB', 'PNC', 'TFC', 'ALLY',
+        # Energy (Under $50)
+        'XOM', 'CVX', 'COP', 'SLB', 'HAL', 'OXY', 'DVN',
+        'MRO', 'APA', 'FANG', 'CLR', 'MPC', 'VLO', 'PSX',
+        # Travel & Hospitality (Under $50)
+        'AAL', 'UAL', 'DAL', 'LUV', 'JBLU', 'SAVE', 'ALK',
+        'CCL', 'RCL', 'NCLH', 'EXPE', 'LYFT', 'UBER',
+        # Cannabis (Under $50)
+        'TLRY', 'CGC', 'ACB', 'SNDL', 'HEXO', 'OGI', 'CRON',
+        # Chinese ADRs (Under $50)
+        'NIO', 'XPEV', 'LI', 'IQ', 'BILI', 'DIDI', 'GRAB',
+        # Biotech (Under $50)
+        'MRNA', 'BNTX', 'NVAX', 'VXRT', 'INO', 'OCGN', 'SRNE',
+        # Large Caps (for reference - will be filtered by price)
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'NFLX',
+        'PLTR', 'SHOP', 'SNOW', 'NET', 'CRWD', 'DDOG', 'MDB',
         # Indices/ETFs
         'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'XLV'
     ]
