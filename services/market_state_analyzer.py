@@ -5,13 +5,12 @@ Provides entropy-based market state analysis with clear explanations.
 Helps determine if market conditions are favorable for trading.
 """
 
-import logging
+from loguru import logger
 from typing import Dict, Tuple, Optional
 import pandas as pd
 import numpy as np
 from math import log2
 
-logger = logging.getLogger(__name__)
 
 
 class MarketStateAnalyzer:

@@ -5,13 +5,12 @@ Supports both Tradier and Interactive Brokers (IBKR)
 """
 
 import os
-import logging
+from loguru import logger
 from enum import Enum
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 import streamlit as st
 
-logger = logging.getLogger(__name__)
 
 class TradingMode(Enum):
     """Trading mode enumeration"""

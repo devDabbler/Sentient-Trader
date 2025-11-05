@@ -7,13 +7,12 @@ using only settled funds.
 
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Tuple
 
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

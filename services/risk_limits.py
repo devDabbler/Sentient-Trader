@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from typing import Dict, Optional, Set
 
 from services.agents.messages import TradingMode
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

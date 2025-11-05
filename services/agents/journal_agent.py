@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime
 from typing import List
 
@@ -13,7 +13,6 @@ from services.journal_service import JournalService
 from services.risk_limits import RiskManager
 from services.agents.messages import ApprovedOrder, OrderUpdate, JournalEntry
 
-logger = logging.getLogger(__name__)
 
 
 class JournalAgent:

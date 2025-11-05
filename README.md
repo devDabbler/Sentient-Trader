@@ -1,18 +1,32 @@
 # 📈 Sentient Trader Platform
 
-> **A comprehensive, AI-driven options and stock trading platform with real-time analysis, news integration, technical indicators, and intelligent strategy recommendations for automated and manual trading.**
+> **A comprehensive, AI-driven trading platform for stocks, options, and cryptocurrencies with real-time analysis, news integration, technical indicators, and intelligent strategy recommendations for automated and manual trading.**
 
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Streamlit](https://img.shields.io/badge/streamlit-1.28%2B-red)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-production--ready-brightgreen)
 
-## 🆕 Latest Updates (October 2025)
+## 🆕 Latest Updates (November 2025)
 
-### **⚔️ Warrior Trading Scalping System** 🆕 NEW!
+### **₿ Cryptocurrency Trading Integration** 🔥 **BRAND NEW!**
+- ✅ **Kraken Exchange Integration** - Full API support for crypto trading
+- ✅ **24/7 Markets** - Trade Bitcoin, Ethereum, and 20+ cryptos anytime
+- ✅ **AI-Powered Crypto Signals** - Crypto-specific analysis and strategies
+- ✅ **Crypto Scanner** - Find opportunities across all major pairs
+- ✅ **Adaptive Strategies** - Scalping, swing, and momentum trading for crypto
+- ✅ **Volatility Management** - Position sizing adapted for crypto volatility
+- ✅ **Fear & Greed Index** - Sentiment-driven trading signals
+- ✅ **Social Sentiment** - Twitter/Reddit/Discord integration
+- ✅ **Paper Trading** - Test crypto strategies risk-free
+- ✅ **All Safety Features** - Your stock trading safeguards adapted for crypto
+
+**See:** `documentation/CRYPTO_TRADING_INTEGRATION_SUMMARY.md` for complete details
+
+### **⚔️ Warrior Trading Scalping System**
 - ✅ **Gap & Go Strategy** - Trade premarket gappers with momentum continuation
 - ✅ **1-Minute Entry Triggers** - Breakout, micro pullback, red-to-green detection
-- ✅ **Market-Wide Scanner** 🔥 **NEW!** - Scan entire S&P 500/NASDAQ 100 for gappers automatically
+- ✅ **Market-Wide Scanner** 🔥 - Scan entire S&P 500/NASDAQ 100 for gappers automatically
 - ✅ **Automated Discovery** - No manual screening needed, finds best setups for you
 - ✅ **Tight Risk Management** - 1% stop, 2% profit, scale-out exits
 - ✅ **Morning Momentum Window** - Focus on 9:30 AM - 10:00 AM for best setups

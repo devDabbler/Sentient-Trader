@@ -6,9 +6,8 @@ Handles the connection and interaction with the Supabase backend.
 
 import os
 from supabase import create_client, Client
-import logging
+from loguru import logger
 
-logger = logging.getLogger(__name__)
 
 def get_supabase_client() -> Client:
     """

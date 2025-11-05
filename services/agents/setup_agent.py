@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime
 from typing import Dict, List
 
@@ -12,7 +12,6 @@ from services.intraday_data_service import IntradayDataService
 from services.strategy_detectors import SetupScanner, MarketContext
 from services.agents.messages import IndicatorEvent, TradeCandidate, Timeframe
 
-logger = logging.getLogger(__name__)
 
 
 class SetupAgent:

@@ -5,7 +5,7 @@ Backtest penny stock trading rules to validate stop/target logic
 and measure historical expectancy.
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,7 +13,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

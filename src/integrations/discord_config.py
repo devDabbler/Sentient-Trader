@@ -7,9 +7,8 @@ import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import json
-import logging
+from loguru import logger
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

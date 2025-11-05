@@ -5,14 +5,13 @@ Monitors upcoming earnings announcements and generates alerts
 based on proximity to earnings date and position status.
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import yfinance as yf
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from .base_detector import BaseEventDetector
 
-logger = logging.getLogger(__name__)
 
 
 class EarningsDetector(BaseEventDetector):

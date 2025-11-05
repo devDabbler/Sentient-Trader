@@ -9,10 +9,9 @@ import pandas as pd
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
-import logging
+from loguru import logger
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
 
 
 class WatchlistManager:

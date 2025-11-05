@@ -4,14 +4,13 @@ Tracks positions, orders, and trade history across restarts
 """
 
 import json
-import logging
+from loguru import logger
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-logger = logging.getLogger(__name__)
 
 class TradeStatus(Enum):
     """Trade status enumeration"""

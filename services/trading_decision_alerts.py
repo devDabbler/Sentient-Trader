@@ -5,12 +5,11 @@ Helper functions to generate buy/sell/speculation alerts based on
 analysis results and market conditions.
 """
 
-import logging
+from loguru import logger
 from typing import Optional, Dict
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from services.alert_system import AlertSystem
 
-logger = logging.getLogger(__name__)
 
 
 class TradingDecisionAlerts:

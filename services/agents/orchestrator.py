@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 from typing import List, Optional
 
 from services.event_bus import EventBus, get_event_bus
@@ -18,7 +18,6 @@ from services.agents.risk_agent import RiskAgent
 from services.agents.execution_agent import ExecutionAgent
 from services.agents.journal_agent import JournalAgent
 
-logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrator:

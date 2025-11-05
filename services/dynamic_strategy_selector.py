@@ -3,7 +3,7 @@ Dynamic Strategy Selector
 Analyzes ticker characteristics and recommends the best trading strategy
 """
 
-import logging
+from loguru import logger
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 from enum import Enum
@@ -11,7 +11,6 @@ from enum import Enum
 from models.analysis import StockAnalysis
 from services.penny_stock_constants import PENNY_THRESHOLDS
 
-logger = logging.getLogger(__name__)
 
 
 class TradingStrategy(Enum):

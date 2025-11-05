@@ -5,7 +5,7 @@ Monitors SEC EDGAR filings for material events (8-K), insider trading,
 and quarterly/annual reports.
 """
 
-import logging
+from loguru import logger
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -13,7 +13,6 @@ import requests
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from .base_detector import BaseEventDetector
 
-logger = logging.getLogger(__name__)
 
 
 class SECDetector(BaseEventDetector):

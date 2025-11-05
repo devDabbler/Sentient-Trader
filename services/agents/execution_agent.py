@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 import random
 from typing import List, Optional
 
 from services.event_bus import EventBus
 from services.agents.messages import ApprovedOrder, OrderUpdate
 
-logger = logging.getLogger(__name__)
 
 
 class ExecutionAgent:

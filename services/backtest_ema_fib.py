@@ -1,6 +1,6 @@
 """Backtesting framework for EMA Reclaim + Fibonacci extension strategy."""
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, field
@@ -9,7 +9,6 @@ import numpy as np
 import yfinance as yf
 from analyzers.technical import TechnicalAnalyzer
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

@@ -3,11 +3,10 @@ Unified Broker Adapter
 Provides a consistent interface for both Tradier and IBKR clients
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple, Any
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger(__name__)
 
 class BrokerAdapter(ABC):
     """Abstract base class for broker adapters"""
@@ -231,6 +230,17 @@ class TradierAdapter(BrokerAdapter):
             return success, result
         except Exception as e:
             logger.error(f"Error placing Tradier bracket order: {e}")
+            return False, {}
+    
+    def get_order_status(self, order_id: str) -> Tuple[bool, Dict]:
+        """Get status of a specific order from Tradier"""
+        try:
+            success, status = self.client.get_order_status(order_id)
+            if not success:
+                return False, {}
+            return True, status
+        except Exception as e:
+            logger.error(f"Error getting Tradier order status: {e}")
             return False, {}
     
     def is_connected(self) -> bool:

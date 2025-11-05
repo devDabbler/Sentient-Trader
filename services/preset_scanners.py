@@ -1,6 +1,6 @@
 """Preset scan filters for rapid opportunity identification."""
 
-import logging
+from loguru import logger
 from typing import List, Dict, Callable, Optional
 from dataclasses import dataclass
 from enum import Enum
@@ -8,7 +8,6 @@ import pandas as pd
 from analyzers.comprehensive import ComprehensiveAnalyzer
 from services.alert_system import get_alert_system, SetupDetector
 
-logger = logging.getLogger(__name__)
 
 
 class ScanPreset(Enum):

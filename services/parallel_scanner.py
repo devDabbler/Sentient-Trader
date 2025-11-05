@@ -5,7 +5,7 @@ High-performance scanner using ThreadPoolExecutor for concurrent analysis.
 Provides 4-8x speedup over sequential scanning with safe error handling.
 """
 
-import logging
+from loguru import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import yfinance as yf
 import pandas as pd
@@ -18,7 +18,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from circuitbreaker import circuit, CircuitBreakerError
 import streamlit as st
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

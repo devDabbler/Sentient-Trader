@@ -3,7 +3,7 @@ Automated Trading Service
 Monitors tickers and automatically executes trades based on AI signals
 """
 
-import logging
+from loguru import logger
 import time
 import asyncio
 from datetime import datetime, time as dt_time
@@ -14,7 +14,6 @@ from services.cash_manager import CashManager, CashManagerConfig
 from services.trade_state_manager import TradeStateManager
 from services.position_exit_monitor import PositionExitMonitor
 
-logger = logging.getLogger(__name__)
 
 # Define custom exception for API errors
 class APIError(Exception):

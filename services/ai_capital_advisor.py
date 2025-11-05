@@ -8,12 +8,11 @@ Uses AI to:
 4. Adjust allocations based on portfolio state and market conditions
 """
 
-import logging
+from loguru import logger
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 import json
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

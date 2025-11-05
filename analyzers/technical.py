@@ -1,13 +1,12 @@
 """Technical analysis calculations."""
 
-import logging
+from loguru import logger
 from typing import Tuple
 from math import log2
 import pandas as pd
 import numpy as np
 import yfinance as yf
 
-logger = logging.getLogger(__name__)
 
 
 class TechnicalAnalyzer:

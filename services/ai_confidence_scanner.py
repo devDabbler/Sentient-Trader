@@ -8,14 +8,13 @@ Adds AI reasoning on top of quantitative scoring.
 import os
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-import logging
+from loguru import logger
 from .top_trades_scanner import TopTradesScanner, TopTrade
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

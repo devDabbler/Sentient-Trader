@@ -3,13 +3,12 @@ Capital Manager
 Tracks available capital, allocations, and ensures intelligent position sizing
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

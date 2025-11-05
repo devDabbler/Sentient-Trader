@@ -6,7 +6,7 @@ and Numba JIT compilation for mathematical operations. Provides 10-100x speedup
 over pandas-based calculations.
 """
 
-import logging
+from loguru import logger
 from typing import Tuple, Dict, List, Optional
 import pandas as pd
 import numpy as np
@@ -19,9 +19,8 @@ try:
     TALIB_AVAILABLE = True
 except ImportError:
     TALIB_AVAILABLE = False
-    logging.warning("TA-Lib not available - falling back to pandas calculations")
+    logger.warning("TA-Lib not available - falling back to pandas calculations")
 
-logger = logging.getLogger(__name__)
 
 # Suppress numba warnings for cleaner output
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)

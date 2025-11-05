@@ -5,13 +5,12 @@ Provides common functionality for all event detectors including
 watchlist filtering, error handling, and logging.
 """
 
-import logging
+from loguru import logger
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import List, Dict, Set, Optional
 from models.alerts import TradingAlert, AlertType, AlertPriority
 
-logger = logging.getLogger(__name__)
 
 
 class BaseEventDetector(ABC):

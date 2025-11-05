@@ -3,12 +3,11 @@ Hybrid Data Fetcher - Combines IBKR and yfinance for optimal real-time data
 Falls back to yfinance when IBKR provides delayed data (paper trading)
 """
 
-import logging
+from loguru import logger
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 import yfinance as yf
 
-logger = logging.getLogger(__name__)
 
 
 class HybridDataFetcher:

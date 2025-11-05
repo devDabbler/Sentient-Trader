@@ -7,12 +7,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-import logging
+from loguru import logger
 from discord_alert_listener import create_discord_manager, DiscordAlertManager
 from discord_config import DiscordConfig
 import json
 
-logger = logging.getLogger(__name__)
 
 
 def init_discord_session_state():
@@ -85,7 +84,7 @@ def render_discord_config_section():
             for ch in config.channels.values()
         ])
         
-        st.dataframe(channels_df, use_container_width=True)
+        st.dataframe(channels_df, width="stretch")
         
         # Remove channel
         channel_to_remove = st.selectbox(

@@ -6,7 +6,7 @@ Monitors Discord channels for trading alerts and parses them into standardized f
 import discord
 from discord.ext import commands
 import asyncio
-import logging
+from loguru import logger
 import re
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -15,7 +15,6 @@ import json
 import os
 from collections import deque
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

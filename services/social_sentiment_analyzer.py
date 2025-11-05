@@ -16,7 +16,7 @@ Uses Crawl4ai for:
 - Adaptive crawling (smart resource management)
 """
 
-import logging
+from loguru import logger
 import asyncio
 import sys
 import os
@@ -27,7 +27,6 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
 
 # Critical Windows fix for Playwright/Crawl4ai subprocess support
 if sys.platform == 'win32':

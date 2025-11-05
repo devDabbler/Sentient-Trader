@@ -5,7 +5,7 @@ Monitors major economic events that could impact market sectors
 and watchlist tickers.
 """
 
-import logging
+from loguru import logger
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Set
@@ -13,7 +13,6 @@ import requests
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from .base_detector import BaseEventDetector
 
-logger = logging.getLogger(__name__)
 
 
 class EconomicDetector(BaseEventDetector):

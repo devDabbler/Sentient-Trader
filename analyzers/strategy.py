@@ -1,6 +1,6 @@
 """Strategy recommendation engine for options trading."""
 
-import logging
+from loguru import logger
 from typing import List, Optional
 from models.analysis import StockAnalysis, StrategyRecommendation
 from models.reddit_strategies import (
@@ -9,7 +9,6 @@ from models.reddit_strategies import (
     CustomStrategy
 )
 
-logger = logging.getLogger(__name__)
 
 
 class StrategyAdvisor:

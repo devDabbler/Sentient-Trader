@@ -5,7 +5,7 @@ Provides intelligent caching with Supabase integration and fallback mechanisms.
 Optimizes cache TTLs based on data volatility and reduces redundant API calls by 50-80%.
 """
 
-import logging
+from loguru import logger
 from typing import Any, Optional, Dict, Callable
 import json
 import time
@@ -17,7 +17,6 @@ import streamlit as st
 from supabase import Client
 import os
 
-logger = logging.getLogger(__name__)
 
 
 class CacheConfig:

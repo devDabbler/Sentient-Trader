@@ -11,7 +11,7 @@ Integrates all enhancements:
 - Backtesting validation
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import pandas as pd
@@ -23,7 +23,6 @@ from services.enhanced_catalyst_detector import EnhancedCatalystDetector, StockL
 from services.penny_stock_backtest import PennyStockBacktester
 from analyzers.technical import TechnicalAnalyzer
 
-logger = logging.getLogger(__name__)
 
 
 class UnifiedPennyStockAnalysis:

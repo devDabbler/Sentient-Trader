@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Deque
 import numpy as np
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

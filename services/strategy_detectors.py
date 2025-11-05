@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import logging
+from loguru import logger
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
 from typing import Dict, List, Optional, Tuple
@@ -10,7 +10,6 @@ import numpy as np
 
 from services.agents.messages import SetupType, TradingMode, TradeCandidate
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

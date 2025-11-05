@@ -8,14 +8,13 @@ Multi-source intelligent ticker discovery using:
 - Sector rotation analysis
 """
 
-import logging
+from loguru import logger
 from typing import List, Dict, Set, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import requests
 from collections import Counter
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -219,12 +218,12 @@ class EnhancedTickerDiscovery:
         for ticker in sentiment_universe[:sample_size]:
             try:
                 # Get recent news
-                articles = news_analyzer.get_news(ticker, max_articles=5)
+                articles = news_analyzer.get_stock_news(ticker, max_articles=5)
                 if not articles:
                     continue
                 
                 # Analyze sentiment
-                sentiment_score = news_analyzer.analyze_sentiment(articles)
+                sentiment_score, sentiment_signals = news_analyzer.analyze_sentiment(articles)
                 article_count = len(articles)
                 
                 # Strong positive sentiment = potential opportunity

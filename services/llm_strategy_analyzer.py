@@ -5,16 +5,15 @@ Analyzes bot configurations and provides intelligent recommendations
 
 import os
 import json
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import requests
 
-logger = logging.getLogger(__name__)
 
-# Enhanced logging for OpenRouter integration
-logger.setLevel(logging.DEBUG)
+# Enhanced logging for OpenRouter integration (Loguru uses enable/disable, not setLevel)
+logger.enable("llm_strategy_analyzer")
 
 @dataclass
 class StrategyAnalysis:

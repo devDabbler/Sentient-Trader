@@ -12,7 +12,7 @@ Features:
 - Market-wide scanning (S&P 500, NASDAQ 100, custom universes)
 """
 
-import logging
+from loguru import logger
 import yfinance as yf
 import os
 from datetime import datetime, time as dt_time, timedelta
@@ -31,7 +31,6 @@ from models.warrior_trading_strategy import (
     WarriorTradingSignal
 )
 
-logger = logging.getLogger(__name__)
 
 
 class WarriorTradingDetector:

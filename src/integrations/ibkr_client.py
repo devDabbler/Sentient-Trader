@@ -4,7 +4,7 @@ Supports live trading, market data, and position management for IBKR accounts
 Integrated with Trading Mode Manager for paper and live trading
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,9 +13,8 @@ import asyncio
 import threading
 import sys
 
-# Configure logging first
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# Loguru logging is configured in utils/logging_config.py
+# No need to configure here
 
 # Import trading configuration
 try:

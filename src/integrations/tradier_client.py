@@ -4,7 +4,7 @@ Handles account management, order placement, and position tracking
 """
 
 import requests
-import logging
+from loguru import logger
 import time
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
@@ -12,7 +12,6 @@ import json
 from functools import wraps
 from .trading_config import get_trading_mode_manager, TradingMode
 
-logger = logging.getLogger(__name__)
 
 def retry_on_timeout(max_retries=3, initial_delay=1.0, backoff_factor=2.0):
     """

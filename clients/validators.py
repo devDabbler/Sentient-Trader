@@ -1,11 +1,10 @@
 """Signal validation and guardrails."""
 
-import logging
+from loguru import logger
 from datetime import datetime
 from typing import Dict, Tuple
 from models.config import TradingConfig
 
-logger = logging.getLogger(__name__)
 
 
 class SignalValidator:

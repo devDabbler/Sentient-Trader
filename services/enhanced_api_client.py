@@ -5,7 +5,7 @@ Provides connection pooling, retry logic, and caching for all external API clien
 Reduces API latency by 30-50% and improves reliability with circuit breaker patterns.
 """
 
-import logging
+from loguru import logger
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -19,7 +19,6 @@ import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
-logger = logging.getLogger(__name__)
 
 
 class EnhancedHTTPAdapter(HTTPAdapter):

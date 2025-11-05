@@ -1,13 +1,12 @@
 """Options chain integration with Fibonacci-based strike selection."""
 
-import logging
+from loguru import logger
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import pandas as pd
 import yfinance as yf
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

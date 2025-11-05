@@ -3,7 +3,7 @@ Streamlit UI components for Reddit strategy selection and AI validation.
 """
 
 import streamlit as st
-import logging
+from loguru import logger
 from typing import Optional, Dict, List
 
 from models.reddit_strategies import (
@@ -20,7 +20,6 @@ from services.reddit_strategy_validator import (
 )
 from models.analysis import StockAnalysis
 
-logger = logging.getLogger(__name__)
 
 
 def render_reddit_strategy_selector(
@@ -356,7 +355,7 @@ def render_strategy_comparison_ui(
                         "Red Flags": len(val.red_flags_detected)
                     })
                 
-                st.dataframe(comparison_data, use_container_width=True)
+                st.dataframe(comparison_data, width="stretch")
                 
                 # Show detailed results for each
                 st.markdown("---")

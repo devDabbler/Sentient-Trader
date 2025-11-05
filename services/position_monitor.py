@@ -8,14 +8,13 @@ Monitors positions from Tradier and sends alerts for:
 - Significant P&L changes
 """
 
-import logging
+from loguru import logger
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from models.alerts import AlertType, AlertPriority, TradingAlert
 from services.alert_system import AlertSystem
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

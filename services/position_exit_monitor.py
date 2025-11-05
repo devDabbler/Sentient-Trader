@@ -11,14 +11,13 @@ Features:
 - Automatic bracket order management
 """
 
-import logging
+from loguru import logger
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-logger = logging.getLogger(__name__)
 
 
 class ExitReason(Enum):
@@ -823,12 +822,21 @@ class PositionExitMonitor:
                         try:
                             success, order_status = self.tradier_client.get_order_status(str(order_id))
                             if success:
-                                status = order_status.get('order', {}).get('status', '').lower()
+                                order_data = order_status.get('order', {})
+                                status = order_data.get('status', '').lower()
                                 
                                 if status == 'rejected':
                                     logger.error("=" * 80)
                                     logger.error(f"🚫 DETECTED REJECTED ORDER: {symbol}")
                                     logger.error(f"   Order ID: {order_id}")
+                                    logger.error(f"   Status: {status}")
+                                    logger.error(f"   Full Order Data: {order_data}")
+                                    
+                                    # Extract rejection reason if available
+                                    rejection_reason = order_data.get('reason_description') or order_data.get('reject_reason')
+                                    if rejection_reason:
+                                        logger.error(f"   Rejection Reason: {rejection_reason}")
+                                    
                                     logger.error(f"   Broker rejected this exit order")
                                     logger.error(f"   Removing from monitoring to prevent retry spam")
                                     logger.error("=" * 80)

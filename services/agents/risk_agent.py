@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime, timedelta
 from typing import List
 
@@ -12,7 +12,6 @@ from services.cash_manager import CashManager
 from services.risk_limits import RiskManager
 from services.agents.messages import TradeCandidate, ApprovedOrder, TradingMode
 
-logger = logging.getLogger(__name__)
 
 
 class RiskAgent:

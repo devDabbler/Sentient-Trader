@@ -5,7 +5,7 @@ Provides easy integration of performance optimizations into existing scanners.
 Allows gradual adoption without breaking existing functionality.
 """
 
-import logging
+from loguru import logger
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -18,7 +18,6 @@ from .enhanced_cache import get_cache_instance, CacheConfig, smart_cache
 from .enhanced_api_client import get_enhanced_yfinance_client
 from .optimized_technical import OptimizedTechnicalAnalyzer, TechnicalAnalyzerOptimized
 
-logger = logging.getLogger(__name__)
 
 
 class OptimizedScanner:

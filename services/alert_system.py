@@ -1,6 +1,6 @@
 """Real-time alert system for high-confidence trading setups."""
 
-import logging
+from loguru import logger
 import os
 import json
 from datetime import datetime
@@ -9,7 +9,6 @@ from dataclasses import field
 from src.integrations.discord_webhook import send_discord_alert
 from models.alerts import AlertType, AlertPriority, TradingAlert
 
-logger = logging.getLogger(__name__)
 
 
 class AlertSystem:

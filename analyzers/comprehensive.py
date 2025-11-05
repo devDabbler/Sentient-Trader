@@ -1,13 +1,12 @@
 """Comprehensive stock analysis combining technical, news, and catalysts."""
 
-import logging
+from loguru import logger
 from typing import Optional
 from models.analysis import StockAnalysis
 from analyzers.technical import TechnicalAnalyzer
 from analyzers.news import NewsAnalyzer
 from utils.caching import get_cached_stock_data
 
-logger = logging.getLogger(__name__)
 
 
 class ComprehensiveAnalyzer:

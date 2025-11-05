@@ -3,13 +3,12 @@ Multi-Strategy Orchestrator
 Runs multiple trading strategies simultaneously with independent risk management
 """
 
-import logging
+from loguru import logger
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import asyncio
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

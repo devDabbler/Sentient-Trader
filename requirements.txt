@@ -29,3 +29,4 @@ polars>=0.20.0  # Fast DataFrame operations (5-10x faster than pandas)
 redis>=4.5.0  # High-speed caching (evaluate vs Supabase)
 tenacity>=8.2.0  # Robust retry logic with exponential backoff
 circuitbreaker>=1.4.0  # Circuit breaker pattern for resilience
+loguru>=0.7.0  # Fast, efficient logging with minimal boilerplate

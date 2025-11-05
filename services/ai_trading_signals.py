@@ -3,14 +3,13 @@ AI Trading Signals Generator
 Uses LLM to analyze multiple data sources and generate buy/sell signals
 """
 
-import logging
+from loguru import logger
 import os
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import json
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

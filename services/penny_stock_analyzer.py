@@ -11,11 +11,10 @@ from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 import yfinance as yf
-import logging
+from loguru import logger
 from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock
 from services.fda_catalyst_detector import FDACatalystDetector
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

@@ -8,10 +8,9 @@ watchlists, and quick-access lists using a Supabase backend.
 import json
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
-import logging
+from loguru import logger
 from clients.supabase_client import get_supabase_client
 
-logger = logging.getLogger(__name__)
 
 class TickerManager:
     """Manages saved tickers and watchlists with a Supabase backend"""

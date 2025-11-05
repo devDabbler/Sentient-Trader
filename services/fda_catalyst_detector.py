@@ -5,14 +5,13 @@ Detects FDA approvals, clinical trials, and healthcare news that can drive
 massive price movements in pharma/biotech penny stocks.
 """
 
-import logging
+from loguru import logger
 import yfinance as yf
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import re
 
-logger = logging.getLogger(__name__)
 
 
 # Healthcare/Pharma sector keywords and classifications
@@ -123,7 +122,9 @@ class FDACatalystDetector:
     """Detects FDA and healthcare catalysts for stocks"""
     
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        from loguru import logger
+        self.logger = logger
+        self.fda_keywords = [keyword for catalyst_info in FDA_CATALYSTS.values() for keyword in catalyst_info['keywords']]
     
     def is_healthcare_stock(self, ticker: str, info: Dict = None) -> Tuple[bool, str]:
         """

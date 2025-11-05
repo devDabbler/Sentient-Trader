@@ -5,7 +5,7 @@ Manages scheduled execution of event detectors with configurable intervals.
 Runs detectors at optimal times to catch market-moving events.
 """
 
-import logging
+from loguru import logger
 import threading
 import time
 from datetime import datetime, time as dt_time
@@ -21,7 +21,6 @@ from services.event_detectors.news_detector import NewsDetector
 from services.event_detectors.sec_detector import SECDetector
 from services.event_detectors.economic_detector import EconomicDetector
 
-logger = logging.getLogger(__name__)
 
 
 class EventScheduler:

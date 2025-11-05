@@ -1,117 +1,126 @@
-"""Logging configuration for the trading application."""
+"""Logging configuration for the trading application using Loguru."""
 
-import logging
 import sys
-from io import TextIOWrapper
-from typing import List
+from pathlib import Path
+from loguru import logger
+
+# Track if logging has been configured to prevent duplicate handlers
+_logging_configured = False
+
+# Remove default handler
+logger.remove()
+
+# Create logs directory if it doesn't exist
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
 
 
-def _create_logging_handlers(log_file: str = 'trading_signals.log') -> List[logging.Handler]:
-    """Create logging handlers that explicitly use UTF-8 encoding (helps on Windows consoles)."""
-    handlers: List[logging.Handler] = []
-
-    try:
-        # File handler with UTF-8 encoding
-        fh = logging.FileHandler(log_file, encoding='utf-8')
-        handlers.append(fh)
-    except Exception:
-        # Fallback: File handler without explicit encoding
+def setup_logging(
+    log_file: str = "logs/sentient_trader.log",
+    level: str = "DEBUG",
+    rotation: str = "500 MB",
+    retention: str = "7 days",
+    format_string: str = None,
+    force: bool = False,
+    console_output: bool = True
+):
+    """
+    Configure Loguru logging for the entire application.
+    
+    Args:
+        log_file: Path to log file
+        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        rotation: Log rotation size (e.g., "500 MB", "1 day")
+        retention: Log retention period (e.g., "7 days", "30 days")
+        format_string: Custom format string (uses Loguru format syntax)
+        force: Force re-configuration even if already configured (default: False)
+        console_output: Enable console logging (default: True). Set False for pythonw.exe
+    """
+    global _logging_configured
+    
+    # Skip if already configured (prevents duplicate handlers on Streamlit reruns)
+    if _logging_configured and not force:
+        return
+    
+    # Remove all existing handlers to prevent duplicates
+    logger.remove()
+    
+    # Default format with colors for console, simple for file
+    if format_string is None:
+        console_format = (
+            "<level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+            "<level>{message}</level>"
+        )
+        file_format = (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{level: <8} | "
+            "{name}:{function}:{line} - "
+            "{message}"
+        )
+    else:
+        console_format = format_string
+        file_format = format_string
+    
+    # Console handler (stdout) with colors - only if console_output is True
+    # For background services (pythonw.exe), set console_output=False
+    if console_output and sys.stdout is not None:
         try:
-            handlers.append(logging.FileHandler(log_file))
+            logger.add(
+                sys.stdout,
+                level=level,
+                format=console_format,
+                colorize=True,
+                backtrace=True,
+                diagnose=True
+            )
         except Exception:
+            # If stdout is not available (e.g., pythonw.exe), skip console logging
             pass
-
-    # Safe console handler which avoids writing to a closed stream
-    class SafeStreamHandler(logging.StreamHandler):
-        def emit(self, record):
-            try:
-                stream = getattr(self, 'stream', None)
-
-                # If stream is closed, missing, or not writable, fallback to sys.__stdout__
-                if stream is None or getattr(stream, 'closed', False) or not hasattr(stream, 'write'):
-                    fallback = getattr(sys, '__stdout__', None)
-                    if fallback is None:
-                        # Nothing to write to; skip emit
-                        return
-                    # Prefer wrapping fallback.buffer if available
-                    fb = getattr(fallback, 'buffer', None)
-                    if fb is not None:
-                        try:
-                            self.stream = TextIOWrapper(fb, encoding='utf-8', errors='replace')
-                        except Exception:
-                            # Use fallback as-is
-                            self.stream = fallback
-                    else:
-                        self.stream = fallback
-
-                # Ensure UTF-8 wrapper if underlying buffer exists and not already wrapped
-                sbuf = getattr(self.stream, 'buffer', None)
-                if sbuf is not None and not isinstance(self.stream, TextIOWrapper):
-                    try:
-                        self.stream = TextIOWrapper(sbuf, encoding='utf-8', errors='replace')
-                    except Exception:
-                        pass
-
-                super().emit(record)
-            except Exception:
-                # Swallow to avoid crashing worker threads. Try to write a minimal error to stderr if possible.
-                try:
-                    err = getattr(sys, '__stderr__', None)
-                    if err is not None and hasattr(err, 'write'):
-                        eb = getattr(err, 'buffer', None)
-                        msg = f"[Logging failure] {record.getMessage()}\n"
-                        try:
-                            if eb is not None:
-                                es = TextIOWrapper(eb, encoding='utf-8', errors='replace')
-                                es.write(msg)
-                                try:
-                                    es.flush()
-                                except Exception:
-                                    pass
-                            else:
-                                err.write(msg)
-                                try:
-                                    err.flush()
-                                except Exception:
-                                    pass
-                        except Exception:
-                            # Last resort: ignore
-                            pass
-                except Exception:
-                    pass
-
-    try:
-        # prefer wrapping stdout but use SafeStreamHandler to handle closed streams
-        sh = SafeStreamHandler(sys.stdout)
-        handlers.append(sh)
-    except Exception:
-        handlers.append(SafeStreamHandler())
-
-    return handlers
-
-
-def setup_logging(log_file: str = 'logs/trading_signals.log'):
-    """Configure enhanced logging for debugging"""
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=_create_logging_handlers(log_file),
-        force=True
+    
+    # File handler with rotation and retention
+    # IMPORTANT: enqueue=True makes logging thread-safe and works better with pythonw.exe
+    logger.add(
+        log_file,
+        level=level,
+        format=file_format,
+        rotation=rotation,
+        retention=retention,
+        encoding="utf-8",
+        backtrace=True,
+        diagnose=True,
+        enqueue=True,  # Thread-safe logging (important for background services)
+        buffering=1     # Line buffering - flush after each line
     )
     
-    # Set specific loggers to INFO/WARNING to reduce noise
-    logging.getLogger('urllib3').setLevel(logging.INFO)
-    logging.getLogger('requests').setLevel(logging.INFO)
-    # Reduce verbosity from httpx/httpcore and OpenAI client (they emit lots of debug logs)
-    logging.getLogger('httpcore').setLevel(logging.WARNING)
-    logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('openai').setLevel(logging.WARNING)
-    logging.getLogger('openai._base_client').setLevel(logging.WARNING)
-    # Suppress excessive yfinance DEBUG logging
-    logging.getLogger('yfinance').setLevel(logging.WARNING)
-    # Suppress peewee database DEBUG logging
-    logging.getLogger('peewee').setLevel(logging.WARNING)
+    # Suppress noisy third-party loggers by disabling their handlers
+    # These libraries will still work, but won't spam logs
+    _suppress_third_party_logs()
+    
+    # Mark as configured
+    _logging_configured = True
 
 
-# Initialize logger for this module
-logger = logging.getLogger(__name__)
+def _suppress_third_party_logs():
+    """Suppress verbose logging from third-party libraries."""
+    import logging
+    
+    # Map of logger names to their desired levels
+    suppress_loggers = {
+        'urllib3': 'INFO',
+        'requests': 'INFO',
+        'httpcore': 'WARNING',
+        'httpx': 'WARNING',
+        'openai': 'WARNING',
+        'openai._base_client': 'WARNING',
+        'yfinance': 'WARNING',
+        'peewee': 'WARNING',
+        'discord': 'INFO',
+        'discord.client': 'WARNING',
+        'discord.gateway': 'WARNING',
+        'asyncio': 'WARNING',
+        'aiohttp': 'WARNING',
+    }
+    
+    for logger_name, level in suppress_loggers.items():
+        logging.getLogger(logger_name).setLevel(getattr(logging, level))

@@ -1,6 +1,6 @@
 """Trading style-specific analysis for different trading strategies."""
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple
 from models.analysis import StockAnalysis
 from analyzers.technical import TechnicalAnalyzer
@@ -9,7 +9,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
 
 
 class TradingStyleAnalyzer:

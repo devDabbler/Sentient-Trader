@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime, time as dt_time
 from typing import Dict, List, Optional
 
@@ -11,7 +11,6 @@ from services.event_bus import EventBus
 from services.intraday_data_service import IntradayDataService, OHLCVBar
 from services.agents.messages import BarEvent, IndicatorEvent, Timeframe
 
-logger = logging.getLogger(__name__)
 
 
 class DataAgent:

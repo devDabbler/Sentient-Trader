@@ -4,10 +4,9 @@ Discord Webhook for Trading Alerts
 
 import os
 import requests
-import logging
+from loguru import logger
 from models.alerts import TradingAlert, AlertType
 
-logger = logging.getLogger(__name__)
 
 
 def _build_earnings_fields(details: dict) -> list:

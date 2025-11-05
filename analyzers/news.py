@@ -1,6 +1,6 @@
 """News and sentiment analysis."""
 
-import logging
+from loguru import logger
 from datetime import datetime
 from typing import Dict, List, Tuple
 import yfinance as yf
@@ -8,7 +8,6 @@ import yfinance as yf
 # Import from utils module
 from utils.caching import get_cached_news
 
-logger = logging.getLogger(__name__)
 
 
 class NewsAnalyzer:
@@ -25,36 +24,53 @@ class NewsAnalyzer:
             
             if not news:
                 logger.warning(f"No news data returned from cache for {ticker}")
-                # Try direct fetch as fallback
-                try:
-                    stock = yf.Ticker(ticker)
-                    news = stock.news
-                    logger.info(f"Direct fetch returned {len(news) if news else 0} articles")
-                except Exception as direct_error:
-                    logger.error(f"Direct fetch also failed for {ticker}: {direct_error}")
-                    return []
+                return []
+            
+            # Ensure news is a list
+            if not isinstance(news, list):
+                logger.warning(f"News data is not a list for {ticker}: {type(news)}")
+                return []
             
             articles = []
             for idx, item in enumerate(news[:max_articles]):
                 try:
+                    # Skip None or invalid items
+                    if not item or not isinstance(item, dict):
+                        logger.debug(f"Skipping invalid article {idx} for {ticker}")
+                        continue
+                    
                     # Handle both old and new Yahoo Finance API structures
                     content = item.get('content', item)  # New API has nested content
                     
+                    # Ensure content is a dict
+                    if not isinstance(content, dict):
+                        logger.debug(f"Content is not a dict for article {idx}, using item directly")
+                        content = item
+                    
                     # Extract title from nested content or direct item
                     title = content.get('title', item.get('title', 'No title available'))
+                    if not title or not isinstance(title, str):
+                        logger.debug(f"Invalid title for article {idx}")
+                        continue
                     
                     # Extract publisher information
                     provider = content.get('provider', {})
-                    publisher = provider.get('displayName', item.get('publisher', 'Unknown Publisher'))
+                    if isinstance(provider, dict):
+                        publisher = provider.get('displayName', item.get('publisher', 'Unknown Publisher'))
+                    else:
+                        publisher = item.get('publisher', 'Unknown Publisher')
                     
                     # Extract link - try multiple possible locations
                     link = ''
-                    if content.get('canonicalUrl', {}).get('url'):
-                        link = content['canonicalUrl']['url']
-                    elif content.get('clickThroughUrl', {}).get('url'):
-                        link = content['clickThroughUrl']['url']
-                    elif item.get('link'):
-                        link = item['link']
+                    try:
+                        if isinstance(content.get('canonicalUrl'), dict) and content['canonicalUrl'].get('url'):
+                            link = content['canonicalUrl']['url']
+                        elif isinstance(content.get('clickThroughUrl'), dict) and content['clickThroughUrl'].get('url'):
+                            link = content['clickThroughUrl']['url']
+                        elif item.get('link'):
+                            link = item['link']
+                    except (TypeError, AttributeError):
+                        link = ''
                     
                     # Handle timestamp conversion more safely
                     published_time = 'Unknown'
@@ -69,14 +85,14 @@ class NewsAnalyzer:
                                     dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
                                     published_time = dt.strftime('%Y-%m-%d %H:%M')
                                 else:
-                                    published_time = pub_date
+                                    published_time = pub_date[:50]  # Truncate long strings
                             elif isinstance(pub_date, (int, float)):
                                 # Handle Unix timestamps
                                 published_time = datetime.fromtimestamp(pub_date).strftime('%Y-%m-%d %H:%M')
                             else:
                                 published_time = 'Recent'
-                        except (ValueError, TypeError, OSError) as time_error:
-                            logger.warning(f"Could not parse timestamp for article {idx}: {time_error}")
+                        except (ValueError, TypeError, OSError, OverflowError) as time_error:
+                            logger.debug(f"Could not parse timestamp for article {idx}: {time_error}")
                             published_time = 'Recent'
                     
                     # Extract summary/description
@@ -85,25 +101,25 @@ class NewsAnalyzer:
                         summary = summary[:200] + '...'
                     
                     article = {
-                        'title': title,
-                        'publisher': publisher,
-                        'link': link,
+                        'title': str(title)[:100],  # Ensure string and truncate
+                        'publisher': str(publisher)[:50],  # Ensure string and truncate
+                        'link': str(link)[:500] if link else '',  # Ensure string
                         'published': published_time,
-                        'type': content.get('contentType', item.get('type', 'NEWS')),
-                        'summary': summary
+                        'type': str(content.get('contentType', item.get('type', 'NEWS')))[:20],  # Ensure string
+                        'summary': str(summary)[:300] if summary else ''  # Ensure string
                     }
                     articles.append(article)
                     logger.debug(f"Processed article {idx + 1}: {article['title'][:50]}...")
                     
                 except Exception as article_error:
-                    logger.error(f"Error processing article {idx} for {ticker}: {article_error}")
+                    logger.debug(f"Error processing article {idx} for {ticker}: {article_error}")
                     continue
             
             logger.info(f"Successfully processed {len(articles)} articles for {ticker}")
             return articles
             
         except Exception as e:
-            logger.error(f"Error fetching news for {ticker}: {e}")
+            logger.error(f"Error fetching news for {ticker}: {e}", exc_info=True)
             return []
     
     @staticmethod

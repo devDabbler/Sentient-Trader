@@ -5,10 +5,9 @@ Provides a simple way to check if you have active positions in a ticker,
 used by event detectors to warn about earnings/news when you hold the stock.
 """
 
-import logging
+from loguru import logger
 from typing import Set, Optional, Dict, List
 
-logger = logging.getLogger(__name__)
 
 
 class PositionTracker:

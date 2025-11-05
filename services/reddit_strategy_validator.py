@@ -5,7 +5,7 @@ Uses LLM to analyze if a strategy is viable given current market conditions.
 
 import os
 import json
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,7 +13,6 @@ from datetime import datetime
 from models.reddit_strategies import CustomStrategy, MarketCondition
 from models.analysis import StockAnalysis
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

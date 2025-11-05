@@ -5,7 +5,7 @@ Monitors news feeds for major events affecting watchlist tickers.
 Supports multiple news sources: Finnhub, NewsAPI, and yfinance.
 """
 
-import logging
+from loguru import logger
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -14,7 +14,6 @@ import yfinance as yf
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from .base_detector import BaseEventDetector
 
-logger = logging.getLogger(__name__)
 
 
 class NewsDetector(BaseEventDetector):

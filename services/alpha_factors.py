@@ -5,14 +5,13 @@ Calculates 50+ alpha factors similar to Qlib's Alpha158 but using yfinance data.
 No need for Qlib data download - works with your existing setup.
 """
 
-import logging
+from loguru import logger
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)
 
 
 class AlphaFactorCalculator:

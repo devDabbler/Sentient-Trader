@@ -18,12 +18,11 @@ Usage:
     features = analyzer.get_alpha158_features('AAPL')
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
 
 # Check if qlib is installed
 try:

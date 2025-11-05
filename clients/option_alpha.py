@@ -2,12 +2,11 @@
 
 import os
 import json
-import logging
+from loguru import logger
 import requests
 from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-logger = logging.getLogger(__name__)
 
 
 class OptionAlphaClient:

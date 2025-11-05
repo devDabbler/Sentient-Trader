@@ -8,13 +8,12 @@ Extends SEC filing detection with:
 - Financing event detection
 """
 
-import logging
+from loguru import logger
 import re
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import requests
 
-logger = logging.getLogger(__name__)
 
 
 class EnhancedCatalystDetector:

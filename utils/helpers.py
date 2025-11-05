@@ -1,9 +1,8 @@
 """Helper utility functions."""
 
 from datetime import datetime
-import logging
+from loguru import logger
 
-logger = logging.getLogger(__name__)
 
 
 def calculate_dte(expiry_date: str) -> int:

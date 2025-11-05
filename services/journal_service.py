@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-import logging
+from loguru import logger
 import sqlite3
 from dataclasses import dataclass, asdict
 from datetime import datetime, date
@@ -13,7 +13,6 @@ from typing import Dict, List, Optional
 
 from services.agents.messages import JournalEntry, SetupType, TradingMode
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

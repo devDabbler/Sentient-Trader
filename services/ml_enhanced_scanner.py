@@ -16,7 +16,7 @@ Usage:
     # Returns only trades with BOTH high ML score AND high LLM confidence
 """
 
-import logging
+from loguru import logger
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import pandas as pd
@@ -26,7 +26,6 @@ from .ai_confidence_scanner import AIConfidenceScanner, AIConfidenceTrade
 from .qlib_integration import QLIbEnhancedAnalyzer, check_qlib_installation
 from .alpha_factors import AlphaFactorCalculator
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass

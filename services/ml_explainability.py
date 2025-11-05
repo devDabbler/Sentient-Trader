@@ -5,12 +5,11 @@ Provides feature importance and SHAP-like explanations for ML predictions
 to help understand why ML scores diverge from technical scores.
 """
 
-import logging
+from loguru import logger
 from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
 
 
 class MLExplainer:
