@@ -13,6 +13,7 @@ import json
 import os
 import asyncio
 from clients.kraken_client import KrakenClient, OrderType, OrderSide
+from clients.crypto_validator import CryptoValidator
 from src.integrations.discord_webhook import send_discord_alert
 from models.alerts import TradingAlert, AlertType, AlertPriority
 from services.freqtrade_strategies import FreqtradeStrategyAdapter
@@ -76,17 +77,35 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             
             with st.spinner(f"Scanning for {scan_type_display}..."):
                 try:
+                    # Initialize validator
+                    validator = CryptoValidator(kraken_client)
+                    
                     if scan_type == "penny_crypto_scanner" and scanner_instances.get(scan_type):
                         results = scanner_instances[scan_type].scan_penny_cryptos(max_price=1.0, top_n=50)
-                        st.session_state.scan_results = [{"Ticker": r.symbol, "Price": r.current_price, "Change": r.change_pct_24h, "Score": r.runner_potential_score} for r in results]
+                        # Validate all results
+                        raw_results = [{"Ticker": r.symbol, "Price": r.current_price, "Change": r.change_pct_24h, "Score": r.runner_potential_score} for r in results]
+                        valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
+                        st.session_state.scan_results = valid_results
+                        if invalid_symbols:
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
                     
                     elif scan_type == "crypto_opportunity_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_opportunities(top_n=50)
-                        st.session_state.scan_results = [{"Ticker": o.symbol, "Price": o.current_price, "Change": o.change_pct_24h, "Score": o.score} for o in opps]
+                        # Validate all results
+                        raw_results = [{"Ticker": o.symbol, "Price": o.current_price, "Change": o.change_pct_24h, "Score": o.score} for o in opps]
+                        valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
+                        st.session_state.scan_results = valid_results
+                        if invalid_symbols:
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
 
                     elif scan_type == "ai_crypto_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_with_ai_confidence(top_n=50)
-                        st.session_state.scan_results = [{"Ticker": o.symbol, "Price": o.current_price, "Change": o.change_pct_24h, "Score": o.score} for o in opps]
+                        # Validate all results
+                        raw_results = [{"Ticker": o.symbol, "Price": o.current_price, "Change": o.change_pct_24h, "Score": o.score} for o in opps]
+                        valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
+                        st.session_state.scan_results = valid_results
+                        if invalid_symbols:
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
 
                     elif scan_type == "sub_penny_discovery" and scanner_instances.get(scan_type):
                         runners = asyncio.run(scanner_instances[scan_type].discover_sub_penny_runners(
@@ -97,47 +116,13 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             sort_by="runner_potential"
                         ))
                         
-                        # Filter out invalid Kraken pairs before displaying
-                        valid_results = []
-                        invalid_count = 0
-                        
-                        for r in runners:
-                            symbol = r.symbol.upper()
-                            # Try common Kraken pair formats
-                            possible_pairs = [
-                                f"{symbol}/USD",
-                                f"{symbol}USD",
-                                f"{symbol}/USDT",
-                                f"{symbol}USDT"
-                            ]
-                            
-                            # Check if any format is valid on Kraken
-                            is_valid = False
-                            valid_pair = None
-                            for pair in possible_pairs:
-                                try:
-                                    test_info = kraken_client.get_ticker_info(pair)
-                                    if test_info and 'c' in test_info:
-                                        is_valid = True
-                                        valid_pair = pair
-                                        break
-                                except Exception:
-                                    continue
-                            
-                            if is_valid and valid_pair:
-                                valid_results.append({
-                                    "Ticker": valid_pair,
-                                    "Price": r.price_usd,
-                                    "Change": r.change_24h,
-                                    "Score": r.runner_potential_score
-                                })
-                            else:
-                                invalid_count += 1
-                        
+                        # Validate all results using validator
+                        raw_results = [{"Ticker": r.symbol.upper(), "Price": r.price_usd, "Change": r.change_24h, "Score": r.runner_potential_score} for r in runners]
+                        valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         
-                        if invalid_count > 0:
-                            st.info(f"ℹ️ Filtered out {invalid_count} coins not available on Kraken (e.g., {runners[0].symbol.upper() if runners else 'N/A'})")
+                        if invalid_symbols:
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} coins not available on Kraken")
                     
                     elif scan_type == "watchlist":
                         st.session_state.scan_results = [{"Ticker": t, "Price": 0, "Change": 0, "Score": 0} for t in crypto_config.CRYPTO_WATCHLIST]

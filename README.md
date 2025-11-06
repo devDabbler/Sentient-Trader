@@ -739,6 +739,7 @@ Some integrations require API keys or credentials. You can put them in a `.env` 
   - ANTHROPIC_API_KEY — Anthropic API key
   - GOOGLE_API_KEY — Google Generative API key
   - OPENROUTER_API_KEY — OpenRouter API key
+  - COINMARKETCAP_API_KEY — CoinMarketCap API key (optional, for enhanced crypto data aggregation)
   - Set `LLM_PROVIDER` to one of `openai`, `anthropic`, `google`, `openrouter` if you want to change the default provider.
 - Tradier (optional, for paper/live order execution):
   - **Paper Trading:**

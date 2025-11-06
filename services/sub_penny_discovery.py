@@ -1,7 +1,7 @@
 """
 Sub-Penny Crypto Discovery - Find ultra-low coins (0.00000+) with monster runner potential
 
-Uses CoinGecko markets endpoint to discover all coins under $0.01,
+Uses multi-source aggregator (CoinGecko, CoinMarketCap) to discover all coins under $0.01,
 combines with sentiment analysis and technical scoring.
 
 No state restrictions - works globally!
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from loguru import logger
 from dotenv import load_dotenv
+from services.crypto_data_aggregator import CryptoDataAggregator, AggregatedCryptoData
 
 load_dotenv()
 
@@ -49,15 +50,13 @@ class SubPennyDiscovery:
     
     def __init__(self):
         """Initialize the sub-penny discovery engine"""
-        self.coingecko_api = "https://api.coingecko.com/api/v3"
-        self.last_api_call = 0
+        self.aggregator = CryptoDataAggregator()
         self.cache = {}
         self.cache_ttl = 3600  # 1 hour
         
         logger.info("🔬 Sub-Penny Discovery Engine initialized")
-        logger.info("   • Data source: CoinGecko markets endpoint")
-        logger.info("   • Coverage: All coins under $0.01")
-        logger.info("   • Rate limit: 10-50 calls/min (safe)")
+        logger.info("   • Data sources: Multi-source aggregator (CoinGecko, CoinMarketCap)")
+        logger.info("   • Coverage: ALL coins under $0.01 (no limits)")
         logger.info("   • No state restrictions - works globally")
     
     async def discover_sub_penny_runners(
@@ -84,15 +83,47 @@ class SubPennyDiscovery:
         try:
             logger.info(f"🔬 Discovering sub-penny runners (max ${max_price})...")
             
-            # Fetch all coins from CoinGecko
-            all_coins = await self._fetch_all_coins(max_price)
+            # Fetch ALL coins from multi-source aggregator (no limits)
+            aggregated_data = await self.aggregator.fetch_all_coins(
+                max_price=max_price,
+                min_market_cap=min_market_cap,
+                max_market_cap=max_market_cap
+            )
             
-            if not all_coins:
+            if not aggregated_data:
                 logger.warning("No coins found under specified price")
                 return []
             
-            logger.info(f"📊 Analyzing {len(all_coins)} coins under ${max_price}...")
+            logger.info(f"📊 Analyzing {len(aggregated_data)} coins under ${max_price}...")
             logger.info(f"   • Market cap filter: ${min_market_cap:,.0f} - ${max_market_cap:,.0f}")
+            
+            # Convert aggregated data to SubPennyCoin objects
+            all_coins = []
+            for agg in aggregated_data:
+                try:
+                    coin = SubPennyCoin(
+                        symbol=agg.symbol,
+                        name=agg.name,
+                        price_usd=agg.price_usd,
+                        price_decimals=self._count_decimals(agg.price_usd),
+                        market_cap=agg.market_cap,
+                        market_cap_rank=agg.market_cap_rank,
+                        volume_24h=agg.volume_24h,
+                        change_24h=agg.change_24h,
+                        change_7d=agg.change_7d,
+                        market_cap_change_24h=0.0,  # Not available from aggregator
+                        circulating_supply=0.0,  # Not available from aggregator
+                        total_supply=0.0,  # Not available from aggregator
+                        ath=0.0,  # Not available from aggregator
+                        atl=0.0,  # Not available from aggregator
+                        ath_change_percentage=0.0,  # Not available from aggregator
+                        runner_potential_score=0.0,
+                        discovery_reason=""
+                    )
+                    all_coins.append(coin)
+                except Exception as e:
+                    logger.debug(f"Error converting {agg.symbol}: {e}")
+                    continue
             
             # Score each coin for runner potential
             runners = []
@@ -135,7 +166,7 @@ class SubPennyDiscovery:
             logger.error(f"Error discovering sub-penny runners: {e}")
             return []
     
-    async def _fetch_all_coins(self, max_price: float) -> List[SubPennyCoin]:
+    async def _fetch_all_coins_legacy(self, max_price: float) -> List[SubPennyCoin]:
         """
         Fetch all coins under max_price from CoinGecko
         
