@@ -39,8 +39,9 @@ def get_supabase_client() -> Client:
             supabase_url = st.secrets['supabase']['url']
             supabase_key = st.secrets['supabase']['service_key']
             logger.info("Using Supabase credentials from Streamlit secrets")
-    except Exception as e:
-        logger.debug(f"Could not access Streamlit secrets: {e}")
+    except Exception:
+        # Silently fall back to environment variables
+        pass
     
     # Fallback to environment variables (for local development)
     if not supabase_url or not supabase_key:

@@ -116,6 +116,12 @@ class PositionExitMonitor:
         self.last_tradier_error_time = None
         self.tradier_circuit_breaker_active = False
         
+        # Connection retry logic
+        self.connection_retry_count = 0
+        self.max_connection_retries = 5
+        self.connection_retry_delay = 5  # Start with 5 seconds
+        self.last_successful_sync = datetime.now()
+        
         # Safety flags
         self.is_running = False
         self.emergency_mode = False
@@ -237,14 +243,37 @@ class PositionExitMonitor:
         """
         Sync monitored positions with actual broker positions
         Removes positions that were closed, adds new ones
+        Includes automatic reconnection with exponential backoff
         
         Returns:
             (positions_added, positions_removed)
         """
         try:
             success, positions = self.tradier_client.get_positions()
-            if not success or not positions:
-                logger.debug("No broker positions to sync")
+            
+            # Connection successful - reset retry counter
+            if success:
+                self.connection_retry_count = 0
+                self.connection_retry_delay = 5
+                self.last_successful_sync = datetime.now()
+                
+                if not positions:
+                    logger.debug("No broker positions to sync")
+                    return 0, 0
+            else:
+                # Connection failed - implement exponential backoff retry
+                self.connection_retry_count += 1
+                logger.warning(f"⚠️ Broker connection failed (attempt {self.connection_retry_count}/{self.max_connection_retries})")
+                
+                if self.connection_retry_count >= self.max_connection_retries:
+                    logger.error(f"❌ Max connection retries ({self.max_connection_retries}) reached. Entering emergency mode.")
+                    self.emergency_mode = True
+                    return 0, 0
+                
+                # Exponential backoff: 5s, 10s, 20s, 40s, 80s
+                self.connection_retry_delay = min(5 * (2 ** (self.connection_retry_count - 1)), 300)
+                logger.info(f"🔄 Retrying broker connection in {self.connection_retry_delay}s...")
+                time.sleep(self.connection_retry_delay)
                 return 0, 0
             
             broker_symbols = {pos.get('symbol') for pos in positions if pos.get('symbol')}
@@ -306,7 +335,18 @@ class PositionExitMonitor:
             return added, removed
             
         except Exception as e:
-            logger.error(f"❌ Error syncing with broker: {e}", exc_info=True)
+            self.connection_retry_count += 1
+            logger.error(f"❌ Error syncing with broker (attempt {self.connection_retry_count}/{self.max_connection_retries}): {e}", exc_info=True)
+            
+            if self.connection_retry_count >= self.max_connection_retries:
+                logger.error(f"❌ Max connection retries ({self.max_connection_retries}) reached. Entering emergency mode.")
+                self.emergency_mode = True
+                return 0, 0
+            
+            # Exponential backoff
+            self.connection_retry_delay = min(5 * (2 ** (self.connection_retry_count - 1)), 300)
+            logger.info(f"🔄 Retrying broker connection in {self.connection_retry_delay}s...")
+            time.sleep(self.connection_retry_delay)
             return 0, 0
     
     def check_positions(self) -> List[Dict]:
@@ -575,6 +615,10 @@ class PositionExitMonitor:
                             logger.info(f"✅ Order {order_id} status: {status.upper()} - monitoring for fill")
                         elif status == 'filled':
                             logger.info(f"🎉 Order {order_id} FILLED immediately!")
+                            # Remove from pending since it's already filled
+                            if symbol in self.pending_exit_orders:
+                                del self.pending_exit_orders[symbol]
+                                logger.info(f"✅ Removed {symbol} from pending orders (already filled)")
                 except Exception as e:
                     logger.debug(f"Could not check order status (non-critical): {e}")
                 
@@ -759,7 +803,10 @@ class PositionExitMonitor:
         return closed_count
     
     def get_status(self) -> Dict:
-        """Get current monitor status"""
+        """Get current monitor status including connection health"""
+        time_since_sync = (datetime.now() - self.last_successful_sync).total_seconds() / 60
+        connection_status = 'CONNECTED' if self.connection_retry_count == 0 else f'RECONNECTING ({self.connection_retry_count}/{self.max_connection_retries})'
+        
         return {
             'is_running': self.is_running,
             'monitored_positions': len(self.monitored_positions),
@@ -786,6 +833,13 @@ class PositionExitMonitor:
                 'time_limit_exits': self.time_limit_exits,
                 'trailing_stop_exits': self.trailing_stop_exits,
                 'failed_attempts': self.failed_exit_attempts
+            },
+            'connection_health': {
+                'status': connection_status,
+                'retry_count': self.connection_retry_count,
+                'max_retries': self.max_connection_retries,
+                'time_since_last_sync_minutes': time_since_sync,
+                'emergency_mode': self.emergency_mode
             },
             'emergency_mode': self.emergency_mode,
             'last_health_check': self.last_health_check.isoformat()

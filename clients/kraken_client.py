@@ -351,6 +351,33 @@ class KrakenClient:
             logger.error(f"Error fetching ticker data for {pair}: {e}")
             return {}
     
+    def get_ticker_info(self, pair: str) -> Dict:
+        """
+        Get raw ticker information for a trading pair (raw Kraken format)
+        
+        Args:
+            pair: Trading pair (e.g., 'XXBTZUSD' or 'BTC/USD')
+            
+        Returns:
+            Raw ticker data in Kraken format (includes 'c' key for last price)
+        """
+        # Convert user-friendly format to Kraken format if needed
+        kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+        
+        try:
+            data = self._public_request('Ticker', {'pair': kraken_pair})
+            
+            # Return raw ticker data if found
+            if kraken_pair in data:
+                return data[kraken_pair]
+            else:
+                logger.debug(f"No data found for pair: {kraken_pair}")
+                return {}
+                
+        except Exception as e:
+            logger.debug(f"Error fetching ticker info for {pair}: {e}")
+            return {}
+    
     def get_ohlc_data(self, pair: str, interval: int = 60, since: Optional[int] = None) -> List[Dict]:
         """
         Get OHLC (candlestick) data for a trading pair
@@ -532,7 +559,9 @@ class KrakenClient:
                 elif balance.balance > 0:
                     # Get USD conversion rate for this asset
                     try:
-                        pair = f"{balance.currency}/USD"
+                        # Strip Kraken suffixes (.F, .S, .M) from currency before constructing pair
+                        currency = balance.currency.replace('.F', '').replace('.S', '').replace('.M', '')
+                        pair = f"{currency}/USD"
                         ticker = self.get_ticker_data(pair)
                         if ticker:
                             total_usd += balance.balance * ticker['last_price']
@@ -586,19 +615,19 @@ class KrakenClient:
             'volume': str(volume)
         }
         
-        # Add price for limit orders
+        # Add price for limit orders (Kraken requires max 6 decimals)
         if order_type == OrderType.LIMIT and price:
-            params['price'] = str(price)
+            params['price'] = str(round(price, 6))
         
-        # Add stop loss
+        # Add stop loss (Kraken requires max 6 decimals)
         if stop_loss:
             params['close[ordertype]'] = 'stop-loss'
-            params['close[price]'] = str(stop_loss)
+            params['close[price]'] = str(round(stop_loss, 6))
         
-        # Add take profit
+        # Add take profit (Kraken requires max 6 decimals)
         if take_profit:
             params['close[ordertype]'] = 'take-profit'
-            params['close[price]'] = str(take_profit)
+            params['close[price]'] = str(round(take_profit, 6))
         
         # Validation mode
         if validate:

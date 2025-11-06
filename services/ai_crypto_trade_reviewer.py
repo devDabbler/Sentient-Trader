@@ -5,22 +5,32 @@ Pre-trade validation and ongoing trade monitoring with AI analysis
 
 from loguru import logger
 from typing import Dict, Optional, List, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 
 class AICryptoTradeReviewer:
     """AI-powered pre-trade validation and monitoring for crypto trades"""
     
-    def __init__(self, llm_analyzer=None):
+    def __init__(self, llm_analyzer=None, active_monitors=None, supabase_client=None):
         """
         Initialize AI trade reviewer
         
         Args:
             llm_analyzer: LLM analyzer instance for AI analysis
+            active_monitors: Optional dict of existing monitors (for session state restoration)
+            supabase_client: Optional Supabase client for database persistence
         """
         self.llm_analyzer = llm_analyzer
-        self.active_monitors = {}  # {pair: monitoring_data}
+        self.supabase = supabase_client
+        
+        # Restore monitors from session state if provided, otherwise load from database
+        if active_monitors is not None:
+            self.active_monitors = active_monitors
+        else:
+            self.active_monitors = self._load_monitors_from_db() if self.supabase else {}
+        
+        logger.info(f"🔧 AI Trade Reviewer initialized with {len(self.active_monitors)} monitors (DB: {'enabled' if self.supabase else 'disabled'})")
         
     def pre_trade_review(
         self,
@@ -215,10 +225,11 @@ class AICryptoTradeReviewer:
             take_profit: Take profit price
             strategy: Trading strategy
         """
-        self.active_monitors[trade_id] = {
+        monitor_data = {
             'pair': pair,
             'side': side,
             'entry_price': entry_price,
+            'current_price': current_price,
             'entry_time': datetime.now(),
             'volume': volume,
             'stop_loss': stop_loss,
@@ -228,6 +239,11 @@ class AICryptoTradeReviewer:
             'lowest_price': current_price if side == 'SELL' else entry_price,
             'adjustments': []
         }
+        
+        self.active_monitors[trade_id] = monitor_data
+        
+        # Save to database for persistence
+        self._save_monitor_to_db(trade_id, monitor_data)
         
         logger.info(f"📊 Started monitoring trade {trade_id} for {pair}")
     
@@ -382,11 +398,15 @@ class AICryptoTradeReviewer:
             'time_in_trade_min': time_in_trade
         }
     
-    def stop_monitoring(self, trade_id: str) -> Dict:
+    def stop_monitoring(self, trade_id: str, reason: str = None) -> Dict:
         """Stop monitoring a trade and return summary"""
         if trade_id in self.active_monitors:
             summary = self.active_monitors[trade_id].copy()
             del self.active_monitors[trade_id]
+            
+            # Close in database
+            self._close_monitor_in_db(trade_id, reason)
+            
             logger.info(f"🛑 Stopped monitoring trade {trade_id}")
             return summary
         return {}
@@ -474,3 +494,96 @@ class AICryptoTradeReviewer:
             params['new_tp'] = float(tp_match.group(1))
         
         return params
+    
+    # =========================================================================
+    # DATABASE PERSISTENCE METHODS
+    # =========================================================================
+    
+    def _load_monitors_from_db(self) -> Dict:
+        """Load active monitors from database"""
+        if not self.supabase:
+            return {}
+        
+        try:
+            response = self.supabase.table('crypto_trade_monitors')\
+                .select('*')\
+                .eq('status', 'active')\
+                .execute()
+            
+            monitors = {}
+            if response.data:
+                for row in response.data:
+                    monitors[row['trade_id']] = {
+                        'pair': row['pair'],
+                        'side': row['side'],
+                        'entry_price': float(row['entry_price']),
+                        'current_price': float(row['current_price']) if row['current_price'] else float(row['entry_price']),
+                        'volume': float(row['volume']),
+                        'stop_loss': float(row['stop_loss']) if row['stop_loss'] else None,
+                        'take_profit': float(row['take_profit']) if row['take_profit'] else None,
+                        'strategy': row['strategy'],
+                        'start_time': row['created_at']
+                    }
+                logger.info(f"📥 Loaded {len(monitors)} active monitors from database")
+            return monitors
+        except Exception as e:
+            logger.error(f"❌ Error loading monitors from database: {e}")
+            return {}
+    
+    def _save_monitor_to_db(self, trade_id: str, monitor_data: Dict):
+        """Save a monitor to database"""
+        if not self.supabase:
+            return
+        
+        try:
+            data = {
+                'trade_id': trade_id,
+                'pair': monitor_data['pair'],
+                'side': monitor_data['side'],
+                'entry_price': monitor_data['entry_price'],
+                'current_price': monitor_data.get('current_price', monitor_data['entry_price']),
+                'volume': monitor_data['volume'],
+                'stop_loss': monitor_data.get('stop_loss'),
+                'take_profit': monitor_data.get('take_profit'),
+                'strategy': monitor_data.get('strategy'),
+                'status': 'active',
+                'updated_at': datetime.now(timezone.utc).isoformat()
+            }
+            
+            self.supabase.table('crypto_trade_monitors').upsert(data, on_conflict='trade_id').execute()
+            logger.info(f"💾 Saved monitor {trade_id} to database")
+        except Exception as e:
+            logger.error(f"❌ Error saving monitor to database: {e}")
+    
+    def _update_monitor_in_db(self, trade_id: str, updates: Dict):
+        """Update a monitor in database"""
+        if not self.supabase:
+            return
+        
+        try:
+            updates['updated_at'] = datetime.now(timezone.utc).isoformat()
+            self.supabase.table('crypto_trade_monitors')\
+                .update(updates)\
+                .eq('trade_id', trade_id)\
+                .execute()
+        except Exception as e:
+            logger.error(f"❌ Error updating monitor in database: {e}")
+    
+    def _close_monitor_in_db(self, trade_id: str, reason: str = None):
+        """Mark a monitor as closed in database"""
+        if not self.supabase:
+            return
+        
+        try:
+            self.supabase.table('crypto_trade_monitors')\
+                .update({
+                    'status': 'closed',
+                    'closed_at': datetime.now(timezone.utc).isoformat(),
+                    'close_reason': reason,
+                    'updated_at': datetime.now(timezone.utc).isoformat()
+                })\
+                .eq('trade_id', trade_id)\
+                .execute()
+            logger.info(f"🔒 Closed monitor {trade_id} in database")
+        except Exception as e:
+            logger.error(f"❌ Error closing monitor in database: {e}")

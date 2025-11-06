@@ -48,16 +48,17 @@ class MLEnhancedScanner:
     This gives you the MOST confident trading decisions.
     """
     
-    def __init__(self, use_ml: bool = None, use_llm: bool = None):
+    def __init__(self, use_ml: bool = None, use_llm: bool = None, ai_scanner=None):
         """
-        Initialize ML-Enhanced Scanner
+        Initialize ML-Enhanced Scanner with optional pre-created dependencies
         
         Args:
             use_ml: Whether to use Qlib ML. Auto-detect if None.
             use_llm: Whether to use LLM. Auto-detect if None.
+            ai_scanner: Optional pre-created AIConfidenceScanner instance
         """
         # Initialize base AI confidence scanner (has LLM + quant)
-        self.ai_scanner = AIConfidenceScanner(use_llm=use_llm)
+        self.ai_scanner = ai_scanner if ai_scanner is not None else AIConfidenceScanner(use_llm=use_llm)
         
         # Initialize Qlib ML analyzer
         qlib_available, msg = check_qlib_installation()

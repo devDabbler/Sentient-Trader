@@ -79,19 +79,43 @@ def get_ticker_manager():
     return TickerManager()
 
 @st.cache_resource
-def get_advanced_scanner():
-    """Cached AdvancedOpportunityScanner to avoid repeated initialization"""
-    return AdvancedOpportunityScanner(use_ai=True)
+def get_base_scanner():
+    """Cached TopTradesScanner - base scanner shared by all advanced scanners"""
+    from services.top_trades_scanner import TopTradesScanner
+    return TopTradesScanner()
+
+@st.cache_resource
+def get_llm_analyzer():
+    """Cached LLMStrategyAnalyzer - shared by all scanners that need LLM"""
+    from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+    return LLMStrategyAnalyzer(provider="openrouter", model="google/gemini-2.5-flash")
+
+@st.cache_resource
+def get_social_analyzer():
+    """Cached SocialSentimentAnalyzer - shared by scanners"""
+    from services.social_sentiment_analyzer import SocialSentimentAnalyzer
+    return SocialSentimentAnalyzer()
 
 @st.cache_resource
 def get_ai_scanner():
-    """Cached AIConfidenceScanner to avoid repeated initialization"""
-    return AIConfidenceScanner()
+    """Cached AIConfidenceScanner - reuses shared base scanner and LLM analyzer"""
+    base = get_base_scanner()
+    llm = get_llm_analyzer()
+    return AIConfidenceScanner(base_scanner=base, llm_analyzer=llm)
+
+@st.cache_resource
+def get_advanced_scanner():
+    """Cached AdvancedOpportunityScanner - reuses shared scanners"""
+    base = get_base_scanner()
+    ai = get_ai_scanner()
+    social = get_social_analyzer()
+    return AdvancedOpportunityScanner(use_ai=True, base_scanner=base, ai_scanner=ai, social_analyzer=social)
 
 @st.cache_resource
 def get_ml_scanner():
-    """Cached MLEnhancedScanner to avoid repeated initialization"""
-    return MLEnhancedScanner()
+    """Cached MLEnhancedScanner - reuses AI scanner"""
+    ai = get_ai_scanner()
+    return MLEnhancedScanner(ai_scanner=ai)
 
 @st.cache_resource
 def get_kraken_client(api_key: str, api_secret: str):
@@ -1531,6 +1555,38 @@ def main():
         st.session_state.background_processor_started = False
         st.session_state.background_update_results = {}
     
+    # CRITICAL: Initialize auto_refresh to False to prevent constant reruns
+    # This must be set on every app restart to avoid persistent auto-refresh
+    if 'auto_refresh_enabled' not in st.session_state:
+        st.session_state.auto_refresh_enabled = False
+    
+    # Initialize last auto-refresh time to prevent immediate reruns
+    if 'last_auto_refresh_time' not in st.session_state:
+        st.session_state.last_auto_refresh_time = 0
+    
+    # Initialize cached services in session state to prevent repeated initialization
+    # This is critical for performance - services are expensive to create
+    if 'ticker_manager' not in st.session_state:
+        st.session_state.ticker_manager = get_ticker_manager()
+    if 'ai_scanner' not in st.session_state:
+        st.session_state.ai_scanner = get_ai_scanner()
+    if 'ml_scanner' not in st.session_state:
+        st.session_state.ml_scanner = get_ml_scanner()
+    if 'advanced_scanner' not in st.session_state:
+        st.session_state.advanced_scanner = get_advanced_scanner()
+    
+    # Cache ticker data in session state to prevent repeated database queries
+    # Refresh every 5 minutes (300 seconds)
+    if 'ticker_cache' not in st.session_state:
+        st.session_state.ticker_cache = {}
+        st.session_state.ticker_cache_timestamp = None
+        st.session_state.ticker_cache_ttl = 300  # 5 minutes
+    
+    # Cache should_update_analysis results to prevent repeated database queries
+    if 'analysis_update_cache' not in st.session_state:
+        st.session_state.analysis_update_cache = {}
+        st.session_state.analysis_update_cache_timestamp = {}
+    
     # Sidebar - Configuration
     with st.sidebar:
         st.header("⚙️ Configuration")
@@ -1581,6 +1637,7 @@ def main():
                                     st.info("Tradier client refreshed for Paper Mode")
                                 except Exception as e:
                                     st.warning(f"Failed to refresh Tradier client: {e}")
+                            # Mode switch needs rerun to refresh UI
                             st.rerun()
                         else:
                             st.error("Failed to switch to Paper Mode")
@@ -1594,6 +1651,7 @@ def main():
                         st.warning("⚠️ **LIVE TRADING USES REAL MONEY!**")
                         if st.button("💰 Switch to Production Mode", disabled=mode_manager.is_production_mode(), key="confirm_live_btn"):
                             st.session_state.confirm_live_switch = True
+                            # Mode confirmation needs rerun
                             st.rerun()
                     else:
                         st.error("⚠️ **FINAL CONFIRMATION: This will use REAL MONEY**")
@@ -1617,6 +1675,7 @@ def main():
                                             st.info("Tradier client refreshed for Production Mode")
                                         except Exception as e:
                                             st.warning(f"Failed to refresh Tradier client: {e}")
+                                    # Production mode switch needs rerun to refresh UI
                                     st.rerun()
                                 else:
                                     st.error("Failed to switch to Production Mode")
@@ -1624,6 +1683,7 @@ def main():
                         with col_cancel:
                             if st.button("❌ Cancel", key="cancel_live_switch"):
                                 st.session_state.confirm_live_switch = False
+                                # Cancel action needs rerun
                                 st.rerun()
             else:
                 current_mode = available_modes[0]
@@ -1665,6 +1725,7 @@ def main():
             mode_manager.set_mode(TradingMode.PAPER)
             is_paper = True
             st.error("🚨 Safety override: Reset to PAPER mode due to state mismatch")
+            # Safety mode reset needs rerun to update all UI elements
             st.rerun()
         elif session_state_mode == TradingMode.PRODUCTION and is_paper:
             logger.warning("⚠️ Mismatch: Session state is PRODUCTION but mode_manager reports PAPER. Syncing to session state.")
@@ -1677,6 +1738,7 @@ def main():
                 switch_to_paper_mode()
             else:
                 switch_to_production_mode()
+            # Toggle change needs rerun to update mode across app
             st.rerun()
         
         # Final check before displaying banner - always sync one more time
@@ -1732,6 +1794,7 @@ def main():
                 if st.button("🔎 Open Strategy Analyzer", width="stretch"):
                     # Set a flag so the main tabs can react (we can't switch tabs programmatically reliably)
                     st.session_state.goto_strategy_analyzer = True
+                    # Navigation action needs rerun
                     st.rerun()
             except Exception:
                 st.write("Compact summary unavailable")
@@ -1739,7 +1802,7 @@ def main():
             st.info("Run a strategy analysis to see a quick summary here.")
     
     # Main tabs - Reorganized for clarity
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14, tab15 = st.tabs([
+    tab_names = [
         "🏠 Dashboard",
         "🚀 Advanced Scanner",
         "⭐ My Tickers",
@@ -1755,9 +1818,35 @@ def main():
         "🤖 Strategy Analyzer",
         "🤖 Auto-Trader",
         "₿ Crypto Trading"
-    ])
+    ]
     
-    with tab1:
+    # Use stateful navigation to prevent auto-redirect to Dashboard on reruns
+    if 'active_main_tab' not in st.session_state:
+        st.session_state.active_main_tab = "🏠 Dashboard"
+    
+    # Get current index for radio button
+    try:
+        current_main_index = tab_names.index(st.session_state.active_main_tab)
+    except ValueError:
+        current_main_index = 0
+        st.session_state.active_main_tab = tab_names[0]
+    
+    # Main navigation selector
+    selected_main_tab = st.radio(
+        "Select Section:",
+        tab_names,
+        index=current_main_index,
+        horizontal=True,
+        key="main_tab_selector"
+    )
+    
+    # Update session state when tab changes
+    st.session_state.active_main_tab = selected_main_tab
+    
+    st.divider()
+    
+    # Render only the selected tab content
+    if selected_main_tab == "🏠 Dashboard":
         logger.info(f"🏁 TAB1 RENDERING - Session state: show_quick_trade={st.session_state.get('show_quick_trade', 'NOT SET')}, has_analysis={st.session_state.get('current_analysis') is not None}")
         st.header("🔍 Comprehensive Stock Intelligence")
         st.write("Get real-time analysis including news, catalysts, technical indicators, and IV metrics.")
@@ -1775,17 +1864,37 @@ def main():
         with col2:
             trading_style_display = st.selectbox(
                 "Trading Style",
-                options=["📊 Day Trade", "📈 Swing Trade", "⚡ Scalp", "💎 Buy & Hold", "🎯 Options"],
+                options=[
+                    "🤖 AI Analysis",
+                    "📊 Day Trade", 
+                    "📈 Swing Trade", 
+                    "⚡ Scalp", 
+                    "⚔️ Warrior Scalping",
+                    "💎 Buy & Hold", 
+                    "🎯 Options",
+                    "📈 EMA Crossover + Heikin Ashi",
+                    "📊 RSI + Stochastic + Hammer",
+                    "🎯 Fisher RSI Multi-Indicator",
+                    "📉 MACD + Volume + RSI",
+                    "🔥 Aggressive Scalping"
+                ],
                 index=0,
                 help="Select your trading style for personalized recommendations"
             )
             # Map display names to internal codes
             style_map = {
+                "🤖 AI Analysis": "AI",
                 "📊 Day Trade": "DAY_TRADE",
                 "📈 Swing Trade": "SWING_TRADE",
                 "⚡ Scalp": "SCALP",
+                "⚔️ Warrior Scalping": "WARRIOR_SCALPING",
                 "💎 Buy & Hold": "BUY_HOLD",
-                "🎯 Options": "OPTIONS"
+                "🎯 Options": "OPTIONS",
+                "📈 EMA Crossover + Heikin Ashi": "EMA_HEIKIN_ASHI",
+                "📊 RSI + Stochastic + Hammer": "RSI_STOCHASTIC_HAMMER",
+                "🎯 Fisher RSI Multi-Indicator": "FISHER_RSI",
+                "📉 MACD + Volume + RSI": "MACD_VOLUME_RSI",
+                "🔥 Aggressive Scalping": "AGGRESSIVE_SCALPING"
             }
             trading_style = style_map[trading_style_display]
         
@@ -1799,13 +1908,20 @@ def main():
         
         # Dynamic caption based on selected style
         style_descriptions = {
+            "AI": "🤖 **AI Analysis:** Machine learning-powered analysis with confidence scores and multi-factor signals",
             "DAY_TRADE": "💡 **Day Trade:** Intraday equity trades, exit by market close (0.5-3% targets)",
             "SWING_TRADE": "💡 **Swing Trade:** Multi-day equity holds, 3-10 day timeframe (5-15% targets)",
             "SCALP": "💡 **Scalp:** Ultra-short term, seconds to minutes (0.1-0.5% targets, high risk)",
+            "WARRIOR_SCALPING": "⚔️ **Warrior Scalping:** Aggressive momentum scalping with gap analysis (1-3% targets)",
             "BUY_HOLD": "💡 **Buy & Hold:** Long-term investing, 6+ months (20%+ annual targets)",
-            "OPTIONS": "💡 **Options:** Calls, puts, spreads based on IV and trend analysis"
+            "OPTIONS": "💡 **Options:** Calls, puts, spreads based on IV and trend analysis",
+            "EMA_HEIKIN_ASHI": "📈 **EMA Crossover + Heikin Ashi:** Freqtrade strategy with EMA 20/50/100 crossovers",
+            "RSI_STOCHASTIC_HAMMER": "📊 **RSI + Stochastic + Hammer:** Freqtrade strategy with oversold signals and candlestick patterns",
+            "FISHER_RSI": "🎯 **Fisher RSI Multi-Indicator:** Freqtrade strategy combining Fisher RSI with MFI and Stochastic",
+            "MACD_VOLUME_RSI": "📉 **MACD + Volume + RSI:** Freqtrade strategy with MACD crossovers and volume confirmation",
+            "AGGRESSIVE_SCALPING": "🔥 **Aggressive Scalping:** Freqtrade strategy with fast EMA crosses and tight stops (1-3% targets)"
         }
-        st.caption(style_descriptions[trading_style])
+        st.caption(style_descriptions.get(trading_style, "Select a trading style for analysis"))
         
         # Quick Trade Modal - AT TOP so it's immediately visible when Execute button is clicked
         logger.info(f"🔍 Checking modal display: show_quick_trade={st.session_state.get('show_quick_trade', False)}")
@@ -1823,6 +1939,7 @@ def main():
                 st.error("❌ Analysis data not available. Please analyze a stock first.")
                 if st.button("Close"):
                     st.session_state.show_quick_trade = False
+                    # Modal close needs rerun to update UI
                     st.rerun()
             else:
                 logger.info(f"✅ Modal has analysis data: ticker={analysis.ticker}, price={analysis.price}")
@@ -1837,6 +1954,7 @@ def main():
                     st.error("❌ Tradier not connected. Please configure in the 🏦 Tradier Account tab.")
                     if st.button("Close", key="close_no_tradier"):
                         st.session_state.show_quick_trade = False
+                        # Modal close needs rerun to update UI
                         st.rerun()
                 else:
                     verdict_action = st.session_state.get('quick_trade_verdict', 'N/A')
@@ -2009,6 +2127,7 @@ def main():
                                                 generated_symbol = f"{trade_symbol.upper()}{exp_date.strftime('%y%m%d')}{option_type}{int(strike * 1000):08d}"
                                                 # Store the generated symbol in a temporary session state key
                                                 st.session_state['temp_generated_symbol'] = generated_symbol
+                                                # Symbol generation needs rerun to populate input field
                                                 st.rerun()
                                             except Exception as e:
                                                 st.error(f"Error generating symbol: {e}")
@@ -2279,6 +2398,7 @@ def main():
                                         if st.button("Close & Refresh", key="close_success"):
                                             st.session_state.show_quick_trade = False
                                             st.session_state.selected_recommendation = None
+                                            # Modal close needs rerun to update UI
                                             st.rerun()
                                     else:
                                         st.error(f"❌ Order failed: {result.get('error', 'Unknown error')}")
@@ -2291,6 +2411,7 @@ def main():
                         if st.button("❌ Cancel", width="stretch", key="modal_cancel"):
                             st.session_state.show_quick_trade = False
                             st.session_state.selected_recommendation = None
+                            # Modal close needs rerun to update UI
                             st.rerun()
             st.divider()
         
@@ -2899,8 +3020,10 @@ def main():
                     col_refresh, col_info = st.columns([1, 4])
                     with col_refresh:
                         if st.button("🔄 Refresh News", help="Get the latest news and sentiment"):
-                            # Clear cache for this ticker
+                            # Clear cache for this ticker and set flag for refresh
                             get_cached_news.clear()
+                            st.session_state[f'news_refreshed_{analysis.ticker}'] = True
+                            # News refresh needs rerun to display updated data
                             st.rerun()
                     
                     with col_info:
@@ -3318,6 +3441,182 @@ def main():
                         if not is_penny_stock:
                             st.info("💡 **Position Trading Tip:** Consider selling covered calls or cash-secured puts to generate income while holding.")
                     
+                    elif trading_style == "AI":
+                        # AI Analysis
+                        st.write("🤖 **AI-Powered Analysis**")
+                        ai_results = TradingStyleAnalyzer.analyze_ai_style(analysis, hist)
+                        
+                        # Display AI score and prediction
+                        ai_col1, ai_col2, ai_col3 = st.columns(3)
+                        with ai_col1:
+                            st.metric("AI Score", f"{ai_results['score']}/100")
+                        with ai_col2:
+                            st.metric("ML Prediction", ai_results.get('ml_prediction', 'N/A'))
+                        with ai_col3:
+                            st.metric("Risk Level", ai_results.get('risk_level', 'UNKNOWN'))
+                        
+                        # Display signals
+                        if ai_results.get('signals'):
+                            st.write("**📊 AI Signals:**")
+                            for signal in ai_results['signals']:
+                                st.write(signal)
+                        
+                        # Display recommendations
+                        if ai_results.get('recommendations'):
+                            st.write("**💡 AI Recommendations:**")
+                            for rec in ai_results['recommendations']:
+                                st.write(rec)
+                    
+                    elif trading_style == "SCALP":
+                        # Scalp Analysis
+                        st.write("⚡ **Scalping Analysis**")
+                        scalp_results = TradingStyleAnalyzer.analyze_scalp_style(analysis, hist)
+                        
+                        # Display scalp score and risk
+                        scalp_col1, scalp_col2 = st.columns(2)
+                        with scalp_col1:
+                            st.metric("Scalping Score", f"{scalp_results['score']}/100")
+                        with scalp_col2:
+                            st.metric("Risk Level", scalp_results.get('risk_level', 'UNKNOWN'))
+                        
+                        # Display signals
+                        if scalp_results.get('signals'):
+                            st.write("**📊 Scalping Signals:**")
+                            for signal in scalp_results['signals']:
+                                st.write(signal)
+                        
+                        # Display targets
+                        if scalp_results.get('targets'):
+                            st.write("**🎯 Scalping Targets:**")
+                            for target in scalp_results['targets']:
+                                st.write(target)
+                        
+                        # Display recommendations
+                        if scalp_results.get('recommendations'):
+                            st.write("**💡 Scalping Strategy:**")
+                            for rec in scalp_results['recommendations']:
+                                st.write(rec)
+                    
+                    elif trading_style == "WARRIOR_SCALPING":
+                        # Warrior Scalping Analysis
+                        st.write("⚔️ **Warrior Scalping Analysis**")
+                        warrior_results = TradingStyleAnalyzer.analyze_warrior_scalping_style(analysis, hist)
+                        
+                        # Display warrior score and setup type
+                        warrior_col1, warrior_col2, warrior_col3 = st.columns(3)
+                        with warrior_col1:
+                            st.metric("Warrior Score", f"{warrior_results['score']}/100")
+                        with warrior_col2:
+                            st.metric("Setup Type", warrior_results.get('setup_type', 'N/A'))
+                        with warrior_col3:
+                            st.metric("Risk Level", warrior_results.get('risk_level', 'UNKNOWN'))
+                        
+                        # Display signals
+                        if warrior_results.get('signals'):
+                            st.write("**📊 Warrior Signals:**")
+                            for signal in warrior_results['signals']:
+                                st.write(signal)
+                        
+                        # Display targets
+                        if warrior_results.get('targets'):
+                            st.write("**🎯 Warrior Targets:**")
+                            for target in warrior_results['targets']:
+                                st.write(target)
+                        
+                        # Display recommendations
+                        if warrior_results.get('recommendations'):
+                            st.write("**💡 Warrior Strategy:**")
+                            for rec in warrior_results['recommendations']:
+                                st.write(rec)
+                    
+                    elif trading_style in ["EMA_HEIKIN_ASHI", "RSI_STOCHASTIC_HAMMER", "FISHER_RSI", "MACD_VOLUME_RSI", "AGGRESSIVE_SCALPING"]:
+                        # Freqtrade Strategy Analysis
+                        st.write("⚡ **Freqtrade Strategy Analysis**")
+                        
+                        strategy_names = {
+                            "EMA_HEIKIN_ASHI": "EMA Crossover + Heikin Ashi",
+                            "RSI_STOCHASTIC_HAMMER": "RSI + Stochastic + Hammer",
+                            "FISHER_RSI": "Fisher RSI Multi-Indicator",
+                            "MACD_VOLUME_RSI": "MACD + Volume + RSI",
+                            "AGGRESSIVE_SCALPING": "Aggressive Scalping"
+                        }
+                        
+                        st.info(f"📊 **Strategy:** {strategy_names.get(trading_style, trading_style)}")
+                        
+                        # Calculate strategy suitability score
+                        strategy_score = 50
+                        signals = []
+                        
+                        # Common indicators for freqtrade strategies
+                        if 30 < analysis.rsi < 70:
+                            strategy_score += 15
+                            signals.append("✅ RSI in optimal range")
+                        elif analysis.rsi < 30:
+                            strategy_score += 10
+                            signals.append("✅ RSI oversold - potential buy signal")
+                        elif analysis.rsi > 70:
+                            strategy_score += 10
+                            signals.append("✅ RSI overbought - potential sell signal")
+                        
+                        if analysis.macd_signal == "BULLISH":
+                            strategy_score += 15
+                            signals.append("✅ MACD bullish crossover")
+                        elif analysis.macd_signal == "BEARISH":
+                            strategy_score += 10
+                            signals.append("⚠️ MACD bearish crossover")
+                        
+                        if volume_vs_avg > 1.5:
+                            strategy_score += 15
+                            signals.append(f"✅ Volume surge: {volume_vs_avg:.1f}x average")
+                        
+                        if analysis.trend != "NEUTRAL":
+                            strategy_score += 10
+                            signals.append(f"✅ Clear trend: {analysis.trend}")
+                        
+                        # Strategy-specific scoring
+                        if trading_style == "AGGRESSIVE_SCALPING":
+                            if abs(analysis.change_pct) > 2:
+                                strategy_score += 10
+                                signals.append(f"✅ High volatility: {analysis.change_pct:+.2f}%")
+                        elif trading_style == "EMA_HEIKIN_ASHI":
+                            if analysis.trend == "BULLISH":
+                                strategy_score += 10
+                                signals.append("✅ Heikin Ashi bullish setup")
+                        
+                        strategy_score = min(100, strategy_score)
+                        
+                        # Display results
+                        strat_col1, strat_col2 = st.columns(2)
+                        with strat_col1:
+                            st.metric("Strategy Score", f"{strategy_score}/100")
+                        with strat_col2:
+                            if strategy_score >= 75:
+                                st.metric("Signal", "🟢 STRONG BUY")
+                            elif strategy_score >= 60:
+                                st.metric("Signal", "🟡 BUY")
+                            elif strategy_score >= 40:
+                                st.metric("Signal", "⚪ HOLD")
+                            else:
+                                st.metric("Signal", "🔴 SELL")
+                        
+                        if signals:
+                            st.write("**📊 Strategy Signals:**")
+                            for signal in signals:
+                                st.write(signal)
+                        
+                        # Targets
+                        target1 = analysis.price * 1.02
+                        target2 = analysis.price * 1.05
+                        target3 = analysis.price * 1.10
+                        st.write("**🎯 Profit Targets:**")
+                        st.write(f"T1: ${target1:.2f} (+2%)")
+                        st.write(f"T2: ${target2:.2f} (+5%)")
+                        st.write(f"T3: ${target3:.2f} (+10%)")
+                        
+                        # Stop loss
+                        stop_loss = analysis.price * 0.98
+                        st.write(f"**🛑 Stop Loss:** ${stop_loss:.2f} (-2%)")
+                    
                     # AI Recommendation
                     st.subheader(f"🤖 AI Trading Recommendation - {trading_style_display}")
                     
@@ -3708,25 +4007,37 @@ def main():
                             momentum_factors = {k: v for k, v in alpha_factors.items() if 'momentum' in k or 'rs_' in k}
                             vol_factors = {k: v for k, v in alpha_factors.items() if 'volatility' in k or 'hl_' in k}
                             
-                            tab_price, tab_vol, tab_tech, tab_mom, tab_volat = st.tabs(["💰 Price", "📊 Volume", "📈 Technical", "🚀 Momentum", "⚡ Volatility"])
+                            # Use stateful navigation instead of st.tabs() to prevent reruns
+                            if 'alpha_factors_tab' not in st.session_state:
+                                st.session_state.alpha_factors_tab = "💰 Price"
                             
-                            with tab_price:
+                            # Tab selector using radio buttons (no rerun on selection)
+                            alpha_tab_selector = st.radio(
+                                "Factor Category",
+                                options=["💰 Price", "📊 Volume", "📈 Technical", "🚀 Momentum", "⚡ Volatility"],
+                                horizontal=True,
+                                key="alpha_factors_tab_selector",
+                                label_visibility="collapsed"
+                            )
+                            
+                            # Update session state if changed
+                            if alpha_tab_selector != st.session_state.alpha_factors_tab:
+                                st.session_state.alpha_factors_tab = alpha_tab_selector
+                            
+                            # Render the selected tab
+                            if st.session_state.alpha_factors_tab == "💰 Price":
                                 for k, v in price_factors.items():
                                     st.write(f"**{k}**: {v:.4f}")
-                            
-                            with tab_vol:
+                            elif st.session_state.alpha_factors_tab == "📊 Volume":
                                 for k, v in volume_factors.items():
                                     st.write(f"**{k}**: {v:.4f}")
-                            
-                            with tab_tech:
+                            elif st.session_state.alpha_factors_tab == "📈 Technical":
                                 for k, v in tech_factors.items():
                                     st.write(f"**{k}**: {v:.4f}")
-                            
-                            with tab_mom:
+                            elif st.session_state.alpha_factors_tab == "🚀 Momentum":
                                 for k, v in momentum_factors.items():
                                     st.write(f"**{k}**: {v:.4f}")
-                            
-                            with tab_volat:
+                            elif st.session_state.alpha_factors_tab == "⚡ Volatility":
                                 for k, v in vol_factors.items():
                                     st.write(f"**{k}**: {v:.4f}")
                     else:
@@ -4079,11 +4390,13 @@ def main():
                     with action_col1:
                         if st.button("🎯 Get More Strategy Ideas", width="stretch"):
                             st.session_state.goto_strategy_advisor = True
+                            # Navigation action needs rerun
                             st.rerun()
                     
                     with action_col2:
                         if st.button("📊 View in Strategy Analyzer", width="stretch"):
                             st.session_state.analyzer_ticker = analysis.ticker
+                            # Navigation action needs rerun
                             st.rerun()
                     
                 else:
@@ -4092,14 +4405,14 @@ def main():
         elif st.session_state.current_analysis:
             st.info("💡 Previous analysis is displayed. Enter a new ticker and click Analyze to update.")
     
-    with tab2:
+    elif selected_main_tab == "🚀 Advanced Scanner":
         st.header("🚀 Advanced Opportunity Scanner")
         st.write("**All-in-one scanner** with AI/ML analysis, powerful filters, reverse split detection, and merger candidate identification!")
         
-        # Get cached scanners (only initialized once, reused on reruns)
-        scanner = get_advanced_scanner()
-        ai_scanner = get_ai_scanner()
-        ml_scanner = get_ml_scanner()
+        # Use cached scanners from session state (only initialized once, reused on reruns)
+        scanner = st.session_state.advanced_scanner
+        ai_scanner = st.session_state.ai_scanner
+        ml_scanner = st.session_state.ml_scanner
         
         # Analysis mode selector
         analysis_mode = st.radio(
@@ -4383,7 +4696,8 @@ def main():
                         "Strong Momentum (>5% change)",
                         "Power Zone Stocks Only",
                         "EMA Reclaim Setups"
-                    ]
+                    ],
+                    key='scanner_quick_filter'
                 )
         
         # Advanced Filters (Expandable)
@@ -4630,9 +4944,11 @@ def main():
                             st.metric("🧠 ML Score", f"{trade.ml_prediction_score:.1f}/100")
                         # Add to My Tickers button
                         if st.button(f"⭐ Add to My Tickers", key=f"add_ai_{trade.ticker}_{i}"):
-                            if 'ticker_manager' not in st.session_state:
-                                st.session_state.ticker_manager = TickerManager()
+                            # Use cached ticker manager from session state
                             st.session_state.ticker_manager.add_ticker(trade.ticker, "AI+ML Scanner")
+                            # Invalidate ticker cache to force refresh
+                            if 'ticker_cache' in st.session_state:
+                                st.session_state.ticker_cache = {}
                             st.success(f"✅ Added {trade.ticker} to My Tickers!")
                     
                     st.divider()
@@ -4775,9 +5091,11 @@ def main():
                             st.info(f"Switch to '🔍 Stock Intelligence' tab and analyze {opp.ticker}")
                     with acol2:
                         if st.button(f"⭐ Add to My Tickers", key=f"add_{opp.ticker}_{i}"):
-                            if 'ticker_manager' not in st.session_state:
-                                st.session_state.ticker_manager = TickerManager()
+                            # Use cached ticker manager from session state
                             st.session_state.ticker_manager.add_ticker(opp.ticker, "Advanced Scanner")
+                            # Invalidate ticker cache to force refresh
+                            if 'ticker_cache' in st.session_state:
+                                st.session_state.ticker_cache = {}
                             st.success(f"✅ Added {opp.ticker} to My Tickers!")
             
             # Export option
@@ -4820,16 +5138,20 @@ def main():
         else:
             st.info("👆 Configure your scan settings and click 'Scan Markets' to find opportunities")
     
-    with tab3:
+    elif selected_main_tab == "⭐ My Tickers":
         st.header("⭐ My Tickers")
         st.write("Manage your saved tickers and watchlists.")
         
-        # Use cached ticker manager instance
-        tm = get_ticker_manager()
+        # Use cached ticker manager from session state
+        tm = st.session_state.ticker_manager
         
-        # Debug: Show connection status
+        # Debug: Show connection status (cached to prevent repeated database queries)
         if tm.supabase:
-            if tm.test_connection():
+            # Cache connection test result in session state to avoid repeated queries
+            if 'supabase_connection_test' not in st.session_state:
+                st.session_state.supabase_connection_test = tm.test_connection()
+            
+            if st.session_state.supabase_connection_test:
                 st.success("✅ Supabase connected and table accessible")
             else:
                 st.error("❌ Supabase connected but table not accessible - check table exists")
@@ -4864,8 +5186,11 @@ def main():
         if st.button("➕ Add Ticker"):
             if new_ticker:
                 if tm.add_ticker(new_ticker, name=new_name, ticker_type=new_type, notes=new_notes):
-                    st.success(f"✅ Added {new_ticker}!")
-                    st.rerun()
+                    # Invalidate ticker cache to force refresh
+                    st.session_state.ticker_cache = {}
+                    st.session_state.ticker_cache_timestamp = None
+                    st.success(f"✅ Added {new_ticker}! Refresh the page to see it in your list.")
+                    # No immediate rerun needed - ticker is added, will show on next natural refresh
                 else:
                     st.error("❌ Failed to add ticker. Check the logs for details.")
                     # Show debug info
@@ -4893,8 +5218,9 @@ def main():
         
         with col_refresh_all:
             if st.button("🔄 Refresh All", help="Refresh analysis for all tickers"):
+                # Set flag for refresh - no need to rerun immediately
                 st.session_state.refresh_all_tickers = True
-                st.rerun()
+                st.info("🔄 Refreshing all tickers... This will update on the next analysis run.")
         
         # View saved tickers with pagination
         st.subheader("📋 Your Saved Tickers")
@@ -4907,8 +5233,24 @@ def main():
         if 'ticker_page' not in st.session_state:
             st.session_state.ticker_page = 1
         
-        # Get total count for pagination (get all to count, but only display page)
-        all_tickers_full = tm.get_all_tickers(limit=100)
+        # Get total count for pagination with caching
+        # Check if we have cached ticker data that's still fresh
+        cache_valid = False
+        if st.session_state.ticker_cache and st.session_state.ticker_cache_timestamp:
+            cache_age = (datetime.now() - st.session_state.ticker_cache_timestamp).total_seconds()
+            if cache_age < st.session_state.ticker_cache_ttl:
+                cache_valid = True
+        
+        if cache_valid and 'all_tickers' in st.session_state.ticker_cache:
+            all_tickers_full = st.session_state.ticker_cache['all_tickers']
+            logger.debug(f"Using cached ticker data (age: {cache_age:.1f}s)")
+        else:
+            # Fetch fresh data and cache it
+            all_tickers_full = tm.get_all_tickers(limit=100)
+            st.session_state.ticker_cache['all_tickers'] = all_tickers_full
+            st.session_state.ticker_cache_timestamp = datetime.now()
+            logger.debug("Fetched fresh ticker data and cached it")
+        
         total_tickers = len(all_tickers_full)
         total_pages = max(1, math.ceil(total_tickers / items_per_page))
         
@@ -4922,6 +5264,7 @@ def main():
             with col_p1:
                 if st.button("◀ Previous", disabled=st.session_state.ticker_page == 1, key="prev_top"):
                     st.session_state.ticker_page -= 1
+                    # Pagination needs rerun to display new page
                     st.rerun()
             with col_p2:
                 st.write(f"**Page {st.session_state.ticker_page} of {total_pages}**")
@@ -4930,6 +5273,7 @@ def main():
             with col_p4:
                 if st.button("Next ▶", disabled=st.session_state.ticker_page == total_pages, key="next_top"):
                     st.session_state.ticker_page += 1
+                    # Pagination needs rerun to display new page
                     st.rerun()
         
         # Get only the tickers for current page
@@ -5048,17 +5392,52 @@ def main():
                             st.divider()
                             st.markdown("**📊 Comprehensive Analysis**")
                             
-                            # Check if analysis is stale (older than 1 hour)
-                            # Ensure tm is properly initialized and has the method
-                            try:
-                                if tm and hasattr(tm, 'should_update_analysis'):
-                                    needs_update = tm.should_update_analysis(ticker_symbol, max_age_hours=1.0)
-                                else:
-                                    # Fallback: check last_analyzed directly from ticker data
-                                    needs_update = True
-                            except (AttributeError, TypeError) as e:
-                                logger.error(f"Error checking analysis staleness for {ticker_symbol}: {e}")
-                                needs_update = True  # Default to needing update if check fails
+                            # Check if analysis is stale (older than 1 hour) with caching
+                            # Cache key includes ticker and max_age_hours to ensure proper invalidation
+                            cache_key = f"{ticker_symbol}_1.0"
+                            
+                            # Check if we have a cached result that's still valid (cache for 5 minutes to reduce DB queries)
+                            needs_update = True  # Default
+                            if cache_key in st.session_state.analysis_update_cache:
+                                cache_entry = st.session_state.analysis_update_cache[cache_key]
+                                cache_timestamp = st.session_state.analysis_update_cache_timestamp.get(cache_key)
+                                if cache_timestamp:
+                                    cache_age = (datetime.now() - cache_timestamp).total_seconds()
+                                    if cache_age < 300:  # Cache for 5 minutes (increased from 30 seconds)
+                                        needs_update = cache_entry
+                                        logger.debug(f"Using cached should_update_analysis for {ticker_symbol}: {needs_update}")
+                            
+                            # If not cached or cache expired, try to use ticker data from cache first
+                            if needs_update is True or cache_key not in st.session_state.analysis_update_cache:
+                                try:
+                                    # First, try to get last_analyzed from already-loaded ticker data
+                                    ticker_data = next((t for t in all_tickers_full if t.get('ticker', '').upper() == ticker_symbol.upper()), None)
+                                    if ticker_data and ticker_data.get('last_analyzed'):
+                                        # Use cached ticker data to avoid database query
+                                        try:
+                                            last_analyzed = datetime.fromisoformat(ticker_data['last_analyzed']).replace(tzinfo=timezone.utc)
+                                            age_hours = (datetime.now(timezone.utc) - last_analyzed).total_seconds() / 3600
+                                            needs_update = age_hours >= 1.0
+                                            # Cache the result
+                                            st.session_state.analysis_update_cache[cache_key] = needs_update
+                                            st.session_state.analysis_update_cache_timestamp[cache_key] = datetime.now()
+                                        except (ValueError, TypeError) as e:
+                                            logger.debug(f"Error parsing last_analyzed from ticker data for {ticker_symbol}: {e}")
+                                            # Fall through to database query
+                                            needs_update = True
+                                    else:
+                                        # Fallback to database query if not in cached data
+                                        if tm and hasattr(tm, 'should_update_analysis'):
+                                            needs_update = tm.should_update_analysis(ticker_symbol, max_age_hours=1.0)
+                                            # Cache the result
+                                            st.session_state.analysis_update_cache[cache_key] = needs_update
+                                            st.session_state.analysis_update_cache_timestamp[cache_key] = datetime.now()
+                                        else:
+                                            # Fallback: check last_analyzed directly from ticker data
+                                            needs_update = True
+                                except (AttributeError, TypeError) as e:
+                                    logger.error(f"Error checking analysis staleness for {ticker_symbol}: {e}")
+                                    needs_update = True  # Default to needing update if check fails
                             
                             last_analyzed_str = ticker.get('last_analyzed')
                             
@@ -5607,6 +5986,94 @@ def main():
                                             for rec in hold_results['recommendations']:
                                                 st.write(rec)
 
+                                    elif trading_style in ["EMA_HEIKIN_ASHI", "RSI_STOCHASTIC_HAMMER", "FISHER_RSI", "MACD_VOLUME_RSI", "AGGRESSIVE_SCALPING"]:
+                                        # Freqtrade Strategy Analysis
+                                        st.write("⚡ **Freqtrade Strategy Analysis**")
+                                        
+                                        strategy_names = {
+                                            "EMA_HEIKIN_ASHI": "EMA Crossover + Heikin Ashi",
+                                            "RSI_STOCHASTIC_HAMMER": "RSI + Stochastic + Hammer",
+                                            "FISHER_RSI": "Fisher RSI Multi-Indicator",
+                                            "MACD_VOLUME_RSI": "MACD + Volume + RSI",
+                                            "AGGRESSIVE_SCALPING": "Aggressive Scalping"
+                                        }
+                                        
+                                        st.info(f"📊 **Strategy:** {strategy_names.get(trading_style, trading_style)}")
+                                        
+                                        # Calculate strategy suitability score
+                                        strategy_score = 50
+                                        signals = []
+                                        
+                                        # Common indicators for freqtrade strategies
+                                        if 30 < analysis.rsi < 70:
+                                            strategy_score += 15
+                                            signals.append("✅ RSI in optimal range")
+                                        elif analysis.rsi < 30:
+                                            strategy_score += 10
+                                            signals.append("✅ RSI oversold - potential buy signal")
+                                        elif analysis.rsi > 70:
+                                            strategy_score += 10
+                                            signals.append("✅ RSI overbought - potential sell signal")
+                                        
+                                        if analysis.macd_signal == "BULLISH":
+                                            strategy_score += 15
+                                            signals.append("✅ MACD bullish crossover")
+                                        elif analysis.macd_signal == "BEARISH":
+                                            strategy_score += 10
+                                            signals.append("⚠️ MACD bearish crossover")
+                                        
+                                        if volume_vs_avg > 1.5:
+                                            strategy_score += 15
+                                            signals.append(f"✅ Volume surge: {volume_vs_avg:.1f}x average")
+                                        
+                                        if analysis.trend != "NEUTRAL":
+                                            strategy_score += 10
+                                            signals.append(f"✅ Clear trend: {analysis.trend}")
+                                        
+                                        # Strategy-specific scoring
+                                        if trading_style == "AGGRESSIVE_SCALPING":
+                                            if abs(analysis.change_pct) > 2:
+                                                strategy_score += 10
+                                                signals.append(f"✅ High volatility: {analysis.change_pct:+.2f}%")
+                                        elif trading_style == "EMA_HEIKIN_ASHI":
+                                            if analysis.trend == "BULLISH":
+                                                strategy_score += 10
+                                                signals.append("✅ Heikin Ashi bullish setup")
+                                        
+                                        strategy_score = min(100, strategy_score)
+                                        
+                                        # Display results
+                                        strat_col1, strat_col2 = st.columns(2)
+                                        with strat_col1:
+                                            st.metric("Strategy Score", f"{strategy_score}/100")
+                                        with strat_col2:
+                                            if strategy_score >= 75:
+                                                st.metric("Signal", "🟢 STRONG BUY")
+                                            elif strategy_score >= 60:
+                                                st.metric("Signal", "🟡 BUY")
+                                            elif strategy_score >= 40:
+                                                st.metric("Signal", "⚪ HOLD")
+                                            else:
+                                                st.metric("Signal", "🔴 SELL")
+                                        
+                                        if signals:
+                                            st.write("**📊 Strategy Signals:**")
+                                            for signal in signals:
+                                                st.write(signal)
+                                        
+                                        # Targets
+                                        target1 = analysis.price * 1.02
+                                        target2 = analysis.price * 1.05
+                                        target3 = analysis.price * 1.10
+                                        st.write("**🎯 Profit Targets:**")
+                                        st.write(f"T1: ${target1:.2f} (+2%)")
+                                        st.write(f"T2: ${target2:.2f} (+5%)")
+                                        st.write(f"T3: ${target3:.2f} (+10%)")
+                                        
+                                        # Stop loss
+                                        stop_loss = analysis.price * 0.98
+                                        st.write(f"**🛑 Stop Loss:** ${stop_loss:.2f} (-2%)")
+                                    
                                     else:  # OPTIONS trading
                                         # Options trading focus: IV, time decay, volatility
                                         timeframe_score = 0
@@ -5736,12 +6203,14 @@ def main():
                         if st.button("🔍 Analyze", key=f"analyze_{ticker_symbol}", help="Run fresh comprehensive analysis", width="stretch"):
                             st.session_state.ml_ticker_to_analyze = ticker_symbol
                             st.session_state.analysis_timeframe = "OPTIONS"  # Default to options
+                            # Analysis trigger needs rerun to start analysis process
                             st.rerun()
                         
                         # Refresh analysis button
                         if st.button("🔄 Refresh", key=f"refresh_{ticker_symbol}", help="Refresh analysis data", width="stretch"):
                             st.session_state[f"refresh_{ticker_symbol}"] = True
-                            st.rerun()
+                            # No rerun needed - flag will be processed on next render
+                            st.success(f"⏳ Queued refresh for {ticker_symbol}")
                         
                         # Quick trade button
                         if st.button("⚡ Trade", key=f"trade_{ticker_symbol}", help="Open quick trade interface", width="stretch"):
@@ -5752,11 +6221,15 @@ def main():
                         # Edit notes button
                         if st.button("✏️ Edit", key=f"edit_{ticker_symbol}", help="Edit ticker details", width="stretch"):
                             st.session_state[f"editing_{ticker_symbol}"] = True
+                            # Edit mode toggle needs rerun to show edit form
                             st.rerun()
                         
                         # Remove button
                         if st.button("🗑️ Remove", key=f"remove_{ticker_symbol}", help="Remove from saved tickers", width="stretch"):
                             if tm.remove_ticker(ticker_symbol):
+                                # Invalidate ticker cache to force refresh
+                                st.session_state.ticker_cache = {}
+                                st.session_state.ticker_cache_timestamp = None
                                 st.success(f"🗑️ Removed {ticker_symbol}!")
                                 st.rerun()
                             else:
@@ -6018,12 +6491,12 @@ def main():
                 else:
                     st.warning("No results to display after analysis.")
     
-    with tab4:
+    elif selected_main_tab == "🔍 Stock Intelligence":
         st.header("🔍 Stock Intelligence")
         st.write("Analyze stocks in-depth with AI-powered insights. Use Dashboard tab for quick analysis.")
         st.info("💡 Tip: Use the Dashboard tab for comprehensive stock intelligence and analysis.")
     
-    with tab5:
+    elif selected_main_tab == "🎯 Strategy Advisor":
         st.header("🎯 Intelligent Strategy Advisor")
         st.write("Get personalized strategy recommendations based on comprehensive analysis.")
         
@@ -6237,10 +6710,28 @@ def main():
             with col1:
                 st.subheader("Your Trading Profile")
                 
-                # Create tabs for different input modes
-                profile_tab, comparison_tab = st.tabs(["Single Profile", "Compare Scenarios"])
+                # Use stateful navigation instead of st.tabs() to prevent reruns
+                if 'profile_comparison_tab' not in st.session_state:
+                    st.session_state.profile_comparison_tab = "Single Profile"
+                
+                # Tab selector using radio buttons (no rerun on selection)
+                profile_tab_selector = st.radio(
+                    "Input Mode",
+                    options=["Single Profile", "Compare Scenarios"],
+                    horizontal=True,
+                    key="profile_comparison_tab_selector",
+                    label_visibility="collapsed"
+                )
+                
+                # Update session state if changed
+                if profile_tab_selector != st.session_state.profile_comparison_tab:
+                    st.session_state.profile_comparison_tab = profile_tab_selector
+                
+                # Render the selected tab
+                profile_tab_active = st.session_state.profile_comparison_tab == "Single Profile"
+                comparison_tab_active = st.session_state.profile_comparison_tab == "Compare Scenarios"
 
-                with profile_tab:
+                if profile_tab_active:
                     user_experience = st.selectbox(
                         "Experience Level",
                         options=["Beginner", "Intermediate", "Advanced"],
@@ -6298,7 +6789,7 @@ def main():
                     else:
                         st.success("✅ Conservative risk level (<2% of capital).")
 
-                with comparison_tab:
+                elif comparison_tab_active:
                     st.subheader("Compare Different Scenarios")
                     
                     # Scenario 1
@@ -7181,7 +7672,7 @@ def main():
         This hybrid approach gives you the **most comprehensive and actionable** stock analysis available, combining the best of technical analysis, AI insights, and personalized strategy recommendations.
         """)
     
-    with tab6:
+    elif selected_main_tab == "📊 Generate Signal":
         st.header("📊 Generate Trading Signal")
         
         # Get current trading mode
@@ -7275,6 +7766,7 @@ def main():
             ticker_input = st.text_input(
                 "Ticker Symbol",
                 value=st.session_state.get('selected_ticker', 'SOFI'),
+                key='signal_ticker_input',
                 help="Ticker symbol (e.g., AAPL). If you loaded a recommended strategy this may be prefilled."
             )
             ticker = ticker_input.upper() if isinstance(ticker_input, str) and ticker_input else ''
@@ -7304,15 +7796,16 @@ def main():
                 value=default_expiry,
                 min_value=datetime.now().date(),
                 max_value=(datetime.now() + timedelta(days=365)).date(),
+                key='signal_expiry_date',
                 help="Expiration date for the option contract. Be mindful of DTE (days to expiration)."
             )
 
             default_strike = example.get('strike', 9.0)
-            strike = st.number_input("Strike Price", min_value=0.0, value=float(default_strike), step=0.5, format="%.2f")
+            strike = st.number_input("Strike Price", min_value=0.0, value=float(default_strike), step=0.5, format="%.2f", key='signal_strike_price')
             st.caption("Strike price for the option(s). Use analysis support/resistance as a reference.")
         
         with col2:
-            qty = st.number_input("Quantity (contracts)", min_value=1, max_value=10, value=int(example.get('qty', 2)))
+            qty = st.number_input("Quantity (contracts)", min_value=1, max_value=10, value=int(example.get('qty', 2)), key='signal_qty')
             st.caption("Number of contracts (1 contract = 100 shares). Keep within your capital limits.")
             # Use example or analysis IV if available
             # Determine a safe numeric default for IV rank (never None)
@@ -7449,7 +7942,7 @@ def main():
         with m4:
             st.metric("Mode", "📝 Paper" if paper_mode else "🔴 Live")
     
-    with tab7:
+    elif selected_main_tab == "📜 Signal History":
         st.header("📜 Signal History")
         
         if st.session_state.signal_history:
@@ -7569,7 +8062,7 @@ def main():
         else:
             st.info("No signals generated yet")
     
-    with tab8:
+    elif selected_main_tab == "📚 Strategy Guide":
         st.header("📚 Complete Strategy Guide")
         
         for i, (strategy_key, strategy_info) in enumerate(StrategyAdvisor.STRATEGIES.items()):
@@ -7964,13 +8457,17 @@ def main():
                                 st.table(df_partial)
 
                             # Auto-refresh logic: try to rerun if available, otherwise show Refresh button
+                            # Only auto-refresh if explicitly enabled by user
                             if auto_refresh and st.session_state.benchmark_status.get('running'):
                                 rerun_fn = getattr(st, 'rerun', None)
                                 if callable(rerun_fn):
                                     import time as _time
                                     _time.sleep(0.5)
                                     try:
-                                        rerun_fn()
+                                        # Limit reruns to prevent performance issues
+                                        if st.session_state.get('benchmark_refresh_count', 0) < 100:
+                                            st.session_state.benchmark_refresh_count = st.session_state.get('benchmark_refresh_count', 0) + 1
+                                            rerun_fn()
                                     except Exception:
                                         pass
                                 else:
@@ -8096,692 +8593,746 @@ def main():
                     st.info("No calculations yet — run one above to populate history.")
     
     
-    with tab9:
+    elif selected_main_tab == "📚 Strategy Templates":
         # Strategy Templates Manager
         from ui.strategy_template_manager import render_template_manager
         render_template_manager()
     
     
-    with tab10:
-        # Initialize Tradier client
-        from src.integrations.tradier_client import create_tradier_client_from_env
-        mode_manager = get_trading_mode_manager()
-        current_mode = mode_manager.get_mode()
+    elif selected_main_tab == "🏦 Tradier Account":
+        # =============================================================================
+        # LAZY LOADING: Only initialize Tradier when user interacts with this tab
+        # This saves ~1 second on every page load when viewing other tabs
+        # =============================================================================
         
-        # Check if we need to initialize or refresh the client
-        should_refresh_client = (
-            'tradier_client' not in st.session_state or
-            st.session_state.tradier_client is None or
-            st.session_state.tradier_client.trading_mode != current_mode
-        )
+        # Track if user has visited this tab (auto-initialize on first view)
+        if 'tab10_visited' not in st.session_state:
+            st.session_state.tab10_visited = False
         
-        if should_refresh_client:
-            logger.info("Initializing/refreshing Tradier client from environment")
-            logger.info("Current trading mode: %s", current_mode.value)
-            try:
-                # Use trading mode manager to get client for current mode
-                st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=current_mode)
-                logger.info("Tradier client initialized successfully: %s", bool(st.session_state.tradier_client))
-                logger.info("Client trading mode: %s", st.session_state.tradier_client.trading_mode.value if st.session_state.tradier_client else "None")
-                # Clear cached account data when switching modes
-                if 'account_summary' in st.session_state:
-                    del st.session_state.account_summary
-                    logger.info("Cleared cached account summary due to mode change")
-            except Exception as e:
-                logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
-                st.session_state.tradier_client = None
+        # Auto-initialize on first view (no button required)
+        if not st.session_state.tab10_visited:
+            with st.spinner("⚡ Loading Tradier integration (one-time initialization)..."):
+                st.session_state.tab10_visited = True
         
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.subheader("🔧 Connection Status")
+        # Initialize Tradier (only runs once per session)
+        if st.session_state.tab10_visited:
+            # Initialize Tradier client - cache mode check to prevent unnecessary re-initialization
+            from src.integrations.tradier_client import create_tradier_client_from_env
             
-            if st.session_state.tradier_client:
-                # Test connection
-                if st.button("🔍 Test Connection"):
-                    with st.spinner("Testing Tradier connection..."):
-                        success, message = validate_tradier_connection()
-                        if success:
-                            st.success(f"✅ {message}")
-                        else:
-                            st.error(f"❌ {message}")
+            # Cache the last mode we initialized for to prevent unnecessary checks
+            if 'tradier_client_last_mode' not in st.session_state:
+                st.session_state.tradier_client_last_mode = None
+            
+            # Check if we need to initialize or refresh the client
+            # Only check mode if client doesn't exist or might need refresh
+            should_refresh_client = (
+                'tradier_client' not in st.session_state or
+                st.session_state.tradier_client is None
+            )
+            
+            # If client exists, check if mode has changed (only if we suspect it might have)
+            if not should_refresh_client and st.session_state.tradier_client is not None:
+                # Only check mode if we suspect it might have changed (e.g., after mode switch)
+                # This avoids calling get_trading_mode_manager() on every rerun
+                if st.session_state.tradier_client_last_mode is None:
+                    # First time, cache the mode
+                    st.session_state.tradier_client_last_mode = st.session_state.tradier_client.trading_mode
+                elif 'trading_mode' in st.session_state:
+                    # Check if session state mode differs from cached client mode
+                    # Only do this check if trading_mode is in session state (might have changed)
+                    mode_manager = get_trading_mode_manager()
+                    current_mode = mode_manager.get_mode()
+                    if current_mode != st.session_state.tradier_client_last_mode:
+                        should_refresh_client = True
+            
+            if should_refresh_client:
+                # Get current mode only when we actually need to refresh
+                mode_manager = get_trading_mode_manager()
+                current_mode = mode_manager.get_mode()
                 
-                # Connection info
-                st.info(f"**Account ID:** {st.session_state.tradier_client.account_id}")
-                st.info(f"**API URL:** {st.session_state.tradier_client.api_url}")
+                logger.info("Initializing/refreshing Tradier client from environment")
+                logger.info("Current trading mode: %s", current_mode.value)
+                try:
+                    # Use trading mode manager to get client for current mode
+                    st.session_state.tradier_client = create_tradier_client_from_env(trading_mode=current_mode)
+                    st.session_state.tradier_client_last_mode = current_mode  # Cache the mode
+                    logger.info("Tradier client initialized successfully: %s", bool(st.session_state.tradier_client))
+                    logger.info("Client trading mode: %s", st.session_state.tradier_client.trading_mode.value if st.session_state.tradier_client else "None")
+                    # Clear cached account data when switching modes
+                    if 'account_summary' in st.session_state:
+                        del st.session_state.account_summary
+                        logger.info("Cleared cached account summary due to mode change")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
+                    st.session_state.tradier_client = None
+            
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                st.subheader("🔧 Connection Status")
                 
-            else:
-                st.error("❌ Tradier client not initialized")
-                st.warning("Please check your environment variables:")
-                st.code("""
+                if st.session_state.tradier_client:
+                    # Test connection
+                    if st.button("🔍 Test Connection"):
+                        with st.spinner("Testing Tradier connection..."):
+                            success, message = validate_tradier_connection()
+                            if success:
+                                st.success(f"✅ {message}")
+                            else:
+                                st.error(f"❌ {message}")
+                    
+                    # Connection info
+                    st.info(f"**Account ID:** {st.session_state.tradier_client.account_id}")
+                    st.info(f"**API URL:** {st.session_state.tradier_client.api_url}")
+                    
+                else:
+                    st.error("❌ Tradier client not initialized")
+                    st.warning("Please check your environment variables:")
+                    st.code("""
 TRADIER_ACCOUNT_ID=your_account_id
 TRADIER_ACCESS_TOKEN=your_access_token
 TRADIER_API_URL=https://sandbox.tradier.com
-                """)
-        
-        with col2:
-            st.subheader("📊 Account Overview")
+                    """)
             
-            if st.session_state.tradier_client:
-                # Get account summary
-                if st.button("🔄 Refresh Account Data"):
-                    with st.spinner("Fetching account data..."):
-                        success, summary = st.session_state.tradier_client.get_account_summary()
-                        
-                        if success:
-                            st.session_state.account_summary = summary
-                            st.success("Account data refreshed!")
-                        else:
-                            st.error(f"Failed to fetch account data: {summary.get('error', 'Unknown error')}")
+            with col2:
+                st.subheader("📊 Account Overview")
                 
-                # Display account summary if available
-                if 'account_summary' in st.session_state:
-                    summary = st.session_state.account_summary
-                    
-                    # Balance information
-                    balance = summary.get('balance', {})
-                    if 'balances' in balance:
-                        bal_data = balance['balances']
+                if st.session_state.tradier_client:
+                    # Get account summary
+                    if st.button("🔄 Refresh Account Data"):
+                        with st.spinner("Fetching account data..."):
+                            success, summary = st.session_state.tradier_client.get_account_summary()
                         
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.metric("Total Cash", f"${float(bal_data.get('total_cash') or 0):,.2f}")
-                        with col2:
-                            st.metric("Buying Power", f"${float(bal_data.get('buying_power') or 0):,.2f}")
-                        with col3:
-                            st.metric("Day Trading", f"${float(bal_data.get('day_trading') or 0):,.2f}")
-                        with col4:
-                            st.metric("Market Value", f"${float(bal_data.get('market_value') or 0):,.2f}")
+                            if success:
+                                st.session_state.account_summary = summary
+                                st.success("Account data refreshed!")
+                            else:
+                                st.error(f"Failed to fetch account data: {summary.get('error', 'Unknown error')}")
+                
+                    # Display account summary if available
+                    if 'account_summary' in st.session_state:
+                        summary = st.session_state.account_summary
                     
-                    # Positions
-                    st.subheader("📈 Current Positions")
-                    positions = summary.get('positions', [])
-                    
-                    if positions:
-                        positions_df = pd.DataFrame(positions)
+                        # Balance information
+                        balance = summary.get('balance', {})
+                        if 'balances' in balance:
+                            bal_data = balance['balances']
                         
-                        # Display key columns
-                        display_cols = ['symbol', 'quantity', 'average_cost', 'market_value', 'gain_loss']
-                        if all(col in positions_df.columns for col in display_cols):
-                            st.dataframe(
-                                positions_df[display_cols],
-                                width='stretch',
-                                column_config={
-                                    "symbol": "Symbol",
-                                    "quantity": "Quantity", 
-                                    "average_cost": st.column_config.NumberColumn("Avg Cost", format="$%.2f"),
-                                    "market_value": st.column_config.NumberColumn("Market Value", format="$%.2f"),
-                                    "gain_loss": st.column_config.NumberColumn("P&L", format="$%.2f")
-                                }
-                            )
+                            col1, col2, col3, col4 = st.columns(4)
+                        
+                            with col1:
+                                st.metric("Total Cash", f"${float(bal_data.get('total_cash') or 0):,.2f}")
+                            with col2:
+                                st.metric("Buying Power", f"${float(bal_data.get('buying_power') or 0):,.2f}")
+                            with col3:
+                                st.metric("Day Trading", f"${float(bal_data.get('day_trading') or 0):,.2f}")
+                            with col4:
+                                st.metric("Market Value", f"${float(bal_data.get('market_value') or 0):,.2f}")
+                    
+                        # Positions
+                        st.subheader("📈 Current Positions")
+                        positions = summary.get('positions', [])
+                    
+                        if positions:
+                            positions_df = pd.DataFrame(positions)
+                        
+                            # Display key columns
+                            display_cols = ['symbol', 'quantity', 'average_cost', 'market_value', 'gain_loss']
+                            if all(col in positions_df.columns for col in display_cols):
+                                st.dataframe(
+                                    positions_df[display_cols],
+                                    width='stretch',
+                                    column_config={
+                                        "symbol": "Symbol",
+                                        "quantity": "Quantity", 
+                                        "average_cost": st.column_config.NumberColumn("Avg Cost", format="$%.2f"),
+                                        "market_value": st.column_config.NumberColumn("Market Value", format="$%.2f"),
+                                        "gain_loss": st.column_config.NumberColumn("P&L", format="$%.2f")
+                                    }
+                                )
+                            else:
+                                st.dataframe(positions_df, width='stretch')
                         else:
-                            st.dataframe(positions_df, width='stretch')
-                    else:
-                        st.info("No positions found")
+                            st.info("No positions found")
                     
-                    # Recent orders
-                    st.subheader("📋 Recent Orders")
-                    orders = summary.get('recent_orders', [])
+                        # Recent orders
+                        st.subheader("📋 Recent Orders")
+                        orders = summary.get('recent_orders', [])
                     
-                    if orders:
-                        # Group orders by class (show bracket orders specially)
-                        for order in orders:
-                            order_class = order.get('class', 'equity')
-                            order_id = order.get('id', 'N/A')
-                            symbol = order.get('symbol', 'N/A')
-                            status = order.get('status', 'N/A')
+                        if orders:
+                            # Group orders by class (show bracket orders specially)
+                            for order in orders:
+                                order_class = order.get('class', 'equity')
+                                order_id = order.get('id', 'N/A')
+                                symbol = order.get('symbol', 'N/A')
+                                status = order.get('status', 'N/A')
                             
-                            if order_class in ['otoco', 'oco']:
-                                # Bracket order - show all legs
-                                with st.expander(f"🎯 Bracket Order: {symbol} (ID: {order_id}) - {status}"):
-                                    st.write(f"**Order Class:** {order_class.upper()}")
-                                    st.write(f"**Status:** {status}")
+                                if order_class in ['otoco', 'oco']:
+                                    # Bracket order - show all legs
+                                    with st.expander(f"🎯 Bracket Order: {symbol} (ID: {order_id}) - {status}"):
+                                        st.write(f"**Order Class:** {order_class.upper()}")
+                                        st.write(f"**Status:** {status}")
                                     
-                                    # Get legs if available
-                                    legs = order.get('leg', [])
-                                    if not isinstance(legs, list):
-                                        legs = [legs] if legs else []
+                                        # Get legs if available
+                                        legs = order.get('leg', [])
+                                        if not isinstance(legs, list):
+                                            legs = [legs] if legs else []
                                     
-                                    if legs:
-                                        st.write("**Order Legs:**")
-                                        for i, leg in enumerate(legs, 1):
-                                            leg_type = leg.get('type', 'N/A')
-                                            leg_side = leg.get('side', 'N/A')
-                                            leg_qty = leg.get('quantity', 'N/A')
-                                            leg_price = leg.get('price', leg.get('avg_fill_price', ''))
-                                            leg_stop = leg.get('stop', '')
-                                            leg_status = leg.get('status', 'N/A')
+                                        if legs:
+                                            st.write("**Order Legs:**")
+                                            for i, leg in enumerate(legs, 1):
+                                                leg_type = leg.get('type', 'N/A')
+                                                leg_side = leg.get('side', 'N/A')
+                                                leg_qty = leg.get('quantity', 'N/A')
+                                                leg_price = leg.get('price', leg.get('avg_fill_price', ''))
+                                                leg_stop = leg.get('stop', '')
+                                                leg_status = leg.get('status', 'N/A')
                                             
-                                            # Determine leg purpose based on type and position
-                                            if leg_type == 'limit' and i == 1:
-                                                price_str = f"${leg_price}" if leg_price else "N/A"
-                                                st.info(f"**Leg {i} - Entry:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
-                                            elif leg_type == 'limit' and i == 2:
-                                                price_str = f"${leg_price}" if leg_price else "N/A"
-                                                st.success(f"**Leg {i} - Take Profit:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
-                                            elif leg_type in ['stop', 'stop_limit'] or i == 3:
-                                                # For stop orders, show stop price
-                                                if leg_stop:
-                                                    price_display = f"${leg_stop}"
-                                                elif leg_price:
-                                                    price_display = f"${leg_price}"
+                                                # Determine leg purpose based on type and position
+                                                if leg_type == 'limit' and i == 1:
+                                                    price_str = f"${leg_price}" if leg_price else "N/A"
+                                                    st.info(f"**Leg {i} - Entry:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
+                                                elif leg_type == 'limit' and i == 2:
+                                                    price_str = f"${leg_price}" if leg_price else "N/A"
+                                                    st.success(f"**Leg {i} - Take Profit:** {leg_side.upper()} {leg_qty} @ {price_str} ({leg_status})")
+                                                elif leg_type in ['stop', 'stop_limit'] or i == 3:
+                                                    # For stop orders, show stop price
+                                                    if leg_stop:
+                                                        price_display = f"${leg_stop}"
+                                                    elif leg_price:
+                                                        price_display = f"${leg_price}"
+                                                    else:
+                                                        price_display = "N/A"
+                                                    st.error(f"**Leg {i} - Stop Loss:** {leg_side.upper()} {leg_qty} @ {price_display} ({leg_status})")
                                                 else:
-                                                    price_display = "N/A"
-                                                st.error(f"**Leg {i} - Stop Loss:** {leg_side.upper()} {leg_qty} @ {price_display} ({leg_status})")
-                                            else:
-                                                # Fallback display
-                                                price_info = f"Price: ${leg_price}" if leg_price else ""
-                                                stop_info = f", Stop: ${leg_stop}" if leg_stop else ""
-                                                st.write(f"**Leg {i}:** {leg_type.upper()} {leg_side.upper()} {leg_qty} - {price_info}{stop_info} ({leg_status})")
+                                                    # Fallback display
+                                                    price_info = f"Price: ${leg_price}" if leg_price else ""
+                                                    stop_info = f", Stop: ${leg_stop}" if leg_stop else ""
+                                                    st.write(f"**Leg {i}:** {leg_type.upper()} {leg_side.upper()} {leg_qty} - {price_info}{stop_info} ({leg_status})")
                                     
-                                    # Show full order details
-                                    with st.expander("View Full Order JSON"):
-                                        st.json(order)
-                            else:
-                                # Simple order
-                                with st.expander(f"📝 {order_class.upper()}: {symbol} (ID: {order_id}) - {status}"):
-                                    st.write(f"**Side:** {order.get('side', 'N/A')}")
-                                    st.write(f"**Quantity:** {order.get('quantity', 'N/A')}")
-                                    st.write(f"**Type:** {order.get('type', 'N/A')}")
-                                    st.write(f"**Price:** ${order.get('price', 'N/A')}")
-                                    st.write(f"**Status:** {status}")
-                                    
-                                    with st.expander("View Full Order JSON"):
-                                        st.json(order)
-                    else:
-                        st.info("No orders found")
-                
-                else:
-                    st.info("Click 'Refresh Account Data' to load your account information")
-            
-        # Order management section
-        st.subheader("📝 Order Management")
-        
-        if st.session_state.tradier_client:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Get Order Status**")
-                order_id = st.text_input("Order ID", placeholder="Enter order ID")
-                
-                if st.button("🔍 Get Order Status") and order_id:
-                    with st.spinner("Fetching order status..."):
-                        success, order_data = st.session_state.tradier_client.get_order_status(order_id)
-                        
-                        if success:
-                            st.success("Order found!")
-                            st.json(order_data)
-                        else:
-                            st.error(f"Failed to get order: {order_data.get('error', 'Unknown error')}")
-            
-            with col2:
-                st.write("**Cancel Order**")
-                cancel_order_id = st.text_input("Order ID to Cancel", placeholder="Enter order ID", key="cancel_order")
-                
-                if st.button("❌ Cancel Order") and cancel_order_id:
-                    with st.spinner("Cancelling order..."):
-                        success, result = st.session_state.tradier_client.cancel_order(cancel_order_id)
-                        
-                        if success:
-                            st.success("Order cancelled successfully!")
-                            st.json(result)
-                        else:
-                            st.error(f"Failed to cancel order: {result.get('error', 'Unknown error')}")
-        
-        # Manual order placement section
-        st.subheader("🎯 Manual Order Placement")
-        
-        if st.session_state.tradier_client:
-            with st.expander("Place Custom Order"):
-                # Order mode selection
-                order_mode = st.radio("Order Mode", ["Simple Order", "Bracket Order (OTOCO)"], horizontal=True, key='tab7_order_mode')
-                
-                if order_mode == "Bracket Order (OTOCO)":
-                    st.info("🎯 Bracket orders automatically set take-profit and stop-loss orders after your entry fills")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        symbol = st.text_input("Symbol", placeholder="AAPL", key='tab7_bracket_symbol')
-                        side = st.selectbox("Side", ["buy", "sell"], key='tab7_bracket_side')
-                        quantity = st.number_input("Quantity", min_value=1, value=10, key='tab7_bracket_qty')
-                    
-                    with col2:
-                        entry_price = st.number_input("Entry Price", min_value=0.01, value=100.00, step=0.01, format="%.2f", key='tab7_bracket_entry')
-                        take_profit = st.number_input("Take Profit Price", min_value=0.01, value=105.00, step=0.01, format="%.2f", key='tab7_bracket_profit')
-                        stop_loss = st.number_input("Stop Loss Price", min_value=0.01, value=97.00, step=0.01, format="%.2f", key='tab7_bracket_stop')
-                    
-                    with col3:
-                        duration = st.selectbox("Duration", ["gtc", "day"], key='tab7_bracket_duration')
-                        tag = st.text_input("Tag", value=f"BRACKET_{datetime.now().strftime('%Y%m%d_%H%M%S')}", key='tab7_bracket_tag')
-                        
-                        # Calculate percentages
-                        if side == "buy":
-                            profit_pct = ((take_profit - entry_price) / entry_price) * 100
-                            loss_pct = ((entry_price - stop_loss) / entry_price) * 100
-                        else:
-                            profit_pct = ((entry_price - take_profit) / entry_price) * 100
-                            loss_pct = ((stop_loss - entry_price) / entry_price) * 100
-                        
-                        st.metric("Profit Target", f"{profit_pct:.1f}%")
-                        st.metric("Max Loss", f"{loss_pct:.1f}%")
-                    
-                    if st.button("🎯 Place Bracket Order", type="primary", key='tab7_bracket_submit'):
-                        with st.spinner("Placing bracket order..."):
-                            success, result = st.session_state.tradier_client.place_bracket_order(
-                                symbol=symbol.upper(),
-                                side=side,
-                                quantity=quantity,
-                                entry_price=entry_price,
-                                take_profit_price=take_profit,
-                                stop_loss_price=stop_loss,
-                                duration=duration,
-                                tag=tag
-                            )
-                            
-                            if success:
-                                st.success("🎉 Bracket order placed successfully!")
-                                st.info(f"✅ Entry: ${entry_price} | 🎯 Target: ${take_profit} | 🛑 Stop: ${stop_loss}")
-                                st.json(result)
-                            else:
-                                st.error(f"Failed to place bracket order: {result.get('error', 'Unknown error')}")
-                                st.json(result)
-                
-                else:
-                    # Simple order mode
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        order_class = st.selectbox("Order Class", ["equity", "option", "multileg", "combo"], key='tab7_order_class_select')
-                        symbol = st.text_input("Symbol", placeholder="AAPL or AAPL240315C150")
-                        side = st.selectbox("Side", ["buy", "sell", "buy_to_cover", "sell_short", "sell_to_open", "sell_to_close", "buy_to_open", "buy_to_close"], key='tab7_order_side_select')
-                        quantity = st.number_input("Quantity", min_value=1, value=1)
-                    
-                    with col2:
-                        order_type = st.selectbox("Order Type", ["market", "limit", "stop", "stop_limit", "credit", "debit"], key='tab7_order_type_select')
-                        duration = st.selectbox("Duration", ["day", "gtc", "pre", "post"], key='tab7_order_duration_select')
-                        price = st.number_input("Price", min_value=0.0, value=0.0, step=0.01, format="%.2f")
-                        tag = st.text_input("Tag", value=f"MANUAL_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-                    
-                    if st.button("📤 Place Order", type="primary"):
-                        order_data = {
-                            "class": order_class,
-                            "symbol": symbol.upper(),
-                            "side": side,
-                            "quantity": str(quantity),
-                            "type": order_type,
-                            "duration": duration,
-                            "tag": tag
-                        }
-                        
-                        if order_type in ["limit", "stop_limit"] and price > 0:
-                            order_data["price"] = str(price)
-                        
-                        with st.spinner("Placing order..."):
-                            success, result = st.session_state.tradier_client.place_order(order_data)
-                            
-                            if success:
-                                st.success("Order placed successfully!")
-                                st.json(result)
-                            else:
-                                st.error(f"Failed to place order: {result.get('error', 'Unknown error')}")
-        
-        # Configuration section
-        st.subheader("⚙️ Configuration")
-        
-        with st.expander("Environment Variables Status"):
-            env_vars = {
-                "TRADIER_ACCOUNT_ID": os.getenv('TRADIER_ACCOUNT_ID', 'Not set'),
-                "TRADIER_ACCESS_TOKEN": os.getenv('TRADIER_ACCESS_TOKEN', 'Not set'),
-                "TRADIER_API_URL": os.getenv('TRADIER_API_URL', 'Not set'),
-                "OPTION_ALPHA_WEBHOOK_URL": os.getenv('OPTION_ALPHA_WEBHOOK_URL', 'Not set')
-            }
-            
-            for var, value in env_vars.items():
-                if 'TOKEN' in var and value != 'Not set':
-                    st.code(f"{var}=***{value[-4:] if len(value) > 4 else '***'}")
-                else:
-                    st.code(f"{var}={value}")
-    
-    with tab11:
-        st.header("📈 IBKR Day Trading / Scalping")
-        st.write("Connect to Interactive Brokers for live day trading and scalping. Real-time positions, orders, and execution.")
-        
-        # Import IBKR client with comprehensive error handling
-        ibkr_available = False
-        ibkr_error_message = None
-        try:
-            logger.info("Attempting to import IBKR client modules...")
-            from src.integrations.ibkr_client import IBKRClient, create_ibkr_client_from_env, validate_ibkr_connection, IBKRPosition, IBKROrder
-            ibkr_available = True
-            logger.info("IBKR client modules imported successfully")
-        except ImportError as e:
-            ibkr_error_message = f"Missing dependency: {e}. Please install: pip install ib_insync"
-            logger.error(f"IBKR ImportError: {e}", exc_info=True)
-            st.error(f"⚠️ {ibkr_error_message}")
-        except RuntimeError as e:
-            ibkr_error_message = f"Event loop error: {e}. This is a known issue with asyncio in Streamlit."
-            logger.error(f"IBKR RuntimeError: {e}", exc_info=True)
-            st.error(f"⚠️ {ibkr_error_message}")
-            st.info("💡 Try restarting the Streamlit app to resolve event loop issues.")
-        except Exception as e:
-            ibkr_error_message = f"Unexpected error: {e}"
-            logger.error(f"IBKR unexpected error: {e}", exc_info=True)
-            st.error(f"⚠️ {ibkr_error_message}")
-            st.code(str(e))
-        
-        if ibkr_available:
-            # Initialize IBKR client in session state
-            if 'ibkr_client' not in st.session_state:
-                st.session_state.ibkr_client = None
-                st.session_state.ibkr_connected = False
-            
-            # Connection Section
-            st.subheader("🔌 Connection Settings")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                ibkr_host = st.text_input("Host", value="127.0.0.1", help="IB Gateway/TWS host address")
-            
-            with col2:
-                ibkr_port = st.number_input(
-                    "Port", 
-                    value=7497, 
-                    help="7497 for paper trading, 7496 for live TWS, 4002 for IB Gateway paper, 4001 for IB Gateway live"
-                )
-            
-            with col3:
-                ibkr_client_id = st.number_input("Client ID", value=1, min_value=1, max_value=32)
-            
-            col_conn1, col_conn2 = st.columns(2)
-            
-            with col_conn1:
-                if st.button("🔗 Connect to IBKR", type="primary", width="stretch"):
-                    try:
-                        with st.status("Connecting to Interactive Brokers...") as status:
-                            st.write("Initializing connection...")
-                            client = IBKRClient(host=ibkr_host, port=int(ibkr_port), client_id=int(ibkr_client_id))
-                            
-                            st.write("Connecting to IB Gateway/TWS...")
-                            if client.connect(timeout=10):
-                                st.session_state.ibkr_client = client
-                                st.session_state.ibkr_connected = True
-                                
-                                st.write("Fetching account information...")
-                                account_info = client.get_account_info()
-                                
-                                if account_info:
-                                    status.update(label="✅ Connected to IBKR!", state="complete")
-                                    st.success(f"Connected to account: {account_info.account_id}")
-                                    st.info(f"💰 Buying Power: ${account_info.buying_power:,.2f} | Net Liquidation: ${account_info.net_liquidation:,.2f}")
+                                        # Show full order details
+                                        with st.expander("View Full Order JSON"):
+                                            st.json(order)
                                 else:
-                                    status.update(label="⚠️ Connected but no account info", state="error")
-                            else:
-                                st.error("Failed to connect. Make sure IB Gateway or TWS is running with API enabled.")
-                                status.update(label="❌ Connection failed", state="error")
-                    except Exception as e:
-                        st.error(f"Connection error: {e}")
-            
-            with col_conn2:
-                if st.button("🔌 Disconnect", width="stretch"):
-                    if st.session_state.ibkr_client:
-                        st.session_state.ibkr_client.disconnect()
-                        st.session_state.ibkr_client = None
-                        st.session_state.ibkr_connected = False
-                        st.success("Disconnected from IBKR")
-            
-            st.divider()
-            
-            # Show connection status
-            if st.session_state.ibkr_connected and st.session_state.ibkr_client:
-                if st.session_state.ibkr_client.is_connected():
-                    st.success("🟢 Connected to IBKR")
-                else:
-                    st.warning("🟡 Connection lost - please reconnect")
-                    st.session_state.ibkr_connected = False
-            else:
-                st.info("🔴 Not connected to IBKR")
-            
-            # Main trading interface (only show if connected)
-            if st.session_state.ibkr_connected and st.session_state.ibkr_client:
-                client = st.session_state.ibkr_client
+                                    # Simple order
+                                    with st.expander(f"📝 {order_class.upper()}: {symbol} (ID: {order_id}) - {status}"):
+                                        st.write(f"**Side:** {order.get('side', 'N/A')}")
+                                        st.write(f"**Quantity:** {order.get('quantity', 'N/A')}")
+                                        st.write(f"**Type:** {order.get('type', 'N/A')}")
+                                        st.write(f"**Price:** ${order.get('price', 'N/A')}")
+                                        st.write(f"**Status:** {status}")
+                                    
+                                        with st.expander("View Full Order JSON"):
+                                            st.json(order)
+                        else:
+                            st.info("No orders found")
                 
-                # Account Information
-                st.subheader("💼 Account Information")
+                    else:
+                        st.info("Click 'Refresh Account Data' to load your account information")
+            
+            # Order management section
+            st.subheader("📝 Order Management")
+        
+            if st.session_state.tradier_client:
+                col1, col2 = st.columns(2)
+            
+                with col1:
+                    st.write("**Get Order Status**")
+                    order_id = st.text_input("Order ID", placeholder="Enter order ID")
                 
-                try:
-                    account_info = client.get_account_info()
-                    
-                    if account_info:
-                        col1, col2, col3, col4 = st.columns(4)
+                    if st.button("🔍 Get Order Status") and order_id:
+                        with st.spinner("Fetching order status..."):
+                            success, order_data = st.session_state.tradier_client.get_order_status(order_id)
                         
+                            if success:
+                                st.success("Order found!")
+                                st.json(order_data)
+                            else:
+                                st.error(f"Failed to get order: {order_data.get('error', 'Unknown error')}")
+            
+                with col2:
+                    st.write("**Cancel Order**")
+                    cancel_order_id = st.text_input("Order ID to Cancel", placeholder="Enter order ID", key="cancel_order")
+                
+                    if st.button("❌ Cancel Order") and cancel_order_id:
+                        with st.spinner("Cancelling order..."):
+                            success, result = st.session_state.tradier_client.cancel_order(cancel_order_id)
+                        
+                            if success:
+                                st.success("Order cancelled successfully!")
+                                st.json(result)
+                            else:
+                                st.error(f"Failed to cancel order: {result.get('error', 'Unknown error')}")
+        
+            # Manual order placement section
+            st.subheader("🎯 Manual Order Placement")
+        
+            if st.session_state.tradier_client:
+                with st.expander("Place Custom Order"):
+                    # Order mode selection
+                    order_mode = st.radio("Order Mode", ["Simple Order", "Bracket Order (OTOCO)"], horizontal=True, key='tab7_order_mode')
+                
+                    if order_mode == "Bracket Order (OTOCO)":
+                        st.info("🎯 Bracket orders automatically set take-profit and stop-loss orders after your entry fills")
+                    
+                        col1, col2, col3 = st.columns(3)
+                    
                         with col1:
-                            st.metric("Net Liquidation", f"${account_info.net_liquidation:,.2f}")
-                        
+                            symbol = st.text_input("Symbol", placeholder="AAPL", key='tab7_bracket_symbol')
+                            side = st.selectbox("Side", ["buy", "sell"], key='tab7_bracket_side')
+                            quantity = st.number_input("Quantity", min_value=1, value=10, key='tab7_bracket_qty')
+                    
                         with col2:
-                            st.metric("Buying Power", f"${account_info.buying_power:,.2f}")
-                        
+                            entry_price = st.number_input("Entry Price", min_value=0.01, value=100.00, step=0.01, format="%.2f", key='tab7_bracket_entry')
+                            take_profit = st.number_input("Take Profit Price", min_value=0.01, value=105.00, step=0.01, format="%.2f", key='tab7_bracket_profit')
+                            stop_loss = st.number_input("Stop Loss Price", min_value=0.01, value=97.00, step=0.01, format="%.2f", key='tab7_bracket_stop')
+                    
                         with col3:
-                            st.metric("Cash", f"${account_info.total_cash_value:,.2f}")
+                            duration = st.selectbox("Duration", ["gtc", "day"], key='tab7_bracket_duration')
+                            tag = st.text_input("Tag", value=f"BRACKET_{datetime.now().strftime('%Y%m%d_%H%M%S')}", key='tab7_bracket_tag')
                         
-                        with col4:
-                            if account_info.is_pdt:
-                                st.metric("Day Trades Left", "Unlimited" if account_info.net_liquidation >= 25000 else str(account_info.day_trades_remaining))
+                            # Calculate percentages
+                            if side == "buy":
+                                profit_pct = ((take_profit - entry_price) / entry_price) * 100
+                                loss_pct = ((entry_price - stop_loss) / entry_price) * 100
                             else:
-                                st.metric("Day Trades Left", str(account_info.day_trades_remaining))
+                                profit_pct = ((entry_price - take_profit) / entry_price) * 100
+                                loss_pct = ((stop_loss - entry_price) / entry_price) * 100
+                        
+                            st.metric("Profit Target", f"{profit_pct:.1f}%")
+                            st.metric("Max Loss", f"{loss_pct:.1f}%")
                     
-                except Exception as e:
-                    st.error(f"Error fetching account info: {e}")
+                        if st.button("🎯 Place Bracket Order", type="primary", key='tab7_bracket_submit'):
+                            with st.spinner("Placing bracket order..."):
+                                success, result = st.session_state.tradier_client.place_bracket_order(
+                                    symbol=symbol.upper(),
+                                    side=side,
+                                    quantity=quantity,
+                                    entry_price=entry_price,
+                                    take_profit_price=take_profit,
+                                    stop_loss_price=stop_loss,
+                                    duration=duration,
+                                    tag=tag
+                                )
+                            
+                                if success:
+                                    st.success("🎉 Bracket order placed successfully!")
+                                    st.info(f"✅ Entry: ${entry_price} | 🎯 Target: ${take_profit} | 🛑 Stop: ${stop_loss}")
+                                    st.json(result)
+                                else:
+                                    st.error(f"Failed to place bracket order: {result.get('error', 'Unknown error')}")
+                                    st.json(result)
                 
+                    else:
+                        # Simple order mode
+                        col1, col2 = st.columns(2)
+                    
+                        with col1:
+                            order_class = st.selectbox("Order Class", ["equity", "option", "multileg", "combo"], key='tab7_order_class_select')
+                            symbol = st.text_input("Symbol", placeholder="AAPL or AAPL240315C150")
+                            side = st.selectbox("Side", ["buy", "sell", "buy_to_cover", "sell_short", "sell_to_open", "sell_to_close", "buy_to_open", "buy_to_close"], key='tab7_order_side_select')
+                            quantity = st.number_input("Quantity", min_value=1, value=1)
+                    
+                        with col2:
+                            order_type = st.selectbox("Order Type", ["market", "limit", "stop", "stop_limit", "credit", "debit"], key='tab7_order_type_select')
+                            duration = st.selectbox("Duration", ["day", "gtc", "pre", "post"], key='tab7_order_duration_select')
+                            price = st.number_input("Price", min_value=0.0, value=0.0, step=0.01, format="%.2f")
+                            tag = st.text_input("Tag", value=f"MANUAL_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                    
+                        if st.button("📤 Place Order", type="primary"):
+                            order_data = {
+                                "class": order_class,
+                                "symbol": symbol.upper(),
+                                "side": side,
+                                "quantity": str(quantity),
+                                "type": order_type,
+                                "duration": duration,
+                                "tag": tag
+                            }
+                        
+                            if order_type in ["limit", "stop_limit"] and price > 0:
+                                order_data["price"] = str(price)
+                        
+                            with st.spinner("Placing order..."):
+                                success, result = st.session_state.tradier_client.place_order(order_data)
+                            
+                                if success:
+                                    st.success("Order placed successfully!")
+                                    st.json(result)
+                                else:
+                                    st.error(f"Failed to place order: {result.get('error', 'Unknown error')}")
+        
+            # Configuration section
+            st.subheader("⚙️ Configuration")
+        
+            with st.expander("Environment Variables Status"):
+                env_vars = {
+                    "TRADIER_ACCOUNT_ID": os.getenv('TRADIER_ACCOUNT_ID', 'Not set'),
+                    "TRADIER_ACCESS_TOKEN": os.getenv('TRADIER_ACCESS_TOKEN', 'Not set'),
+                    "TRADIER_API_URL": os.getenv('TRADIER_API_URL', 'Not set'),
+                    "OPTION_ALPHA_WEBHOOK_URL": os.getenv('OPTION_ALPHA_WEBHOOK_URL', 'Not set')
+                }
+            
+                for var, value in env_vars.items():
+                    if 'TOKEN' in var and value != 'Not set':
+                        st.code(f"{var}=***{value[-4:] if len(value) > 4 else '***'}")
+                    else:
+                        st.code(f"{var}={value}")
+    
+    elif selected_main_tab == "📈 IBKR Trading":
+        # =============================================================================
+        # LAZY LOADING: Only import IBKR modules when user interacts with this tab
+        # This saves ~300ms on every page load when viewing other tabs
+        # =============================================================================
+        
+        # Track if user has visited this tab (auto-initialize on first view)
+        if 'tab11_visited' not in st.session_state:
+            st.session_state.tab11_visited = False
+        
+        # Auto-initialize on first view (no button required)
+        if not st.session_state.tab11_visited:
+            with st.spinner("⚡ Loading IBKR integration (one-time initialization)..."):
+                st.session_state.tab11_visited = True
+        
+        # Initialize IBKR (only runs once per session)
+        if st.session_state.tab11_visited:
+            st.header("📈 IBKR Day Trading / Scalping")
+            st.write("Connect to Interactive Brokers for live day trading and scalping. Real-time positions, orders, and execution.")
+            
+            # Import IBKR client with comprehensive error handling
+            ibkr_available = False
+            ibkr_error_message = None
+            try:
+                logger.info("Attempting to import IBKR client modules...")
+                from src.integrations.ibkr_client import IBKRClient, create_ibkr_client_from_env, validate_ibkr_connection, IBKRPosition, IBKROrder
+                ibkr_available = True
+                logger.info("IBKR client modules imported successfully")
+            except ImportError as e:
+                ibkr_error_message = f"Missing dependency: {e}. Please install: pip install ib_insync"
+                logger.error(f"IBKR ImportError: {e}", exc_info=True)
+                st.error(f"⚠️ {ibkr_error_message}")
+            except RuntimeError as e:
+                ibkr_error_message = f"Event loop error: {e}. This is a known issue with asyncio in Streamlit."
+                logger.error(f"IBKR RuntimeError: {e}", exc_info=True)
+                st.error(f"⚠️ {ibkr_error_message}")
+                st.info("💡 Try restarting the Streamlit app to resolve event loop issues.")
+            except Exception as e:
+                ibkr_error_message = f"Unexpected error: {e}"
+                logger.error(f"IBKR unexpected error: {e}", exc_info=True)
+                st.error(f"⚠️ {ibkr_error_message}")
+                st.code(str(e))
+            
+            if ibkr_available:
+                # Initialize IBKR client in session state
+                if 'ibkr_client' not in st.session_state:
+                    st.session_state.ibkr_client = None
+                    st.session_state.ibkr_connected = False
+            
+                # Connection Section
+                st.subheader("🔌 Connection Settings")
+            
+                col1, col2, col3 = st.columns(3)
+            
+                with col1:
+                    ibkr_host = st.text_input("Host", value="127.0.0.1", help="IB Gateway/TWS host address")
+            
+                with col2:
+                    ibkr_port = st.number_input(
+                        "Port", 
+                        value=7497, 
+                        help="7497 for paper trading, 7496 for live TWS, 4002 for IB Gateway paper, 4001 for IB Gateway live"
+                    )
+            
+                with col3:
+                    ibkr_client_id = st.number_input("Client ID", value=1, min_value=1, max_value=32)
+            
+                col_conn1, col_conn2 = st.columns(2)
+            
+                with col_conn1:
+                    if st.button("🔗 Connect to IBKR", type="primary", width="stretch"):
+                        try:
+                            with st.status("Connecting to Interactive Brokers...") as status:
+                                st.write("Initializing connection...")
+                                client = IBKRClient(host=ibkr_host, port=int(ibkr_port), client_id=int(ibkr_client_id))
+                            
+                                st.write("Connecting to IB Gateway/TWS...")
+                                if client.connect(timeout=10):
+                                    st.session_state.ibkr_client = client
+                                    st.session_state.ibkr_connected = True
+                                
+                                    st.write("Fetching account information...")
+                                    account_info = client.get_account_info()
+                                
+                                    if account_info:
+                                        status.update(label="✅ Connected to IBKR!", state="complete")
+                                        st.success(f"Connected to account: {account_info.account_id}")
+                                        st.info(f"💰 Buying Power: ${account_info.buying_power:,.2f} | Net Liquidation: ${account_info.net_liquidation:,.2f}")
+                                    else:
+                                        status.update(label="⚠️ Connected but no account info", state="error")
+                                else:
+                                    st.error("Failed to connect. Make sure IB Gateway or TWS is running with API enabled.")
+                                    status.update(label="❌ Connection failed", state="error")
+                        except Exception as e:
+                            st.error(f"Connection error: {e}")
+            
+                with col_conn2:
+                    if st.button("🔌 Disconnect", width="stretch"):
+                        if st.session_state.ibkr_client:
+                            st.session_state.ibkr_client.disconnect()
+                            st.session_state.ibkr_client = None
+                            st.session_state.ibkr_connected = False
+                            st.success("Disconnected from IBKR")
+            
                 st.divider()
+            
+                # Show connection status
+                if st.session_state.ibkr_connected and st.session_state.ibkr_client:
+                    if st.session_state.ibkr_client.is_connected():
+                        st.success("🟢 Connected to IBKR")
+                    else:
+                        st.warning("🟡 Connection lost - please reconnect")
+                        st.session_state.ibkr_connected = False
+                else:
+                    st.info("🔴 Not connected to IBKR")
+            
+                # Main trading interface (only show if connected)
+                if st.session_state.ibkr_connected and st.session_state.ibkr_client:
+                    client = st.session_state.ibkr_client
                 
-                # Current Positions
-                st.subheader("📊 Current Positions")
+                    # Account Information
+                    st.subheader("💼 Account Information")
                 
-                if st.button("🔄 Refresh Positions", width="stretch"):
-                    st.rerun()
-                
-                try:
-                    positions = client.get_positions()
+                    try:
+                        account_info = client.get_account_info()
                     
-                    if positions:
-                        positions_data = []
-                        for pos in positions:
-                            positions_data.append({
-                                'Symbol': pos.symbol,
-                                'Quantity': int(pos.position),
-                                'Avg Cost': f"${pos.avg_cost:.2f}",
-                                'Market Price': f"${pos.market_price:.2f}",
-                                'Market Value': f"${pos.market_value:,.2f}",
-                                'Unrealized P&L': f"${pos.unrealized_pnl:,.2f}",
-                                'Realized P&L': f"${pos.realized_pnl:,.2f}"
-                            })
+                        if account_info:
+                            col1, col2, col3, col4 = st.columns(4)
                         
-                        positions_df = pd.DataFrame(positions_data)
-                        st.dataframe(positions_df, width="stretch")
+                            with col1:
+                                st.metric("Net Liquidation", f"${account_info.net_liquidation:,.2f}")
                         
-                        # Quick flatten buttons
-                        st.write("**Quick Actions:**")
-                        cols = st.columns(min(len(positions), 4))
-                        for idx, pos in enumerate(positions[:4]):
-                            with cols[idx]:
-                                if st.button(f"Close {pos.symbol}", key=f"flatten_{pos.symbol}"):
-                                    if client.flatten_position(pos.symbol):
-                                        st.success(f"✅ Closing {pos.symbol}")
+                            with col2:
+                                st.metric("Buying Power", f"${account_info.buying_power:,.2f}")
+                        
+                            with col3:
+                                st.metric("Cash", f"${account_info.total_cash_value:,.2f}")
+                        
+                            with col4:
+                                if account_info.is_pdt:
+                                    st.metric("Day Trades Left", "Unlimited" if account_info.net_liquidation >= 25000 else str(account_info.day_trades_remaining))
+                                else:
+                                    st.metric("Day Trades Left", str(account_info.day_trades_remaining))
+                    
+                    except Exception as e:
+                        st.error(f"Error fetching account info: {e}")
+                
+                    st.divider()
+                
+                    # Current Positions
+                    st.subheader("📊 Current Positions")
+                
+                    if st.button("🔄 Refresh Positions", width="stretch"):
+                        st.rerun()
+                
+                    try:
+                        positions = client.get_positions()
+                    
+                        if positions:
+                            positions_data = []
+                            for pos in positions:
+                                positions_data.append({
+                                    'Symbol': pos.symbol,
+                                    'Quantity': int(pos.position),
+                                    'Avg Cost': f"${pos.avg_cost:.2f}",
+                                    'Market Price': f"${pos.market_price:.2f}",
+                                    'Market Value': f"${pos.market_value:,.2f}",
+                                    'Unrealized P&L': f"${pos.unrealized_pnl:,.2f}",
+                                    'Realized P&L': f"${pos.realized_pnl:,.2f}"
+                                })
+                        
+                            positions_df = pd.DataFrame(positions_data)
+                            st.dataframe(positions_df, width="stretch")
+                        
+                            # Quick flatten buttons
+                            st.write("**Quick Actions:**")
+                            cols = st.columns(min(len(positions), 4))
+                            for idx, pos in enumerate(positions[:4]):
+                                with cols[idx]:
+                                    if st.button(f"Close {pos.symbol}", key=f"flatten_{pos.symbol}"):
+                                        if client.flatten_position(pos.symbol):
+                                            st.success(f"✅ Closing {pos.symbol}")
+                                            time.sleep(1)
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Failed to close {pos.symbol}")
+                        else:
+                            st.info("No open positions")
+                
+                    except Exception as e:
+                        st.error(f"Error fetching positions: {e}")
+                
+                    st.divider()
+                
+                    # Open Orders
+                    st.subheader("📝 Open Orders")
+                
+                    try:
+                        open_orders = client.get_open_orders()
+                    
+                        if open_orders:
+                            orders_data = []
+                            for order in open_orders:
+                                orders_data.append({
+                                    'Order ID': order.order_id,
+                                    'Symbol': order.symbol,
+                                    'Action': order.action,
+                                    'Type': order.order_type,
+                                    'Qty': order.quantity,
+                                    'Limit': f"${order.limit_price:.2f}" if order.limit_price else "N/A",
+                                    'Stop': f"${order.stop_price:.2f}" if order.stop_price else "N/A",
+                                    'Status': order.status,
+                                    'Filled': order.filled,
+                                    'Remaining': order.remaining
+                                })
+                        
+                            orders_df = pd.DataFrame(orders_data)
+                            st.dataframe(orders_df, width="stretch")
+                        
+                            # Cancel orders
+                            col_cancel1, col_cancel2 = st.columns(2)
+                        
+                            with col_cancel1:
+                                order_id_to_cancel = st.number_input("Order ID to Cancel", min_value=1, step=1)
+                                if st.button("❌ Cancel Order"):
+                                    if client.cancel_order(int(order_id_to_cancel)):
+                                        st.success(f"Order {order_id_to_cancel} cancelled")
                                         time.sleep(1)
                                         st.rerun()
                                     else:
-                                        st.error(f"Failed to close {pos.symbol}")
-                    else:
-                        st.info("No open positions")
-                
-                except Exception as e:
-                    st.error(f"Error fetching positions: {e}")
-                
-                st.divider()
-                
-                # Open Orders
-                st.subheader("📝 Open Orders")
-                
-                try:
-                    open_orders = client.get_open_orders()
-                    
-                    if open_orders:
-                        orders_data = []
-                        for order in open_orders:
-                            orders_data.append({
-                                'Order ID': order.order_id,
-                                'Symbol': order.symbol,
-                                'Action': order.action,
-                                'Type': order.order_type,
-                                'Qty': order.quantity,
-                                'Limit': f"${order.limit_price:.2f}" if order.limit_price else "N/A",
-                                'Stop': f"${order.stop_price:.2f}" if order.stop_price else "N/A",
-                                'Status': order.status,
-                                'Filled': order.filled,
-                                'Remaining': order.remaining
-                            })
+                                        st.error(f"Failed to cancel order {order_id_to_cancel}")
                         
-                        orders_df = pd.DataFrame(orders_data)
-                        st.dataframe(orders_df, width="stretch")
-                        
-                        # Cancel orders
-                        col_cancel1, col_cancel2 = st.columns(2)
-                        
-                        with col_cancel1:
-                            order_id_to_cancel = st.number_input("Order ID to Cancel", min_value=1, step=1)
-                            if st.button("❌ Cancel Order"):
-                                if client.cancel_order(int(order_id_to_cancel)):
-                                    st.success(f"Order {order_id_to_cancel} cancelled")
+                            with col_cancel2:
+                                st.write("")
+                                st.write("")
+                                if st.button("❌❌ Cancel ALL Orders", type="secondary"):
+                                    cancelled = client.cancel_all_orders()
+                                    st.success(f"Cancelled {cancelled} orders")
                                     time.sleep(1)
                                     st.rerun()
-                                else:
-                                    st.error(f"Failed to cancel order {order_id_to_cancel}")
-                        
-                        with col_cancel2:
-                            st.write("")
-                            st.write("")
-                            if st.button("❌❌ Cancel ALL Orders", type="secondary"):
-                                cancelled = client.cancel_all_orders()
-                                st.success(f"Cancelled {cancelled} orders")
-                                time.sleep(1)
-                                st.rerun()
-                    else:
-                        st.info("No open orders")
+                        else:
+                            st.info("No open orders")
                 
-                except Exception as e:
-                    st.error(f"Error fetching orders: {e}")
+                    except Exception as e:
+                        st.error(f"Error fetching orders: {e}")
                 
-                st.divider()
+                    st.divider()
                 
-                # Place New Order
-                st.subheader("🎯 Place Order")
+                    # Place New Order
+                    st.subheader("🎯 Place Order")
                 
-                col1, col2 = st.columns(2)
+                    col1, col2 = st.columns(2)
                 
-                with col1:
-                    order_symbol = st.text_input("Symbol", value="", key="order_symbol").upper()
-                    order_action = st.selectbox("Action", options=["BUY", "SELL"], key="order_action")
-                    order_quantity = st.number_input("Quantity", min_value=1, value=100, step=1, key="order_quantity")
+                    with col1:
+                        order_symbol = st.text_input("Symbol", value="", key="order_symbol").upper()
+                        order_action = st.selectbox("Action", options=["BUY", "SELL"], key="order_action")
+                        order_quantity = st.number_input("Quantity", min_value=1, value=100, step=1, key="order_quantity")
                 
-                with col2:
-                    order_type = st.selectbox(
-                        "Order Type", 
-                        options=["MARKET", "LIMIT", "STOP"],
-                        key="order_type"
-                    )
+                    with col2:
+                        order_type = st.selectbox(
+                            "Order Type", 
+                            options=["MARKET", "LIMIT", "STOP"],
+                            key="order_type"
+                        )
                     
-                    if order_type == "LIMIT":
-                        order_limit_price = st.number_input("Limit Price", min_value=0.01, value=10.0, step=0.01, key="order_limit")
-                    elif order_type == "STOP":
-                        order_stop_price = st.number_input("Stop Price", min_value=0.01, value=10.0, step=0.01, key="order_stop")
+                        if order_type == "LIMIT":
+                            order_limit_price = st.number_input("Limit Price", min_value=0.01, value=10.0, step=0.01, key="order_limit")
+                        elif order_type == "STOP":
+                            order_stop_price = st.number_input("Stop Price", min_value=0.01, value=10.0, step=0.01, key="order_stop")
                 
-                # Place order button
-                if st.button("🚀 Place Order", type="primary", width="stretch"):
-                    if not order_symbol:
-                        st.error("Please enter a symbol")
-                    else:
-                        try:
-                            with st.status(f"Placing {order_type} order...") as status:
-                                result = None
-                                
-                                if order_type == "MARKET":
-                                    result = client.place_market_order(order_symbol, order_action, int(order_quantity))
-                                elif order_type == "LIMIT":
-                                    result = client.place_limit_order(order_symbol, order_action, int(order_quantity), float(order_limit_price))
-                                elif order_type == "STOP":
-                                    result = client.place_stop_order(order_symbol, order_action, int(order_quantity), float(order_stop_price))
-                                
-                                if result:
-                                    status.update(label="✅ Order placed!", state="complete")
-                                    st.success(f"Order placed: {order_action} {order_quantity} {order_symbol}")
-                                    st.json({
-                                        'Order ID': result.order_id,
-                                        'Symbol': result.symbol,
-                                        'Action': result.action,
-                                        'Type': result.order_type,
-                                        'Quantity': result.quantity,
-                                        'Status': result.status
-                                    })
-                                    time.sleep(2)
-                                    st.rerun()
-                                else:
-                                    status.update(label="❌ Order failed", state="error")
-                                    st.error("Failed to place order")
-                        
-                        except Exception as e:
-                            st.error(f"Error placing order: {e}")
-                
-                st.divider()
-                
-                # Market Data
-                st.subheader("📊 Real-Time Market Data")
-                
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    market_symbol = st.text_input("Symbol for Quote", value="SPY", key="market_symbol").upper()
-                
-                with col2:
-                    st.write("")
-                    st.write("")
-                    if st.button("📈 Get Quote", width="stretch"):
-                        if market_symbol:
+                    # Place order button
+                    if st.button("🚀 Place Order", type="primary", width="stretch"):
+                        if not order_symbol:
+                            st.error("Please enter a symbol")
+                        else:
                             try:
-                                market_data = client.get_market_data(market_symbol)
+                                with st.status(f"Placing {order_type} order...") as status:
+                                    result = None
                                 
-                                if market_data:
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    
-                                    with col1:
-                                        st.metric("Last", f"${market_data['last']:.2f}")
-                                    
-                                    with col2:
-                                        st.metric("Bid", f"${market_data['bid']:.2f}", delta=f"{market_data['bid_size']}")
-                                    
-                                    with col3:
-                                        st.metric("Ask", f"${market_data['ask']:.2f}", delta=f"{market_data['ask_size']}")
-                                    
-                                    with col4:
-                                        st.metric("Volume", f"{market_data['volume']:,}")
-                                else:
-                                    st.error("Failed to fetch market data")
-                            
+                                    if order_type == "MARKET":
+                                        result = client.place_market_order(order_symbol, order_action, int(order_quantity))
+                                    elif order_type == "LIMIT":
+                                        result = client.place_limit_order(order_symbol, order_action, int(order_quantity), float(order_limit_price))
+                                    elif order_type == "STOP":
+                                        result = client.place_stop_order(order_symbol, order_action, int(order_quantity), float(order_stop_price))
+                                
+                                    if result:
+                                        status.update(label="✅ Order placed!", state="complete")
+                                        st.success(f"Order placed: {order_action} {order_quantity} {order_symbol}")
+                                        st.json({
+                                            'Order ID': result.order_id,
+                                            'Symbol': result.symbol,
+                                            'Action': result.action,
+                                            'Type': result.order_type,
+                                            'Quantity': result.quantity,
+                                            'Status': result.status
+                                        })
+                                        time.sleep(2)
+                                        st.rerun()
+                                    else:
+                                        status.update(label="❌ Order failed", state="error")
+                                        st.error("Failed to place order")
+                        
                             except Exception as e:
-                                st.error(f"Error fetching market data: {e}")
+                                st.error(f"Error placing order: {e}")
+                
+                    st.divider()
+                
+                    # Market Data
+                    st.subheader("📊 Real-Time Market Data")
+                
+                    col1, col2 = st.columns([3, 1])
+                
+                    with col1:
+                        market_symbol = st.text_input("Symbol for Quote", value="SPY", key="market_symbol").upper()
+                
+                    with col2:
+                        st.write("")
+                        st.write("")
+                        if st.button("📈 Get Quote", width="stretch"):
+                            if market_symbol:
+                                try:
+                                    market_data = client.get_market_data(market_symbol)
+                                
+                                    if market_data:
+                                        col1, col2, col3, col4 = st.columns(4)
+                                    
+                                        with col1:
+                                            st.metric("Last", f"${market_data['last']:.2f}")
+                                    
+                                        with col2:
+                                            st.metric("Bid", f"${market_data['bid']:.2f}", delta=f"{market_data['bid_size']}")
+                                    
+                                        with col3:
+                                            st.metric("Ask", f"${market_data['ask']:.2f}", delta=f"{market_data['ask_size']}")
+                                    
+                                        with col4:
+                                            st.metric("Volume", f"{market_data['volume']:,}")
+                                    else:
+                                        st.error("Failed to fetch market data")
+                            
+                                except Exception as e:
+                                    st.error(f"Error fetching market data: {e}")
             
-            else:
-                st.warning("⚠️ Please connect to IBKR to access trading features")
-                st.info("**Setup Instructions:**\n"
-                       "1. Download and install IB Gateway or TWS from Interactive Brokers\n"
-                       "2. Log in with your IBKR credentials\n"
-                       "3. Enable API connections in TWS/Gateway settings\n"
-                       "4. Set the port number (7497 for paper, 7496 for live)\n"
-                       "5. Click 'Connect to IBKR' above")
+                else:
+                    st.warning("⚠️ Please connect to IBKR to access trading features")
+                    st.info("**Setup Instructions:**\n"
+                           "1. Download and install IB Gateway or TWS from Interactive Brokers\n"
+                           "2. Log in with your IBKR credentials\n"
+                           "3. Enable API connections in TWS/Gateway settings\n"
+                           "4. Set the port number (7497 for paper, 7496 for live)\n"
+                           "5. Click 'Connect to IBKR' above")
     
-    with tab12:
+    elif selected_main_tab == "⚡ Scalping/Day Trade":
         st.header("⚡ Scalping & Day Trading Dashboard")
         st.write("Quick entry/exit interface for stock day trading and scalping. Works with both Tradier and IBKR.")
         st.info("💡 **Perfect for:** Blue chips, penny stocks, runners, and high-momentum plays. Get instant scalping signals!")
@@ -9181,7 +9732,11 @@ TRADIER_API_URL=https://sandbox.tradier.com
             )
         
         with col_platform2:
-            auto_refresh = st.toggle("Auto-refresh positions", value=False, help="Automatically refresh every 5 seconds")
+            # Use session state to track auto-refresh but ensure it defaults to False
+            auto_refresh = st.toggle("Auto-refresh positions", value=st.session_state.get('auto_refresh_enabled', False), 
+                                    help="Automatically refresh every 5 seconds", key='auto_refresh_toggle')
+            # Update session state only if changed
+            st.session_state.auto_refresh_enabled = auto_refresh
         
         st.divider()
         
@@ -9644,12 +10199,20 @@ TRADIER_API_URL=https://sandbox.tradier.com
             except ImportError:
                 st.error("IBKR client not available")
         
-        # Auto-refresh functionality
+        # Auto-refresh functionality - only rerun if explicitly enabled
+        # This prevents constant background reloads
+        # The toggle state is already stored in auto_refresh variable, no need for redundant check
         if auto_refresh:
-            time.sleep(5)
-            st.rerun()
+            # Add a timestamp check to prevent immediate reruns
+            last_refresh = st.session_state.get('last_auto_refresh_time', 0)
+            current_time = time.time()
+            # Only refresh if at least 5 seconds have passed
+            if current_time - last_refresh >= 5:
+                st.session_state['last_auto_refresh_time'] = current_time
+                time.sleep(5)
+                st.rerun()
     
-    with tab13:
+    elif selected_main_tab == "🤖 Strategy Analyzer":
         st.header("🤖 Strategy Analyzer")
         st.write("Analyze Option Alpha bot configs using an LLM provider. Choose provider, model and optionally provide an API key to run analysis.")
 
@@ -9804,7 +10367,7 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     except Exception as e:
                         st.error(f"Analysis failed: {e}")
     
-    with tab14:
+    elif selected_main_tab == "🤖 Auto-Trader":
         st.header("🤖 Automated Trading Bot")
         st.write("Set up automated trading that monitors your watchlist and executes high-confidence signals.")
         
@@ -10262,14 +10825,29 @@ USE_AGENT_SYSTEM = False
         if current_config:
             st.success(f"✅ Loaded configuration from `{selected_config_file}`")
             
-            # Create tabs for organization
-            cfg_tab1, cfg_tab2, cfg_tab3 = st.tabs([
-                "📊 Strategy & Tickers", 
-                "⚖️ Risk & AI Settings", 
-                "💾 Step 3: Save"
-            ])
+            # Use stateful navigation instead of st.tabs() to prevent reruns
+            if 'config_tab' not in st.session_state:
+                st.session_state.config_tab = "📊 Strategy & Tickers"
             
-            with cfg_tab1:
+            # Tab selector using radio buttons (no rerun on selection)
+            config_tab_selector = st.radio(
+                "Configuration Section",
+                options=["📊 Strategy & Tickers", "⚖️ Risk & AI Settings", "💾 Step 3: Save"],
+                horizontal=True,
+                key="config_tab_selector",
+                label_visibility="collapsed"
+            )
+            
+            # Update session state if changed
+            if config_tab_selector != st.session_state.config_tab:
+                st.session_state.config_tab = config_tab_selector
+            
+            # Render the selected tab
+            cfg_tab1_active = st.session_state.config_tab == "📊 Strategy & Tickers"
+            cfg_tab2_active = st.session_state.config_tab == "⚖️ Risk & AI Settings"
+            cfg_tab3_active = st.session_state.config_tab == "💾 Step 3: Save"
+            
+            if cfg_tab1_active:
                 st.subheader("Strategy Settings")
                 
                 col1, col2 = st.columns(2)
@@ -10321,8 +10899,13 @@ USE_AGENT_SYSTEM = False
                     """Get tickers that are checked in the main watchlist"""
                     selected = []
                     try:
-                        ticker_mgr = TickerManager()
-                        all_tickers = ticker_mgr.get_all_tickers()
+                        # Use cached ticker manager from session state
+                        ticker_mgr = st.session_state.ticker_manager
+                        # Use cached ticker data if available
+                        if st.session_state.ticker_cache and 'all_tickers' in st.session_state.ticker_cache:
+                            all_tickers = st.session_state.ticker_cache['all_tickers']
+                        else:
+                            all_tickers = ticker_mgr.get_all_tickers()
                         if all_tickers:
                             for t in all_tickers:
                                 ticker = t['ticker']
@@ -10380,7 +10963,7 @@ USE_AGENT_SYSTEM = False
                         key="watchlist_text_area_disabled"
                     )
             
-            with cfg_tab2:
+            elif cfg_tab2_active:
                 st.subheader("💰 Capital Management")
                 st.markdown("_Control how much capital the bot can use for trading_")
                 
@@ -10561,7 +11144,7 @@ USE_AGENT_SYSTEM = False
                 else:
                     st.warning("⚠️ AI features disabled. Enable for superior trade quality!")
             
-            with cfg_tab3:
+            elif cfg_tab3_active:
                 st.subheader("🎯 Step 3: Save Configuration")
                 
                 st.markdown(f"""
@@ -10887,10 +11470,18 @@ USE_AGENT_SYSTEM = False
         st.subheader("📋 Watchlist")
         st.write("Select tickers to monitor for automated trading:")
         
-        # Get tickers from database
+        # Get tickers from database with caching
         try:
-            ticker_mgr = TickerManager()
-            all_tickers = ticker_mgr.get_all_tickers()
+            # Use cached ticker manager from session state
+            ticker_mgr = st.session_state.ticker_manager
+            # Use cached ticker data if available
+            if st.session_state.ticker_cache and 'all_tickers' in st.session_state.ticker_cache:
+                all_tickers = st.session_state.ticker_cache['all_tickers']
+            else:
+                all_tickers = ticker_mgr.get_all_tickers()
+                # Cache the result
+                st.session_state.ticker_cache['all_tickers'] = all_tickers
+                st.session_state.ticker_cache_timestamp = datetime.now()
             ticker_symbols = [t['ticker'] for t in all_tickers] if all_tickers else []
         except Exception:
             ticker_symbols = []
@@ -11198,7 +11789,10 @@ When enabled (paper trading only), SELL signals can open short positions:
 Always start with paper trading and only risk capital you can afford to lose.
             """)
     
-    with tab15:
+    elif selected_main_tab == "₿ Crypto Trading":
+        # Ensure main tab state is preserved during reruns
+        st.session_state.active_main_tab = "₿ Crypto Trading"
+        
         st.header("₿ Cryptocurrency Trading (Kraken Integration)")
         st.write("Trade cryptocurrencies 24/7 with AI-powered signals and automated strategies.")
         
@@ -11259,8 +11853,16 @@ Always start with paper trading and only risk capital you can afford to lose.
         
         crypto_wl_manager = st.session_state.crypto_watchlist_manager
         
-        # Create subtabs for crypto features
-        crypto_tab1, crypto_tab2, crypto_tab3, crypto_tab4, crypto_tab5, crypto_tab6, crypto_tab7 = st.tabs([
+        # Use stateful navigation instead of st.tabs() to prevent automatic redirect
+        if 'active_crypto_tab' not in st.session_state:
+            st.session_state.active_crypto_tab = "🔍 Crypto Scanner"
+        
+        # Preserve active_crypto_tab during reruns to prevent redirects
+        # This ensures we stay on the current tab even when widgets trigger reruns
+        current_active_tab = st.session_state.get('active_crypto_tab', "🔍 Crypto Scanner")
+        
+        # Tab selector
+        tab_options = [
             "📊 Market Overview",
             "🔍 Crypto Scanner",
             "💰 Penny Cryptos (<$1)",
@@ -11268,9 +11870,36 @@ Always start with paper trading and only risk capital you can afford to lose.
             "🎯 Signal Generator",
             "⚡ Quick Trade",
             "📈 Portfolio & Settings"
-        ])
+        ]
         
-        with crypto_tab1:
+        # Get current index, with fallback if tab not found
+        try:
+            current_index = tab_options.index(current_active_tab)
+        except ValueError:
+            # If tab not found, default to Crypto Scanner
+            current_index = 1
+            current_active_tab = "🔍 Crypto Scanner"
+            st.session_state.active_crypto_tab = current_active_tab
+        
+        active_crypto_tab = st.radio(
+            "Select Crypto Feature:",
+            tab_options,
+            index=current_index,
+            horizontal=True,
+            key="crypto_tab_selector"
+        )
+        
+        # Update session state only if tab actually changed
+        if active_crypto_tab != current_active_tab:
+            st.session_state.active_crypto_tab = active_crypto_tab
+        else:
+            # Ensure session state is set even if unchanged (prevents reset on rerun)
+            st.session_state.active_crypto_tab = active_crypto_tab
+        
+        st.divider()
+        
+        # Render only the active tab content
+        if active_crypto_tab == "📊 Market Overview":
             st.subheader("📊 Crypto Market Overview")
             
             col1, col2 = st.columns([2, 1])
@@ -11314,7 +11943,9 @@ Always start with paper trading and only risk capital you can afford to lose.
                     holdings_data = []
                     for balance in crypto_holdings:
                         try:
-                            pair = f"{balance.currency}/USD"
+                            # Strip .F suffix (futures) and other suffixes from currency name
+                            currency = balance.currency.replace('.F', '').replace('.S', '').replace('.M', '')
+                            pair = f"{currency}/USD"
                             ticker = kraken_client.get_ticker_data(pair)
                             
                             if ticker:
@@ -11367,7 +11998,7 @@ Always start with paper trading and only risk capital you can afford to lose.
             if price_data:
                 st.dataframe(price_data, width="stretch")
         
-        with crypto_tab2:
+        elif active_crypto_tab == "🔍 Crypto Scanner":
             logger.info("🏁 CRYPTO_TAB2 (Scanner) RENDERING")
             st.subheader("🔍 Advanced Crypto Opportunity Scanner")
             st.write("**AI-powered scanner** to find the best crypto trading opportunities with multiple analysis modes.")
@@ -11519,6 +12150,9 @@ Always start with paper trading and only risk capital you can afford to lose.
                         
                         # Store results in session state
                         st.session_state.crypto_scan_results = opportunities
+                        st.session_state.just_scanned_crypto = True
+                        # Keep user on Scanner tab after scan
+                        st.session_state.active_crypto_tab = "🔍 Crypto Scanner"
                         logger.info(f"📊 Scan complete - Found {len(opportunities)} opportunities")
                         
                     except Exception as e:
@@ -11528,6 +12162,7 @@ Always start with paper trading and only risk capital you can afford to lose.
             # Display results from session state (persists across button clicks)
             if st.session_state.crypto_scan_results is not None:
                 opportunities = st.session_state.crypto_scan_results
+                
                 if opportunities:
                     logger.info(f"🎯 Rendering {len(opportunities)} crypto cards...")
                     st.success(f"✅ Found {len(opportunities)} crypto opportunities!")
@@ -11740,7 +12375,7 @@ Always start with paper trading and only risk capital you can afford to lose.
                 - **AI Confidence**: HIGH = AI agrees with technical analysis
                 """)
         
-        with crypto_tab3:
+        elif active_crypto_tab == "💰 Penny Cryptos (<$1)":
             logger.info("🏁 CRYPTO_TAB3 (Penny Cryptos) RENDERING")
             st.subheader("💰 Penny Crypto Scanner - Monster Runners Under $1")
             st.write("**Find sub-$1 cryptocurrencies with extreme runner potential** - including sub-penny coins (0.0000000+)")
@@ -11765,12 +12400,19 @@ Always start with paper trading and only risk capital you can afford to lose.
                     st.warning(f"**Note:** {scanner_stats['note']}")
             
             # Scan mode selector
+            # Preserve active tab state when radio changes
+            if 'active_crypto_tab' not in st.session_state:
+                st.session_state.active_crypto_tab = "💰 Penny Cryptos (<$1)"
+            
             scan_mode = st.radio(
                 "🎯 Scan Mode:",
                 options=["💰 All Penny Cryptos (<$1)", "🔥 Sub-Penny Cryptos (<$0.01)"],
                 horizontal=False,
                 help="Choose scan mode:\n- All Penny: Cryptos under $1\n- Sub-Penny: Extreme runners under $0.01"
             )
+            
+            # Preserve tab state after radio change
+            st.session_state.active_crypto_tab = "💰 Penny Cryptos (<$1)"
             
             st.divider()
             
@@ -12309,6 +12951,8 @@ Always start with paper trading and only risk capital you can afford to lose.
                                     except Exception as e:
                                         st.error(f"❌ Error saving {opp.symbol}: {e}")
                                         logger.error(f"Error saving penny crypto to watchlist: {e}", exc_info=True)
+                                        # Preserve tab state even on error
+                                        st.session_state.active_crypto_tab = "💰 Penny Cryptos (<$1)"
                             
                             with bcol2:
                                 if st.button(f"📊 Generate Signal", key=f"gen_penny_signal_{i}"):
@@ -12371,7 +13015,7 @@ Always start with paper trading and only risk capital you can afford to lose.
                 - Monitor social sentiment
                 """)
         
-        with crypto_tab4:
+        elif active_crypto_tab == "⭐ My Watchlist":
             st.subheader("⭐ My Crypto Watchlist")
             
             # Import and render watchlist UI
@@ -12382,7 +13026,7 @@ Always start with paper trading and only risk capital you can afford to lose.
                 st.error(f"Error loading watchlist: {e}")
                 logger.error(f"Crypto watchlist UI error: {e}", exc_info=True)
         
-        with crypto_tab5:
+        elif active_crypto_tab == "🎯 Signal Generator":
             st.subheader("🎯 Crypto Signal Generator")
             
             # Import and render signal generation UI
@@ -12393,16 +13037,33 @@ Always start with paper trading and only risk capital you can afford to lose.
                 st.error(f"Error loading signal generator: {e}")
                 logger.error(f"Crypto signal UI error: {e}", exc_info=True)
         
-        with crypto_tab6:
-            # Import and render quick trade UI
+        elif active_crypto_tab == "⚡ Quick Trade":
+            # Import and render quick trade UI with cached scanners
             try:
                 from ui.crypto_quick_trade_ui import render_quick_trade_tab
-                render_quick_trade_tab(kraken_client, crypto_config)
+                
+                # Get cached scanner instances to avoid duplicates
+                penny_scanner = get_penny_crypto_scanner(kraken_client, crypto_config)
+                crypto_scanner = get_crypto_scanner(kraken_client, crypto_config)
+                ai_scanner = get_ai_crypto_scanner(kraken_client, crypto_config)
+                sub_penny = get_sub_penny_discovery()
+                
+                # Pass cached instances to avoid re-initialization
+                render_quick_trade_tab(
+                    kraken_client, 
+                    crypto_config,
+                    penny_crypto_scanner=penny_scanner,
+                    crypto_opportunity_scanner=crypto_scanner,
+                    ai_crypto_scanner=ai_scanner,
+                    sub_penny_discovery=sub_penny
+                )
             except Exception as e:
                 st.error(f"Error loading quick trade: {e}")
                 logger.error(f"Crypto quick trade UI error: {e}", exc_info=True)
+                # Ensure we stay on Quick Trade tab even after error
+                st.session_state.active_crypto_tab = "⚡ Quick Trade"
         
-        with crypto_tab7:
+        elif active_crypto_tab == "📈 Portfolio & Settings":
             st.subheader("📈 Crypto Portfolio & Settings")
             
             # Configuration display

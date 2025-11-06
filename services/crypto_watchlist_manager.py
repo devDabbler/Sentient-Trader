@@ -74,6 +74,13 @@ class CryptoWatchlistManager:
             
             logger.info(f"📋 Parsed symbol: base={base_asset}, quote={quote_asset}")
             
+            # CRITICAL FIX: Strip Kraken suffixes (.F, .S, .M) from symbol before storing
+            # These suffixes indicate futures, staking, margin but break ticker API calls
+            clean_symbol = symbol.replace('.F/', '/').replace('.S/', '/').replace('.M/', '/')
+            if clean_symbol != symbol:
+                logger.info(f"🔧 Cleaned symbol: {symbol} → {clean_symbol}")
+                symbol = clean_symbol
+            
             now = datetime.now(timezone.utc).isoformat()
             
             # Prepare data

@@ -92,13 +92,16 @@ class SubPennyDiscovery:
                 return []
             
             logger.info(f"📊 Analyzing {len(all_coins)} coins under ${max_price}...")
+            logger.info(f"   • Market cap filter: ${min_market_cap:,.0f} - ${max_market_cap:,.0f}")
             
             # Score each coin for runner potential
             runners = []
+            filtered_by_market_cap = 0
             for coin in all_coins:
                 try:
                     # Filter by market cap
                     if coin.market_cap < min_market_cap or coin.market_cap > max_market_cap:
+                        filtered_by_market_cap += 1
                         continue
                     
                     # Score runner potential
@@ -111,6 +114,9 @@ class SubPennyDiscovery:
                 except Exception as e:
                     logger.debug(f"Error scoring {coin.symbol}: {e}")
                     continue
+            
+            if filtered_by_market_cap > 0:
+                logger.info(f"   • Filtered out {filtered_by_market_cap} coins by market cap filter")
             
             # Sort by criteria
             if sort_by == "runner_potential":
@@ -149,8 +155,8 @@ class SubPennyDiscovery:
                 if elapsed < 7:
                     await asyncio.sleep(7 - elapsed)
                 
-                # Retry logic for rate limits
-                max_retries = 3
+                # Retry logic for rate limits - only retry once (initial attempt + 1 retry)
+                max_retries = 2
                 retry_count = 0
                 
                 while retry_count < max_retries:
@@ -171,10 +177,13 @@ class SubPennyDiscovery:
                             
                             self.last_api_call = time.time()
                             
-                            # Handle rate limiting
+                            # Handle rate limiting - wait once and if still rate limited, give up
                             if response.status_code == 429:
                                 retry_count += 1
-                                wait_time = 15 * retry_count  # 15s, 30s, 45s
+                                if retry_count >= max_retries:
+                                    logger.warning(f"Rate limited (429) after {retry_count} attempts, giving up on this page")
+                                    return coins  # Return what we have so far
+                                wait_time = 30  # Single wait of 30s
                                 logger.warning(f"Rate limited (429), waiting {wait_time}s before retry {retry_count}/{max_retries}...")
                                 await asyncio.sleep(wait_time)
                                 continue
@@ -248,16 +257,9 @@ class SubPennyDiscovery:
                 
                 logger.debug(f"Page {page}: Found {page_sub_penny_count} sub-penny coins (total: {len(coins)})")
                 
-                # Track pages with low yield
-                if page_sub_penny_count < 5:
-                    low_yield_pages += 1
-                else:
-                    low_yield_pages = 0  # Reset counter
-                
-                # Early stopping conditions
-                if low_yield_pages >= 5:
-                    logger.info(f"Stopping after {low_yield_pages} consecutive low-yield pages")
-                    break
+                # If the page has no sub-penny coins, just continue to the next one
+                if page_sub_penny_count == 0 and page > 1:
+                    logger.debug(f"Page {page} has no sub-penny coins, continuing...")
                 
                 if len(coins) >= 5000:
                     logger.info(f"Collected {len(coins)} coins - sufficient for analysis")

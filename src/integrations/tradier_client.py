@@ -249,6 +249,7 @@ class TradierClient:
             positions_wrapper = positions_data.get('positions', {})
             if not isinstance(positions_wrapper, dict):
                 logger.debug("No positions found (wrapper is %s, likely empty account)", type(positions_wrapper).__name__)
+                logger.debug(f"Full positions_data structure: {positions_data}")
                 return True, []
             
             positions = positions_wrapper.get('position', [])
@@ -257,11 +258,13 @@ class TradierClient:
             if not isinstance(positions, list):
                 positions = [positions] if positions else []
             
-            logger.info(f"Retrieved {len(positions)} positions")
+            logger.info(f"✅ Retrieved {len(positions)} positions from Tradier")
+            if len(positions) > 0:
+                logger.debug(f"Positions: {[p.get('symbol', 'UNKNOWN') for p in positions]}")
             return True, positions
             
         except AttributeError as e:
-            logger.error(f"Positions error details: {positions_data}", exc_info=True)
+            logger.error(f"Positions error details: {positions_data if 'positions_data' in locals() else 'undefined'}", exc_info=True)
             return True, []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting positions: {e}")
@@ -303,6 +306,15 @@ class TradierClient:
         except AttributeError as e:
             logger.error(f"Orders error details: {orders_data}", exc_info=True)
             return True, []
+        except requests.exceptions.HTTPError as e:
+            # Let the retry decorator handle 500/504 errors
+            if e.response is not None and e.response.status_code in [500, 504]:
+                # Re-raise to let the retry decorator handle it
+                raise
+            # For other HTTP errors, log and return empty list
+            logger.error(f"Error getting orders: {e}")
+            logger.warning("⚠️ Returning empty orders list due to HTTP error (safe fallback)")
+            return False, []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting orders: {e}")
             logger.warning("⚠️ Returning empty orders list due to API error (safe fallback)")

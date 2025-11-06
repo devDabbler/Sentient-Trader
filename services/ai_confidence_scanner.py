@@ -32,15 +32,16 @@ class AIConfidenceScanner:
     Can work with or without LLM API keys.
     """
     
-    def __init__(self, use_llm: bool = None):
+    def __init__(self, use_llm: bool = None, base_scanner=None, llm_analyzer=None):
         """
-        Initialize AI scanner
+        Initialize AI scanner with optional pre-created dependencies for performance
         
         Args:
-            use_llm: Whether to use LLM for analysis. 
-                    If None, auto-detect based on API keys.
+            use_llm: Whether to use LLM for analysis. If None, auto-detect based on API keys.
+            base_scanner: Optional pre-created TopTradesScanner instance
+            llm_analyzer: Optional pre-created LLMStrategyAnalyzer instance
         """
-        self.scanner = TopTradesScanner()
+        self.scanner = base_scanner if base_scanner is not None else TopTradesScanner()
         
         # Auto-detect if we should use LLM
         if use_llm is None:
@@ -48,7 +49,11 @@ class AIConfidenceScanner:
         else:
             self.use_llm = use_llm
         
-        if self.use_llm:
+        # Use provided LLM analyzer or create new one
+        if llm_analyzer is not None:
+            self.llm_analyzer = llm_analyzer
+            self.use_llm = True
+        elif self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
                 api_key = os.getenv('OPENROUTER_API_KEY')
@@ -66,6 +71,8 @@ class AIConfidenceScanner:
             except Exception as e:
                 logger.error(f"❌ LLM initialization failed: {e}", exc_info=True)
                 self.use_llm = False
+        else:
+            self.llm_analyzer = None
     
     def _check_llm_available(self) -> bool:
         """Check if OpenRouter LLM API key is available"""

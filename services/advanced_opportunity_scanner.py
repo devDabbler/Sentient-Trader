@@ -206,12 +206,12 @@ class AdvancedOpportunityScanner:
         'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'XLV', 'ARKK', 'SQQQ', 'TQQQ'
     ]
     
-    def __init__(self, use_ai: bool = True):
-        """Initialize the scanner"""
-        self.base_scanner = TopTradesScanner()
-        self.ai_scanner = AIConfidenceScanner(use_llm=use_ai) if use_ai else None
+    def __init__(self, use_ai: bool = True, base_scanner=None, ai_scanner=None, social_analyzer=None):
+        """Initialize the scanner with optional pre-created dependencies for performance"""
+        self.base_scanner = base_scanner if base_scanner is not None else TopTradesScanner()
+        self.ai_scanner = ai_scanner if ai_scanner is not None else (AIConfidenceScanner(use_llm=use_ai) if use_ai else None)
         self.use_ai = use_ai
-        self.social_analyzer = SocialSentimentAnalyzer()  # For buzz detection
+        self.social_analyzer = social_analyzer if social_analyzer is not None else SocialSentimentAnalyzer()
     
     def scan_opportunities(
         self,
