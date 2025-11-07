@@ -3,6 +3,7 @@ Crypto Opportunity Scanner
 Scans cryptocurrency markets for trading opportunities
 
 Adapted from TopTradesScanner for crypto-specific analysis
+Fetches from multiple sources: CoinGecko, CoinMarketCap, and Kraken
 """
 
 from loguru import logger
@@ -10,8 +11,11 @@ from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from clients.kraken_client import KrakenClient
+from services.crypto_data_aggregator import CryptoDataAggregator, AggregatedCryptoData
+from utils.crypto_pair_utils import normalize_crypto_pair, extract_base_asset
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
 
 
 @dataclass
@@ -45,6 +49,7 @@ class CryptoOpportunityScanner:
         """
         self.client = kraken_client
         self.config = config
+        self.aggregator = CryptoDataAggregator()
         
         # Popular crypto pairs from config or defaults - expanded for better coverage
         if config and hasattr(config, 'CRYPTO_WATCHLIST'):
@@ -88,6 +93,7 @@ class CryptoOpportunityScanner:
             ]
         
         logger.info(f"Crypto Scanner initialized with {len(self.watchlist)} pairs")
+        logger.info("   • Multi-source data: CoinGecko, CoinMarketCap, Kraken")
     
     def scan_opportunities(
         self,
@@ -202,15 +208,18 @@ class CryptoOpportunityScanner:
             CryptoOpportunity or None
         """
         try:
+            # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+            normalized_symbol = normalize_crypto_pair(symbol)
+            
             # Get market data
-            ticker = self.client.get_ticker_data(symbol)
+            ticker = self.client.get_ticker_data(normalized_symbol)
             
             if not ticker:
                 return None
             
             # Get OHLC data for technical analysis
-            ohlc_5m = self.client.get_ohlc_data(symbol, interval=5)  # 5-minute
-            ohlc_1h = self.client.get_ohlc_data(symbol, interval=60)  # 1-hour
+            ohlc_5m = self.client.get_ohlc_data(normalized_symbol, interval=5)  # 5-minute
+            ohlc_1h = self.client.get_ohlc_data(normalized_symbol, interval=60)  # 1-hour
             
             if not ohlc_5m or not ohlc_1h:
                 return None
@@ -234,7 +243,7 @@ class CryptoOpportunityScanner:
             
             # Score the opportunity
             score, reason, confidence, risk_level, target_strategy = self._score_opportunity(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 current_price=current_price,
                 change_pct_24h=change_pct_24h,
                 volume_ratio=volume_ratio,
@@ -246,11 +255,11 @@ class CryptoOpportunityScanner:
             )
             
             # Parse base asset
-            base_asset = symbol.split('/')[0]
+            base_asset = extract_base_asset(normalized_symbol)
             
             # Create opportunity
             opportunity = CryptoOpportunity(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 base_asset=base_asset,
                 score=score,
                 current_price=current_price,
@@ -268,6 +277,125 @@ class CryptoOpportunityScanner:
             
         except Exception as e:
             logger.error(f"Error analyzing {symbol}: {e}")
+            return None
+    
+    def _analyze_crypto_pair_multi_source(
+        self,
+        symbol: str,
+        strategy: str,
+        aggregated_coins: List[AggregatedCryptoData]
+    ) -> Optional[CryptoOpportunity]:
+        """
+        Analyze a single crypto pair using multiple sources
+        Tries Kraken first, falls back to CoinGecko/CoinMarketCap data
+        
+        Args:
+            symbol: Crypto pair (e.g., 'BTC/USD')
+            strategy: Target strategy
+            aggregated_coins: List of AggregatedCryptoData from CoinGecko/CoinMarketCap
+            
+        Returns:
+            CryptoOpportunity or None
+        """
+        try:
+            # Normalize pair format globally
+            normalized_symbol = normalize_crypto_pair(symbol)
+            base_asset = extract_base_asset(normalized_symbol)
+            
+            # Try to get data from aggregated coins first
+            aggregated_data = None
+            for coin in aggregated_coins:
+                if coin.symbol.upper() == base_asset:
+                    aggregated_data = coin
+                    break
+            
+            # Try Kraken first (for technical analysis) - use normalized symbol
+            ticker = self.client.get_ticker_data(normalized_symbol)
+            ohlc_5m = None
+            ohlc_1h = None
+            
+            if ticker:
+                current_price = ticker['last_price']
+                # Get OHLC data for technical analysis - use normalized symbol
+                ohlc_5m = self.client.get_ohlc_data(normalized_symbol, interval=5)
+                ohlc_1h = self.client.get_ohlc_data(normalized_symbol, interval=60)
+            elif aggregated_data:
+                # Use aggregated data from CoinGecko/CoinMarketCap
+                current_price = aggregated_data.price_usd
+            else:
+                return None
+            
+            # Calculate metrics from available data
+            if ticker and ohlc_1h:
+                # Use Kraken data (most accurate)
+                change_pct_24h = ((ticker['high_24h'] - ticker['low_24h']) / ticker['low_24h']) * 100 if ticker['low_24h'] > 0 else 0
+                volume_24h = ticker['volume_24h']
+                
+                # Calculate volume ratio
+                avg_volume = sum([candle['volume'] for candle in ohlc_1h[-24:]]) / 24 if len(ohlc_1h) >= 24 else volume_24h
+                volume_ratio = volume_24h / avg_volume if avg_volume > 0 else 1.0
+                
+                # Calculate volatility
+                volatility_24h = self._calculate_volatility([candle['close'] for candle in ohlc_1h[-24:]])
+                
+                # Calculate technical indicators
+                rsi = self._calculate_rsi([candle['close'] for candle in ohlc_5m[-14:]]) if ohlc_5m and len(ohlc_5m) >= 14 else 50.0
+                ema_8 = self._calculate_ema([candle['close'] for candle in ohlc_5m[-20:]], 8) if ohlc_5m and len(ohlc_5m) >= 20 else current_price
+                ema_20 = self._calculate_ema([candle['close'] for candle in ohlc_1h[-40:]], 20) if ohlc_1h and len(ohlc_1h) >= 40 else current_price
+            elif aggregated_data:
+                # Use aggregated data (CoinGecko/CoinMarketCap)
+                change_pct_24h = aggregated_data.change_24h
+                volume_24h = aggregated_data.volume_24h
+                
+                # Estimate volume ratio (use 1.0 as default)
+                volume_ratio = 1.0
+                
+                # Estimate volatility from 24h change
+                volatility_24h = abs(change_pct_24h) if change_pct_24h else 0.0
+                
+                # Default technical indicators (can't calculate without OHLC)
+                rsi = 50.0
+                ema_8 = current_price
+                ema_20 = current_price
+            else:
+                return None
+            
+            # Score the opportunity - use normalized symbol
+            score, reason, confidence, risk_level, target_strategy = self._score_opportunity(
+                symbol=normalized_symbol,
+                current_price=current_price,
+                change_pct_24h=change_pct_24h,
+                volume_ratio=volume_ratio,
+                volatility_24h=volatility_24h,
+                rsi=rsi,
+                ema_8=ema_8,
+                ema_20=ema_20,
+                strategy=strategy
+            )
+            
+            # Parse base asset
+            base_asset = extract_base_asset(normalized_symbol)
+            
+            # Create opportunity - use normalized symbol
+            opportunity = CryptoOpportunity(
+                symbol=normalized_symbol,
+                base_asset=base_asset,
+                score=score,
+                current_price=current_price,
+                change_pct_24h=change_pct_24h,
+                volume_24h=volume_24h,
+                volume_ratio=volume_ratio,
+                volatility_24h=volatility_24h,
+                reason=reason,
+                strategy=target_strategy,
+                confidence=confidence,
+                risk_level=risk_level
+            )
+            
+            return opportunity
+            
+        except Exception as e:
+            logger.debug(f"Error analyzing {symbol} (multi-source): {e}")
             return None
     
     def _score_opportunity(
@@ -471,7 +599,8 @@ class CryptoOpportunityScanner:
         self,
         top_n: int = 10,
         min_volume_ratio: float = 2.0,
-        use_parallel: bool = True
+        use_parallel: bool = True,
+        use_multi_source: bool = True
     ) -> List[CryptoOpportunity]:
         """
         Scan for buzzing/trending cryptocurrencies with high social momentum
@@ -481,11 +610,15 @@ class CryptoOpportunityScanner:
             top_n: Number of top buzzing cryptos to return
             min_volume_ratio: Minimum volume ratio (vs average)
             use_parallel: Use parallel processing for 5-8x speedup (default: True)
+            use_multi_source: Fetch from CoinGecko, CoinMarketCap, and Kraken (default: True)
             
         Returns:
             List of buzzing CryptoOpportunity objects
         """
         logger.info(f"🔥 Scanning for {top_n} buzzing cryptocurrencies...")
+        
+        if use_multi_source:
+            return self._scan_buzzing_multi_source(top_n, min_volume_ratio, use_parallel)
         
         buzzing_opportunities = []
         start_time = time.time()
@@ -536,11 +669,97 @@ class CryptoOpportunityScanner:
         
         return buzzing_opportunities[:top_n]
     
+    def _scan_buzzing_multi_source(
+        self,
+        top_n: int,
+        min_volume_ratio: float,
+        use_parallel: bool = True
+    ) -> List[CryptoOpportunity]:
+        """
+        Scan for buzzing cryptos using multiple sources
+        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        """
+        logger.info(f"🔍 Scanning buzzing cryptos from multiple sources...")
+        start_time = time.time()
+        
+        # Fetch from CoinGecko and CoinMarketCap
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            aggregated_coins = loop.run_until_complete(
+                self.aggregator.fetch_all_coins(
+                    min_volume_24h=100000,  # Minimum $100k volume for buzzing
+                    max_coins=300  # Get up to 300 coins
+                )
+            )
+            loop.close()
+            
+            logger.info(f"✅ Fetched {len(aggregated_coins)} coins from CoinGecko/CoinMarketCap")
+        except Exception as e:
+            logger.error(f"Error fetching from aggregator: {e}")
+            aggregated_coins = []
+        
+        # Create symbol list from aggregated coins
+        symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
+        
+        # Combine with watchlist (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for buzzing cryptos...")
+        
+        buzzing_opportunities = []
+        
+        if use_parallel:
+            max_workers = 8
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_symbol = {
+                    executor.submit(self._analyze_crypto_pair_multi_source, symbol, 'MOMENTUM', aggregated_coins): symbol
+                    for symbol in all_symbols
+                }
+                
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    try:
+                        opportunity = future.result()
+                        
+                        if opportunity and opportunity.volume_ratio >= min_volume_ratio:
+                            buzz_bonus = min((opportunity.volume_ratio - 1.0) * 10, 30)
+                            opportunity.score += buzz_bonus
+                            opportunity.reason += f" | 🔥 BUZZING (Vol: {opportunity.volume_ratio:.1f}x)"
+                            buzzing_opportunities.append(opportunity)
+                            
+                    except Exception as e:
+                        logger.debug(f"Error analyzing {symbol} for buzz: {e}")
+                        continue
+        else:
+            for symbol in all_symbols:
+                try:
+                    opportunity = self._analyze_crypto_pair_multi_source(symbol, 'MOMENTUM', aggregated_coins)
+                    
+                    if opportunity and opportunity.volume_ratio >= min_volume_ratio:
+                        buzz_bonus = min((opportunity.volume_ratio - 1.0) * 10, 30)
+                        opportunity.score += buzz_bonus
+                        opportunity.reason += f" | 🔥 BUZZING (Vol: {opportunity.volume_ratio:.1f}x)"
+                        buzzing_opportunities.append(opportunity)
+                        
+                except Exception as e:
+                    logger.debug(f"Error analyzing {symbol} for buzz: {e}")
+                    continue
+        
+        # Sort by volume ratio (primary indicator of buzz)
+        buzzing_opportunities.sort(key=lambda x: x.volume_ratio, reverse=True)
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ Found {len(buzzing_opportunities)} buzzing cryptos in {elapsed_time:.2f}s")
+        
+        return buzzing_opportunities[:top_n]
+    
     def scan_hottest_cryptos(
         self,
         top_n: int = 10,
         min_momentum: float = 3.0,
-        use_parallel: bool = True
+        use_parallel: bool = True,
+        use_multi_source: bool = True
     ) -> List[CryptoOpportunity]:
         """
         Scan for the hottest cryptocurrencies with strongest momentum
@@ -550,11 +769,15 @@ class CryptoOpportunityScanner:
             top_n: Number of hottest cryptos to return
             min_momentum: Minimum 24h change % (absolute value)
             use_parallel: Use parallel processing for 5-8x speedup (default: True)
+            use_multi_source: Fetch from CoinGecko, CoinMarketCap, and Kraken (default: True)
             
         Returns:
             List of hottest CryptoOpportunity objects
         """
         logger.info(f"🌶️ Scanning for {top_n} hottest cryptocurrencies...")
+        
+        if use_multi_source:
+            return self._scan_hottest_multi_source(top_n, min_momentum, use_parallel)
         
         hot_opportunities = []
         start_time = time.time()
@@ -609,10 +832,100 @@ class CryptoOpportunityScanner:
         
         return hot_opportunities[:top_n]
     
+    def _scan_hottest_multi_source(
+        self,
+        top_n: int,
+        min_momentum: float,
+        use_parallel: bool = True
+    ) -> List[CryptoOpportunity]:
+        """
+        Scan for hottest cryptos using multiple sources
+        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        """
+        logger.info(f"🔍 Scanning hottest cryptos from multiple sources...")
+        start_time = time.time()
+        
+        # Fetch from CoinGecko and CoinMarketCap
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            aggregated_coins = loop.run_until_complete(
+                self.aggregator.fetch_all_coins(
+                    min_volume_24h=50000,  # Minimum $50k volume
+                    max_coins=300  # Get up to 300 coins
+                )
+            )
+            loop.close()
+            
+            logger.info(f"✅ Fetched {len(aggregated_coins)} coins from CoinGecko/CoinMarketCap")
+        except Exception as e:
+            logger.error(f"Error fetching from aggregator: {e}")
+            aggregated_coins = []
+        
+        # Create symbol list from aggregated coins
+        symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
+        
+        # Combine with watchlist (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for hottest cryptos...")
+        
+        hot_opportunities = []
+        
+        if use_parallel:
+            max_workers = 8
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_symbol = {
+                    executor.submit(self._analyze_crypto_pair_multi_source, symbol, 'MOMENTUM', aggregated_coins): symbol
+                    for symbol in all_symbols
+                }
+                
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    try:
+                        opportunity = future.result()
+                        
+                        if opportunity and abs(opportunity.change_pct_24h) >= min_momentum:
+                            momentum_bonus = min(abs(opportunity.change_pct_24h) * 2, 40)
+                            opportunity.score += momentum_bonus
+                            
+                            direction = "🚀" if opportunity.change_pct_24h > 0 else "📉"
+                            opportunity.reason += f" | 🌶️ HOTTEST {direction} ({opportunity.change_pct_24h:+.1f}%)"
+                            hot_opportunities.append(opportunity)
+                            
+                    except Exception as e:
+                        logger.debug(f"Error analyzing {symbol} for heat: {e}")
+                        continue
+        else:
+            for symbol in all_symbols:
+                try:
+                    opportunity = self._analyze_crypto_pair_multi_source(symbol, 'MOMENTUM', aggregated_coins)
+                    
+                    if opportunity and abs(opportunity.change_pct_24h) >= min_momentum:
+                        momentum_bonus = min(abs(opportunity.change_pct_24h) * 2, 40)
+                        opportunity.score += momentum_bonus
+                        
+                        direction = "🚀" if opportunity.change_pct_24h > 0 else "📉"
+                        opportunity.reason += f" | 🌶️ HOTTEST {direction} ({opportunity.change_pct_24h:+.1f}%)"
+                        hot_opportunities.append(opportunity)
+                        
+                except Exception as e:
+                    logger.debug(f"Error analyzing {symbol} for heat: {e}")
+                    continue
+        
+        # Sort by absolute momentum (primary indicator of heat)
+        hot_opportunities.sort(key=lambda x: abs(x.change_pct_24h), reverse=True)
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ Found {len(hot_opportunities)} hottest cryptos in {elapsed_time:.2f}s")
+        
+        return hot_opportunities[:top_n]
+    
     def scan_breakout_cryptos(
         self,
         top_n: int = 10,
-        use_parallel: bool = True
+        use_parallel: bool = True,
+        use_multi_source: bool = True
     ) -> List[CryptoOpportunity]:
         """
         Scan for cryptocurrencies breaking out of consolidation
@@ -621,11 +934,15 @@ class CryptoOpportunityScanner:
         Args:
             top_n: Number of breakout opportunities to return
             use_parallel: Use parallel processing for 5-8x speedup (default: True)
+            use_multi_source: Fetch from CoinGecko, CoinMarketCap, and Kraken (default: True)
             
         Returns:
             List of breakout CryptoOpportunity objects
         """
         logger.info(f"💥 Scanning for {top_n} breakout cryptocurrencies...")
+        
+        if use_multi_source:
+            return self._scan_breakout_multi_source(top_n, use_parallel)
         
         breakout_opportunities = []
         start_time = time.time()
@@ -667,15 +984,93 @@ class CryptoOpportunityScanner:
         
         return breakout_opportunities[:top_n]
     
+    def _scan_breakout_multi_source(
+        self,
+        top_n: int,
+        use_parallel: bool = True
+    ) -> List[CryptoOpportunity]:
+        """
+        Scan for breakout cryptos using multiple sources
+        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        """
+        logger.info(f"🔍 Scanning breakout cryptos from multiple sources...")
+        start_time = time.time()
+        
+        # Fetch from CoinGecko and CoinMarketCap
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            aggregated_coins = loop.run_until_complete(
+                self.aggregator.fetch_all_coins(
+                    min_volume_24h=50000,  # Minimum $50k volume
+                    max_coins=300  # Get up to 300 coins
+                )
+            )
+            loop.close()
+            
+            logger.info(f"✅ Fetched {len(aggregated_coins)} coins from CoinGecko/CoinMarketCap")
+        except Exception as e:
+            logger.error(f"Error fetching from aggregator: {e}")
+            aggregated_coins = []
+        
+        # Create symbol list from aggregated coins
+        symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
+        
+        # Combine with watchlist (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for breakout cryptos...")
+        
+        breakout_opportunities = []
+        
+        if use_parallel:
+            max_workers = 8
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_symbol = {
+                    executor.submit(self._analyze_breakout_single, symbol): symbol
+                    for symbol in all_symbols
+                }
+                
+                for future in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
+                    try:
+                        opportunity = future.result()
+                        if opportunity:
+                            breakout_opportunities.append(opportunity)
+                    except Exception as e:
+                        logger.debug(f"Error analyzing {symbol} for breakout: {e}")
+                        continue
+        else:
+            for symbol in all_symbols:
+                try:
+                    opportunity = self._analyze_breakout_single(symbol)
+                    if opportunity:
+                        breakout_opportunities.append(opportunity)
+                        
+                except Exception as e:
+                    logger.debug(f"Error analyzing {symbol} for breakout: {e}")
+                    continue
+        
+        # Sort by score
+        breakout_opportunities.sort(key=lambda x: x.score, reverse=True)
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ Found {len(breakout_opportunities)} breakout opportunities in {elapsed_time:.2f}s")
+        
+        return breakout_opportunities[:top_n]
+    
     def _analyze_breakout_single(self, symbol: str) -> Optional[CryptoOpportunity]:
         """Analyze a single symbol for breakout pattern"""
         try:
+            # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+            normalized_symbol = normalize_crypto_pair(symbol)
+            
             # Get data for breakout analysis
-            ticker = self.client.get_ticker_data(symbol)
+            ticker = self.client.get_ticker_data(normalized_symbol)
             if not ticker:
                 return None
             
-            ohlc_1h = self.client.get_ohlc_data(symbol, interval=60)
+            ohlc_1h = self.client.get_ohlc_data(normalized_symbol, interval=60)
             if not ohlc_1h or len(ohlc_1h) < 40:
                 return None
             
@@ -713,10 +1108,11 @@ class CryptoOpportunityScanner:
                 score += min((volume_ratio - 1.0) * 15, 20)  # Volume bonus
                 score += min(((current_price / ema_50) - 1.0) * 200, 10)  # Strength bonus
                 
-                base_asset = symbol.split('/')[0]
+                # Parse base asset
+                base_asset = extract_base_asset(normalized_symbol)
                 
                 opportunity = CryptoOpportunity(
-                    symbol=symbol,
+                    symbol=normalized_symbol,
                     base_asset=base_asset,
                     score=score,
                     current_price=current_price,

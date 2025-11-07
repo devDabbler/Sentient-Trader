@@ -108,21 +108,30 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
 
                     elif scan_type == "sub_penny_discovery" and scanner_instances.get(scan_type):
-                        runners = asyncio.run(scanner_instances[scan_type].discover_sub_penny_runners(
-                            max_price=0.01,
-                            min_market_cap=0,
-                            max_market_cap=10_000_000,  # 10M to match main app and allow more coins
-                            top_n=50,
-                            sort_by="runner_potential"
-                        ))
+                        with st.status("🔬 Discovering sub-penny coins... This may take 1-2 minutes to find enough valid Kraken pairs.", expanded=True) as status:
+                            status.update(label="🔍 Fetching coins from CoinGecko & CoinMarketCap...")
+                            runners = asyncio.run(scanner_instances[scan_type].discover_sub_penny_runners(
+                                max_price=0.01,
+                                min_market_cap=0,
+                                max_market_cap=10_000_000,  # 10M to match main app and allow more coins
+                                top_n=50,
+                                sort_by="runner_potential"
+                            ))
+                            
+                            status.update(label=f"✅ Found {len(runners)} coins, validating against Kraken...")
+                            # Validate all results using validator
+                            raw_results = [{"Ticker": r.symbol.upper(), "Price": r.price_usd, "Change": r.change_24h, "Score": r.runner_potential_score} for r in runners]
+                            valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
+                            
+                            status.update(label=f"✅ Validation complete: {len(valid_results)} valid Kraken pairs found")
                         
-                        # Validate all results using validator
-                        raw_results = [{"Ticker": r.symbol.upper(), "Price": r.price_usd, "Change": r.change_24h, "Score": r.runner_potential_score} for r in runners]
-                        valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} coins not available on Kraken")
+                            st.warning(f"⚠️ Filtered out {len(invalid_symbols)} coins not available on Kraken (only {len(valid_results)} valid pairs found)")
+                        
+                        if len(valid_results) < 5:
+                            st.info("💡 **Tip:** Most sub-penny coins aren't available on Kraken. Try the 'Penny Cryptos (<$1)' scanner for more tradable options.")
                     
                     elif scan_type == "watchlist":
                         st.session_state.scan_results = [{"Ticker": t, "Price": 0, "Change": 0, "Score": 0} for t in crypto_config.CRYPTO_WATCHLIST]
@@ -310,7 +319,8 @@ def render_quick_trade_tab(
     penny_crypto_scanner=None,
     crypto_opportunity_scanner=None,
     ai_crypto_scanner=None,
-    sub_penny_discovery=None
+    sub_penny_discovery=None,
+    watchlist_manager=None
 ):
     """
     Main renderer for the Quick Trade tab with integrated unified scanner
@@ -378,15 +388,42 @@ def render_quick_trade_tab(
     if st.session_state.quick_trade_subtab == "🔍 Ticker Management":
         display_unified_scanner(kraken_client, crypto_config, st.session_state.scanner_instances)
     elif st.session_state.quick_trade_subtab == "⚡ Execute Trade":
-        display_trade_setup(kraken_client, crypto_config)
+        display_trade_setup(kraken_client, crypto_config, watchlist_manager)
 
 
-def display_trade_setup(kraken_client: KrakenClient, crypto_config):
+def display_trade_setup(kraken_client: KrakenClient, crypto_config, watchlist_manager=None):
     """
     Display the trade execution form with AI analysis
+    Supports single trade, bulk custom selection, and bulk watchlist trading
     """
     st.markdown("### ⚡ Execute Trade")
     
+    # Trade mode selector
+    trade_mode = st.radio(
+        "Trade Mode",
+        options=["Single Trade", "Bulk Custom Selection", "Bulk Watchlist"],
+        horizontal=True,
+        key="crypto_trade_mode"
+    )
+    
+    st.divider()
+    
+    # Render based on mode
+    if trade_mode == "Single Trade":
+        display_single_trade(kraken_client, crypto_config)
+    elif trade_mode == "Bulk Custom Selection":
+        display_bulk_custom_trade(kraken_client, crypto_config)
+    elif trade_mode == "Bulk Watchlist":
+        if watchlist_manager:
+            display_bulk_watchlist_trade(kraken_client, crypto_config, watchlist_manager)
+        else:
+            st.error("Watchlist manager not available. Please ensure watchlist is initialized.")
+
+
+def display_single_trade(kraken_client: KrakenClient, crypto_config):
+    """
+    Display single trade execution form
+    """
     # Trading pair selection
     col1, col2 = st.columns([2, 1])
     
@@ -546,8 +583,26 @@ def display_trade_setup(kraken_client: KrakenClient, crypto_config):
         exec_col1, exec_col2, exec_col3 = st.columns([2, 1, 1])
         
         with exec_col1:
-            if st.button("🚀 Execute Trade", use_container_width=True, type="primary"):
-                execute_crypto_trade(kraken_client, analysis)
+            # Check for duplicate execution protection
+            execution_key = f"crypto_single_execution_{analysis['pair']}_{analysis['direction']}_{analysis['position_size']}"
+            execution_timestamp_key = f"{execution_key}_timestamp"
+            
+            import time
+            current_time = time.time()
+            
+            # Check if we just executed this trade recently (within last 30 seconds)
+            is_recent = (execution_key in st.session_state and 
+                        execution_timestamp_key in st.session_state and
+                        current_time - st.session_state[execution_timestamp_key] < 30)
+            
+            if st.button("🚀 Execute Trade", use_container_width=True, type="primary", disabled=is_recent):
+                if is_recent:
+                    st.warning("⚠️ **Duplicate execution prevented!** You just executed this trade. Please wait a moment before executing again.")
+                else:
+                    # Mark execution
+                    st.session_state[execution_key] = True
+                    st.session_state[execution_timestamp_key] = current_time
+                    execute_crypto_trade(kraken_client, analysis)
         
         with exec_col2:
             if st.button("💾 Save Setup", use_container_width=True):
@@ -577,17 +632,38 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
             else:
                 quantity = analysis['position_size'] / analysis['current_price']
             
-            # Place the order
-            success, result = kraken_client.place_order(
+            # Place the order with stop loss and take profit
+            result = kraken_client.place_order(
                 pair=analysis['pair'],
                 side=order_side,
                 order_type=OrderType.MARKET,
-                volume=quantity
+                volume=quantity,
+                stop_loss=analysis.get('stop_loss'),
+                take_profit=analysis.get('take_profit')
             )
             
-            if success:
-                st.success(f"✅ Trade executed successfully!")
-                st.json(result)
+            if result is not None:
+                # Verify order ID exists
+                order_id = result.order_id if hasattr(result, 'order_id') else None
+                
+                if not order_id or order_id == '':
+                    st.error(f"❌ Order placed but no order ID returned. Check Kraken for order status.")
+                    logger.error(f"Order placed but no order ID returned for {analysis['pair']}")
+                else:
+                    st.success(f"✅ Trade executed successfully! Order ID: {order_id}")
+                    st.info("ℹ️ **Note:** Market orders fill immediately. Check your Kraken account's 'Trade History' or 'Closed Orders' section to see the filled order.")
+                    logger.info(f"✅ Order {order_id} placed successfully for {analysis['pair']} - {analysis['direction']} {quantity:.6f} @ ${analysis['current_price']:.4f}")
+                    
+                    st.json({
+                        'order_id': order_id,
+                        'pair': result.pair,
+                        'side': result.side,
+                        'order_type': result.order_type,
+                        'volume': result.volume,
+                        'price': result.price,
+                        'status': result.status,
+                        'timestamp': result.timestamp.isoformat() if hasattr(result.timestamp, 'isoformat') else str(result.timestamp)
+                    })
                 
                 # Send Discord notification if configured
                 try:
@@ -595,14 +671,22 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                         ticker=analysis['pair'],
                         alert_type=AlertType.TRADE_EXECUTED,
                         message=f"{analysis['direction']} order executed at ${analysis['current_price']:.4f}",
-                        priority=AlertPriority.MEDIUM
+                        priority=AlertPriority.MEDIUM,
+                        details={
+                            'order_id': result.order_id,
+                            'price': float(analysis['current_price']),
+                            'quantity': float(quantity),
+                            'direction': str(analysis['direction']),
+                            'position_size': float(analysis['position_size'])
+                        }
                     )
                     send_discord_alert(alert)
                 except Exception as e:
-                    logger.warning(f"Failed to send Discord alert: {e}")
+                    error_msg = str(e) if e else "Unknown error"
+                    logger.error(f"❌ Failed to send Discord alert for {analysis['pair']}: {error_msg}", exc_info=True)
                     
             else:
-                st.error(f"❌ Trade failed: {result}")
+                st.error(f"❌ Trade failed: Order placement returned None - check logs for details")
                 
     except Exception as e:
         st.error(f"Trade execution error: {e}")
@@ -626,3 +710,760 @@ def save_trade_setup(analysis: Dict):
         
     except Exception as e:
         logger.error(f"Failed to save trade setup: {e}", exc_info=True)
+
+
+def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
+    """
+    Display bulk trade execution form with custom pair selection
+    """
+    st.markdown("#### 📊 Bulk Custom Selection")
+    
+    # Get available pairs
+    try:
+        import time
+        cache_key = 'crypto_asset_pairs_cache'
+        cache_timestamp_key = 'crypto_asset_pairs_cache_timestamp'
+        cache_ttl = 300
+        current_time = time.time()
+        
+        if (cache_key in st.session_state and 
+            cache_timestamp_key in st.session_state and
+            current_time - st.session_state[cache_timestamp_key] < cache_ttl):
+            asset_pairs = st.session_state[cache_key]
+        else:
+            asset_pairs = kraken_client.get_tradable_asset_pairs()
+            st.session_state[cache_key] = asset_pairs
+            st.session_state[cache_timestamp_key] = current_time
+        
+        pair_options = [pair['altname'] for pair in asset_pairs if pair['quote'] == 'USD' or pair['quote'] == 'USDT']
+        pair_options.sort()
+        
+        # Multi-select for pairs
+        selected_pairs = st.multiselect(
+            "Select Trading Pairs",
+            options=pair_options,
+            default=[],
+            key="crypto_bulk_custom_pairs",
+            help="Select multiple pairs to trade simultaneously"
+        )
+        
+        if not selected_pairs:
+            st.info("👆 Select one or more trading pairs above to configure bulk trades")
+            return
+        
+        st.divider()
+        
+        # Common parameters for all trades
+        st.markdown("#### ⚙️ Common Trade Parameters")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            direction = st.radio(
+                "Direction",
+                options=["BUY", "SELL"],
+                horizontal=True,
+                key="crypto_bulk_direction"
+            )
+            
+            position_size = st.number_input(
+                "Position Size per Pair (USD)",
+                min_value=1.0,
+                max_value=10000.0,
+                value=100.0,
+                step=1.0,
+                key="crypto_bulk_position_size"
+            )
+        
+        with col2:
+            risk_pct = st.number_input(
+                "Risk % per Trade",
+                min_value=0.1,
+                max_value=10.0,
+                value=2.0,
+                step=0.1,
+                key="crypto_bulk_risk_pct"
+            )
+            
+            take_profit_pct = st.number_input(
+                "Take Profit %",
+                min_value=0.1,
+                max_value=20.0,
+                value=5.0,
+                step=0.1,
+                key="crypto_bulk_target_pct"
+            )
+        
+        # Analysis section
+        st.divider()
+        st.markdown("#### 🤖 Analyze Selected Pairs")
+        
+        analysis_col1, analysis_col2 = st.columns([2, 1])
+        
+        with analysis_col1:
+            if st.button("🔍 Analyze All Selected Pairs", use_container_width=True, type="primary"):
+                analyze_bulk_pairs(kraken_client, selected_pairs, direction, position_size, risk_pct, take_profit_pct, "bulk_custom")
+        
+        with analysis_col2:
+            if st.button("📊 Get Market Data", use_container_width=True):
+                with st.spinner("Fetching market data..."):
+                    try:
+                        # Show market data for first selected pair as example
+                        if selected_pairs:
+                            ticker_info = kraken_client.get_ticker_info(selected_pairs[0])
+                            st.json(ticker_info)
+                    except Exception as e:
+                        st.error(f"Failed to fetch market data: {e}")
+        
+        # Display analysis results if available (filtered to currently selected pairs)
+        analysis_key = "crypto_bulk_custom_analysis"
+        if analysis_key in st.session_state and st.session_state[analysis_key]:
+            all_analysis_results = st.session_state[analysis_key]
+            
+            # Filter to only show results for currently selected pairs
+            analysis_results = [r for r in all_analysis_results if r.get('pair') in selected_pairs]
+            
+            if analysis_results:
+                st.divider()
+                st.markdown("#### 📈 Analysis Results")
+                
+                # Summary metrics
+                total_investment = sum(a.get('position_size', 0) for a in analysis_results)
+                avg_rr = sum(a.get('risk_reward_ratio', 0) for a in analysis_results) / len(analysis_results) if analysis_results else 0
+                
+                metric_cols = st.columns(4)
+                metric_cols[0].metric("Pairs Analyzed", len(analysis_results))
+                metric_cols[1].metric("Total Investment", f"${total_investment:,.2f}")
+                metric_cols[2].metric("Avg R:R Ratio", f"{avg_rr:.2f}")
+                metric_cols[3].metric("Direction", direction)
+                
+                # Detailed analysis table
+                analysis_df = pd.DataFrame(analysis_results)
+                # Format numeric columns for better display
+                if not analysis_df.empty:
+                    numeric_cols = ['current_price', 'stop_loss', 'take_profit', 'position_size', 'quantity', 'risk_reward_ratio']
+                    for col in numeric_cols:
+                        if col in analysis_df.columns:
+                            analysis_df[col] = analysis_df[col].apply(lambda x: f"{x:,.4f}" if isinstance(x, (int, float)) else x)
+                    st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+        
+        # Preview trades
+        st.divider()
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs)} pairs)")
+        
+        # Check if execution is in progress
+        execution_key = f"crypto_bulk_execution_{hash(tuple(sorted(selected_pairs)))}_{direction}_{position_size}"
+        is_executing = st.session_state.get(execution_key, False)
+        
+        if st.button("🚀 Execute Bulk Trades", type="primary", use_container_width=True, disabled=is_executing):
+            execute_bulk_trades(
+                kraken_client,
+                selected_pairs,
+                direction,
+                position_size,
+                risk_pct,
+                take_profit_pct
+            )
+        
+    except Exception as e:
+        st.error(f"Error loading trading pairs: {e}")
+        logger.error(f"Bulk custom trade error: {e}", exc_info=True)
+
+
+def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, watchlist_manager):
+    """
+    Display bulk trade execution form for watchlist
+    """
+    st.markdown("#### ⭐ Bulk Watchlist Trading")
+    
+    try:
+        # Get watchlist
+        watchlist = watchlist_manager.get_all_cryptos()
+        
+        if not watchlist:
+            st.warning("Your watchlist is empty. Add some cryptos first!")
+            return
+        
+        # Extract symbols
+        watchlist_symbols = [crypto.get('symbol', '') for crypto in watchlist if crypto.get('symbol')]
+        
+        if not watchlist_symbols:
+            st.warning("No valid symbols found in watchlist")
+            return
+        
+        st.info(f"📊 Found {len(watchlist_symbols)} symbols in your watchlist")
+        
+        # Allow selection of which watchlist items to trade
+        selected_symbols = st.multiselect(
+            "Select Symbols to Trade",
+            options=watchlist_symbols,
+            default=watchlist_symbols[:10] if len(watchlist_symbols) > 10 else watchlist_symbols,
+            key="crypto_bulk_watchlist_pairs",
+            help="Select which watchlist symbols to trade (default: first 10)"
+        )
+        
+        if not selected_symbols:
+            st.info("👆 Select symbols from your watchlist above to configure bulk trades")
+            return
+        
+        st.divider()
+        
+        # Common parameters for all trades
+        st.markdown("#### ⚙️ Common Trade Parameters")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            direction = st.radio(
+                "Direction",
+                options=["BUY", "SELL"],
+                horizontal=True,
+                key="crypto_bulk_watchlist_direction"
+            )
+            
+            position_size = st.number_input(
+                "Position Size per Symbol (USD)",
+                min_value=1.0,
+                max_value=10000.0,
+                value=100.0,
+                step=1.0,
+                key="crypto_bulk_watchlist_position_size"
+            )
+        
+        with col2:
+            risk_pct = st.number_input(
+                "Risk % per Trade",
+                min_value=0.1,
+                max_value=10.0,
+                value=2.0,
+                step=0.1,
+                key="crypto_bulk_watchlist_risk_pct"
+            )
+            
+            take_profit_pct = st.number_input(
+                "Take Profit %",
+                min_value=0.1,
+                max_value=20.0,
+                value=5.0,
+                step=0.1,
+                key="crypto_bulk_watchlist_target_pct"
+            )
+        
+        # Analysis section
+        st.divider()
+        st.markdown("#### 🤖 Analyze Selected Symbols")
+        
+        analysis_col1, analysis_col2 = st.columns([2, 1])
+        
+        with analysis_col1:
+            if st.button("🔍 Analyze All Selected Symbols", use_container_width=True, type="primary"):
+                analyze_bulk_pairs(kraken_client, selected_symbols, direction, position_size, risk_pct, take_profit_pct, "bulk_watchlist")
+        
+        with analysis_col2:
+            if st.button("📊 Get Market Data", use_container_width=True):
+                with st.spinner("Fetching market data..."):
+                    try:
+                        # Show market data for first selected symbol as example
+                        if selected_symbols:
+                            ticker_info = kraken_client.get_ticker_info(selected_symbols[0])
+                            st.json(ticker_info)
+                    except Exception as e:
+                        st.error(f"Failed to fetch market data: {e}")
+        
+        # Display analysis results if available (filtered to currently selected symbols)
+        analysis_key = "crypto_bulk_watchlist_analysis"
+        if analysis_key in st.session_state and st.session_state[analysis_key]:
+            all_analysis_results = st.session_state[analysis_key]
+            
+            # Filter to only show results for currently selected symbols
+            analysis_results = [r for r in all_analysis_results if r.get('pair') in selected_symbols]
+            
+            if analysis_results:
+                st.divider()
+                st.markdown("#### 📈 Analysis Results")
+                
+                # Summary metrics
+                total_investment = sum(a.get('position_size', 0) for a in analysis_results)
+                avg_rr = sum(a.get('risk_reward_ratio', 0) for a in analysis_results) / len(analysis_results) if analysis_results else 0
+                
+                metric_cols = st.columns(4)
+                metric_cols[0].metric("Symbols Analyzed", len(analysis_results))
+                metric_cols[1].metric("Total Investment", f"${total_investment:,.2f}")
+                metric_cols[2].metric("Avg R:R Ratio", f"{avg_rr:.2f}")
+                metric_cols[3].metric("Direction", direction)
+                
+                # Detailed analysis table
+                analysis_df = pd.DataFrame(analysis_results)
+                # Format numeric columns for better display
+                if not analysis_df.empty:
+                    numeric_cols = ['current_price', 'stop_loss', 'take_profit', 'position_size', 'quantity', 'risk_reward_ratio']
+                    for col in numeric_cols:
+                        if col in analysis_df.columns:
+                            analysis_df[col] = analysis_df[col].apply(lambda x: f"{x:,.4f}" if isinstance(x, (int, float)) else x)
+                    st.dataframe(analysis_df, use_container_width=True, hide_index=True)
+        
+        # Preview trades
+        st.divider()
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols)} symbols)")
+        
+        # Check if execution is in progress
+        execution_key = f"crypto_bulk_execution_{hash(tuple(sorted(selected_symbols)))}_{direction}_{position_size}"
+        is_executing = st.session_state.get(execution_key, False)
+        
+        if st.button("🚀 Execute Bulk Watchlist Trades", type="primary", use_container_width=True, disabled=is_executing):
+            execute_bulk_trades(
+                kraken_client,
+                selected_symbols,
+                direction,
+                position_size,
+                risk_pct,
+                take_profit_pct
+            )
+        
+    except Exception as e:
+        st.error(f"Error loading watchlist: {e}")
+        logger.error(f"Bulk watchlist trade error: {e}", exc_info=True)
+
+
+def analyze_bulk_pairs(
+    kraken_client: KrakenClient,
+    pairs: List[str],
+    direction: str,
+    position_size: float,
+    risk_pct: float,
+    take_profit_pct: float,
+    analysis_type: str = "bulk_custom"
+):
+    """
+    Analyze multiple pairs and store results in session state
+    
+    Args:
+        kraken_client: KrakenClient instance
+        pairs: List of trading pair symbols
+        direction: "BUY" or "SELL"
+        position_size: Position size in USD per pair
+        risk_pct: Risk percentage per trade
+        take_profit_pct: Take profit percentage
+        analysis_type: "bulk_custom" or "bulk_watchlist" to determine session state key
+    """
+    if not pairs:
+        st.warning("No pairs selected for analysis")
+        return
+    
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        for idx, pair in enumerate(pairs):
+            progress = (idx + 1) / len(pairs)
+            progress_bar.progress(progress)
+            status_text.text(f"Analyzing {pair} ({idx + 1}/{len(pairs)})...")
+            
+            try:
+                # Get current price
+                ticker_info = kraken_client.get_ticker_info(pair)
+                if not ticker_info:
+                    results.append({
+                        'pair': pair,
+                        'status': 'FAILED',
+                        'error': 'Could not fetch ticker data',
+                        'current_price': 0.0,
+                        'stop_loss': 0.0,
+                        'take_profit': 0.0,
+                        'position_size': 0.0,
+                        'quantity': 0.0,
+                        'risk_reward_ratio': 0.0
+                    })
+                    continue
+                
+                current_price = float(ticker_info.get('c', [0])[0])
+                
+                # Calculate stop loss and take profit
+                if direction == "BUY":
+                    stop_loss = current_price * (1 - risk_pct / 100)
+                    take_profit = current_price * (1 + take_profit_pct / 100)
+                else:
+                    stop_loss = current_price * (1 + risk_pct / 100)
+                    take_profit = current_price * (1 - take_profit_pct / 100)
+                
+                # Calculate quantity
+                quantity = position_size / current_price if current_price > 0 else 0
+                
+                # Calculate risk/reward ratio
+                risk_reward_ratio = take_profit_pct / risk_pct if risk_pct > 0 else 0
+                
+                results.append({
+                    'pair': pair,
+                    'status': 'SUCCESS',
+                    'current_price': current_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'position_size': position_size,
+                    'quantity': quantity,
+                    'risk_reward_ratio': risk_reward_ratio,
+                    'risk_pct': risk_pct,
+                    'take_profit_pct': take_profit_pct
+                })
+                
+            except Exception as e:
+                logger.error(f"Error analyzing {pair}: {e}", exc_info=True)
+                results.append({
+                    'pair': pair,
+                    'status': 'FAILED',
+                    'error': str(e),
+                    'current_price': 0.0,
+                    'stop_loss': 0.0,
+                    'take_profit': 0.0,
+                    'position_size': 0.0,
+                    'quantity': 0.0,
+                    'risk_reward_ratio': 0.0
+                })
+        
+        progress_bar.progress(1.0)
+        status_text.empty()
+        
+        # Store results in session state
+        if analysis_type == "bulk_custom":
+            st.session_state.crypto_bulk_custom_analysis = results
+        elif analysis_type == "bulk_watchlist":
+            st.session_state.crypto_bulk_watchlist_analysis = results
+        
+        # Show success message
+        successful = [r for r in results if r['status'] == 'SUCCESS']
+        if successful:
+            st.success(f"✅ Successfully analyzed {len(successful)} out of {len(pairs)} pairs")
+        else:
+            st.warning(f"⚠️ Could not analyze any pairs. Please check your selections.")
+        
+        # Rerun to display results
+        st.rerun()
+        
+    except Exception as e:
+        st.error(f"Bulk analysis error: {e}")
+        logger.error(f"Bulk analysis error: {e}", exc_info=True)
+
+
+def execute_bulk_trades(
+    kraken_client: KrakenClient,
+    pairs: List[str],
+    direction: str,
+    position_size: float,
+    risk_pct: float,
+    take_profit_pct: float
+):
+    """
+    Execute bulk trades for multiple pairs
+    
+    Args:
+        kraken_client: KrakenClient instance
+        pairs: List of trading pair symbols
+        direction: "BUY" or "SELL"
+        position_size: Position size in USD per pair
+        risk_pct: Risk percentage per trade
+        take_profit_pct: Take profit percentage
+    """
+    if not pairs:
+        st.warning("No pairs selected for trading")
+        return
+    
+    # Check for duplicate execution protection
+    execution_key = f"crypto_bulk_execution_{hash(tuple(sorted(pairs)))}_{direction}_{position_size}"
+    execution_timestamp_key = f"{execution_key}_timestamp"
+    
+    import time
+    current_time = time.time()
+    
+    # Check if we just executed these same trades recently (within last 30 seconds)
+    if (execution_key in st.session_state and 
+        execution_timestamp_key in st.session_state and
+        current_time - st.session_state[execution_timestamp_key] < 30):
+        st.warning("⚠️ **Duplicate execution prevented!** You just executed these trades. Please wait a moment before executing again.")
+        st.info(f"Last execution was {int(current_time - st.session_state[execution_timestamp_key])} seconds ago.")
+        return
+    
+    # Mark execution in progress
+    st.session_state[execution_key] = True
+    st.session_state[execution_timestamp_key] = current_time
+    
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        order_side = OrderSide.BUY if direction == "BUY" else OrderSide.SELL
+        
+        for idx, pair in enumerate(pairs):
+            progress = (idx + 1) / len(pairs)
+            progress_bar.progress(progress)
+            status_text.text(f"Processing {pair} ({idx + 1}/{len(pairs)})...")
+            
+            try:
+                # Get current price
+                ticker_info = kraken_client.get_ticker_info(pair)
+                if not ticker_info:
+                    results.append({
+                        'pair': pair,
+                        'status': 'FAILED',
+                        'error': 'Could not fetch ticker data'
+                    })
+                    continue
+                
+                current_price = float(ticker_info.get('c', [0])[0])
+                
+                # Calculate stop loss and take profit
+                if direction == "BUY":
+                    stop_loss = current_price * (1 - risk_pct / 100)
+                    take_profit = current_price * (1 + take_profit_pct / 100)
+                else:
+                    stop_loss = current_price * (1 + risk_pct / 100)
+                    take_profit = current_price * (1 - take_profit_pct / 100)
+                
+                # Calculate quantity
+                quantity = position_size / current_price
+                
+                # Place the order with stop loss and take profit
+                result = kraken_client.place_order(
+                    pair=pair,
+                    side=order_side,
+                    order_type=OrderType.MARKET,
+                    volume=quantity,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit
+                )
+                
+                if result is not None:
+                    # Verify order was actually placed by checking order ID
+                    order_id = result.order_id if hasattr(result, 'order_id') else None
+                    
+                    if not order_id or order_id == '':
+                        # Order ID is missing - order might not have been placed
+                        results.append({
+                            'pair': pair,
+                            'status': 'FAILED',
+                            'error': 'Order ID missing - order may not have been placed'
+                        })
+                        logger.error(f"Order placed but no order ID returned for {pair}")
+                        continue
+                    
+                    # Order was successful
+                    results.append({
+                        'pair': pair,
+                        'status': 'SUCCESS',
+                        'price': current_price,
+                        'quantity': quantity,
+                        'position_size': position_size,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'order_id': order_id
+                    })
+                    
+                    logger.info(f"✅ Order {order_id} placed successfully for {pair} - {direction} {quantity:.6f} @ ${current_price:.4f}")
+                    
+                    # Send Discord notification
+                    try:
+                        alert = TradingAlert(
+                            ticker=pair,
+                            alert_type=AlertType.TRADE_EXECUTED,
+                            message=f"{direction} order executed at ${current_price:.4f} (Bulk Trade)",
+                            priority=AlertPriority.MEDIUM,
+                            details={
+                                'order_id': result.order_id,
+                                'price': float(current_price),
+                                'quantity': float(quantity),
+                                'direction': str(direction),
+                                'position_size': float(position_size)
+                            }
+                        )
+                        send_discord_alert(alert)
+                    except Exception as e:
+                        error_msg = str(e) if e else "Unknown error"
+                        logger.error(f"❌ Failed to send Discord alert for {pair}: {error_msg}", exc_info=True)
+                else:
+                    # Order failed
+                    results.append({
+                        'pair': pair,
+                        'status': 'FAILED',
+                        'error': 'Order placement failed - check logs for details'
+                    })
+                    
+            except Exception as e:
+                logger.error(f"Error executing trade for {pair}: {e}", exc_info=True)
+                results.append({
+                    'pair': pair,
+                    'status': 'FAILED',
+                    'error': str(e)
+                })
+        
+        progress_bar.progress(1.0)
+        status_text.empty()
+        
+        # Display results
+        st.divider()
+        st.markdown("#### 📊 Execution Results")
+        
+        successful = [r for r in results if r['status'] == 'SUCCESS']
+        failed = [r for r in results if r['status'] == 'FAILED']
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total", len(results))
+        col2.metric("Successful", len(successful), delta=f"{len(successful)/len(results)*100:.1f}%")
+        col3.metric("Failed", len(failed), delta=f"-{len(failed)/len(results)*100:.1f}%")
+        
+        # Detailed results table
+        if successful:
+            st.markdown("##### ✅ Successful Trades")
+            success_df = pd.DataFrame(successful)
+            st.dataframe(success_df, use_container_width=True, hide_index=True)
+        
+        if failed:
+            st.markdown("##### ❌ Failed Trades")
+            failed_df = pd.DataFrame(failed)
+            st.dataframe(failed_df, use_container_width=True, hide_index=True)
+        
+        # Summary
+        if successful:
+            total_invested = sum(r['position_size'] for r in successful)
+            st.success(f"✅ Successfully executed {len(successful)} trades with total position size of ${total_invested:,.2f}")
+            st.info("ℹ️ **Note:** Market orders fill immediately. Check your Kraken account's 'Trade History' or 'Closed Orders' section to see filled orders.")
+            
+            # Add verification section
+            st.divider()
+            st.markdown("#### 🔍 Verify Orders")
+            
+            verify_col1, verify_col2 = st.columns(2)
+            
+            with verify_col1:
+                if st.button("📊 Check Recent Orders", use_container_width=True):
+                    verify_recent_orders(kraken_client, [r['order_id'] for r in successful])
+            
+            with verify_col2:
+                if st.button("💰 Check Positions", use_container_width=True):
+                    verify_positions(kraken_client, [r['pair'] for r in successful])
+        
+    except Exception as e:
+        st.error(f"Bulk trade execution error: {e}")
+        logger.error(f"Bulk trade execution error: {e}", exc_info=True)
+
+
+def verify_recent_orders(kraken_client: KrakenClient, order_ids: List[str]):
+    """
+    Verify if orders were actually placed by checking closed orders
+    
+    Args:
+        kraken_client: KrakenClient instance
+        order_ids: List of order IDs to verify
+    """
+    try:
+        with st.spinner("Checking recent orders..."):
+            # Get closed orders from the last hour
+            from datetime import datetime, timedelta
+            start_time = int((datetime.now() - timedelta(hours=1)).timestamp())
+            
+            closed_orders = kraken_client.get_closed_orders(start=start_time)
+            
+            if not closed_orders:
+                st.warning("⚠️ No closed orders found in the last hour. Orders may still be processing or may not have executed.")
+                return
+            
+            # Check if our order IDs are in the closed orders
+            found_orders = []
+            missing_orders = []
+            
+            for order_id in order_ids:
+                found = False
+                for closed_order in closed_orders:
+                    if closed_order.order_id == order_id:
+                        found_orders.append({
+                            'order_id': order_id,
+                            'status': closed_order.status,
+                            'pair': closed_order.pair,
+                            'side': closed_order.side,
+                            'volume': closed_order.volume,
+                            'executed_volume': closed_order.executed_volume,
+                            'avg_price': closed_order.avg_price if hasattr(closed_order, 'avg_price') else None
+                        })
+                        found = True
+                        break
+                
+                if not found:
+                    missing_orders.append(order_id)
+            
+            # Display results
+            if found_orders:
+                st.success(f"✅ Found {len(found_orders)} order(s) in closed orders:")
+                found_df = pd.DataFrame(found_orders)
+                st.dataframe(found_df, use_container_width=True, hide_index=True)
+            
+            if missing_orders:
+                st.warning(f"⚠️ {len(missing_orders)} order(s) not found in closed orders:")
+                for order_id in missing_orders:
+                    st.text(f"  - {order_id}")
+                st.info("💡 These orders may have failed, been rejected, or are still processing. Check your Kraken account directly.")
+            
+            if not found_orders and not missing_orders:
+                st.info("ℹ️ No matching orders found. They may still be processing or may have failed.")
+                
+    except Exception as e:
+        st.error(f"Error verifying orders: {e}")
+        logger.error(f"Order verification error: {e}", exc_info=True)
+
+
+def verify_positions(kraken_client: KrakenClient, pairs: List[str]):
+    """
+    Verify if trades executed by checking positions
+    
+    Args:
+        kraken_client: KrakenClient instance
+        pairs: List of trading pairs to check
+    """
+    try:
+        with st.spinner("Checking positions..."):
+            # Get account balances
+            balances = kraken_client.get_account_balance()
+            
+            if not balances:
+                st.warning("⚠️ Could not fetch account balances. Check your API permissions.")
+                return
+            
+            # Extract base assets from pairs
+            base_assets = []
+            for pair in pairs:
+                if '/' in pair:
+                    base_asset = pair.split('/')[0]
+                    base_assets.append(base_asset)
+            
+            # Check if we have positions in these assets
+            found_positions = []
+            for balance in balances:
+                # Check if this balance matches any of our traded assets
+                for base_asset in base_assets:
+                    if balance.currency.upper() == base_asset.upper() or balance.currency.upper() == f"Z{base_asset.upper()}" or balance.currency.upper() == f"X{base_asset.upper()}":
+                        if balance.balance > 0:
+                            found_positions.append({
+                                'asset': base_asset,
+                                'balance': balance.balance,
+                                'available': balance.available,
+                                'hold': balance.hold
+                            })
+            
+            # Display results
+            if found_positions:
+                st.success(f"✅ Found positions in {len(found_positions)} asset(s):")
+                positions_df = pd.DataFrame(found_positions)
+                st.dataframe(positions_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("ℹ️ No positions found for the traded pairs. This could mean:")
+                st.markdown("""
+                - Orders were placed but not filled yet
+                - Orders were rejected
+                - You sold the positions immediately
+                - Check your Kraken account's Trade History
+                """)
+            
+            # Show USD balance
+            usd_balance = next((b for b in balances if b.currency == 'USD' or b.currency == 'ZUSD'), None)
+            if usd_balance:
+                st.metric("USD Balance", f"${usd_balance.balance:,.2f}")
+                
+    except Exception as e:
+        st.error(f"Error verifying positions: {e}")
+        logger.error(f"Position verification error: {e}", exc_info=True)

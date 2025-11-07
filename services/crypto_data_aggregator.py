@@ -69,28 +69,38 @@ class CryptoDataAggregator:
         max_price: Optional[float] = None,
         min_market_cap: Optional[float] = None,
         max_market_cap: Optional[float] = None,
-        min_volume_24h: Optional[float] = None
+        min_volume_24h: Optional[float] = None,
+        max_coins: Optional[int] = None,
+        max_pages: Optional[int] = None
     ) -> List[AggregatedCryptoData]:
         """
-        Fetch ALL coins from all available sources.
-        No artificial limits - gets everything available.
+        Fetch coins from all available sources with smart limits.
         
         Args:
             max_price: Optional maximum price filter
             min_market_cap: Optional minimum market cap filter
             max_market_cap: Optional maximum market cap filter
             min_volume_24h: Optional minimum 24h volume filter
+            max_coins: Optional maximum number of coins to fetch (stops early when reached)
+            max_pages: Optional maximum pages to fetch (default: 20 for sub-penny, 200 for general)
             
         Returns:
             List of aggregated crypto data
         """
-        logger.info("🔍 Fetching ALL coins from all available sources...")
+        logger.info("🔍 Fetching coins from all available sources...")
+        if max_coins:
+            logger.info(f"   • Max coins: {max_coins}")
+        if max_pages:
+            logger.info(f"   • Max pages: {max_pages}")
         
         all_coins = {}
         
         # Fetch from CoinGecko (always available)
         try:
-            coingecko_coins = await self._fetch_coingecko_all(max_price, min_market_cap, max_market_cap, min_volume_24h)
+            coingecko_coins = await self._fetch_coingecko_all(
+                max_price, min_market_cap, max_market_cap, min_volume_24h,
+                max_coins=max_coins, max_pages=max_pages
+            )
             logger.info(f"✅ CoinGecko: Found {len(coingecko_coins)} coins")
             
             # Merge into aggregated data
@@ -126,15 +136,21 @@ class CryptoDataAggregator:
         except Exception as e:
             logger.error(f"❌ CoinGecko fetch failed: {e}")
         
-        # Fetch from CoinMarketCap if API key available
-        if self.coinmarketcap_api_key:
+        # Fetch from CoinMarketCap if API key available (only if we need more coins)
+        if self.coinmarketcap_api_key and (not max_coins or len(all_coins) < max_coins):
             try:
-                cmc_coins = await self._fetch_coinmarketcap_all(max_price, min_market_cap, max_market_cap, min_volume_24h)
+                cmc_coins = await self._fetch_coinmarketcap_all(
+                    max_price, min_market_cap, max_market_cap, min_volume_24h,
+                    max_coins=max_coins
+                )
                 logger.info(f"✅ CoinMarketCap: Found {len(cmc_coins)} coins")
                 
                 # Merge into aggregated data
                 for coin in cmc_coins:
-                    symbol = coin['symbol'].upper()
+                    # CoinMarketCap uses 'symbol' field
+                    symbol = coin.get('symbol', '').upper()
+                    if not symbol:
+                        continue
                     if symbol not in all_coins:
                         all_coins[symbol] = {
                             'symbol': symbol,
@@ -189,16 +205,21 @@ class CryptoDataAggregator:
         max_price: Optional[float] = None,
         min_market_cap: Optional[float] = None,
         max_market_cap: Optional[float] = None,
-        min_volume_24h: Optional[float] = None
+        min_volume_24h: Optional[float] = None,
+        max_coins: Optional[int] = None,
+        max_pages: Optional[int] = None
     ) -> List[Dict]:
         """
-        Fetch ALL coins from CoinGecko (no limits).
-        Uses pagination to get everything.
+        Fetch coins from CoinGecko with smart limits.
+        Stops early when max_coins is reached or max_pages is hit.
         """
         all_coins = []
         page = 1
         per_page = 250  # Max per page
         consecutive_empty = 0
+        # Default max_pages: 20 for sub-penny (faster), 200 for general
+        if max_pages is None:
+            max_pages = 20 if max_price and max_price <= 0.01 else 200
         
         while True:
             # Rate limiting
@@ -263,9 +284,14 @@ class CryptoDataAggregator:
                     
                     logger.debug(f"Page {page}: Found {len(data)} coins (total: {len(all_coins)})")
                     
-                    # Safety limit: don't fetch more than 200 pages (50,000 coins)
-                    if page >= 200:
-                        logger.info(f"Reached page limit (200 pages), collected {len(all_coins)} coins")
+                    # Stop early if we have enough coins
+                    if max_coins and len(all_coins) >= max_coins:
+                        logger.info(f"✅ Reached max_coins limit ({max_coins}), collected {len(all_coins)} coins")
+                        break
+                    
+                    # Safety limit: don't fetch more than max_pages
+                    if page >= max_pages:
+                        logger.info(f"Reached page limit ({max_pages} pages), collected {len(all_coins)} coins")
                         break
                     
                     page += 1
@@ -281,11 +307,12 @@ class CryptoDataAggregator:
         max_price: Optional[float] = None,
         min_market_cap: Optional[float] = None,
         max_market_cap: Optional[float] = None,
-        min_volume_24h: Optional[float] = None
+        min_volume_24h: Optional[float] = None,
+        max_coins: Optional[int] = None
     ) -> List[Dict]:
         """
-        Fetch ALL coins from CoinMarketCap (no limits).
-        Uses pagination to get everything.
+        Fetch coins from CoinMarketCap with smart limits.
+        Stops early when max_coins is reached.
         """
         if not self.coinmarketcap_api_key:
             return []
@@ -359,6 +386,11 @@ class CryptoDataAggregator:
                         all_coins.append(coin)
                     
                     logger.debug(f"CoinMarketCap: Fetched {len(coins)} coins (total: {len(all_coins)})")
+                    
+                    # Stop early if we have enough coins
+                    if max_coins and len(all_coins) >= max_coins:
+                        logger.info(f"✅ Reached max_coins limit ({max_coins}), collected {len(all_coins)} coins")
+                        break
                     
                     # Check if there are more results
                     if len(coins) < limit:

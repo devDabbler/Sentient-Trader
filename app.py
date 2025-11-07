@@ -4,8 +4,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Initialize Loguru logging (must be before any other imports that use logging)
-from utils.logging_config import setup_logging
-setup_logging()
+from utils.logging_config import setup_logging, get_broker_specific_log_file
+# Use broker-specific log file based on DEFAULT_BROKER environment variable
+log_file = get_broker_specific_log_file("logs/sentient_trader.log")
+setup_logging(log_file=log_file)
 
 import sys
 import os
@@ -54,7 +56,8 @@ from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, 
 from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
 from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
 from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
-from analyzers.comprehensive import ComprehensiveAnalyzer, StockAnalysis
+from analyzers.comprehensive import ComprehensiveAnalyzer
+from models.analysis import StockAnalysis
 from analyzers.trading_styles import TradingStyleAnalyzer
 from services.event_detectors.sec_detector import SECDetector
 from services.enhanced_catalyst_detector import EnhancedCatalystDetector
@@ -355,37 +358,6 @@ class StrategyRecommendation:
     setup_steps: Optional[List[str]] = None
     warnings: Optional[List[str]] = None
 
-@dataclass
-class StockAnalysis:
-    """Complete stock analysis with technicals, news, and catalysts"""
-    ticker: str
-    price: float
-    change_pct: float
-    volume: int
-    avg_volume: int
-    rsi: float
-    macd_signal: str
-    trend: str
-    support: float
-    resistance: float
-    iv_rank: float
-    iv_percentile: float
-    earnings_date: Optional[str]
-    earnings_days_away: Optional[int]
-    recent_news: List[Dict]
-    catalysts: List[Dict]
-    sentiment_score: float
-    sentiment_signals: List[str]
-    confidence_score: float
-    recommendation: str
-    # Optional advanced indicator context (additive)
-    ema8: Optional[float] = None
-    ema21: Optional[float] = None
-    demarker: Optional[float] = None
-    fib_targets: Optional[Dict[str, float]] = None
-    ema_power_zone: Optional[bool] = None
-    ema_reclaim: Optional[bool] = None
-
 class TechnicalAnalyzer:
     """Calculate technical indicators"""
     
@@ -393,15 +365,15 @@ class TechnicalAnalyzer:
     def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
         """Calculate RSI indicator"""
         try:
-            # Ensure numeric dtype
-            prices = pd.to_numeric(prices, errors='coerce').dropna()
+            # Ensure numeric dtype - type: ignore for pandas union types
+            prices_series: pd.Series = pd.Series(pd.to_numeric(prices, errors='coerce')).dropna()  # type: ignore
             # Calculate price changes and force numeric dtype for safe comparisons
-            delta = pd.to_numeric(prices.diff(), errors='coerce').fillna(0.0)
+            delta: pd.Series = pd.Series(pd.to_numeric(prices_series.diff(), errors='coerce')).fillna(0.0)  # type: ignore
             gain = (delta.where(delta > 0.0, 0.0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0.0, 0.0)).rolling(window=period).mean()
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            return round(rsi.iloc[-1], 2)
+            return round(float(rsi.iloc[-1]), 2)
         except:
             return 50.0
     
@@ -482,17 +454,21 @@ class TechnicalAnalyzer:
     @staticmethod
     def ema(series: pd.Series, period: int) -> pd.Series:
         try:
-            return pd.to_numeric(series, errors='coerce').ewm(span=period, adjust=False).mean()
+            # pd.to_numeric on Series returns Series, but type checker needs explicit cast
+            numeric_series: pd.Series = pd.Series(pd.to_numeric(series, errors='coerce'))  # type: ignore
+            result = numeric_series.ewm(span=period, adjust=False).mean()
+            return pd.Series(result)  # type: ignore
         except Exception:
             return series
 
     @staticmethod
     def demarker(df: pd.DataFrame, period: int = 14) -> pd.Series:
         try:
-            high = pd.to_numeric(df['High'], errors='coerce')
-            low = pd.to_numeric(df['Low'], errors='coerce')
-            up = (high - high.shift(1)).clip(lower=0.0)
-            dn = (low.shift(1) - low).clip(lower=0.0)
+            # Explicitly cast to Series for type checker
+            high: pd.Series = pd.Series(pd.to_numeric(df['High'], errors='coerce'))  # type: ignore[assignment]
+            low: pd.Series = pd.Series(pd.to_numeric(df['Low'], errors='coerce'))  # type: ignore[assignment]
+            up: pd.Series = (high - high.shift(1)).clip(lower=0.0)  # type: ignore[operator, call-overload]
+            dn: pd.Series = (low.shift(1) - low).clip(lower=0.0)  # type: ignore[operator, call-overload]
             up_sum = up.rolling(window=period, min_periods=period).sum()
             dn_sum = dn.rolling(window=period, min_periods=period).sum()
             denom = (up_sum + dn_sum).replace(0, np.nan)
@@ -509,12 +485,13 @@ class TechnicalAnalyzer:
         vol_lookback: int = 20
     ) -> Dict[str, object]:
         try:
-            close = pd.to_numeric(df['Close'], errors='coerce')
+            # Explicitly cast to Series for type checker
+            close: pd.Series = pd.Series(pd.to_numeric(df['Close'], errors='coerce'))  # type: ignore
             vol = df['Volume'] if 'Volume' in df.columns else None
             power_zone = bool(close.iloc[-1] > ema8.iloc[-1] > ema21.iloc[-1])
             is_reclaim = False
             reasons = []
-            if len(close) >= 3 and ema8.notna().any() and ema21.notna().any():
+            if len(close) >= 3 and ema8.notna().any() and ema21.notna().any():  # type: ignore[arg-type]
                 prior_below = (close.iloc[-2] < ema8.iloc[-2]) or (close.iloc[-2] < ema21.iloc[-2])
                 now_above = (close.iloc[-1] > ema8.iloc[-1]) and (close.iloc[-1] > ema21.iloc[-1])
                 # Compute EMA slopes using last two values to avoid typing issues
@@ -1821,8 +1798,20 @@ def main():
     ]
     
     # Use stateful navigation to prevent auto-redirect to Dashboard on reruns
+    # Check for DEFAULT_BROKER environment variable to auto-select broker tab
     if 'active_main_tab' not in st.session_state:
-        st.session_state.active_main_tab = "🏠 Dashboard"
+        default_broker = os.getenv('DEFAULT_BROKER', '').upper()
+        if default_broker == 'TRADIER':
+            st.session_state.active_main_tab = "🏦 Tradier Account"
+            logger.info("🔧 DEFAULT_BROKER=TRADIER: Auto-selecting Tradier Account tab")
+        elif default_broker == 'IBKR':
+            st.session_state.active_main_tab = "📈 IBKR Trading"
+            logger.info("🔧 DEFAULT_BROKER=IBKR: Auto-selecting IBKR Trading tab")
+        elif default_broker == 'KRAKEN':
+            st.session_state.active_main_tab = "₿ Crypto Trading"
+            logger.info("🔧 DEFAULT_BROKER=KRAKEN: Auto-selecting Crypto Trading tab")
+        else:
+            st.session_state.active_main_tab = "🏠 Dashboard"
     
     # Get current index for radio button
     try:
@@ -10549,19 +10538,11 @@ TRADIER_API_URL=https://sandbox.tradier.com
         
         # Helper functions for config file management
         def load_config_file(config_filename):
-            """Load settings from any config file dynamically"""
+            """Load settings from any config file dynamically (with broker-specific support)"""
             try:
-                # Remove .py extension and import dynamically
-                module_name = config_filename.replace('.py', '')
-                import importlib
-                import sys
-                
-                # Reload module if already imported to get fresh data
-                if module_name in sys.modules:
-                    importlib.reload(sys.modules[module_name])
-                    cfg = sys.modules[module_name]
-                else:
-                    cfg = importlib.import_module(module_name)
+                # Use broker-specific config loader
+                from utils.config_loader import load_config_module
+                cfg = load_config_module(config_filename)
                 
                 return {
                     'trading_mode': getattr(cfg, 'TRADING_MODE', 'SCALPING'),
@@ -10847,6 +10828,35 @@ USE_AGENT_SYSTEM = False
             cfg_tab2_active = st.session_state.config_tab == "⚖️ Risk & AI Settings"
             cfg_tab3_active = st.session_state.config_tab == "💾 Step 3: Save"
             
+            # Initialize session state for config values if not already set
+            config_key = f"config_{selected_strategy}"
+            if config_key not in st.session_state:
+                st.session_state[config_key] = {}
+            
+            # Initialize all variables from session state (if set) or current_config
+            # This ensures widget values persist across tab switches
+            trading_mode = st.session_state[config_key].get('trading_mode', current_config.get('trading_mode', 'SCALPING'))
+            scan_interval = st.session_state[config_key].get('scan_interval', current_config.get('scan_interval', 15))
+            min_confidence = st.session_state[config_key].get('min_confidence', current_config.get('min_confidence', 70))
+            use_bracket_orders = st.session_state[config_key].get('use_bracket_orders', current_config.get('use_bracket_orders', True))
+            use_smart_scanner = st.session_state[config_key].get('use_smart_scanner', current_config.get('use_smart_scanner', True))
+            watchlist_str = st.session_state[config_key].get('watchlist_str', ", ".join(current_config.get('watchlist', [])))
+            total_capital = st.session_state[config_key].get('total_capital', current_config.get('total_capital', 10000.0))
+            reserve_cash_pct = st.session_state[config_key].get('reserve_cash_pct', current_config.get('reserve_cash_pct', 10.0))
+            max_capital_utilization_pct = st.session_state[config_key].get('max_capital_utilization_pct', current_config.get('max_capital_utilization_pct', 80.0))
+            max_daily_orders = st.session_state[config_key].get('max_daily_orders', current_config.get('max_daily_orders', 5))
+            max_position_size_pct = st.session_state[config_key].get('max_position_size_pct', current_config.get('max_position_size_pct', 10.0))
+            risk_per_trade_pct = st.session_state[config_key].get('risk_per_trade_pct', current_config.get('risk_per_trade_pct', 0.02))
+            max_daily_loss_pct = st.session_state[config_key].get('max_daily_loss_pct', current_config.get('max_daily_loss_pct', 0.05))
+            scalping_take_profit_pct = st.session_state[config_key].get('scalping_take_profit_pct', current_config.get('scalping_take_profit_pct', 2.0))
+            scalping_stop_loss_pct = st.session_state[config_key].get('scalping_stop_loss_pct', current_config.get('scalping_stop_loss_pct', 1.0))
+            use_settled_funds_only = st.session_state[config_key].get('use_settled_funds_only', current_config.get('use_settled_funds_only', False))
+            allow_short_selling = st.session_state[config_key].get('allow_short_selling', current_config.get('allow_short_selling', False))
+            use_ml_enhanced_scanner = st.session_state[config_key].get('use_ml_enhanced_scanner', current_config.get('use_ml_enhanced_scanner', True))
+            use_ai_validation = st.session_state[config_key].get('use_ai_validation', current_config.get('use_ai_validation', True))
+            min_ensemble_score = st.session_state[config_key].get('min_ensemble_score', current_config.get('min_ensemble_score', 70))
+            min_ai_validation_confidence = st.session_state[config_key].get('min_ai_validation_confidence', current_config.get('min_ai_validation_confidence', 0.7))
+            
             if cfg_tab1_active:
                 st.subheader("Strategy Settings")
                 
@@ -10856,43 +10866,53 @@ USE_AGENT_SYSTEM = False
                     trading_mode = st.selectbox(
                         "Trading Mode",
                         options=["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"],
-                        index=["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"].index(current_config.get('trading_mode', 'SCALPING')) if current_config.get('trading_mode', 'SCALPING') in ["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"] else 0,
-                        help="SCALPING: Fast intraday | WARRIOR_SCALPING: Gap & Go (9:30-10:00 AM) | STOCKS: Swing trades | OPTIONS: Options trading"
+                        index=["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"].index(trading_mode) if trading_mode in ["SCALPING", "WARRIOR_SCALPING", "STOCKS", "OPTIONS", "ALL"] else 0,
+                        help="SCALPING: Fast intraday | WARRIOR_SCALPING: Gap & Go (9:30-10:00 AM) | STOCKS: Swing trades | OPTIONS: Options trading",
+                        key=f"{config_key}_trading_mode"
                     )
+                    st.session_state[config_key]['trading_mode'] = trading_mode
                     
                     scan_interval = st.slider(
                         "Scan Interval (minutes)",
                         min_value=5,
                         max_value=60,
-                        value=int(current_config['scan_interval']),
+                        value=int(scan_interval),
                         step=5,
-                        help="How often to scan for new opportunities"
+                        help="How often to scan for new opportunities",
+                        key=f"{config_key}_scan_interval"
                     )
+                    st.session_state[config_key]['scan_interval'] = scan_interval
                 
                 with col2:
                     min_confidence = st.slider(
                         "Minimum Confidence %",
                         min_value=60,
                         max_value=95,
-                        value=int(current_config['min_confidence']),
+                        value=int(min_confidence),
                         step=5,
-                        help="Only execute signals above this confidence level"
+                        help="Only execute signals above this confidence level",
+                        key=f"{config_key}_min_confidence"
                     )
+                    st.session_state[config_key]['min_confidence'] = min_confidence
                     
                     use_bracket_orders = st.checkbox(
                         "Use Bracket Orders (Stop-Loss + Take-Profit)",
-                        value=current_config['use_bracket_orders'],
-                        help="Automatically set protective orders"
+                        value=use_bracket_orders,
+                        help="Automatically set protective orders",
+                        key=f"{config_key}_use_bracket_orders"
                     )
+                    st.session_state[config_key]['use_bracket_orders'] = use_bracket_orders
                 
                 st.divider()
                 st.subheader("Ticker Selection")
                 
                 use_smart_scanner = st.checkbox(
                     "🧠 Use Smart Scanner (Auto-discover best tickers)",
-                    value=current_config.get('use_smart_scanner', True),  # Default to True if config missing
-                    help="When enabled, ignores watchlist and automatically finds opportunities"
+                    value=use_smart_scanner,
+                    help="When enabled, ignores watchlist and automatically finds opportunities",
+                    key=f"{config_key}_use_smart_scanner"
                 )
+                st.session_state[config_key]['use_smart_scanner'] = use_smart_scanner
                 
                 # Get checked tickers from the watchlist section
                 def get_selected_tickers_from_ui():
@@ -10933,7 +10953,7 @@ USE_AGENT_SYSTEM = False
                         else:
                             st.warning("⚠️ No tickers checked in Watchlist section below. Scroll down and check some first!")
                 
-                # Use synced watchlist if available
+                # Use synced watchlist if available, otherwise use session state or current config
                 if 'synced_watchlist' in st.session_state:
                     default_watchlist = st.session_state['synced_watchlist']
                     # Clear the synced state so it doesn't persist forever
@@ -10941,7 +10961,7 @@ USE_AGENT_SYSTEM = False
                         del st.session_state['synced_watchlist']
                         st.session_state['clear_sync'] = False
                 else:
-                    default_watchlist = ", ".join(current_config['watchlist'])
+                    default_watchlist = watchlist_str
                 
                 if not use_smart_scanner:
                     st.info("💡 Smart Scanner disabled - will use your custom watchlist below")
@@ -10950,8 +10970,9 @@ USE_AGENT_SYSTEM = False
                         value=default_watchlist,
                         help="Enter tickers separated by commas. Example: TSLA, NVDA, AMD, AAPL\nTip: Use '📋 Copy Checked Tickers' to auto-fill from your checked tickers below!",
                         height=100,
-                        key="watchlist_text_area"
+                        key=f"{config_key}_watchlist_text_area"
                     )
+                    st.session_state[config_key]['watchlist_str'] = watchlist_str
                 else:
                     st.warning("⚠️ Smart Scanner enabled - watchlist below will be IGNORED")
                     watchlist_str = st.text_area(
@@ -10960,8 +10981,9 @@ USE_AGENT_SYSTEM = False
                         help="These tickers are ignored while Smart Scanner is enabled",
                         height=100,
                         disabled=True,
-                        key="watchlist_text_area_disabled"
+                        key=f"{config_key}_watchlist_text_area_disabled"
                     )
+                    st.session_state[config_key]['watchlist_str'] = watchlist_str
             
             elif cfg_tab2_active:
                 st.subheader("💰 Capital Management")
@@ -10974,19 +10996,23 @@ USE_AGENT_SYSTEM = False
                         "Total Capital Allocated to Bot",
                         min_value=100.0,
                         max_value=1000000.0,
-                        value=float(current_config.get('total_capital', 10000.0)),
+                        value=float(total_capital),
                         step=100.0,
-                        help="💵 Total account balance or capital allocated for auto-trading"
+                        help="💵 Total account balance or capital allocated for auto-trading",
+                        key=f"{config_key}_total_capital"
                     )
+                    st.session_state[config_key]['total_capital'] = total_capital
                     
                     reserve_cash_pct = st.slider(
                         "Reserve Cash %",
                         min_value=0.0,
                         max_value=50.0,
-                        value=float(current_config.get('reserve_cash_pct', 10.0)),
+                        value=float(reserve_cash_pct),
                         step=5.0,
-                        help="💰 Percentage kept aside, not used for trading (emergency cash)"
+                        help="💰 Percentage kept aside, not used for trading (emergency cash)",
+                        key=f"{config_key}_reserve_cash_pct"
                     )
+                    st.session_state[config_key]['reserve_cash_pct'] = reserve_cash_pct
                     
                     st.info(f"**Usable Capital:** ${total_capital * (1 - reserve_cash_pct/100):,.2f}")
                 
@@ -10995,10 +11021,12 @@ USE_AGENT_SYSTEM = False
                         "Max Capital Utilization %",
                         min_value=20.0,
                         max_value=100.0,
-                        value=float(current_config.get('max_capital_utilization_pct', 80.0)),
+                        value=float(max_capital_utilization_pct),
                         step=5.0,
-                        help="📊 Maximum % of usable capital that can be deployed in positions"
+                        help="📊 Maximum % of usable capital that can be deployed in positions",
+                        key=f"{config_key}_max_capital_utilization_pct"
                     )
+                    st.session_state[config_key]['max_capital_utilization_pct'] = max_capital_utilization_pct
                     
                     usable_capital = total_capital * (1 - reserve_cash_pct/100)
                     max_deployed = usable_capital * (max_capital_utilization_pct/100)
@@ -11015,55 +11043,67 @@ USE_AGENT_SYSTEM = False
                         "Max Daily Orders",
                         min_value=1,
                         max_value=50,
-                        value=int(current_config['max_daily_orders']),
-                        help="Maximum number of trades per day"
+                        value=int(max_daily_orders),
+                        help="Maximum number of trades per day",
+                        key=f"{config_key}_max_daily_orders"
                     )
+                    st.session_state[config_key]['max_daily_orders'] = max_daily_orders
                     
                     max_position_size_pct = st.slider(
                         "Max Position Size %",
                         min_value=1.0,
                         max_value=50.0,
-                        value=float(current_config['max_position_size_pct']),
+                        value=float(max_position_size_pct),
                         step=1.0,
-                        help="Maximum % of total capital per single trade"
+                        help="Maximum % of total capital per single trade",
+                        key=f"{config_key}_max_position_size_pct"
                     )
+                    st.session_state[config_key]['max_position_size_pct'] = max_position_size_pct
                     
                     risk_per_trade_pct = st.slider(
                         "Risk Per Trade %",
                         min_value=0.5,
                         max_value=5.0,
-                        value=float(current_config['risk_per_trade_pct'] * 100),
+                        value=float(risk_per_trade_pct * 100),
                         step=0.5,
-                        help="Risk % of account per trade"
+                        help="Risk % of account per trade",
+                        key=f"{config_key}_risk_per_trade_pct"
                     ) / 100.0
+                    st.session_state[config_key]['risk_per_trade_pct'] = risk_per_trade_pct
                 
                 with col4:
                     max_daily_loss_pct = st.slider(
                         "Max Daily Loss %",
                         min_value=1.0,
                         max_value=10.0,
-                        value=float(current_config['max_daily_loss_pct'] * 100),
+                        value=float(max_daily_loss_pct * 100),
                         step=0.5,
-                        help="Stop trading if down this % in a day"
+                        help="Stop trading if down this % in a day",
+                        key=f"{config_key}_max_daily_loss_pct"
                     ) / 100.0
+                    st.session_state[config_key]['max_daily_loss_pct'] = max_daily_loss_pct
                     
                     scalping_take_profit_pct = st.slider(
                         "Take-Profit % (Scalping)",
                         min_value=0.5,
                         max_value=10.0,
-                        value=float(current_config['scalping_take_profit_pct']),
+                        value=float(scalping_take_profit_pct),
                         step=0.5,
-                        help="Target profit % for scalping mode"
+                        help="Target profit % for scalping mode",
+                        key=f"{config_key}_scalping_take_profit_pct"
                     )
+                    st.session_state[config_key]['scalping_take_profit_pct'] = scalping_take_profit_pct
                     
                     scalping_stop_loss_pct = st.slider(
                         "Stop-Loss % (Scalping)",
                         min_value=0.25,
                         max_value=5.0,
-                        value=float(current_config['scalping_stop_loss_pct']),
+                        value=float(scalping_stop_loss_pct),
                         step=0.25,
-                        help="Stop loss % for scalping mode"
+                        help="Stop loss % for scalping mode",
+                        key=f"{config_key}_scalping_stop_loss_pct"
                     )
+                    st.session_state[config_key]['scalping_stop_loss_pct'] = scalping_stop_loss_pct
                 
                 st.divider()
                 st.subheader("Advanced Options")
@@ -11073,16 +11113,20 @@ USE_AGENT_SYSTEM = False
                 with col3:
                     use_settled_funds_only = st.checkbox(
                         "PDT-Safe: Use Settled Funds Only",
-                        value=current_config['use_settled_funds_only'],
-                        help="Avoids Pattern Day Trader restrictions"
+                        value=use_settled_funds_only,
+                        help="Avoids Pattern Day Trader restrictions",
+                        key=f"{config_key}_use_settled_funds_only"
                     )
+                    st.session_state[config_key]['use_settled_funds_only'] = use_settled_funds_only
                 
                 with col4:
                     allow_short_selling = st.checkbox(
                         "Allow Short Selling (Paper Only)",
-                        value=current_config['allow_short_selling'],
-                        help="⚠️ Advanced: Enable short selling in paper trading"
+                        value=allow_short_selling,
+                        help="⚠️ Advanced: Enable short selling in paper trading",
+                        key=f"{config_key}_allow_short_selling"
                     )
+                    st.session_state[config_key]['allow_short_selling'] = allow_short_selling
                 
                 st.divider()
                 st.subheader("🥊 AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO)")
@@ -11099,41 +11143,51 @@ USE_AGENT_SYSTEM = False
                 with col_ai1:
                     use_ml_enhanced_scanner = st.checkbox(
                         "🧠 Enable ML-Enhanced Scanner (PUNCH 1)",
-                        value=current_config.get('use_ml_enhanced_scanner', True),
-                        help="Triple validation: 40% ML + 35% LLM + 25% Quantitative analysis"
+                        value=use_ml_enhanced_scanner,
+                        help="Triple validation: 40% ML + 35% LLM + 25% Quantitative analysis",
+                        key=f"{config_key}_use_ml_enhanced_scanner"
                     )
+                    st.session_state[config_key]['use_ml_enhanced_scanner'] = use_ml_enhanced_scanner
                     
                     if use_ml_enhanced_scanner:
                         min_ensemble_score = st.slider(
                             "Min Ensemble Score %",
                             min_value=50,
                             max_value=95,
-                            value=int(current_config.get('min_ensemble_score', 70)),
+                            value=int(min_ensemble_score),
                             step=5,
-                            help="Minimum combined score from ML+LLM+Quant (70%+ recommended)"
+                            help="Minimum combined score from ML+LLM+Quant (70%+ recommended)",
+                            key=f"{config_key}_min_ensemble_score"
                         )
+                        st.session_state[config_key]['min_ensemble_score'] = min_ensemble_score
                     else:
                         min_ensemble_score = 70.0
+                        st.session_state[config_key]['min_ensemble_score'] = min_ensemble_score
                 
                 with col_ai2:
                     use_ai_validation = st.checkbox(
                         "🛡️ Enable AI Pre-Trade Validation (PUNCH 2)",
-                        value=current_config.get('use_ai_validation', True),
-                        help="LLM validates risk/reward, portfolio fit, and red flags before execution"
+                        value=use_ai_validation,
+                        help="LLM validates risk/reward, portfolio fit, and red flags before execution",
+                        key=f"{config_key}_use_ai_validation"
                     )
+                    st.session_state[config_key]['use_ai_validation'] = use_ai_validation
                     
                     if use_ai_validation:
                         min_ai_validation_confidence = st.slider(
                             "Min AI Validation Confidence",
                             min_value=0.5,
                             max_value=0.95,
-                            value=float(current_config.get('min_ai_validation_confidence', 0.7)),
+                            value=float(min_ai_validation_confidence),
                             step=0.05,
                             format="%.2f",
-                            help="Minimum confidence for AI to approve trade (0.7+ recommended)"
+                            help="Minimum confidence for AI to approve trade (0.7+ recommended)",
+                            key=f"{config_key}_min_ai_validation_confidence"
                         )
+                        st.session_state[config_key]['min_ai_validation_confidence'] = min_ai_validation_confidence
                     else:
                         min_ai_validation_confidence = 0.7
+                        st.session_state[config_key]['min_ai_validation_confidence'] = min_ai_validation_confidence
                 
                 if use_ml_enhanced_scanner and use_ai_validation:
                     st.success("🥊 **KNOCKOUT COMBO ACTIVE!** Maximum trade quality & risk control enabled.")
@@ -11174,32 +11228,54 @@ USE_AGENT_SYSTEM = False
                 
                 # Show what will be saved
                 with st.expander("👁️ Preview Configuration"):
+                    # Read values from session state for preview
+                    preview_config_dict = st.session_state.get(config_key, {})
+                    preview_trading_mode = preview_config_dict.get('trading_mode', trading_mode)
+                    preview_scan_interval = preview_config_dict.get('scan_interval', scan_interval)
+                    preview_min_confidence = preview_config_dict.get('min_confidence', min_confidence)
+                    preview_use_smart_scanner = preview_config_dict.get('use_smart_scanner', use_smart_scanner)
+                    preview_watchlist_str = preview_config_dict.get('watchlist_str', watchlist_str)
+                    preview_total_capital = preview_config_dict.get('total_capital', total_capital)
+                    preview_reserve_cash_pct = preview_config_dict.get('reserve_cash_pct', reserve_cash_pct)
+                    preview_max_capital_utilization_pct = preview_config_dict.get('max_capital_utilization_pct', max_capital_utilization_pct)
+                    preview_max_daily_orders = preview_config_dict.get('max_daily_orders', max_daily_orders)
+                    preview_max_position_size_pct = preview_config_dict.get('max_position_size_pct', max_position_size_pct)
+                    preview_risk_per_trade_pct = preview_config_dict.get('risk_per_trade_pct', risk_per_trade_pct)
+                    preview_max_daily_loss_pct = preview_config_dict.get('max_daily_loss_pct', max_daily_loss_pct)
+                    preview_use_bracket_orders = preview_config_dict.get('use_bracket_orders', use_bracket_orders)
+                    preview_scalping_take_profit_pct = preview_config_dict.get('scalping_take_profit_pct', scalping_take_profit_pct)
+                    preview_scalping_stop_loss_pct = preview_config_dict.get('scalping_stop_loss_pct', scalping_stop_loss_pct)
+                    preview_use_ml_enhanced_scanner = preview_config_dict.get('use_ml_enhanced_scanner', use_ml_enhanced_scanner)
+                    preview_use_ai_validation = preview_config_dict.get('use_ai_validation', use_ai_validation)
+                    preview_min_ensemble_score = preview_config_dict.get('min_ensemble_score', min_ensemble_score)
+                    preview_min_ai_validation_confidence = preview_config_dict.get('min_ai_validation_confidence', min_ai_validation_confidence)
+                    
                     preview_config = {
-                        'Trading Mode': trading_mode,
-                        'Scan Interval': f"{scan_interval} minutes",
-                        'Min Confidence': f"{min_confidence}%",
-                        'Smart Scanner': "Enabled" if use_smart_scanner else "Disabled",
-                        'Watchlist': watchlist_str if not use_smart_scanner else "(Using Smart Scanner)",
+                        'Trading Mode': preview_trading_mode,
+                        'Scan Interval': f"{preview_scan_interval} minutes",
+                        'Min Confidence': f"{preview_min_confidence}%",
+                        'Smart Scanner': "Enabled" if preview_use_smart_scanner else "Disabled",
+                        'Watchlist': preview_watchlist_str if not preview_use_smart_scanner else "(Using Smart Scanner)",
                         '--- Capital Management ---': '---',
-                        'Total Capital': f"${total_capital:,.2f}",
-                        'Reserve Cash': f"{reserve_cash_pct}% (${total_capital * reserve_cash_pct / 100:,.2f})",
-                        'Usable Capital': f"${total_capital * (1 - reserve_cash_pct/100):,.2f}",
-                        'Max Capital Utilization': f"{max_capital_utilization_pct}%",
-                        'Max Deployed Capital': f"${total_capital * (1 - reserve_cash_pct/100) * max_capital_utilization_pct / 100:,.2f}",
+                        'Total Capital': f"${preview_total_capital:,.2f}",
+                        'Reserve Cash': f"{preview_reserve_cash_pct}% (${preview_total_capital * preview_reserve_cash_pct / 100:,.2f})",
+                        'Usable Capital': f"${preview_total_capital * (1 - preview_reserve_cash_pct/100):,.2f}",
+                        'Max Capital Utilization': f"{preview_max_capital_utilization_pct}%",
+                        'Max Deployed Capital': f"${preview_total_capital * (1 - preview_reserve_cash_pct/100) * preview_max_capital_utilization_pct / 100:,.2f}",
                         '--- Risk Management ---': '---',
-                        'Max Daily Orders': max_daily_orders,
-                        'Max Position Size': f"{max_position_size_pct}% (${total_capital * max_position_size_pct / 100:,.2f})",
-                        'Risk Per Trade': f"{risk_per_trade_pct * 100:.1f}%",
-                        'Max Daily Loss': f"{max_daily_loss_pct * 100:.1f}%",
-                        'Use Bracket Orders': "Yes" if use_bracket_orders else "No",
-                        'Take-Profit': f"{scalping_take_profit_pct}%",
-                        'Stop-Loss': f"{scalping_stop_loss_pct}%",
+                        'Max Daily Orders': preview_max_daily_orders,
+                        'Max Position Size': f"{preview_max_position_size_pct}% (${preview_total_capital * preview_max_position_size_pct / 100:,.2f})",
+                        'Risk Per Trade': f"{preview_risk_per_trade_pct * 100:.1f}%",
+                        'Max Daily Loss': f"{preview_max_daily_loss_pct * 100:.1f}%",
+                        'Use Bracket Orders': "Yes" if preview_use_bracket_orders else "No",
+                        'Take-Profit': f"{preview_scalping_take_profit_pct}%",
+                        'Stop-Loss': f"{preview_scalping_stop_loss_pct}%",
                         '--- AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO) ---': '🥊',
-                        'ML-Enhanced Scanner (PUNCH 1)': "✅ Enabled" if use_ml_enhanced_scanner else "❌ Disabled",
-                        'Min Ensemble Score': f"{min_ensemble_score}%" if use_ml_enhanced_scanner else "N/A",
-                        'AI Pre-Trade Validation (PUNCH 2)': "✅ Enabled" if use_ai_validation else "❌ Disabled",
-                        'Min AI Validation Confidence': f"{min_ai_validation_confidence:.2f}" if use_ai_validation else "N/A",
-                        'Knockout Combo Status': "🥊 ACTIVE - Maximum Quality!" if (use_ml_enhanced_scanner and use_ai_validation) else "⚠️ Partial" if (use_ml_enhanced_scanner or use_ai_validation) else "❌ Disabled",
+                        'ML-Enhanced Scanner (PUNCH 1)': "✅ Enabled" if preview_use_ml_enhanced_scanner else "❌ Disabled",
+                        'Min Ensemble Score': f"{preview_min_ensemble_score}%" if preview_use_ml_enhanced_scanner else "N/A",
+                        'AI Pre-Trade Validation (PUNCH 2)': "✅ Enabled" if preview_use_ai_validation else "❌ Disabled",
+                        'Min AI Validation Confidence': f"{preview_min_ai_validation_confidence:.2f}" if preview_use_ai_validation else "N/A",
+                        'Knockout Combo Status': "🥊 ACTIVE - Maximum Quality!" if (preview_use_ml_enhanced_scanner and preview_use_ai_validation) else "⚠️ Partial" if (preview_use_ml_enhanced_scanner or preview_use_ai_validation) else "❌ Disabled",
                     }
                     st.json(preview_config)
                 
@@ -11207,42 +11283,68 @@ USE_AGENT_SYSTEM = False
                 
                 # Save button
                 if st.button("💾 Save Configuration to File", type="primary", width="stretch"):
+                    # Read values from session state (most up-to-date) or fall back to initialized variables
+                    saved_config = st.session_state.get(config_key, {})
+                    
+                    # Get values from session state if available, otherwise use initialized variables
+                    trading_mode_save = saved_config.get('trading_mode', trading_mode)
+                    scan_interval_save = saved_config.get('scan_interval', scan_interval)
+                    min_confidence_save = saved_config.get('min_confidence', min_confidence)
+                    use_bracket_orders_save = saved_config.get('use_bracket_orders', use_bracket_orders)
+                    use_smart_scanner_save = saved_config.get('use_smart_scanner', use_smart_scanner)
+                    watchlist_str_save = saved_config.get('watchlist_str', watchlist_str)
+                    total_capital_save = saved_config.get('total_capital', total_capital)
+                    reserve_cash_pct_save = saved_config.get('reserve_cash_pct', reserve_cash_pct)
+                    max_capital_utilization_pct_save = saved_config.get('max_capital_utilization_pct', max_capital_utilization_pct)
+                    max_daily_orders_save = saved_config.get('max_daily_orders', max_daily_orders)
+                    max_position_size_pct_save = saved_config.get('max_position_size_pct', max_position_size_pct)
+                    risk_per_trade_pct_save = saved_config.get('risk_per_trade_pct', risk_per_trade_pct)
+                    max_daily_loss_pct_save = saved_config.get('max_daily_loss_pct', max_daily_loss_pct)
+                    scalping_take_profit_pct_save = saved_config.get('scalping_take_profit_pct', scalping_take_profit_pct)
+                    scalping_stop_loss_pct_save = saved_config.get('scalping_stop_loss_pct', scalping_stop_loss_pct)
+                    use_settled_funds_only_save = saved_config.get('use_settled_funds_only', use_settled_funds_only)
+                    allow_short_selling_save = saved_config.get('allow_short_selling', allow_short_selling)
+                    use_ml_enhanced_scanner_save = saved_config.get('use_ml_enhanced_scanner', use_ml_enhanced_scanner)
+                    use_ai_validation_save = saved_config.get('use_ai_validation', use_ai_validation)
+                    min_ensemble_score_save = saved_config.get('min_ensemble_score', min_ensemble_score)
+                    min_ai_validation_confidence_save = saved_config.get('min_ai_validation_confidence', min_ai_validation_confidence)
+                    
                     # Parse watchlist
-                    if not use_smart_scanner:
-                        watchlist_tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+                    if not use_smart_scanner_save:
+                        watchlist_tickers = [t.strip().upper() for t in watchlist_str_save.split(',') if t.strip()]
                         if not watchlist_tickers:
                             st.error("❌ Watchlist cannot be empty when Smart Scanner is disabled!")
                             st.stop()
                     else:
-                        watchlist_tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+                        watchlist_tickers = [t.strip().upper() for t in watchlist_str_save.split(',') if t.strip()]
                         if not watchlist_tickers:
                             watchlist_tickers = ['SPY', 'QQQ', 'AAPL']  # Fallback
                     
                     # Prepare config dict
                     new_config = {
-                        'trading_mode': trading_mode,
-                        'scan_interval': scan_interval,
-                        'min_confidence': min_confidence,
-                        'max_daily_orders': max_daily_orders,
-                        'max_position_size_pct': max_position_size_pct,
-                        'use_bracket_orders': use_bracket_orders,
-                        'scalping_take_profit_pct': scalping_take_profit_pct,
-                        'scalping_stop_loss_pct': scalping_stop_loss_pct,
-                        'risk_per_trade_pct': risk_per_trade_pct,
-                        'max_daily_loss_pct': max_daily_loss_pct,
-                        'use_smart_scanner': use_smart_scanner,
+                        'trading_mode': trading_mode_save,
+                        'scan_interval': scan_interval_save,
+                        'min_confidence': min_confidence_save,
+                        'max_daily_orders': max_daily_orders_save,
+                        'max_position_size_pct': max_position_size_pct_save,
+                        'use_bracket_orders': use_bracket_orders_save,
+                        'scalping_take_profit_pct': scalping_take_profit_pct_save,
+                        'scalping_stop_loss_pct': scalping_stop_loss_pct_save,
+                        'risk_per_trade_pct': risk_per_trade_pct_save,
+                        'max_daily_loss_pct': max_daily_loss_pct_save,
+                        'use_smart_scanner': use_smart_scanner_save,
                         'watchlist': watchlist_tickers,
-                        'allow_short_selling': allow_short_selling,
-                        'use_settled_funds_only': use_settled_funds_only,
+                        'allow_short_selling': allow_short_selling_save,
+                        'use_settled_funds_only': use_settled_funds_only_save,
                         # Capital Management (NEW)
-                        'total_capital': total_capital,
-                        'reserve_cash_pct': reserve_cash_pct,
-                        'max_capital_utilization_pct': max_capital_utilization_pct,
+                        'total_capital': total_capital_save,
+                        'reserve_cash_pct': reserve_cash_pct_save,
+                        'max_capital_utilization_pct': max_capital_utilization_pct_save,
                         # AI-Powered Hybrid Mode (NEW)
-                        'use_ml_enhanced_scanner': use_ml_enhanced_scanner,
-                        'use_ai_validation': use_ai_validation,
-                        'min_ensemble_score': min_ensemble_score,
-                        'min_ai_validation_confidence': min_ai_validation_confidence,
+                        'use_ml_enhanced_scanner': use_ml_enhanced_scanner_save,
+                        'use_ai_validation': use_ai_validation_save,
+                        'min_ensemble_score': min_ensemble_score_save,
+                        'min_ai_validation_confidence': min_ai_validation_confidence_save,
                     }
                     
                     # Save to file
@@ -13048,6 +13150,11 @@ Always start with paper trading and only risk capital you can afford to lose.
                 ai_scanner = get_ai_crypto_scanner(kraken_client, crypto_config)
                 sub_penny = get_sub_penny_discovery()
                 
+                # Get watchlist manager if available
+                watchlist_manager = None
+                if 'crypto_watchlist_manager' in st.session_state:
+                    watchlist_manager = st.session_state.crypto_watchlist_manager
+                
                 # Pass cached instances to avoid re-initialization
                 render_quick_trade_tab(
                     kraken_client, 
@@ -13055,7 +13162,8 @@ Always start with paper trading and only risk capital you can afford to lose.
                     penny_crypto_scanner=penny_scanner,
                     crypto_opportunity_scanner=crypto_scanner,
                     ai_crypto_scanner=ai_scanner,
-                    sub_penny_discovery=sub_penny
+                    sub_penny_discovery=sub_penny,
+                    watchlist_manager=watchlist_manager
                 )
             except Exception as e:
                 st.error(f"Error loading quick trade: {e}")
@@ -13065,6 +13173,156 @@ Always start with paper trading and only risk capital you can afford to lose.
         
         elif active_crypto_tab == "📈 Portfolio & Settings":
             st.subheader("📈 Crypto Portfolio & Settings")
+            
+            # Portfolio display - show all coins/positions
+            st.markdown("### 💰 Your Portfolio")
+            
+            try:
+                balances = kraken_client.get_account_balance()
+                total_usd = kraken_client.get_total_balance_usd()
+                
+                # Summary metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Portfolio Value", f"${total_usd:,.2f}")
+                
+                # Find USD and crypto balances
+                usd_balance = next((b for b in balances if b.currency in ['USD', 'ZUSD']), None)
+                crypto_holdings = [b for b in balances if b.balance > 0 and b.currency not in ['USD', 'ZUSD']]
+                
+                with col2:
+                    if usd_balance:
+                        st.metric("Available USD", f"${usd_balance.available:,.2f}")
+                    else:
+                        st.metric("Available USD", "$0.00")
+                
+                with col3:
+                    st.metric("Crypto Assets", len(crypto_holdings))
+                
+                with col4:
+                    total_crypto_value = total_usd - (usd_balance.available if usd_balance else 0)
+                    st.metric("Crypto Value", f"${total_crypto_value:,.2f}")
+                
+                # Show all crypto holdings with detailed info
+                if crypto_holdings:
+                    st.markdown("#### 📊 All Your Crypto Holdings")
+                    
+                    # Add refresh button
+                    refresh_col1, refresh_col2 = st.columns([1, 4])
+                    with refresh_col1:
+                        if st.button("🔄 Refresh Portfolio", use_container_width=True):
+                            st.rerun()
+                    
+                    holdings_data = []
+                    total_crypto_value_calc = 0.0
+                    
+                    for balance in crypto_holdings:
+                        try:
+                            # Strip .F suffix (futures) and other suffixes from currency name
+                            currency = balance.currency.replace('.F', '').replace('.S', '').replace('.M', '')
+                            pair = f"{currency}/USD"
+                            ticker = kraken_client.get_ticker_data(pair)
+                            
+                            if ticker:
+                                value_usd = balance.balance * ticker['last_price']
+                                total_crypto_value_calc += value_usd
+                                
+                                # Calculate 24h change
+                                change_24h = ((ticker['last_price'] - ticker['open_24h']) / ticker['open_24h'] * 100) if ticker.get('open_24h') else 0
+                                
+                                holdings_data.append({
+                                    'Asset': balance.currency,
+                                    'Balance': balance.balance,
+                                    'Available': balance.available,
+                                    'On Hold': balance.hold,
+                                    'Current Price': ticker['last_price'],
+                                    'Value (USD)': value_usd,
+                                    '24h Change %': change_24h,
+                                    '24h High': ticker.get('high_24h', 0),
+                                    '24h Low': ticker.get('low_24h', 0),
+                                    '24h Volume': ticker.get('volume_24h', 0)
+                                })
+                            else:
+                                # If ticker not found, still show the balance
+                                holdings_data.append({
+                                    'Asset': balance.currency,
+                                    'Balance': balance.balance,
+                                    'Available': balance.available,
+                                    'On Hold': balance.hold,
+                                    'Current Price': 'N/A',
+                                    'Value (USD)': 'N/A',
+                                    '24h Change %': 'N/A',
+                                    '24h High': 'N/A',
+                                    '24h Low': 'N/A',
+                                    '24h Volume': 'N/A'
+                                })
+                        except Exception as e:
+                            logger.debug(f"Error processing balance for {balance.currency}: {e}")
+                            holdings_data.append({
+                                'Asset': balance.currency,
+                                'Balance': balance.balance,
+                                'Available': balance.available,
+                                'On Hold': balance.hold,
+                                'Current Price': 'N/A',
+                                'Value (USD)': 'N/A',
+                                '24h Change %': 'N/A',
+                                '24h High': 'N/A',
+                                '24h Low': 'N/A',
+                                '24h Volume': 'N/A'
+                            })
+                    
+                    if holdings_data:
+                        # Sort by value (highest first)
+                        holdings_data_sorted = sorted(
+                            [h for h in holdings_data if isinstance(h.get('Value (USD)'), (int, float))],
+                            key=lambda x: x.get('Value (USD)', 0),
+                            reverse=True
+                        )
+                        
+                        # Add holdings without value at the end
+                        holdings_data_sorted.extend(
+                            [h for h in holdings_data if not isinstance(h.get('Value (USD)'), (int, float))]
+                        )
+                        
+                        # Display as dataframe with formatting
+                        import pandas as pd
+                        df = pd.DataFrame(holdings_data_sorted)
+                        
+                        # Format numeric columns
+                        if 'Balance' in df.columns:
+                            df['Balance'] = df['Balance'].apply(lambda x: f"{x:.8f}" if isinstance(x, (int, float)) else x)
+                        if 'Available' in df.columns:
+                            df['Available'] = df['Available'].apply(lambda x: f"{x:.8f}" if isinstance(x, (int, float)) else x)
+                        if 'On Hold' in df.columns:
+                            df['On Hold'] = df['On Hold'].apply(lambda x: f"{x:.8f}" if isinstance(x, (int, float)) else x)
+                        if 'Current Price' in df.columns:
+                            df['Current Price'] = df['Current Price'].apply(lambda x: f"${x:,.6f}" if isinstance(x, (int, float)) else x)
+                        if 'Value (USD)' in df.columns:
+                            df['Value (USD)'] = df['Value (USD)'].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x)
+                        if '24h Change %' in df.columns:
+                            df['24h Change %'] = df['24h Change %'].apply(lambda x: f"{x:+.2f}%" if isinstance(x, (int, float)) else x)
+                        if '24h High' in df.columns:
+                            df['24h High'] = df['24h High'].apply(lambda x: f"${x:,.6f}" if isinstance(x, (int, float)) else x)
+                        if '24h Low' in df.columns:
+                            df['24h Low'] = df['24h Low'].apply(lambda x: f"${x:,.6f}" if isinstance(x, (int, float)) else x)
+                        if '24h Volume' in df.columns:
+                            df['24h Volume'] = df['24h Volume'].apply(lambda x: f"${x:,.0f}" if isinstance(x, (int, float)) else x)
+                        
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                        
+                        # Show summary
+                        if total_crypto_value_calc > 0:
+                            st.info(f"📊 **Portfolio Summary**: {len([h for h in holdings_data_sorted if isinstance(h.get('Value (USD)'), (int, float))])} assets with total value of ${total_crypto_value_calc:,.2f}")
+                else:
+                    st.info("💡 You don't have any crypto holdings yet. Start trading to build your portfolio!")
+                    
+            except Exception as e:
+                st.error(f"❌ Error fetching portfolio data: {e}")
+                logger.error(f"Portfolio fetch error: {e}", exc_info=True)
+                st.info("💡 Make sure your Kraken API credentials are configured correctly and have balance read permissions.")
+            
+            st.divider()
             
             # Configuration display
             st.markdown("### ⚙️ Current Configuration")

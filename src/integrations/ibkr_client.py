@@ -202,6 +202,10 @@ class IBKRClient:
                 logger.warning("Already connected to IBKR")
                 return True
             
+            # Set request timeout to prevent hanging (default is 60s)
+            self.ib.RequestTimeout = 5.0  # 5 second timeout for requests
+            logger.info(f"Set IB.RequestTimeout to {self.ib.RequestTimeout}s")
+            
             # Connect to IB
             self.ib.connect(self.host, self.port, clientId=self.client_id, timeout=timeout)
             self.connected = True
@@ -226,6 +230,46 @@ class IBKRClient:
             self.connected = False
             return False
     
+    def _qualify_contract_with_timeout(self, contract, timeout: float = 10.0):
+        """
+        Qualify a contract using ib_insync's built-in RequestTimeout
+        
+        The IB.RequestTimeout is set during connect() to prevent hanging.
+        When a timeout occurs, ib_insync raises an asyncio.TimeoutError.
+        
+        Args:
+            contract: The contract to qualify
+            timeout: Timeout in seconds (handled by IB.RequestTimeout)
+            
+        Returns:
+            Qualified contract or None if error/timeout
+        """
+        try:
+            logger.debug(f"Qualifying contract (using IB.RequestTimeout={self.ib.RequestTimeout}s)...")
+            start_time = datetime.now()
+            
+            # Use qualifyContracts - ib_insync will handle timeout via RequestTimeout
+            qualified = self.ib.qualifyContracts(contract)
+            
+            elapsed = (datetime.now() - start_time).total_seconds()
+            
+            if not qualified or len(qualified) == 0:
+                logger.error("❌ Failed to qualify contract - no results returned")
+                logger.error("   💡 TIP: Check if symbol is valid and TWS is responsive")
+                return None
+                
+            logger.debug(f"✅ Contract qualified in {elapsed:.2f}s")
+            return qualified[0]
+            
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Contract qualification timeout after {self.ib.RequestTimeout}s")
+            logger.error("   💡 TIP: TWS may be frozen - try restarting it")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error qualifying contract: {e}", exc_info=True)
+            logger.error("   💡 TIP: Verify symbol is valid and TWS is connected")
+            return None
+    
     def disconnect(self):
         """Disconnect from IBKR"""
         try:
@@ -239,6 +283,43 @@ class IBKRClient:
     def is_connected(self) -> bool:
         """Check if connected to IBKR"""
         return self.connected and self.ib.isConnected()
+    
+    def check_connection_health(self) -> bool:
+        """
+        Check if IBKR connection is healthy and responsive
+        
+        Returns:
+            True if connection is healthy, False otherwise
+        """
+        try:
+            if not self.is_connected():
+                logger.warning("🔴 IBKR connection check failed: Not connected")
+                return False
+            
+            # Quick health check - try to get account info
+            start_time = datetime.now()
+            try:
+                accounts = self.ib.managedAccounts()
+                elapsed = (datetime.now() - start_time).total_seconds()
+                
+                if elapsed > 5.0:
+                    logger.warning(f"⚠️ IBKR connection slow: {elapsed:.1f}s response time")
+                    return False
+                
+                if not accounts or len(accounts) == 0:
+                    logger.warning("🔴 IBKR connection check failed: No accounts")
+                    return False
+                
+                logger.debug(f"✅ IBKR connection healthy ({elapsed:.2f}s)")
+                return True
+                
+            except Exception as e:
+                logger.error(f"🔴 IBKR health check failed: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error checking IBKR connection health: {e}")
+            return False
     
     def get_account_info(self, account: Optional[str] = None) -> Optional[IBKRAccountInfo]:
         """
@@ -292,6 +373,24 @@ class IBKRClient:
             logger.error(f"Error getting account info: {e}")
             return None
     
+    def _ensure_event_loop(self):
+        """
+        Ensure there's an event loop in the current thread.
+        Critical for methods called from non-main threads (like PositionExitMonitor).
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            # Check if loop is closed or None
+            if loop is None or loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                logger.debug("Created new event loop for current thread")
+        except RuntimeError:
+            # No event loop in current thread - create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            logger.debug("Created event loop for thread without loop")
+    
     def get_positions(self, account: Optional[str] = None) -> List[IBKRPosition]:
         """
         Get current positions
@@ -303,6 +402,9 @@ class IBKRClient:
             List of IBKRPosition objects
         """
         try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return []
@@ -318,14 +420,18 @@ class IBKRClient:
                 ticker = self.ib.ticker(pos.contract)
                 market_price = ticker.marketPrice() if ticker.marketPrice() else pos.avgCost
                 
+                # Calculate unrealized PnL manually
+                # Position object doesn't have unrealizedPNL attribute
+                unrealized_pnl = (market_price - pos.avgCost) * pos.position
+                
                 result.append(IBKRPosition(
                     symbol=pos.contract.symbol,
                     position=pos.position,
                     avg_cost=pos.avgCost,
                     market_price=market_price,
                     market_value=pos.position * market_price,
-                    unrealized_pnl=pos.unrealizedPNL,
-                    realized_pnl=pos.realizedPNL,
+                    unrealized_pnl=unrealized_pnl,
+                    realized_pnl=0.0,  # Position object doesn't track realized PnL
                     account=pos.account
                 ))
             
@@ -343,6 +449,9 @@ class IBKRClient:
             List of IBKROrder objects
         """
         try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return []
@@ -387,30 +496,18 @@ class IBKRClient:
             IBKROrder object or None if error
         """
         try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return None
             
             logger.info(f"🔄 Creating contract for {symbol}...")
-            # Create stock contract
+            # Create stock contract - SMART routing for US stocks
+            # Note: For standard US stocks, we can skip qualification to avoid timeout issues
             contract = Stock(symbol, 'SMART', 'USD')
-            
-            # Qualify contract with timeout (5 seconds max)
-            logger.info(f"🔍 Qualifying contract for {symbol}...")
-            try:
-                qualified = self.ib.waitOnUpdate(timeout=5)  # Wait up to 5 seconds
-                qualified = self.ib.qualifyContracts(contract)
-                if not qualified:
-                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
-                    return None
-                contract = qualified[0]  # Use the qualified contract
-                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
-            except asyncio.TimeoutError:
-                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
-                return None
-            except Exception as e:
-                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
-                return None
+            logger.info(f"✅ Contract created for {symbol} (SMART routing, USD)")
             
             # Create market order
             logger.info(f"📝 Creating market order: {action} {quantity} {symbol}")
@@ -463,24 +560,9 @@ class IBKRClient:
                 return None
             
             logger.info(f"🔄 Creating limit order contract for {symbol}...")
-            # Create stock contract
+            # Create stock contract - SMART routing for US stocks
             contract = Stock(symbol, 'SMART', 'USD')
-            
-            # Qualify contract with timeout
-            try:
-                qualified = self.ib.waitOnUpdate(timeout=5)
-                qualified = self.ib.qualifyContracts(contract)
-                if not qualified:
-                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
-                    return None
-                contract = qualified[0]
-                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
-            except asyncio.TimeoutError:
-                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
-                return None
-            except Exception as e:
-                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
-                return None
+            logger.info(f"✅ Contract created for {symbol} (SMART routing, USD)")
             
             # Create limit order
             logger.info(f"📝 Creating limit order: {action} {quantity} {symbol} @ ${limit_price}")
@@ -530,24 +612,9 @@ class IBKRClient:
                 return None
             
             logger.info(f"🔄 Creating stop order contract for {symbol}...")
-            # Create stock contract
+            # Create stock contract - SMART routing for US stocks
             contract = Stock(symbol, 'SMART', 'USD')
-            
-            # Qualify contract with timeout
-            try:
-                qualified = self.ib.waitOnUpdate(timeout=5)
-                qualified = self.ib.qualifyContracts(contract)
-                if not qualified:
-                    logger.error(f"❌ Failed to qualify contract for {symbol} - no results returned")
-                    return None
-                contract = qualified[0]
-                logger.info(f"✅ Contract qualified for {symbol}: {contract.conId}")
-            except asyncio.TimeoutError:
-                logger.error(f"⏱️ Timeout qualifying contract for {symbol} (5s)")
-                return None
-            except Exception as e:
-                logger.error(f"❌ Error qualifying contract for {symbol}: {e}")
-                return None
+            logger.info(f"✅ Contract created for {symbol} (SMART routing, USD)")
             
             # Create stop order
             logger.info(f"📝 Creating stop order: {action} {quantity} {symbol} @ ${stop_price}")
@@ -577,6 +644,103 @@ class IBKRClient:
             logger.error(f"Error placing stop order: {e}")
             return None
     
+    def place_bracket_order(self, symbol: str, action: str, quantity: int,
+                           take_profit_price: float, stop_loss_price: float,
+                           limit_price: Optional[float] = None) -> Optional[Dict]:
+        """
+        Place a proper IBKR bracket order (parent + 2 child orders)
+        Uses ib_insync's bracketOrder() for proper order linking
+        
+        Args:
+            symbol: Stock symbol
+            action: 'BUY' or 'SELL'
+            quantity: Number of shares
+            take_profit_price: Take profit limit price
+            stop_loss_price: Stop loss price
+            limit_price: Limit price for parent order (if None, uses midpoint)
+            
+        Returns:
+            Dict with parent, takeProfit, and stopLoss order IDs, or None if error
+        """
+        try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
+            if not self.is_connected():
+                logger.error("Not connected to IBKR")
+                return None
+            
+            logger.info(f"🎯 Creating IBKR bracket order for {symbol}: {action} {quantity} shares")
+            logger.info(f"   Take Profit: ${take_profit_price:.2f}, Stop Loss: ${stop_loss_price:.2f}")
+            
+            # Create stock contract
+            contract = Stock(symbol, 'SMART', 'USD')
+            
+            # If no limit price provided, get current ask price to ensure immediate fill
+            if limit_price is None:
+                # Get current market price
+                self.ib.reqMktData(contract, '', False, False)
+                self.ib.sleep(0.5)
+                ticker = self.ib.ticker(contract)
+                
+                # For BUY: use ask price to ensure immediate fill
+                # For SELL: use bid price to ensure immediate fill
+                if action.upper() == 'BUY':
+                    limit_price = ticker.ask if ticker.ask and ticker.ask > 0 else take_profit_price
+                    logger.info(f"   Using current ASK as limit for immediate fill: ${limit_price:.2f}")
+                else:
+                    limit_price = ticker.bid if ticker.bid and ticker.bid > 0 else stop_loss_price
+                    logger.info(f"   Using current BID as limit for immediate fill: ${limit_price:.2f}")
+            
+            # Create bracket order using ib_insync's built-in function
+            # This properly links parent and child orders with OCA group
+            parent, takeProfit, stopLoss = self.ib.bracketOrder(
+                action=action.upper(),
+                quantity=quantity,
+                limitPrice=limit_price,
+                takeProfitPrice=take_profit_price,
+                stopLossPrice=stop_loss_price
+            )
+            
+            # Place all three orders (parent + both children)
+            # They are already linked by bracketOrder() via OCA group
+            logger.info(f"📤 Placing bracket order with IBKR...")
+            logger.info(f"   Submitting parent order...")
+            parent_trade = self.ib.placeOrder(contract, parent)
+            self.ib.sleep(0.2)
+            
+            logger.info(f"   Submitting take-profit order...")
+            tp_trade = self.ib.placeOrder(contract, takeProfit)
+            self.ib.sleep(0.2)
+            
+            logger.info(f"   Submitting stop-loss order...")
+            sl_trade = self.ib.placeOrder(contract, stopLoss)
+            self.ib.sleep(0.2)
+            
+            logger.info(f"✅ IBKR bracket order placed successfully")
+            logger.info(f"   Parent Order ID: {parent.orderId}")
+            logger.info(f"   Take Profit ID: {takeProfit.orderId}")
+            logger.info(f"   Stop Loss ID: {stopLoss.orderId}")
+            
+            return {
+                'parent': {
+                    'order_id': parent.orderId,
+                    'status': parent_trade.orderStatus.status
+                },
+                'take_profit': {
+                    'order_id': takeProfit.orderId,
+                    'price': take_profit_price
+                },
+                'stop_loss': {
+                    'order_id': stopLoss.orderId,
+                    'price': stop_loss_price
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error placing bracket order: {e}", exc_info=True)
+            return None
+    
     def cancel_order(self, order_id: int) -> bool:
         """
         Cancel an order
@@ -588,6 +752,9 @@ class IBKRClient:
             True if successful
         """
         try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return False
@@ -641,13 +808,19 @@ class IBKRClient:
             Dictionary with market data or None if error
         """
         try:
+            # Ensure event loop exists in current thread (critical for multi-threading)
+            self._ensure_event_loop()
+            
             if not self.is_connected():
                 logger.error("Not connected to IBKR")
                 return None
             
-            # Create contract
+            # Create contract with timeout protection
             contract = Stock(symbol, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
+            contract = self._qualify_contract_with_timeout(contract, timeout=5.0)
+            if not contract:
+                logger.debug(f"Failed to qualify contract for {symbol}")
+                return None
             
             # Request market data (will use delayed if real-time not available)
             self.ib.reqMktData(contract, '', False, False)
@@ -772,9 +945,12 @@ class IBKRClient:
                 logger.error("Not connected to IBKR")
                 return None
             
-            # Create contract
+            # Create contract with timeout protection
             contract = Stock(symbol, 'SMART', 'USD')
-            self.ib.qualifyContracts(contract)
+            contract = self._qualify_contract_with_timeout(contract, timeout=10.0)
+            if not contract:
+                logger.error(f"Failed to qualify contract for {symbol}")
+                return None
             
             # Request historical data
             bars = self.ib.reqHistoricalData(

@@ -205,6 +205,11 @@ def send_discord_alert(alert: TradingAlert):
     if not webhook_url:
         logger.warning('DISCORD_WEBHOOK_URL not set. Skipping Discord notification.')
         return
+    
+    # Validate webhook URL format
+    if not webhook_url.startswith('https://discord.com/api/webhooks/') and not webhook_url.startswith('https://discordapp.com/api/webhooks/'):
+        logger.error(f'Invalid Discord webhook URL format. URL must start with https://discord.com/api/webhooks/ or https://discordapp.com/api/webhooks/')
+        return
 
     # Color mapping
     color_map = {
@@ -215,12 +220,16 @@ def send_discord_alert(alert: TradingAlert):
     }
     
     # Build base embed
-    embed = {
-        'title': f'🚨 {alert.priority.value} Alert: {alert.ticker}',
-        'description': alert.message,
-        'color': color_map.get(alert.priority.value, 10070709),
-        'timestamp': alert.timestamp.isoformat()
-    }
+    try:
+        embed = {
+            'title': f'🚨 {alert.priority.value} Alert: {alert.ticker}',
+            'description': alert.message or 'No message provided',
+            'color': color_map.get(alert.priority.value, 10070709),
+            'timestamp': alert.timestamp.isoformat() if hasattr(alert.timestamp, 'isoformat') else str(alert.timestamp)
+        }
+    except Exception as e:
+        logger.error(f'Error building Discord embed: {e}', exc_info=True)
+        return
     
     # Add type-specific fields
     fields = []
@@ -236,6 +245,63 @@ def send_discord_alert(alert: TradingAlert):
     elif alert.alert_type in [AlertType.BUY_SIGNAL, AlertType.SELL_SIGNAL, 
                               AlertType.SPECULATION_OPPORTUNITY, AlertType.REVIEW_REQUIRED]:
         fields = _build_trading_decision_fields(alert.details)
+    elif alert.alert_type == AlertType.TRADE_EXECUTED:
+        # Build fields for trade execution alerts
+        fields = []
+        try:
+            if alert.details:
+                if alert.details.get('order_id'):
+                    fields.append({
+                        'name': '🆔 Order ID',
+                        'value': str(alert.details['order_id']),
+                        'inline': True
+                    })
+                if alert.details.get('price'):
+                    try:
+                        price = float(alert.details['price'])
+                        fields.append({
+                            'name': '💰 Price',
+                            'value': f"${price:.4f}",
+                            'inline': True
+                        })
+                    except (ValueError, TypeError):
+                        fields.append({
+                            'name': '💰 Price',
+                            'value': str(alert.details['price']),
+                            'inline': True
+                        })
+                if alert.details.get('quantity'):
+                    try:
+                        quantity = float(alert.details['quantity'])
+                        fields.append({
+                            'name': '📊 Quantity',
+                            'value': f"{quantity:.6f}",
+                            'inline': True
+                        })
+                    except (ValueError, TypeError):
+                        fields.append({
+                            'name': '📊 Quantity',
+                            'value': str(alert.details['quantity']),
+                            'inline': True
+                        })
+                if alert.details.get('direction'):
+                    fields.append({
+                        'name': '📈 Direction',
+                        'value': str(alert.details['direction']),
+                        'inline': True
+                    })
+                if alert.details.get('position_size'):
+                    try:
+                        pos_size = float(alert.details['position_size'])
+                        fields.append({
+                            'name': '💵 Position Size',
+                            'value': f"${pos_size:,.2f}",
+                            'inline': True
+                        })
+                    except (ValueError, TypeError):
+                        pass
+        except Exception as e:
+            logger.error(f'Error building TRADE_EXECUTED fields: {e}', exc_info=True)
     else:
         # Default fields for technical alerts
         if alert.confidence_score > 0:
@@ -265,8 +331,16 @@ def send_discord_alert(alert: TradingAlert):
     }
 
     try:
-        response = requests.post(webhook_url, json=payload)
+        response = requests.post(webhook_url, json=payload, timeout=10)
         response.raise_for_status()
-        logger.info(f'Successfully sent alert for {alert.ticker} to Discord.')
+        logger.info(f'✅ Successfully sent alert for {alert.ticker} to Discord.')
+    except requests.exceptions.Timeout:
+        logger.error(f'❌ Discord webhook timeout for {alert.ticker}. Webhook may be slow or unreachable.')
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f'❌ Discord webhook connection error for {alert.ticker}: {e}')
+    except requests.exceptions.HTTPError as e:
+        logger.error(f'❌ Discord webhook HTTP error for {alert.ticker}: {e} - Status: {response.status_code}, Response: {response.text[:200]}')
     except requests.exceptions.RequestException as e:
-        logger.error(f'Failed to send Discord alert for {alert.ticker}: {e}')
+        logger.error(f'❌ Failed to send Discord alert for {alert.ticker}: {e}', exc_info=True)
+    except Exception as e:
+        logger.error(f'❌ Unexpected error sending Discord alert for {alert.ticker}: {e}', exc_info=True)

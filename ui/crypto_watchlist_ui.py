@@ -63,7 +63,7 @@ def display_watchlist_filters():
     with col2:
         strategy_filter = st.multiselect(
             "Strategy",
-            ['ALL', 'SCALP', 'MOMENTUM', 'SWING'],
+            ['ALL', 'SCALP', 'MOMENTUM', 'SWING', 'BUZZING', 'HOTTEST', 'BREAKOUT'],
             default=['ALL'],
             key="crypto_wl_strategy"
         )

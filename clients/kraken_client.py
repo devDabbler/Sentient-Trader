@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 from functools import wraps
+from utils.crypto_pair_utils import normalize_crypto_pair
 
 
 
@@ -318,13 +319,24 @@ class KrakenClient:
         Get ticker information for a trading pair
         
         Args:
-            pair: Trading pair (e.g., 'XXBTZUSD' or 'BTC/USD')
+            pair: Trading pair (e.g., 'XXBTZUSD', 'BTC/USD', 'BTCUSD', 'btcusd', 'btc/usd')
             
         Returns:
             Ticker data including price, volume, high, low
         """
+        # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+        normalized_pair = normalize_crypto_pair(pair)
+        
         # Convert user-friendly format to Kraken format if needed
-        kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+        kraken_pair = self.POPULAR_PAIRS.get(normalized_pair, normalized_pair)
+        
+        # If pair is not in POPULAR_PAIRS, try common format conversions
+        if kraken_pair == normalized_pair:
+            # Try common formats: ATOM/USD -> ATOMUSD
+            if '/' in normalized_pair:
+                kraken_pair = normalized_pair.replace('/', '').upper()
+            else:
+                kraken_pair = normalized_pair.upper()
         
         try:
             data = self._public_request('Ticker', {'pair': kraken_pair})
@@ -344,9 +356,34 @@ class KrakenClient:
                     'trades_24h': int(ticker['t'][1])  # Number of trades
                 }
             else:
-                logger.error(f"No data found for pair: {kraken_pair}")
+                # Try to find the pair in the response (Kraken sometimes returns different keys)
+                if data:
+                    # Get the first available pair if exact match not found
+                    first_key = list(data.keys())[0]
+                    ticker = data[first_key]
+                    logger.debug(f"Using alternative pair format: {first_key} for {pair}")
+                    return {
+                        'pair': pair,
+                        'last_price': float(ticker['c'][0]),
+                        'bid': float(ticker['b'][0]),
+                        'ask': float(ticker['a'][0]),
+                        'high_24h': float(ticker['h'][1]),
+                        'low_24h': float(ticker['l'][1]),
+                        'volume_24h': float(ticker['v'][1]),
+                        'vwap_24h': float(ticker['p'][1]),
+                        'trades_24h': int(ticker['t'][1])
+                    }
+                logger.debug(f"No data found for pair: {kraken_pair} (pair may not exist on Kraken)")
                 return {}
                 
+        except ValueError as e:
+            # Handle "Unknown asset pair" errors gracefully
+            error_msg = str(e)
+            if "Unknown asset pair" in error_msg or "EQuery:Unknown asset pair" in error_msg:
+                logger.debug(f"Pair {pair} ({kraken_pair}) not available on Kraken: {error_msg}")
+                return {}
+            logger.error(f"Error fetching ticker data for {pair}: {e}")
+            return {}
         except Exception as e:
             logger.error(f"Error fetching ticker data for {pair}: {e}")
             return {}
@@ -356,13 +393,24 @@ class KrakenClient:
         Get raw ticker information for a trading pair (raw Kraken format)
         
         Args:
-            pair: Trading pair (e.g., 'XXBTZUSD' or 'BTC/USD')
+            pair: Trading pair (e.g., 'XXBTZUSD', 'BTC/USD', 'BTCUSD', 'btcusd', 'btc/usd')
             
         Returns:
             Raw ticker data in Kraken format (includes 'c' key for last price)
         """
+        # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+        normalized_pair = normalize_crypto_pair(pair)
+        
         # Convert user-friendly format to Kraken format if needed
-        kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+        kraken_pair = self.POPULAR_PAIRS.get(normalized_pair, normalized_pair)
+        
+        # If pair is not in POPULAR_PAIRS, try common format conversions
+        if kraken_pair == normalized_pair:
+            # Try common formats: ATOM/USD -> ATOMUSD
+            if '/' in normalized_pair:
+                kraken_pair = normalized_pair.replace('/', '').upper()
+            else:
+                kraken_pair = normalized_pair.upper()
         
         try:
             data = self._public_request('Ticker', {'pair': kraken_pair})
@@ -371,9 +419,22 @@ class KrakenClient:
             if kraken_pair in data:
                 return data[kraken_pair]
             else:
+                # Try to find the pair in the response
+                if data:
+                    first_key = list(data.keys())[0]
+                    logger.debug(f"Using alternative pair format: {first_key} for {pair}")
+                    return data[first_key]
                 logger.debug(f"No data found for pair: {kraken_pair}")
                 return {}
                 
+        except ValueError as e:
+            # Handle "Unknown asset pair" errors gracefully
+            error_msg = str(e)
+            if "Unknown asset pair" in error_msg or "EQuery:Unknown asset pair" in error_msg:
+                logger.debug(f"Pair {pair} ({kraken_pair}) not available on Kraken: {error_msg}")
+                return {}
+            logger.debug(f"Error fetching ticker info for {pair}: {e}")
+            return {}
         except Exception as e:
             logger.debug(f"Error fetching ticker info for {pair}: {e}")
             return {}
@@ -383,14 +444,45 @@ class KrakenClient:
         Get OHLC (candlestick) data for a trading pair
         
         Args:
-            pair: Trading pair
+            pair: Trading pair (e.g., 'ATOM/USD', 'ATOMUSD', 'atomusd', 'atom/usd')
             interval: Time interval in minutes (1, 5, 15, 30, 60, 240, 1440, 10080, 21600)
+                     Can be int or string like "5" or "5m"
             since: Return committed OHLC data since given ID
             
         Returns:
             List of OHLC candles
         """
-        kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+        # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+        normalized_pair = normalize_crypto_pair(pair)
+        
+        # Get the actual Kraken pair format
+        kraken_pair = self.POPULAR_PAIRS.get(normalized_pair, normalized_pair)
+        
+        # If pair is not in POPULAR_PAIRS, try common format conversions
+        if kraken_pair == normalized_pair:
+            # Try common formats: ATOM/USD -> ATOMUSD
+            if '/' in normalized_pair:
+                kraken_pair = normalized_pair.replace('/', '').upper()
+            else:
+                kraken_pair = normalized_pair.upper()
+        
+        # Convert interval to integer (handle string formats like "5" or "5m")
+        if isinstance(interval, str):
+            # Remove 'm' suffix if present (e.g., "5m" -> 5)
+            interval_str = interval.replace('m', '').replace('M', '').strip()
+            try:
+                interval = int(interval_str)
+            except ValueError:
+                logger.error(f"Invalid interval format: {interval}, using default 60")
+                interval = 60
+        
+        # Kraken OHLC valid intervals: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+        valid_intervals = [1, 5, 15, 30, 60, 240, 1440, 10080, 21600]
+        if interval not in valid_intervals:
+            # Round to nearest valid interval
+            closest = min(valid_intervals, key=lambda x: abs(x - interval))
+            logger.debug(f"Interval {interval} not valid, using closest: {closest}")
+            interval = closest
         
         params = {
             'pair': kraken_pair,
@@ -404,8 +496,25 @@ class KrakenClient:
             data = self._public_request('OHLC', params)
             
             ohlc_data = []
+            
+            # Kraken OHLC can return data with different key formats
+            # Try exact match first, then try variants
             if kraken_pair in data:
-                for candle in data[kraken_pair]:
+                pair_key = kraken_pair
+            else:
+                # Try to find any matching key (Kraken might return ATOMUSD.d, etc.)
+                pair_key = None
+                for key in data.keys():
+                    if key.startswith(kraken_pair) or kraken_pair.startswith(key.split('.')[0]):
+                        pair_key = key
+                        break
+                
+                if not pair_key:
+                    logger.debug(f"No OHLC data found for {pair} (tried {kraken_pair})")
+                    return []
+            
+            if pair_key in data:
+                for candle in data[pair_key]:
                     ohlc_data.append({
                         'timestamp': int(candle[0]),
                         'datetime': datetime.fromtimestamp(int(candle[0])),
@@ -619,15 +728,23 @@ class KrakenClient:
         if order_type == OrderType.LIMIT and price:
             params['price'] = str(round(price, 6))
         
-        # Add stop loss (Kraken requires max 6 decimals)
+        # Add stop loss and take profit (Kraken requires max 6 decimals)
+        # Note: Kraken API only supports one close order at a time
+        # Priority: stop-loss for safety, then take-profit if no stop-loss
         if stop_loss:
             params['close[ordertype]'] = 'stop-loss'
             params['close[price]'] = str(round(stop_loss, 6))
-        
-        # Add take profit (Kraken requires max 6 decimals)
-        if take_profit:
+            logger.info(f"Setting stop-loss at ${stop_loss:.6f} for {pair}")
+        elif take_profit:
+            # Only set take-profit if no stop-loss (safety first)
             params['close[ordertype]'] = 'take-profit'
             params['close[price]'] = str(round(take_profit, 6))
+            logger.info(f"Setting take-profit at ${take_profit:.6f} for {pair}")
+        
+        # Note: If both stop_loss and take_profit are provided, only stop_loss will be set
+        # This is a limitation of Kraken's API - only one close order per entry order
+        if stop_loss and take_profit:
+            logger.warning(f"Both stop-loss and take-profit provided for {pair}. Only stop-loss will be set. Consider placing take-profit separately after entry.")
         
         # Validation mode
         if validate:
@@ -640,10 +757,19 @@ class KrakenClient:
                 logger.info(f"✅ Order validation successful for {pair}")
                 return None
             
-            # Extract order info
-            order_id = data.get('txid', [''])[0]
+            # Extract order info - Kraken returns txid as a list
+            txid_list = data.get('txid', [])
+            if not txid_list or len(txid_list) == 0:
+                logger.error(f"❌ Order placement returned no transaction ID for {pair}")
+                return None
             
-            logger.info(f"✅ Order placed successfully: {order_id}")
+            order_id = txid_list[0] if isinstance(txid_list, list) else str(txid_list)
+            
+            if not order_id or order_id == '':
+                logger.error(f"❌ Order placement returned empty transaction ID for {pair}")
+                return None
+            
+            logger.info(f"✅ Order placed successfully: {order_id} for {pair}")
             
             return KrakenOrder(
                 order_id=order_id,
@@ -848,6 +974,48 @@ class KrakenClient:
             return list(data.keys())
         except:
             return list(self.POPULAR_PAIRS.values())
+    
+    def get_tradable_asset_pairs(self) -> List[Dict]:
+        """
+        Get list of all tradable asset pairs with full details
+        
+        Returns:
+            List of dictionaries containing pair information with keys:
+            - 'altname': Alternative name (e.g., 'BTC/USD')
+            - 'base': Base asset (e.g., 'BTC')
+            - 'quote': Quote asset (e.g., 'USD')
+            - 'pair': Kraken pair name (e.g., 'XXBTZUSD')
+        """
+        try:
+            data = self._public_request('AssetPairs')
+            pairs_list = []
+            
+            for pair_name, pair_info in data.items():
+                # Extract relevant information
+                pair_dict = {
+                    'pair': pair_name,
+                    'altname': pair_info.get('altname', pair_name),
+                    'base': pair_info.get('base', ''),
+                    'quote': pair_info.get('quote', ''),
+                    'wsname': pair_info.get('wsname', pair_info.get('altname', pair_name))
+                }
+                pairs_list.append(pair_dict)
+            
+            return pairs_list
+        except Exception as e:
+            logger.error(f"Error fetching asset pairs: {e}")
+            # Return popular pairs as fallback
+            fallback_pairs = []
+            for altname, kraken_name in self.POPULAR_PAIRS.items():
+                base, quote = altname.split('/') if '/' in altname else (altname, 'USD')
+                fallback_pairs.append({
+                    'pair': kraken_name,
+                    'altname': altname,
+                    'base': base,
+                    'quote': quote,
+                    'wsname': altname
+                })
+            return fallback_pairs
     
     def get_server_time(self) -> datetime:
         """

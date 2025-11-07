@@ -1,6 +1,7 @@
 """Logging configuration for the trading application using Loguru."""
 
 import sys
+import os
 from pathlib import Path
 from loguru import logger
 
@@ -13,6 +14,43 @@ logger.remove()
 # Create logs directory if it doesn't exist
 logs_dir = Path("logs")
 logs_dir.mkdir(exist_ok=True)
+
+
+def get_broker_specific_log_file(default_log_file: str = "logs/sentient_trader.log") -> str:
+    """
+    Get broker-specific log file name based on DEFAULT_BROKER environment variable
+    
+    Args:
+        default_log_file: Default log file path (e.g., "logs/sentient_trader.log")
+        
+    Returns:
+        Broker-specific log file path if DEFAULT_BROKER is set, otherwise returns default
+        
+    Examples:
+        >>> get_broker_specific_log_file("logs/sentient_trader.log")
+        'logs/sentient_trader_tradier.log'  # if DEFAULT_BROKER=TRADIER
+        'logs/sentient_trader_ibkr.log'     # if DEFAULT_BROKER=IBKR
+        'logs/sentient_trader_kraken.log'   # if DEFAULT_BROKER=KRAKEN
+        'logs/sentient_trader.log'          # if DEFAULT_BROKER not set
+    """
+    default_broker = os.getenv('DEFAULT_BROKER', '').upper()
+    
+    # If DEFAULT_BROKER is not set, return original filename
+    if not default_broker or default_broker not in ['TRADIER', 'IBKR', 'KRAKEN']:
+        return default_log_file
+    
+    # Extract directory, base name, and extension
+    log_path = Path(default_log_file)
+    directory = log_path.parent
+    base_name = log_path.stem  # filename without extension
+    extension = log_path.suffix  # .log
+    
+    # Create broker-specific filename
+    broker_suffix = default_broker.lower()
+    broker_specific_filename = f"{base_name}_{broker_suffix}{extension}"
+    
+    # Return full path
+    return str(directory / broker_specific_filename)
 
 
 def setup_logging(

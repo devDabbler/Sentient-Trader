@@ -56,7 +56,7 @@ class SubPennyDiscovery:
         
         logger.info("🔬 Sub-Penny Discovery Engine initialized")
         logger.info("   • Data sources: Multi-source aggregator (CoinGecko, CoinMarketCap)")
-        logger.info("   • Coverage: ALL coins under $0.01 (no limits)")
+        logger.info("   • Coverage: Up to 3,000 coins under $0.01 (optimized for valid Kraken pairs)")
         logger.info("   • No state restrictions - works globally")
     
     async def discover_sub_penny_runners(
@@ -83,11 +83,19 @@ class SubPennyDiscovery:
         try:
             logger.info(f"🔬 Discovering sub-penny runners (max ${max_price})...")
             
-            # Fetch ALL coins from multi-source aggregator (no limits)
+            # Fetch coins from multi-source aggregator with smart limits
+            # For sub-penny discovery, we need MANY MORE coins because most won't be valid Kraken pairs
+            # Most sub-penny coins are NOT on Kraken, so we need to fetch 5000-10000 to get 15-20 valid pairs
+            # This prevents the search from going on forever while ensuring enough valid results
+            max_coins_to_fetch = 10000  # Increased significantly to get more valid Kraken pairs
+            max_pages_to_fetch = 40  # Stop after 40 pages (10,000 coins max from CoinGecko)
+            
             aggregated_data = await self.aggregator.fetch_all_coins(
                 max_price=max_price,
                 min_market_cap=min_market_cap,
-                max_market_cap=max_market_cap
+                max_market_cap=max_market_cap,
+                max_coins=max_coins_to_fetch,
+                max_pages=max_pages_to_fetch
             )
             
             if not aggregated_data:

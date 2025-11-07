@@ -211,11 +211,20 @@ class TradierAdapter(BrokerAdapter):
                            entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
         """Place bracket order via Tradier"""
         try:
-            # If no entry_price provided, use None to trigger market order entry
+            # If no entry_price provided, fetch current market price
             if entry_price is None:
-                # Get current market price as approximation
-                # Tradier requires entry_price for bracket orders
-                return False, {"error": "entry_price is required for bracket orders"}
+                logger.info(f"📊 No entry_price provided, fetching current market price for {symbol}...")
+                try:
+                    quote = self.client.get_quote(symbol)
+                    if quote and 'last' in quote:
+                        entry_price = float(quote['last'])
+                        logger.info(f"✅ Using current market price: ${entry_price:.2f}")
+                    else:
+                        logger.error(f"❌ Failed to get market price for {symbol}")
+                        return False, {"error": "Unable to determine entry price"}
+                except Exception as e:
+                    logger.error(f"❌ Error fetching market price for {symbol}: {e}")
+                    return False, {"error": f"Failed to fetch market price: {str(e)}"}
             
             success, result = self.client.place_bracket_order(
                 symbol=symbol,
@@ -276,8 +285,8 @@ class IBKRAdapter(BrokerAdapter):
             for pos in positions:
                 normalized.append({
                     'symbol': pos.symbol,
-                    'quantity': int(pos.quantity),
-                    'cost_basis': float(pos.avg_cost * abs(pos.quantity)),
+                    'quantity': int(pos.position),  # IBKRPosition uses 'position' not 'quantity'
+                    'cost_basis': float(pos.avg_cost * abs(pos.position)),
                     'current_price': float(pos.market_price)
                 })
             return True, normalized
@@ -389,43 +398,41 @@ class IBKRAdapter(BrokerAdapter):
             logger.info(f"🎯 IBKR: Starting bracket order for {symbol}: {action} {quantity} shares")
             logger.info(f"   Entry: market, Stop: ${stop_loss_price:.2f}, Target: ${take_profit_price:.2f}")
             
-            # For IBKR, we need to place parent order + 2 child orders
-            # 1. Place the entry market order
-            logger.info(f"📥 Step 1/3: Placing parent market order...")
-            parent_order = self.client.place_market_order(symbol, action, quantity)
-            if not parent_order:
-                logger.error(f"❌ Failed to place parent order for {symbol}")
-                return False, {"error": "Failed to place parent market order"}
+            # Health check - ensure TWS is responsive before placing order
+            if hasattr(self.client, 'check_connection_health'):
+                logger.info("🏥 Checking IBKR connection health...")
+                if not self.client.check_connection_health():
+                    logger.error("❌ IBKR connection unhealthy - aborting order")
+                    logger.error("   💡 TIP: Try restarting TWS if orders keep failing")
+                    return False, {"error": "IBKR connection not responding"}
+                logger.info("✅ IBKR connection healthy, proceeding with order")
             
-            logger.info(f"✅ IBKR parent order placed: {parent_order.order_id}")
+            # Use IBKR's proper bracket order functionality
+            # This creates parent + 2 child orders with proper OCA linking
+            logger.info(f"📥 Placing IBKR bracket order (parent + child orders)...")
+            result = self.client.place_bracket_order(
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                take_profit_price=take_profit_price,
+                stop_loss_price=stop_loss_price
+            )
             
-            # 2. Place stop loss order (opposite action)
-            stop_action = 'SELL' if action == 'BUY' else 'BUY'
-            logger.info(f"📥 Step 2/3: Placing stop loss order...")
-            stop_order = self.client.place_stop_order(symbol, stop_action, quantity, stop_loss_price)
-            if not stop_order:
-                logger.warning(f"⚠️ Failed to place stop loss order for {symbol}")
-            else:
-                logger.info(f"✅ Stop loss order placed: {stop_order.order_id}")
+            if not result:
+                logger.error(f"❌ Failed to place bracket order for {symbol}")
+                return False, {"error": "Failed to place bracket order"}
             
-            # 3. Place take profit order (opposite action)
-            logger.info(f"📥 Step 3/3: Placing take profit order...")
-            profit_order = self.client.place_limit_order(symbol, stop_action, quantity, take_profit_price)
-            if not profit_order:
-                logger.warning(f"⚠️ Failed to place take profit order for {symbol}")
-            else:
-                logger.info(f"✅ Take profit order placed: {profit_order.order_id}")
-            
-            logger.info(f"✅ IBKR bracket orders completed - Parent: {parent_order.order_id}, "
-                       f"Stop: {stop_order.order_id if stop_order else 'N/A'}, "
-                       f"Profit: {profit_order.order_id if profit_order else 'N/A'}")
+            logger.info(f"✅ IBKR bracket order completed successfully")
+            logger.info(f"   Parent: {result['parent']['order_id']}")
+            logger.info(f"   Take Profit: {result['take_profit']['order_id']} @ ${result['take_profit']['price']:.2f}")
+            logger.info(f"   Stop Loss: {result['stop_loss']['order_id']} @ ${result['stop_loss']['price']:.2f}")
             
             return True, {
                 'order': {
-                    'id': parent_order.order_id,
-                    'status': parent_order.status,
-                    'stop_order_id': stop_order.order_id if stop_order else None,
-                    'profit_order_id': profit_order.order_id if profit_order else None
+                    'id': result['parent']['order_id'],
+                    'status': result['parent']['status'],
+                    'stop_order_id': result['stop_loss']['order_id'],
+                    'profit_order_id': result['take_profit']['order_id']
                 }
             }
         except Exception as e:

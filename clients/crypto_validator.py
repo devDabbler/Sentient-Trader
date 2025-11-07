@@ -8,6 +8,7 @@ Ensures all crypto implementations only work with tradable pairs.
 from typing import List, Dict, Optional, Tuple
 from loguru import logger
 from clients.kraken_client import KrakenClient
+from utils.crypto_pair_utils import normalize_crypto_pair, get_pair_variations
 
 
 class CryptoValidator:
@@ -53,17 +54,15 @@ class CryptoValidator:
         
         # Default formats to try
         if try_formats is None:
-            symbol_upper = symbol.upper().strip()
-            # Remove common suffixes/prefixes
-            symbol_clean = symbol_upper.replace('/USD', '').replace('/USDT', '').replace('USD', '').replace('USDT', '')
+            # Normalize the symbol first (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+            normalized = normalize_crypto_pair(symbol)
             
-            try_formats = [
-                f"{symbol_clean}/USD",
-                f"{symbol_clean}USD",
-                f"{symbol_clean}/USDT",
-                f"{symbol_clean}USDT",
-                symbol_upper,  # Try as-is
-            ]
+            # Get all variations of the normalized pair
+            try_formats = get_pair_variations(normalized)
+            
+            # Also try the original symbol as-is (for Kraken-specific formats like XXBTZUSD)
+            if symbol.upper() not in try_formats:
+                try_formats.append(symbol.upper())
         
         # Try each format
         for pair_format in try_formats:
