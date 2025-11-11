@@ -250,8 +250,16 @@ class AutoTrader:
         if config.use_ai_validation:
             try:
                 from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-                self._ai_validator = LLMStrategyAnalyzer(provider="openrouter")
-                logger.info("🛡️ AI Pre-Trade Validation ENABLED: Secondary knockout check before execution")
+                from utils.config_loader import get_api_key
+                
+                api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
+                
+                if api_key:
+                    self._ai_validator = LLMStrategyAnalyzer(provider="openrouter", api_key=api_key)
+                    logger.info("🛡️ AI Pre-Trade Validation ENABLED: Secondary knockout check before execution")
+                else:
+                    logger.warning("⚠️ OPENROUTER_API_KEY not found, AI validation disabled")
+                    config.use_ai_validation = False
             except Exception as e:
                 logger.warning(f"⚠️ AI Validator initialization failed: {e}, proceeding without validation")
                 config.use_ai_validation = False

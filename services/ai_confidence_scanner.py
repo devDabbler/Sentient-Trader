@@ -56,25 +56,11 @@ class AIConfidenceScanner:
         elif self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
+                from utils.config_loader import get_api_key
                 
-                # Try to get API key from multiple sources
-                api_key = os.getenv('OPENROUTER_API_KEY')
-                if not api_key:
-                    try:
-                        import streamlit as st
-                        if hasattr(st, 'secrets'):
-                            api_key = st.secrets.get('openrouter', {}).get('api_key') or st.secrets.get('OPENROUTER_API_KEY')
-                    except Exception:
-                        pass
-                
-                model = os.getenv('AI_CONFIDENCE_MODEL', 'google/gemini-2.0-flash-exp:free')
-                if not model:
-                    try:
-                        import streamlit as st
-                        if hasattr(st, 'secrets'):
-                            model = st.secrets.get('models', {}).get('ai_confidence_model', 'google/gemini-2.0-flash-exp:free')
-                    except Exception:
-                        pass
+                # Get API key from multiple sources
+                api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
+                model = os.getenv('AI_CONFIDENCE_MODEL') or get_api_key('AI_CONFIDENCE_MODEL', 'models') or 'google/gemini-2.0-flash-exp:free'
                 
                 if not api_key:
                     logger.error("❌ OPENROUTER_API_KEY not found - AI analysis disabled")

@@ -90,8 +90,16 @@ class FinBERTSentimentAnalyzer:
         """Initialize LLM-based sentiment fallback"""
         try:
             from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-            self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter")
-            logger.info("✅ LLM sentiment fallback initialized")
+            from utils.config_loader import get_api_key
+            
+            api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
+            
+            if api_key:
+                self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", api_key=api_key)
+                logger.info("✅ LLM sentiment fallback initialized")
+            else:
+                logger.warning("⚠️ OPENROUTER_API_KEY not found, LLM fallback disabled")
+                self.llm_analyzer = None
         except Exception as e:
             logger.warning(f"⚠️ Could not initialize LLM fallback: {e}")
             self.llm_analyzer = None

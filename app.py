@@ -93,21 +93,11 @@ def get_base_scanner():
 def get_llm_analyzer():
     """Cached LLMStrategyAnalyzer - shared by all scanners that need LLM"""
     from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+    from utils.config_loader import get_api_key
     
-    # Try to get API key from multiple sources (environment, Streamlit secrets, .toml)
-    api_key = os.getenv('OPENROUTER_API_KEY')
-    if not api_key and hasattr(st, 'secrets'):
-        try:
-            api_key = st.secrets.get('openrouter', {}).get('api_key') or st.secrets.get('OPENROUTER_API_KEY')
-        except Exception:
-            pass
-    
-    model = os.getenv('AI_ANALYZER_MODEL', 'google/gemini-2.5-flash')
-    if not model and hasattr(st, 'secrets'):
-        try:
-            model = st.secrets.get('models', {}).get('ai_analyzer_model', 'google/gemini-2.5-flash')
-        except Exception:
-            pass
+    # Get API key from multiple sources (environment, Streamlit secrets, .env)
+    api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
+    model = os.getenv('AI_ANALYZER_MODEL') or get_api_key('AI_ANALYZER_MODEL', 'models') or 'google/gemini-2.5-flash'
     
     return LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
 
@@ -1235,7 +1225,7 @@ def main():
     if 'ai_scanner' not in st.session_state:
         st.session_state.ai_scanner = get_ai_scanner()
     if 'llm_analyzer' not in st.session_state:
-        st.session_state.llm_analyzer = LLMStrategyAnalyzer()
+        st.session_state.llm_analyzer = get_llm_analyzer()
     # These services depend on the llm_analyzer, so they are initialized after.
     if 'news_analyzer' not in st.session_state:
         st.session_state.news_analyzer = NewsAnalyzer(llm_analyzer=st.session_state.llm_analyzer)

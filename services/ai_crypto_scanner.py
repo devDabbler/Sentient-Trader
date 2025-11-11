@@ -70,11 +70,15 @@ class AICryptoScanner:
                 model = os.getenv('AI_CRYPTO_MODEL', 'google/gemini-2.0-flash-exp:free')
                 
                 if not api_key:
+                    from utils.config_loader import get_api_key as get_key_helper
+                    api_key = get_key_helper('OPENROUTER_API_KEY', 'openrouter')
+                
+                if not api_key:
                     logger.error("❌ OPENROUTER_API_KEY not found - AI crypto analysis disabled")
                     self.use_llm = False
                     self.llm_analyzer = None
                 else:
-                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model)
+                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
                     logger.info(f"✅ AI Crypto Scanner initialized with OpenRouter")
                     logger.info(f"   Model: {model}")
             except Exception as e:
