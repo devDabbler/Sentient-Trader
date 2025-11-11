@@ -5,6 +5,7 @@ Analyzes bot configurations and provides intelligent recommendations
 
 import os
 import json
+import time
 from loguru import logger
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -30,6 +31,64 @@ class StrategyAnalysis:
 class LLMStrategyAnalyzer:
     """Analyzes Option Alpha bot strategies using LLM"""
     
+    # Class-level rate limiting: track last request time and minimum delay between requests
+    _last_request_time = 0
+    _min_request_delay = 2.0  # Minimum seconds between requests (for free tier models)
+    _rate_limit_backoff_until = 0  # Timestamp until which we should back off
+    _rate_limited_models = set()  # Track which models are currently rate-limited
+    _model_blacklist_until = {}  # Track when rate-limited models can be retried
+    
+    # Fallback free models organized by provider (to avoid provider-level rate limits)
+    # When one provider is rate-limited, we try a different provider's model
+    # Verified working free models as of 2025-01-07
+    FALLBACK_FREE_MODELS = {
+        "google": [
+            "google/gemini-2.0-flash-exp:free",
+            "google/gemini-1.5-flash:free"
+        ],
+        "meta": [
+            "meta-llama/llama-3.3-70b-instruct:free"
+        ],
+        "qwen": [
+            "qwen/qwen3-235b-a22b:free"
+        ],
+        "tngtech": [
+            "tngtech/deepseek-r1t-chimera:free"
+        ]
+    }
+    
+    @staticmethod
+    def _get_provider_from_model(model: str) -> Optional[str]:
+        """Extract provider name from model string"""
+        if not model:
+            return None
+        parts = model.split("/")
+        if len(parts) > 0:
+            return parts[0].lower()
+        return None
+    
+    @staticmethod
+    def _get_fallback_models(current_model: str) -> List[str]:
+        """
+        Get list of fallback models from different providers.
+        This helps when rate limits are provider-specific (upstream), not API key-specific.
+        """
+        current_provider = LLMStrategyAnalyzer._get_provider_from_model(current_model)
+        fallbacks = []
+        
+        # Add models from other providers first (most likely to work)
+        for provider, models in LLMStrategyAnalyzer.FALLBACK_FREE_MODELS.items():
+            if provider != current_provider:
+                fallbacks.extend(models)
+        
+        # Then add models from same provider but different models (in case it's model-specific)
+        if current_provider and current_provider in LLMStrategyAnalyzer.FALLBACK_FREE_MODELS:
+            for model in LLMStrategyAnalyzer.FALLBACK_FREE_MODELS[current_provider]:
+                if model != current_model:
+                    fallbacks.append(model)
+        
+        return fallbacks
+    
     def __init__(self, provider: str = "openrouter", model: Optional[str] = None, api_key: Optional[str] = None):
         self.provider = provider
         self.model = model
@@ -40,6 +99,10 @@ class LLMStrategyAnalyzer:
             self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
             if not self.model:
                 self.model = os.getenv("AI_ANALYZER_MODEL", "google/gemini-2.0-flash-exp:free")
+            
+            # Adjust rate limiting based on model type (free models need more throttling)
+            if self.model and ":free" in self.model.lower():
+                LLMStrategyAnalyzer._min_request_delay = 3.0  # More delay for free models
         elif provider == "openai":
             self.base_url = "https://api.openai.com/v1"
             self.api_key = api_key or os.getenv("OPENAI_API_KEY")
@@ -203,54 +266,241 @@ Focus on practical, actionable insights for options trading. Consider the specif
             logger.error(f"Base URL: {self.base_url}")
             return ""
     
-    def _call_openrouter(self, prompt: str) -> Optional[str]:
+    def _call_openrouter(self, prompt: str, max_retries: int = 3, try_fallbacks: bool = True) -> Optional[str]:
         """
         Call OpenRouter API directly - used by ai_confidence_scanner
         This is a simplified wrapper around _call_llm_api for direct calls
-        """
-        try:
-            logger.info(f"🤖 Direct OpenRouter call with model: {self.model}")
-            logger.debug(f"API Key present: {bool(self.api_key)}")
-            
-            # Use requests for direct API call
-            response = requests.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/sentient-trader",
-                    "X-Title": "Sentient Trader"
-                },
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 1500
-                },
-                timeout=30
-            )
-            
-            logger.info(f"OpenRouter response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                content = data['choices'][0]['message']['content']
-                logger.info(f"✅ OpenRouter API call successful - received {len(content)} characters")
-                logger.debug(f"OpenRouter response: {str(content)[:200]}...")
-                return content
-            else:
-                logger.error(f"❌ OpenRouter API error: {response.status_code} - {response.text}")
-                return None
         
-        except Exception as e:
-            logger.error(f"❌ Error calling OpenRouter: {e}", exc_info=True)
-            logger.error(f"API Key configured: {bool(self.api_key)}")
-            return None
+        Args:
+            prompt: The prompt to send to the API
+            max_retries: Maximum number of retry attempts for rate-limited requests
+            try_fallbacks: If True, try fallback models from different providers when rate-limited
+            
+        Returns:
+            API response content or None on failure
+        """
+        models_to_try = [self.model]
+        
+        # If fallbacks are enabled and we're using a free model, prepare fallback list
+        if try_fallbacks and self.model and ":free" in self.model.lower():
+            fallback_models = self._get_fallback_models(self.model)
+            models_to_try.extend(fallback_models)
+            logger.debug(f"🔄 Prepared {len(fallback_models)} fallback models from different providers")
+            logger.debug(f"📋 Fallback models: {fallback_models}")
+            
+            # Validate models - check for old/invalid model names
+            invalid_models = [m for m in fallback_models if "llama-3.1-8b" in m or "llama-3.2-3b" in m]
+            if invalid_models:
+                logger.warning(f"⚠️ Found outdated model names in fallback list: {invalid_models}. Please restart the application to load updated models.")
+        
+        # Try each model in sequence
+        for model_idx, model_to_use in enumerate(models_to_try):
+            # Check if this model is currently blacklisted
+            current_time = time.time()
+            if model_to_use in LLMStrategyAnalyzer._model_blacklist_until:
+                blacklist_until = LLMStrategyAnalyzer._model_blacklist_until[model_to_use]
+                if current_time < blacklist_until:
+                    wait_time = blacklist_until - current_time
+                    logger.debug(f"⏸️ Model {model_to_use} is blacklisted for {wait_time:.1f}s more, skipping...")
+                    continue
+            
+            # Rate limiting: wait if we're in a backoff period
+            if current_time < LLMStrategyAnalyzer._rate_limit_backoff_until:
+                wait_time = LLMStrategyAnalyzer._rate_limit_backoff_until - current_time
+                logger.warning(f"⏳ Rate limit backoff active, waiting {wait_time:.1f}s before request...")
+                time.sleep(wait_time)
+                current_time = time.time()
+            
+            # Throttling: ensure minimum delay between requests
+            time_since_last = current_time - LLMStrategyAnalyzer._last_request_time
+            if time_since_last < LLMStrategyAnalyzer._min_request_delay:
+                wait_time = LLMStrategyAnalyzer._min_request_delay - time_since_last
+                logger.debug(f"⏱️ Rate limiting: waiting {wait_time:.1f}s before next request...")
+                time.sleep(wait_time)
+            
+            # Retry loop with exponential backoff for this model
+            initial_delay = 5.0  # Start with 5 seconds
+            backoff_factor = 2.0
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    # Update last request time
+                    LLMStrategyAnalyzer._last_request_time = time.time()
+                    
+                    model_label = f"{model_to_use} (fallback {model_idx})" if model_idx > 0 else model_to_use
+                    logger.info(f"🤖 Direct OpenRouter call with model: {model_label} (attempt {attempt + 1}/{max_retries + 1})")
+                    logger.debug(f"API Key present: {bool(self.api_key)}")
+                    
+                    # Use requests for direct API call
+                    response = requests.post(
+                        url="https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/sentient-trader",
+                            "X-Title": "Sentient Trader"
+                        },
+                        json={
+                            "model": model_to_use,
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": prompt
+                                }
+                            ],
+                            "temperature": 0.3,
+                            "max_tokens": 1500
+                        },
+                        timeout=30
+                    )
+                    
+                    logger.info(f"OpenRouter response status: {response.status_code}")
+                    
+                    # Handle successful response
+                    if response.status_code == 200:
+                        data = response.json()
+                        content = data['choices'][0]['message']['content']
+                        model_used = model_to_use if model_idx == 0 else f"{model_to_use} (fallback)"
+                        logger.info(f"✅ OpenRouter API call successful with {model_used} - received {len(content)} characters")
+                        logger.debug(f"OpenRouter response: {str(content)[:200]}...")
+                        # Reset backoff on success
+                        LLMStrategyAnalyzer._rate_limit_backoff_until = 0
+                        # Remove from blacklist if it was there
+                        if model_to_use in LLMStrategyAnalyzer._model_blacklist_until:
+                            del LLMStrategyAnalyzer._model_blacklist_until[model_to_use]
+                        return content
+                    
+                    # Handle rate limiting (429)
+                    elif response.status_code == 429:
+                        error_msg = ""
+                        is_provider_limited = False
+                        try:
+                            error_data = response.json()
+                            error_msg = error_data.get('error', {}).get('message', response.text[:200])
+                            # Check if error mentions specific provider/model
+                            if "upstream" in error_msg.lower() or "provider" in error_msg.lower():
+                                is_provider_limited = True
+                        except:
+                            error_msg = response.text[:200]
+                        
+                        # If it's a provider-specific rate limit, blacklist this model and try next fallback
+                        if is_provider_limited and model_idx < len(models_to_try) - 1:
+                            # Blacklist this model for 10 minutes
+                            LLMStrategyAnalyzer._model_blacklist_until[model_to_use] = time.time() + 600
+                            provider = self._get_provider_from_model(model_to_use)
+                            logger.warning(
+                                f"⚠️ Provider-specific rate limit detected for {model_to_use} ({provider}). "
+                                f"Trying fallback model from different provider..."
+                            )
+                            break  # Break out of retry loop, try next model
+                        
+                        # Try to parse Retry-After header (if present)
+                        retry_after = response.headers.get('Retry-After')
+                        if retry_after:
+                            try:
+                                wait_time = float(retry_after)
+                            except ValueError:
+                                wait_time = initial_delay * (backoff_factor ** attempt)
+                        else:
+                            # Calculate exponential backoff
+                            wait_time = initial_delay * (backoff_factor ** attempt)
+                        
+                        # Cap maximum wait time at 5 minutes
+                        wait_time = min(wait_time, 300)
+                        
+                        # Set global backoff to prevent other requests
+                        LLMStrategyAnalyzer._rate_limit_backoff_until = time.time() + wait_time
+                        
+                        # If this is the last model, retry with backoff
+                        if model_idx == len(models_to_try) - 1 and attempt < max_retries:
+                            logger.warning(
+                                f"⚠️ OpenRouter rate limit (429) - {error_msg}. "
+                                f"Retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries + 1})..."
+                            )
+                            time.sleep(wait_time)
+                            continue
+                        elif model_idx < len(models_to_try) - 1:
+                            # Try next fallback model
+                            logger.warning(
+                                f"⚠️ Rate limit on {model_to_use}, trying next fallback model..."
+                            )
+                            break  # Break to try next model
+                        else:
+                            # All models exhausted
+                            logger.error(
+                                f"❌ OpenRouter rate limit (429) after trying {len(models_to_try)} models. "
+                                f"Error: {error_msg}"
+                            )
+                            logger.info(
+                                "💡 Tips to resolve rate limits:\n"
+                                "   1. Add your own provider API keys to OpenRouter: https://openrouter.ai/settings/integrations\n"
+                                "   2. Switch to a paid model instead of free tier\n"
+                                "   3. Reduce request frequency or batch requests\n"
+                                "   4. Wait a few minutes and try again\n"
+                                "   5. Consider using multiple OpenRouter API keys with different models"
+                            )
+                            return None
+                    
+                    # Handle 404 (model not found) - skip to next fallback
+                    elif response.status_code == 404:
+                        error_msg = ""
+                        try:
+                            error_data = response.json()
+                            error_msg = error_data.get('error', {}).get('message', response.text[:200])
+                        except Exception as e:
+                            error_msg = response.text[:200] if hasattr(response, 'text') else str(e)
+                        
+                        logger.warning(f"⚠️ Model not found (404): {model_to_use} - {error_msg}")
+                        
+                        # Blacklist this invalid model permanently (until restart)
+                        if model_to_use not in LLMStrategyAnalyzer._model_blacklist_until:
+                            LLMStrategyAnalyzer._model_blacklist_until[model_to_use] = time.time() + 86400  # 24 hours
+                        
+                        # If we have more fallbacks, try next model
+                        if model_idx < len(models_to_try) - 1:
+                            logger.info(f"🔄 Skipping invalid model {model_to_use}, trying next fallback model...")
+                            break  # Exit retry loop, move to next model
+                        else:
+                            logger.error(f"❌ All fallback models exhausted (404 on last model: {model_to_use})")
+                            return None
+                    
+                    # Handle other errors
+                    else:
+                        error_msg = response.text[:500]
+                        logger.error(f"❌ OpenRouter API error: {response.status_code} - {error_msg}")
+                        # If it's a server error (5xx) and we have fallbacks, try next model
+                        if model_idx < len(models_to_try) - 1 and response.status_code >= 500:
+                            logger.warning(f"⚠️ Server error on {model_to_use}, trying fallback...")
+                            break
+                        # Don't retry on non-rate-limit client errors (4xx except 404/429)
+                        return None
+                
+                except requests.exceptions.Timeout:
+                    if attempt < max_retries and model_idx == len(models_to_try) - 1:
+                        wait_time = initial_delay * (backoff_factor ** attempt)
+                        logger.warning(f"⏱️ OpenRouter timeout, retrying in {wait_time:.1f}s...")
+                        time.sleep(wait_time)
+                        continue
+                    elif model_idx < len(models_to_try) - 1:
+                        logger.warning(f"⏱️ Timeout on {model_to_use}, trying fallback model...")
+                        break
+                    else:
+                        logger.error("❌ OpenRouter API timeout after all retries and fallbacks")
+                        return None
+                
+                except Exception as e:
+                    logger.error(f"❌ Error calling OpenRouter: {e}", exc_info=True)
+                    logger.error(f"API Key configured: {bool(self.api_key)}")
+                    # If we have fallbacks, try next model
+                    if model_idx < len(models_to_try) - 1:
+                        logger.warning(f"⚠️ Error on {model_to_use}, trying fallback model...")
+                        break
+                    # Don't retry on unexpected errors
+                    return None
+        
+        # All models exhausted
+        logger.error(f"❌ All {len(models_to_try)} models exhausted, request failed")
+        return None
     
     def _parse_analysis_response(self, response: str, bot_config: Dict) -> StrategyAnalysis:
         """Parse LLM response into StrategyAnalysis object"""

@@ -424,46 +424,71 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     """
     Display single trade execution form
     """
-    # Trading pair selection
+    # Trading pair selection with custom input option
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Get available pairs from Kraken (cached in session state)
-        try:
-            # Cache asset pairs in session state to avoid repeated API calls
-            cache_key = 'crypto_asset_pairs_cache'
-            cache_timestamp_key = 'crypto_asset_pairs_cache_timestamp'
-            cache_ttl = 300  # 5 minutes
+        # Add input method selector
+        input_method = st.radio(
+            "Select input method:",
+            options=["Dropdown", "Custom Input"],
+            horizontal=True,
+            key="pair_input_method",
+            help="Use dropdown for common pairs or custom input to type any ticker"
+        )
+        
+        if input_method == "Dropdown":
+            # Get available pairs from Kraken (cached in session state)
+            try:
+                # Cache asset pairs in session state to avoid repeated API calls
+                cache_key = 'crypto_asset_pairs_cache'
+                cache_timestamp_key = 'crypto_asset_pairs_cache_timestamp'
+                cache_ttl = 300  # 5 minutes
+                
+                import time
+                current_time = time.time()
+                
+                # Check if cache exists and is still valid
+                if (cache_key in st.session_state and 
+                    cache_timestamp_key in st.session_state and
+                    current_time - st.session_state[cache_timestamp_key] < cache_ttl):
+                    asset_pairs = st.session_state[cache_key]
+                else:
+                    # Fetch fresh data
+                    asset_pairs = kraken_client.get_tradable_asset_pairs()
+                    st.session_state[cache_key] = asset_pairs
+                    st.session_state[cache_timestamp_key] = current_time
+                
+                pair_options = [pair['altname'] for pair in asset_pairs if pair['quote'] == 'USD' or pair['quote'] == 'USDT']
+                pair_options.sort()
+                
+                # Default to session state or first available
+                default_pair = st.session_state.get('crypto_quick_trade_pair', pair_options[0] if pair_options else 'BTC/USD')
+                
+                selected_pair = st.selectbox(
+                    "Trading Pair",
+                    options=pair_options,
+                    index=pair_options.index(default_pair) if default_pair in pair_options else 0,
+                    key="crypto_quick_trade_pair_dropdown"
+                )
+            except Exception as e:
+                st.error(f"Error loading trading pairs: {e}")
+                return
+        else:
+            # Custom text input for any ticker
+            selected_pair = st.text_input(
+                "Trading Pair (Symbol/USD)",
+                value=st.session_state.get('crypto_custom_pair', 'HIPPO/USD'),
+                key="crypto_custom_pair",
+                help="Enter any ticker symbol (e.g., HIPPO/USD, BTC/USD, ETH/USD). Format: SYMBOL/USD or SYMBOL/USDT",
+                placeholder="e.g., HIPPO/USD"
+            ).upper().strip()
             
-            import time
-            current_time = time.time()
-            
-            # Check if cache exists and is still valid
-            if (cache_key in st.session_state and 
-                cache_timestamp_key in st.session_state and
-                current_time - st.session_state[cache_timestamp_key] < cache_ttl):
-                asset_pairs = st.session_state[cache_key]
-            else:
-                # Fetch fresh data
-                asset_pairs = kraken_client.get_tradable_asset_pairs()
-                st.session_state[cache_key] = asset_pairs
-                st.session_state[cache_timestamp_key] = current_time
-            
-            pair_options = [pair['altname'] for pair in asset_pairs if pair['quote'] == 'USD' or pair['quote'] == 'USDT']
-            pair_options.sort()
-            
-            # Default to session state or first available
-            default_pair = st.session_state.get('crypto_quick_trade_pair', pair_options[0] if pair_options else 'BTC/USD')
-            
-            selected_pair = st.selectbox(
-                "Trading Pair",
-                options=pair_options,
-                index=pair_options.index(default_pair) if default_pair in pair_options else 0,
-                key="crypto_quick_trade_pair"
-            )
-        except Exception as e:
-            st.error(f"Error loading trading pairs: {e}")
-            return
+            # Validate format
+            if selected_pair and '/' not in selected_pair:
+                st.warning("⚠️ Please use format: SYMBOL/USD (e.g., HIPPO/USD)")
+            elif selected_pair:
+                st.info(f"✓ Will trade: **{selected_pair}**")
     
     with col2:
         st.write("")
@@ -474,6 +499,174 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
             horizontal=True,
             key="crypto_quick_direction"
         )
+    
+    # 🆕 ENHANCED SELL MODE: Show position selection when SELL is selected
+    if direction == "SELL":
+        st.markdown("---")
+        st.markdown("#### 💰 Select Position to Sell")
+        st.info("💡 **Tip:** Select a position from your Kraken account to get AI-powered exit analysis")
+        
+        # Fetch open positions
+        with st.spinner("Fetching your Kraken positions..."):
+            try:
+                positions = kraken_client.get_open_positions()
+                
+                if not positions:
+                    st.warning("⚠️ No open positions found in your Kraken account")
+                    st.info("You can still manually enter a trading pair below to place a SELL order")
+                else:
+                    # Display positions in a table
+                    st.markdown(f"**Found {len(positions)} open position(s):**")
+                    
+                    position_data = []
+                    for pos in positions:
+                        position_data.append({
+                            'Pair': pos.pair,
+                            'Volume': f"{pos.volume:.6f}",
+                            'Current Price': f"${pos.current_price:,.4f}",
+                            'Value (USD)': f"${pos.cost:,.2f}"
+                        })
+                    
+                    df = pd.DataFrame(position_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    
+                    # Position selector
+                    position_options = [f"{pos.pair} ({pos.volume:.6f} @ ${pos.current_price:,.4f})" for pos in positions]
+                    position_options.insert(0, "🔧 Manual Entry (enter pair below)")
+                    
+                    selected_position_idx = st.selectbox(
+                        "Select Position to Analyze",
+                        options=range(len(position_options)),
+                        format_func=lambda i: position_options[i],
+                        key="crypto_sell_position_selector"
+                    )
+                    
+                    # If a position is selected (not manual entry)
+                    if selected_position_idx > 0:
+                        selected_pos = positions[selected_position_idx - 1]
+                        selected_pair = selected_pos.pair
+                        
+                        # Auto-populate the pair
+                        st.session_state.crypto_custom_pair = selected_pair
+                        
+                        # Show AI Exit Analysis button
+                        st.markdown("---")
+                        if st.button("🤖 Get AI Exit Analysis", use_container_width=True, type="primary"):
+                            with st.spinner(f"🤖 AI analyzing exit timing for {selected_pair}..."):
+                                try:
+                                    from services.ai_exit_analyzer import analyze_exit_timing
+                                    
+                                    # Get exit analysis
+                                    exit_analysis = analyze_exit_timing(
+                                        kraken_client=kraken_client,
+                                        pair=selected_pair,
+                                        current_price=selected_pos.current_price,
+                                        position_size=selected_pos.volume,
+                                        entry_price=selected_pos.entry_price if selected_pos.entry_price > 0 else selected_pos.current_price
+                                    )
+                                    
+                                    # Store in session state
+                                    st.session_state.crypto_exit_analysis = exit_analysis
+                                    st.session_state.crypto_selected_position = selected_pos
+                                    
+                                    st.rerun()
+                                    
+                                except Exception as e:
+                                    st.error(f"AI exit analysis failed: {e}")
+                                    logger.error(f"Exit analysis error: {e}", exc_info=True)
+                        
+                        # Display exit analysis if available
+                        if 'crypto_exit_analysis' in st.session_state:
+                            exit_analysis = st.session_state.crypto_exit_analysis
+                            selected_pos = st.session_state.crypto_selected_position
+                            
+                            st.markdown("---")
+                            st.markdown("#### 🤖 AI Exit Recommendation")
+                            
+                            # Calculate P&L
+                            if selected_pos.entry_price > 0:
+                                pnl_pct = ((selected_pos.current_price - selected_pos.entry_price) / selected_pos.entry_price) * 100
+                                pnl_usd = (selected_pos.current_price - selected_pos.entry_price) * selected_pos.volume
+                            else:
+                                pnl_pct = 0
+                                pnl_usd = 0
+                            
+                            # Display P&L metrics
+                            pnl_col1, pnl_col2, pnl_col3, pnl_col4 = st.columns(4)
+                            pnl_col1.metric("Entry Price", f"${selected_pos.entry_price:,.4f}" if selected_pos.entry_price > 0 else "Unknown")
+                            pnl_col2.metric("Current Price", f"${selected_pos.current_price:,.4f}")
+                            pnl_col3.metric("P&L %", f"{pnl_pct:+.2f}%", delta=f"{pnl_pct:+.2f}%")
+                            pnl_col4.metric("P&L USD", f"${pnl_usd:+,.2f}", delta=f"{pnl_usd:+,.2f}")
+                            
+                            # AI Recommendation
+                            rec_col1, rec_col2 = st.columns([3, 1])
+                            with rec_col1:
+                                action = exit_analysis.get('action', 'HOLD')
+                                confidence = exit_analysis.get('confidence', 0)
+                                
+                                if action == 'SELL_NOW':
+                                    st.error(f"🚨 **AI says SELL NOW** (Confidence: {confidence:.0f}%)")
+                                elif action == 'TAKE_PARTIAL':
+                                    st.warning(f"⚠️ **AI suggests PARTIAL EXIT** (Confidence: {confidence:.0f}%)")
+                                elif action == 'HOLD':
+                                    st.success(f"✅ **AI says HOLD** (Confidence: {confidence:.0f}%)")
+                                else:
+                                    st.info(f"ℹ️ **AI says {action}** (Confidence: {confidence:.0f}%)")
+                            
+                            with rec_col2:
+                                st.metric("AI Score", f"{exit_analysis.get('score', 0):.0f}/100")
+                            
+                            # AI Reasoning
+                            st.info(f"**💡 AI Reasoning:** {exit_analysis.get('reasoning', 'No reasoning provided')}")
+                            
+                            # Key signals
+                            if 'signals' in exit_analysis and exit_analysis['signals']:
+                                st.markdown("**📊 Key Signals:**")
+                                for signal in exit_analysis['signals'][:5]:
+                                    st.write(f"- {signal}")
+                            
+                            # Suggested exit price/levels
+                            if 'suggested_exit_price' in exit_analysis:
+                                st.success(f"💰 **Suggested Exit Price:** ${exit_analysis['suggested_exit_price']:,.4f}")
+                            
+                            # Quick action buttons
+                            st.markdown("---")
+                            action_col1, action_col2, action_col3 = st.columns(3)
+                            
+                            with action_col1:
+                                if st.button("🚀 Execute SELL", use_container_width=True, type="primary"):
+                                    # Auto-populate analysis for execution
+                                    st.session_state.crypto_analysis = {
+                                        'pair': selected_pair,
+                                        'direction': 'SELL',
+                                        'current_price': selected_pos.current_price,
+                                        'stop_loss': exit_analysis.get('stop_loss', selected_pos.current_price * 0.95),
+                                        'take_profit': exit_analysis.get('take_profit', selected_pos.current_price * 1.05),
+                                        'position_size': selected_pos.cost,
+                                        'leverage': 1.0,
+                                        'risk_reward_ratio': 2.0
+                                    }
+                                    st.success("✅ Trade setup populated! Scroll down to execute.")
+                                    st.rerun()
+                            
+                            with action_col2:
+                                if st.button("📊 Refresh Analysis", use_container_width=True):
+                                    if 'crypto_exit_analysis' in st.session_state:
+                                        del st.session_state.crypto_exit_analysis
+                                    st.rerun()
+                            
+                            with action_col3:
+                                if st.button("🔄 Clear", use_container_width=True):
+                                    if 'crypto_exit_analysis' in st.session_state:
+                                        del st.session_state.crypto_exit_analysis
+                                    if 'crypto_selected_position' in st.session_state:
+                                        del st.session_state.crypto_selected_position
+                                    st.rerun()
+            
+            except Exception as e:
+                st.error(f"Failed to fetch positions: {e}")
+                logger.error(f"Position fetch error: {e}", exc_info=True)
+                st.info("You can still manually enter a trading pair below to place a SELL order")
     
     # Position sizing
     st.markdown("#### Position Sizing")
@@ -525,36 +718,55 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     analysis_col1, analysis_col2, analysis_col3 = st.columns([2, 1, 1])
     
     with analysis_col1:
-        if st.button("🔍 Analyze Opportunity", use_container_width=True):
-            with st.spinner("Analyzing opportunity..."):
+        if st.button("🤖 AI Entry Analysis", use_container_width=True, type="primary"):
+            with st.spinner("🤖 AI analyzing entry timing..."):
                 try:
-                    # Get current price
-                    ticker_info = kraken_client.get_ticker_info(selected_pair)
-                    current_price = float(ticker_info.get('c', [0])[0])
+                    # Initialize AI Entry Assistant
+                    from services.ai_entry_assistant import get_ai_entry_assistant
+                    from services.llm_strategy_analyzer import LLMStrategyAnalyzer
                     
-                    # Calculate stop loss and take profit
-                    if direction == "BUY":
-                        stop_loss = current_price * (1 - risk_pct / 100)
-                        take_profit = current_price * (1 + take_profit_pct / 100)
+                    if 'ai_entry_assistant' not in st.session_state:
+                        llm_analyzer = LLMStrategyAnalyzer()
+                        entry_assistant = get_ai_entry_assistant(
+                            kraken_client=kraken_client,
+                            llm_analyzer=llm_analyzer,
+                            check_interval_seconds=60,
+                            enable_auto_entry=False  # Manual approval required by default
+                        )
+                        st.session_state.ai_entry_assistant = entry_assistant
+                        # Start monitoring if not running
+                        if not entry_assistant.is_running:
+                            entry_assistant.start_monitoring()
                     else:
-                        stop_loss = current_price * (1 + risk_pct / 100)
-                        take_profit = current_price * (1 - take_profit_pct / 100)
+                        entry_assistant = st.session_state.ai_entry_assistant
+                    
+                    # Get AI entry analysis
+                    entry_analysis = entry_assistant.analyze_entry(
+                        pair=selected_pair,
+                        side=direction,
+                        position_size=position_size,
+                        risk_pct=risk_pct,
+                        take_profit_pct=take_profit_pct
+                    )
                     
                     # Store in session state
+                    st.session_state.crypto_entry_analysis = entry_analysis
                     st.session_state.crypto_analysis = {
                         'pair': selected_pair,
                         'direction': direction,
-                        'current_price': current_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': take_profit,
+                        'current_price': entry_analysis.current_price,
+                        'stop_loss': entry_analysis.suggested_stop or (entry_analysis.current_price * (1 - risk_pct / 100)),
+                        'take_profit': entry_analysis.suggested_target or (entry_analysis.current_price * (1 + take_profit_pct / 100)),
                         'position_size': position_size,
                         'leverage': leverage,
-                        'risk_reward_ratio': take_profit_pct / risk_pct
+                        'risk_reward_ratio': entry_analysis.risk_reward_ratio if entry_analysis.risk_reward_ratio > 0 else (take_profit_pct / risk_pct)
                     }
                     
+                    logger.info(f"🤖 AI Entry Analysis: {entry_analysis.action} (Confidence: {entry_analysis.confidence:.1f}%)")
+                    
                 except Exception as e:
-                    st.error(f"Analysis failed: {e}")
-                    logger.error(f"AI analysis error: {e}", exc_info=True)
+                    st.error(f"AI analysis failed: {e}")
+                    logger.error(f"AI entry analysis error: {e}", exc_info=True)
     
     with analysis_col2:
         if st.button("📊 Get Market Data", use_container_width=True):
@@ -565,11 +777,62 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                 except Exception as e:
                     st.error(f"Failed to fetch market data: {e}")
     
+    # Display AI entry analysis if available
+    if 'crypto_entry_analysis' in st.session_state:
+        entry_analysis = st.session_state.crypto_entry_analysis
+        
+        st.markdown("---")
+        st.markdown("#### 🤖 AI Entry Recommendation")
+        
+        # Confidence-based color coding
+        if entry_analysis.confidence >= 85:
+            confidence_color = "🟢"  # High confidence - green
+        elif entry_analysis.confidence >= 70:
+            confidence_color = "🟡"  # Medium confidence - yellow
+        else:
+            confidence_color = "🔴"  # Low confidence - red
+        
+        # Display recommendation with styling
+        rec_col1, rec_col2 = st.columns([3, 1])
+        with rec_col1:
+            st.markdown(f"**Action:** `{entry_analysis.action}` {confidence_color}")
+            st.markdown(f"**Confidence:** {entry_analysis.confidence:.1f}% | **Urgency:** {entry_analysis.urgency}")
+        with rec_col2:
+            st.metric("Technical", f"{entry_analysis.technical_score:.0f}/100")
+            st.metric("Timing", f"{entry_analysis.timing_score:.0f}/100")
+        
+        # AI Reasoning
+        st.info(f"**💡 AI Reasoning:** {entry_analysis.reasoning}")
+        
+        # Scores breakdown
+        score_cols = st.columns(4)
+        score_cols[0].metric("Technical Score", f"{entry_analysis.technical_score:.0f}/100")
+        score_cols[1].metric("Trend Score", f"{entry_analysis.trend_score:.0f}/100")
+        score_cols[2].metric("Timing Score", f"{entry_analysis.timing_score:.0f}/100")
+        score_cols[3].metric("Risk Score", f"{entry_analysis.risk_score:.0f}/100", 
+                            delta="Lower is better" if entry_analysis.risk_score < 50 else "Higher risk",
+                            delta_color="normal" if entry_analysis.risk_score < 50 else "inverse")
+        
+        # Action-specific guidance
+        if entry_analysis.action == "ENTER_NOW":
+            st.success("✅ **AI says ENTER NOW** - Excellent setup detected!")
+        elif entry_analysis.action == "WAIT_FOR_PULLBACK":
+            wait_price_text = f" to ${entry_analysis.wait_for_price:,.6f}" if entry_analysis.wait_for_price else ""
+            wait_rsi_text = f" (RSI < {entry_analysis.wait_for_rsi:.0f})" if entry_analysis.wait_for_rsi else ""
+            st.warning(f"⏳ **AI says WAIT FOR PULLBACK**{wait_price_text}{wait_rsi_text}")
+        elif entry_analysis.action == "WAIT_FOR_BREAKOUT":
+            st.warning(f"⏳ **AI says WAIT FOR BREAKOUT** - Consolidating, wait for confirmation")
+        elif entry_analysis.action == "PLACE_LIMIT_ORDER":
+            st.info(f"📝 **AI suggests LIMIT ORDER** at ${entry_analysis.suggested_entry:,.6f}")
+        else:  # DO_NOT_ENTER
+            st.error("❌ **AI says DO NOT ENTER** - Poor setup, avoid this trade")
+    
     # Display analysis results if available
     if 'crypto_analysis' in st.session_state:
         analysis = st.session_state.crypto_analysis
         
-        st.markdown("#### 📈 Analysis Results")
+        st.markdown("---")
+        st.markdown("#### 📈 Trade Setup")
         
         metric_cols = st.columns(4)
         metric_cols[0].metric("Current Price", f"${analysis['current_price']:,.4f}")
@@ -577,10 +840,18 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         metric_cols[2].metric("Take Profit", f"${analysis['take_profit']:,.4f}")
         metric_cols[3].metric("R:R Ratio", f"{analysis['risk_reward_ratio']:.2f}")
         
-        # Execute trade button
+        # Action buttons based on AI recommendation
         st.markdown("---")
         
-        exec_col1, exec_col2, exec_col3 = st.columns([2, 1, 1])
+        # Check if we have AI entry analysis
+        has_entry_analysis = 'crypto_entry_analysis' in st.session_state
+        entry_analysis = st.session_state.get('crypto_entry_analysis')
+        
+        # Determine button layout based on AI recommendation
+        if has_entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+            exec_col1, exec_col2, exec_col3 = st.columns([1, 1, 1])
+        else:
+            exec_col1, exec_col2, exec_col3 = st.columns([2, 1, 1])
         
         with exec_col1:
             # Check for duplicate execution protection
@@ -595,7 +866,22 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                         execution_timestamp_key in st.session_state and
                         current_time - st.session_state[execution_timestamp_key] < 30)
             
-            if st.button("🚀 Execute Trade", use_container_width=True, type="primary", disabled=is_recent):
+            # Determine button label and type based on AI confidence
+            if has_entry_analysis:
+                if entry_analysis.confidence >= 85:
+                    button_label = "🚀 Execute Now (AI Approved)"
+                    button_type = "primary"
+                elif entry_analysis.confidence >= 70:
+                    button_label = "⚠️ Execute (Medium Confidence)"
+                    button_type = "secondary"
+                else:
+                    button_label = "🛑 Execute Anyway (Low Confidence)"
+                    button_type = "secondary"
+            else:
+                button_label = "🚀 Execute Trade"
+                button_type = "primary"
+            
+            if st.button(button_label, use_container_width=True, type=button_type, disabled=is_recent):
                 if is_recent:
                     st.warning("⚠️ **Duplicate execution prevented!** You just executed this trade. Please wait a moment before executing again.")
                 else:
@@ -604,17 +890,54 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     st.session_state[execution_timestamp_key] = current_time
                     execute_crypto_trade(kraken_client, analysis)
         
-        with exec_col2:
-            if st.button("💾 Save Setup", use_container_width=True):
-                save_trade_setup(analysis)
-                st.success("Setup saved!")
-        
-        with exec_col3:
-            def reset_analysis():
-                if 'crypto_analysis' in st.session_state:
-                    del st.session_state.crypto_analysis
+        # Add "Monitor & Alert" button if AI says to wait
+        if has_entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+            with exec_col2:
+                if st.button("🔔 Monitor & Alert", use_container_width=True, type="primary"):
+                    try:
+                        entry_assistant = st.session_state.get('ai_entry_assistant')
+                        if entry_assistant:
+                            opp_id = entry_assistant.monitor_entry_opportunity(
+                                pair=analysis['pair'],
+                                side=analysis['direction'],
+                                position_size=analysis['position_size'],
+                                risk_pct=risk_pct,
+                                take_profit_pct=take_profit_pct,
+                                analysis=entry_analysis,
+                                auto_execute=False
+                            )
+                            st.success(f"✅ Monitoring {analysis['pair']} for entry opportunity!")
+                            st.info(f"📊 Will alert when conditions improve (Opportunity ID: {opp_id})")
+                            logger.info(f"🔔 User set up monitoring for {analysis['pair']}")
+                        else:
+                            st.error("AI Entry Assistant not initialized")
+                    except Exception as e:
+                        st.error(f"Failed to set up monitoring: {e}")
+                        logger.error(f"Monitor setup error: {e}", exc_info=True)
             
-            st.button("🔄 Reset", use_container_width=True, on_click=reset_analysis)
+            with exec_col3:
+                def reset_analysis():
+                    if 'crypto_analysis' in st.session_state:
+                        del st.session_state.crypto_analysis
+                    if 'crypto_entry_analysis' in st.session_state:
+                        del st.session_state.crypto_entry_analysis
+                
+                st.button("🔄 Reset", use_container_width=True, on_click=reset_analysis)
+        else:
+            # Normal layout without monitoring button
+            with exec_col2:
+                if st.button("💾 Save Setup", use_container_width=True):
+                    save_trade_setup(analysis, crypto_config)
+                    st.success("Setup saved!")
+            
+            with exec_col3:
+                def reset_analysis():
+                    if 'crypto_analysis' in st.session_state:
+                        del st.session_state.crypto_analysis
+                    if 'crypto_entry_analysis' in st.session_state:
+                        del st.session_state.crypto_entry_analysis
+                
+                st.button("🔄 Reset", use_container_width=True, on_click=reset_analysis)
 
 
 def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
@@ -664,6 +987,97 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                         'status': result.status,
                         'timestamp': result.timestamp.isoformat() if hasattr(result.timestamp, 'isoformat') else str(result.timestamp)
                     })
+                    
+                    # 🤖 NEW: Add to AI Position Manager for intelligent monitoring
+                    try:
+                        import time
+                        from services.ai_crypto_position_manager import get_ai_position_manager
+                        
+                        # Get or initialize AI position manager
+                        if 'ai_position_manager' not in st.session_state:
+                            from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                            llm_analyzer = LLMStrategyAnalyzer()
+                            
+                            ai_manager = get_ai_position_manager(
+                                kraken_client=kraken_client,
+                                llm_analyzer=llm_analyzer,
+                                check_interval_seconds=60,
+                                enable_ai_decisions=True,
+                                enable_trailing_stops=True,
+                                enable_breakeven_moves=True,
+                                enable_partial_exits=True
+                            )
+                            st.session_state.ai_position_manager = ai_manager
+                            
+                            # Start monitoring loop if not running
+                            if not ai_manager.is_running:
+                                ai_manager.start_monitoring_loop()
+                                logger.info("🤖 AI Position Manager monitoring loop started")
+                        else:
+                            ai_manager = st.session_state.ai_position_manager
+                        
+                        # Add position to AI monitoring
+                        trade_id = f"{analysis['pair']}_{order_id}_{int(time.time())}"
+                        success = ai_manager.add_position(
+                            trade_id=trade_id,
+                            pair=analysis['pair'],
+                            side=analysis['direction'],
+                            volume=quantity,
+                            entry_price=analysis['current_price'],
+                            stop_loss=analysis.get('stop_loss'),
+                            take_profit=analysis.get('take_profit'),
+                            strategy=analysis.get('strategy', 'Manual'),
+                            entry_order_id=order_id
+                        )
+                        
+                        if success:
+                            st.success("🤖 AI monitoring activated - Position will be intelligently managed!")
+                            logger.info(f"🤖 Added {analysis['pair']} to AI position manager (ID: {trade_id})")
+                        
+                    except Exception as ai_err:
+                        logger.warning(f"Could not add to AI position manager: {ai_err}")
+                        # Don't fail the trade if AI monitoring fails
+                    
+                    # Log to unified journal (even if not AI-managed)
+                    try:
+                        from services.unified_trade_journal import get_unified_journal, UnifiedTradeEntry, TradeType
+                        journal = get_unified_journal()
+                        
+                        # Calculate risk/reward percentages
+                        if analysis['direction'] == 'BUY':
+                            risk_pct = ((analysis['current_price'] - analysis.get('stop_loss', 0)) / analysis['current_price']) * 100 if analysis.get('stop_loss') else 2.0
+                            reward_pct = ((analysis.get('take_profit', 0) - analysis['current_price']) / analysis['current_price']) * 100 if analysis.get('take_profit') else 5.0
+                        else:
+                            risk_pct = ((analysis.get('stop_loss', 0) - analysis['current_price']) / analysis['current_price']) * 100 if analysis.get('stop_loss') else 2.0
+                            reward_pct = ((analysis['current_price'] - analysis.get('take_profit', 0)) / analysis['current_price']) * 100 if analysis.get('take_profit') else 5.0
+                        
+                        rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+                        
+                        trade_entry = UnifiedTradeEntry(
+                            trade_id=f"{analysis['pair']}_{order_id}_{int(time.time())}",
+                            trade_type=TradeType.CRYPTO.value,
+                            symbol=analysis['pair'],
+                            side=analysis['direction'],
+                            entry_time=datetime.now(),
+                            entry_price=analysis['current_price'],
+                            quantity=quantity,
+                            position_size_usd=analysis['position_size'],
+                            stop_loss=analysis.get('stop_loss', 0),
+                            take_profit=analysis.get('take_profit', 0),
+                            risk_pct=risk_pct,
+                            reward_pct=reward_pct,
+                            risk_reward_ratio=rr_ratio,
+                            strategy=analysis.get('strategy', 'Manual'),
+                            ai_managed='ai_position_manager' in st.session_state,
+                            broker="KRAKEN",
+                            order_id=order_id,
+                            status="OPEN"
+                        )
+                        
+                        journal.log_trade_entry(trade_entry)
+                        logger.info(f"📝 Logged crypto trade to unified journal")
+                    except Exception as journal_err:
+                        logger.warning(f"Could not log to unified journal: {journal_err}")
                 
                 # Send Discord notification if configured
                 try:
@@ -693,12 +1107,20 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
         logger.error(f"Trade execution error: {e}", exc_info=True)
 
 
-def save_trade_setup(analysis: Dict):
+def save_trade_setup(analysis: Dict, crypto_config=None):
     """
     Save trade setup to watchlist or configuration
+    
+    Args:
+        analysis: Dict containing trade analysis data with 'pair' key
+        crypto_config: Optional crypto config object with CRYPTO_WATCHLIST
     """
     try:
-        # Add to crypto watchlist
+        # Add to crypto watchlist if config provided
+        if crypto_config is None:
+            logger.debug("No crypto_config provided, skipping watchlist save")
+            return
+            
         if hasattr(analysis['pair'], 'replace'):
             ticker = analysis['pair'].replace('/USD', '').replace('/USDT', '')
         else:
@@ -850,19 +1272,32 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         st.divider()
         st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs)} pairs)")
         
+        # Display selected pairs for confirmation
+        st.info(f"**Selected pairs:** {', '.join(selected_pairs)}")
+        
         # Check if execution is in progress
         execution_key = f"crypto_bulk_execution_{hash(tuple(sorted(selected_pairs)))}_{direction}_{position_size}"
         is_executing = st.session_state.get(execution_key, False)
         
-        if st.button("🚀 Execute Bulk Trades", type="primary", use_container_width=True, disabled=is_executing):
-            execute_bulk_trades(
-                kraken_client,
-                selected_pairs,
-                direction,
-                position_size,
-                risk_pct,
-                take_profit_pct
-            )
+        # Confirmation checkbox
+        confirm_key = f"confirm_bulk_custom_{hash(tuple(sorted(selected_pairs)))}"
+        confirm = st.checkbox(
+            f"⚠️ I confirm I want to execute {len(selected_pairs)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_pairs):.2f})",
+            key=confirm_key
+        )
+        
+        if st.button("🚀 Execute Bulk Trades", type="primary", use_container_width=True, disabled=is_executing or not confirm):
+            if not confirm:
+                st.warning("Please confirm by checking the box above")
+            else:
+                execute_bulk_trades(
+                    kraken_client,
+                    selected_pairs,
+                    direction,
+                    position_size,
+                    risk_pct,
+                    take_profit_pct
+                )
         
     except Exception as e:
         st.error(f"Error loading trading pairs: {e}")
@@ -896,9 +1331,9 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         selected_symbols = st.multiselect(
             "Select Symbols to Trade",
             options=watchlist_symbols,
-            default=watchlist_symbols[:10] if len(watchlist_symbols) > 10 else watchlist_symbols,
+            default=[],  # Start with nothing selected for safety
             key="crypto_bulk_watchlist_pairs",
-            help="Select which watchlist symbols to trade (default: first 10)"
+            help="⚠️ Explicitly select which symbols you want to trade. Nothing is pre-selected for your safety."
         )
         
         if not selected_symbols:
@@ -1004,19 +1439,32 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         st.divider()
         st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols)} symbols)")
         
+        # Display selected symbols for confirmation
+        st.info(f"**Selected symbols:** {', '.join(selected_symbols)}")
+        
         # Check if execution is in progress
         execution_key = f"crypto_bulk_execution_{hash(tuple(sorted(selected_symbols)))}_{direction}_{position_size}"
         is_executing = st.session_state.get(execution_key, False)
         
-        if st.button("🚀 Execute Bulk Watchlist Trades", type="primary", use_container_width=True, disabled=is_executing):
-            execute_bulk_trades(
-                kraken_client,
-                selected_symbols,
-                direction,
-                position_size,
-                risk_pct,
-                take_profit_pct
-            )
+        # Confirmation checkbox
+        confirm_key = f"confirm_bulk_watchlist_{hash(tuple(sorted(selected_symbols)))}"
+        confirm = st.checkbox(
+            f"⚠️ I confirm I want to execute {len(selected_symbols)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_symbols):.2f})",
+            key=confirm_key
+        )
+        
+        if st.button("🚀 Execute Bulk Watchlist Trades", type="primary", use_container_width=True, disabled=is_executing or not confirm):
+            if not confirm:
+                st.warning("Please confirm by checking the box above")
+            else:
+                execute_bulk_trades(
+                    kraken_client,
+                    selected_symbols,
+                    direction,
+                    position_size,
+                    risk_pct,
+                    take_profit_pct
+                )
         
     except Exception as e:
         st.error(f"Error loading watchlist: {e}")
@@ -1257,6 +1705,100 @@ def execute_bulk_trades(
                     })
                     
                     logger.info(f"✅ Order {order_id} placed successfully for {pair} - {direction} {quantity:.6f} @ ${current_price:.4f}")
+                    
+                    # 📝 LOG TO UNIFIED JOURNAL
+                    try:
+                        from services.unified_trade_journal import get_unified_journal, UnifiedTradeEntry, TradeType
+                        from datetime import datetime
+                        journal = get_unified_journal()
+                        
+                        # Calculate risk/reward percentages
+                        if direction == "BUY":
+                            risk_pct = ((current_price - stop_loss) / current_price) * 100
+                            reward_pct = ((take_profit - current_price) / current_price) * 100
+                        else:
+                            risk_pct = ((stop_loss - current_price) / current_price) * 100
+                            reward_pct = ((current_price - take_profit) / current_price) * 100
+                        
+                        rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+                        
+                        trade_entry = UnifiedTradeEntry(
+                            trade_id=f"{pair}_{order_id}_{int(datetime.now().timestamp())}",
+                            trade_type=TradeType.CRYPTO.value,
+                            symbol=pair,
+                            side=direction,
+                            entry_time=datetime.now(),
+                            entry_price=current_price,
+                            quantity=quantity,
+                            position_size_usd=position_size,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            risk_pct=risk_pct,
+                            reward_pct=reward_pct,
+                            risk_reward_ratio=rr_ratio,
+                            strategy="Bulk Trade",
+                            ai_managed=False,  # Will be updated if added to AI manager
+                            broker="KRAKEN",
+                            order_id=order_id,
+                            status="OPEN"
+                        )
+                        
+                        journal.log_trade_entry(trade_entry)
+                        logger.info(f"📝 Logged {pair} to unified journal")
+                    except Exception as journal_err:
+                        logger.warning(f"Could not log to unified journal: {journal_err}")
+                    
+                    # 🤖 ADD TO AI POSITION MANAGER
+                    try:
+                        from services.ai_crypto_position_manager import get_ai_position_manager
+                        from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                        import streamlit as st
+                        
+                        # Get or initialize AI position manager
+                        if 'ai_position_manager' not in st.session_state:
+                            llm_analyzer = LLMStrategyAnalyzer()
+                            ai_manager = get_ai_position_manager(
+                                kraken_client=kraken_client,
+                                llm_analyzer=llm_analyzer,
+                                check_interval_seconds=60,
+                                enable_ai_decisions=True,
+                                enable_trailing_stops=True,
+                                enable_breakeven_moves=True,
+                                enable_partial_exits=True
+                            )
+                            st.session_state.ai_position_manager = ai_manager
+                            if not ai_manager.is_running:
+                                ai_manager.start_monitoring_loop()
+                                logger.info("🤖 AI Position Manager started")
+                        else:
+                            ai_manager = st.session_state.ai_position_manager
+                        
+                        # Add position to AI monitoring
+                        trade_id = f"{pair}_{order_id}_{int(time.time())}"
+                        success = ai_manager.add_position(
+                            trade_id=trade_id,
+                            pair=pair,
+                            side=direction,
+                            volume=quantity,
+                            entry_price=current_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            strategy="Bulk Trade",
+                            entry_order_id=order_id
+                        )
+                        
+                        if success:
+                            logger.info(f"🤖 Added {pair} to AI position manager (ID: {trade_id})")
+                            
+                            # Update journal to mark as AI-managed
+                            try:
+                                from services.unified_trade_journal import get_unified_journal
+                                journal = get_unified_journal()
+                                # Note: Would need to add method to update ai_managed flag
+                            except:
+                                pass
+                    except Exception as ai_err:
+                        logger.warning(f"Could not add {pair} to AI position manager: {ai_err}")
                     
                     # Send Discord notification
                     try:

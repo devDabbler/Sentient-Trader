@@ -13,6 +13,15 @@ from utils.caching import get_cached_news
 class NewsAnalyzer:
     """Fetch and analyze news and catalysts"""
     
+    def __init__(self, llm_analyzer=None):
+        """
+        Initialize NewsAnalyzer.
+        
+        Args:
+            llm_analyzer: Optional LLM strategy analyzer for enhanced analysis (not currently used)
+        """
+        self.llm_analyzer = llm_analyzer
+    
     @staticmethod
     def get_stock_news(ticker: str, max_articles: int = 5) -> List[Dict]:
         """Fetch recent news for a stock with enhanced error handling"""

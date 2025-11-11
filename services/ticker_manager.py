@@ -7,8 +7,9 @@ watchlists, and quick-access lists using a Supabase backend.
 
 import json
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from loguru import logger
+from postgrest import CountMethod
 from clients.supabase_client import get_supabase_client
 
 
@@ -41,11 +42,15 @@ class TickerManager:
             logger.error(f"Error type: {type(e).__name__}")
             return False
 
-    def add_ticker(self, ticker: str, name: str = None, sector: str = None, 
-                   ticker_type: str = 'stock', notes: str = None, tags: List[str] = None,
-                   auto_trade_enabled: bool = False, auto_trade_strategy: str = None) -> bool:
+    def add_ticker(self, ticker: Optional[str], name: Optional[str] = None, sector: Optional[str] = None, 
+                   ticker_type: str = 'stock', notes: Optional[str] = None, tags: Optional[List[str]] = None,
+                   auto_trade_enabled: bool = False, auto_trade_strategy: Optional[str] = None) -> bool:
         if not self._check_client(): 
             logger.error("Supabase client not available")
+            return False
+
+        if not ticker or not isinstance(ticker, str):
+            logger.error(f"Invalid ticker provided: {ticker}. Ticker must be a non-empty string.")
             return False
         try:
             ticker = ticker.upper()
@@ -100,7 +105,7 @@ class TickerManager:
             logger.error(f"Error getting ticker {ticker}: {e}")
             return None
 
-    def get_all_tickers(self, ticker_type: str = None, limit: int = 100) -> List[Dict]:
+    def get_all_tickers(self, ticker_type: Optional[str] = None, limit: int = 100) -> List[Dict]:
         if not self._check_client(): return []
         try:
             query = self.supabase.table('saved_tickers').select('*')
@@ -160,11 +165,11 @@ class TickerManager:
         except Exception as e:
             logger.error(f"Error recording access for {ticker}: {e}")
     
-    def set_auto_trade(self, ticker: str, enabled: bool, strategy: str = None) -> bool:
+    def set_auto_trade(self, ticker: str, enabled: bool, strategy: Optional[str] = None) -> bool:
         """Enable/disable auto-trading for a specific ticker"""
         if not self._check_client(): return False
         try:
-            update_data = {'auto_trade_enabled': enabled}
+            update_data: Dict[str, Any] = {'auto_trade_enabled': enabled}
             if strategy:
                 update_data['auto_trade_strategy'] = strategy
             
@@ -203,7 +208,7 @@ class TickerManager:
             logger.error(f"Error searching tickers for '{query}': {e}")
             return []
 
-    def create_watchlist(self, name: str, description: str = None) -> bool:
+    def create_watchlist(self, name: str, description: Optional[str] = None) -> bool:
         if not self._check_client(): return False
         try:
             current_time = datetime.now(timezone.utc).isoformat()
@@ -249,7 +254,9 @@ class TickerManager:
         if not self._check_client(): return []
         try:
             response = self.supabase.rpc('get_watchlist_tickers_by_name', {'watchlist_name_param': watchlist_name}).execute()
-            return [item['ticker'] for item in response.data]
+            if response.data and isinstance(response.data, list):
+                return [str(item.get('ticker', '')) for item in response.data if isinstance(item, dict) and 'ticker' in item]
+            return []
         except Exception as e:
             logger.error(f"Error getting tickers for watchlist {watchlist_name}: {e}")
             return []
@@ -331,6 +338,70 @@ class TickerManager:
             logger.debug(f"Attempted data: {update_data if 'update_data' in locals() else 'N/A'}")
             return False
 
+    def update_ai_entry_analysis(self, ticker: str, entry_analysis: Dict) -> bool:
+        """
+        Update AI entry analysis data for a ticker.
+
+        Args:
+            ticker: The stock ticker symbol.
+            entry_analysis: A dictionary containing the AI entry analysis results.
+                            Expected keys: 'confidence', 'action', 'reasons', 'targets'.
+
+        Returns:
+            True if the update was successful, False otherwise.
+        """
+        if not self._check_client():
+            return False
+
+        try:
+            ticker = ticker.upper()
+            current_time = datetime.now(timezone.utc).isoformat()
+
+            update_data = {
+                'ticker': ticker,
+                'ai_entry_timestamp': current_time,
+            }
+
+            # Map analysis keys to database columns and their types
+            field_mapping = {
+                'confidence': ('ai_entry_confidence', float),
+                'action': ('ai_entry_action', str),
+                'reasons': ('ai_entry_reasons', list),
+                'targets': ('ai_entry_targets', dict),
+            }
+
+            for key, (db_field, type_cast) in field_mapping.items():
+                if key in entry_analysis and entry_analysis[key] is not None:
+                    try:
+                        value = entry_analysis[key]
+                        if isinstance(value, (list, dict)):
+                            update_data[db_field] = json.dumps(value)
+                        else:
+                            update_data[db_field] = type_cast(value)
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Skipping {db_field} for {ticker} due to type conversion error: {e}")
+
+            self.supabase.table('saved_tickers').upsert(
+                update_data,
+                on_conflict='ticker'
+            ).execute()
+
+            logger.info(f"Successfully updated AI entry analysis for {ticker}.")
+            return True
+
+        except Exception as e:
+            error_str = str(e)
+            if "column" in error_str and "does not exist" in error_str:
+                 logger.warning(
+                    f"AI entry columns not found in 'saved_tickers' table. "
+                    f"Please run the migration: migrations/add_ai_entry_columns.sql"
+                )
+            else:
+                logger.error(f"Error updating AI entry analysis for {ticker}: {e}")
+            
+            logger.debug(f"Attempted data for {ticker}: {update_data if 'update_data' in locals() else 'N/A'}")
+            return False
+
     def should_update_analysis(self, ticker: str, max_age_hours: float = 1.0) -> bool:
         """
         Check if ticker analysis needs updating based on staleness.
@@ -356,15 +427,14 @@ class TickerManager:
         except Exception as e:
             logger.debug(f"Error checking analysis staleness for {ticker}: {e}")
             return True  # Update if there's an error
-    
     def get_statistics(self) -> Dict:
         if not self._check_client(): return {}
         try:
             # This can be optimized with a single RPC call in the future
-            total_tickers = self.supabase.table('saved_tickers').select('id', count='exact').execute().count
-            stock_count = self.supabase.table('saved_tickers').select('id', count='exact').eq('type', 'stock').execute().count
-            penny_count = self.supabase.table('saved_tickers').select('id', count='exact').eq('type', 'penny_stock').execute().count
-            watchlist_count = self.supabase.table('watchlists').select('id', count='exact').execute().count
+            total_tickers = self.supabase.table('saved_tickers').select('id', count=CountMethod.exact).execute().count
+            stock_count = self.supabase.table('saved_tickers').select('id', count=CountMethod.exact).eq('type', 'stock').execute().count
+            penny_count = self.supabase.table('saved_tickers').select('id', count=CountMethod.exact).eq('type', 'penny_stock').execute().count
+            watchlist_count = self.supabase.table('watchlists').select('id', count=CountMethod.exact).execute().count
             
             return {
                 'total_tickers': total_tickers,

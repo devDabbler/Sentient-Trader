@@ -22,6 +22,11 @@ feedparser>=6.0.0  # Fast RSS feed parsing for Reddit (no rate limits!)
 httpx>=0.24.0  # Modern async HTTP client for RSS feeds
 apscheduler>=3.10.0  # Scheduled event detection
 
+# PHASE 1 ENHANCEMENTS: FinBERT for Financial Sentiment Analysis
+transformers>=4.30.0  # Hugging Face transformers for FinBERT model
+torch>=2.0.0  # PyTorch for FinBERT (CPU version sufficient, GPU optional)
+# Note: For GPU support, install: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
 # Performance Optimization Libraries
 ta-lib>=0.4.25  # Ultra-fast technical indicators (C implementation)
 numba>=0.58.0  # JIT compilation for mathematical operations

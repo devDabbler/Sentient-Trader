@@ -119,7 +119,7 @@ def retry_on_kraken_error(max_retries=3, initial_delay=1.0, backoff_factor=2.0):
                             )
                     # Re-raise non-rate-limit/server errors immediately
                     raise
-                except requests.exceptions.Timeout as e:
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                     last_exception = e
                     if attempt < max_retries:
                         logger.warning(
@@ -181,6 +181,14 @@ class KrakenClient:
         'MATIC/USD': 'MATICUSD',
         'OP/USD': 'OPUSD',
         'ARB/USD': 'ARBUSD',
+        
+        # Additional altcoins
+        'BAT/USD': 'BATUSD',
+        'SC/USD': 'SCUSD',
+        'HIPPO/USD': 'HIPPOUSD',
+        'SWEAT/USD': 'SWEATUSD',
+        'SAROS/USD': 'SAROSUSD',
+        'CCD/USD': 'CCDUSD',
     }
     
     def __init__(self, api_key: str, api_secret: str, timeout: int = 30):
@@ -580,7 +588,7 @@ class KrakenClient:
         
         params = {'pair': kraken_pair}
         if since:
-            params['since'] = since
+            params['since'] = str(since)
         
         try:
             data = self._public_request('Trades', params)
@@ -889,13 +897,58 @@ class KrakenClient:
             logger.error(f"Error fetching closed orders: {e}")
             return []
     
+    def get_trades_history(self, start: Optional[int] = None, end: Optional[int] = None) -> List[Dict]:
+        """
+        Get trades history (executed trades)
+        
+        Args:
+            start: Starting timestamp (Unix timestamp)
+            end: Ending timestamp (Unix timestamp)
+            
+        Returns:
+            List of trade dictionaries with keys: trade_id, pair, side, volume, price, cost, fee, timestamp
+        """
+        params = {}
+        if start:
+            params['start'] = start
+        if end:
+            params['end'] = end
+        
+        try:
+            data = self._private_request('TradesHistory', params)
+            
+            trades = []
+            trades_data = data.get('trades', {})
+            
+            for trade_id, trade_info in trades_data.items():
+                trades.append({
+                    'trade_id': trade_id,
+                    'pair': trade_info.get('pair', ''),
+                    'side': trade_info.get('type', ''),  # buy or sell
+                    'volume': float(trade_info.get('vol', 0)),
+                    'price': float(trade_info.get('price', 0)),
+                    'cost': float(trade_info.get('cost', 0)),
+                    'fee': float(trade_info.get('fee', 0)),
+                    'timestamp': float(trade_info.get('time', 0)),
+                    'datetime': datetime.fromtimestamp(float(trade_info.get('time', 0)))
+                })
+            
+            return trades
+            
+        except Exception as e:
+            logger.error(f"Error fetching trades history: {e}")
+            return []
+    
     # =========================================================================
     # POSITION MANAGEMENT METHODS
     # =========================================================================
     
-    def get_open_positions(self) -> List[KrakenPosition]:
+    def get_open_positions(self, calculate_real_cost: bool = True) -> List[KrakenPosition]:
         """
-        Get all open positions
+        Get all open positions with accurate entry prices and P&L
+        
+        Args:
+            calculate_real_cost: If True, fetches trade history to calculate real entry prices and costs
         
         Returns:
             List of KrakenPosition objects
@@ -904,37 +957,187 @@ class KrakenClient:
             # Get account balances
             balances = self.get_account_balance()
             
+            # Get trade history to calculate accurate entry prices (last 3 months)
+            trades_by_pair = {}
+            if calculate_real_cost:
+                try:
+                    three_months_ago = int((datetime.now() - timedelta(days=90)).timestamp())
+                    trades = self.get_trades_history(start=three_months_ago)
+                    
+                    # Group trades by pair and side
+                    for trade in trades:
+                        pair = trade['pair']
+                        if pair not in trades_by_pair:
+                            trades_by_pair[pair] = {'buy': [], 'sell': []}
+                        trades_by_pair[pair][trade['side']].append(trade)
+                    
+                    logger.debug(f"Loaded {len(trades)} trades from history for cost calculation")
+                except Exception as e:
+                    logger.warning(f"Could not fetch trade history for cost calculation: {e}")
+                    trades_by_pair = {}
+            
             positions = []
+            skipped_assets = []
+            
+            logger.info(f"Processing {len(balances)} balance(s) from Kraken...")
+            
             for balance in balances:
                 if balance.balance > 0 and balance.currency != 'USD':
+                    # Skip futures contracts (marked with .F, .S, .M suffixes)
+                    currency = balance.currency
+                    if any(currency.endswith(suffix) for suffix in ['.F', '.S', '.M', '.P']):
+                        logger.info(f"⏭️ Skipping futures/staking balance: {currency} ({balance.balance:.6f})")
+                        skipped_assets.append((currency, "Futures/Staking not supported"))
+                        continue
+                    
                     # Get current price
-                    pair = f"{balance.currency}/USD"
+                    pair = f"{currency}/USD"
                     try:
                         ticker = self.get_ticker_data(pair)
                         current_price = ticker.get('last_price', 0)
+                        
+                        if current_price == 0:
+                            logger.warning(f"⚠️ Skipping {pair}: No price data available (balance: {balance.balance:.6f})")
+                            skipped_assets.append((currency, "No price data"))
+                            continue
+                        
+                        # Calculate entry price and cost from trade history
+                        entry_price = 0.0
+                        total_cost = 0.0
+                        total_volume = 0.0
+                        total_fees = 0.0
+                        
+                        # Try multiple pair formats (BATUSD, BATUSDT, XBT+BAT+USD, etc.)
+                        kraken_pair = self.POPULAR_PAIRS.get(pair, pair.replace('/', ''))
+                        possible_pairs = [kraken_pair, pair.replace('/', ''), f"X{currency}ZUSD", f"{currency}USD"]
+                        
+                        for possible_pair in possible_pairs:
+                            if possible_pair in trades_by_pair:
+                                # Calculate weighted average entry price from buy trades
+                                for trade in trades_by_pair[possible_pair]['buy']:
+                                    total_cost += trade['cost'] + trade['fee']
+                                    total_volume += trade['volume']
+                                    total_fees += trade['fee']
+                                
+                                # Calculate weighted average for sells (if any partial exits)
+                                for trade in trades_by_pair[possible_pair]['sell']:
+                                    # Subtract sold volume from total
+                                    total_volume -= trade['volume']
+                                
+                                if total_volume > 0:
+                                    entry_price = total_cost / total_volume
+                                    logger.debug(f"{pair}: Calculated entry price ${entry_price:.6f} from {len(trades_by_pair[possible_pair]['buy'])} buy trades")
+                                    break
+                        
+                        # If we couldn't find trade history, use current price as entry (no P&L calculation)
+                        if entry_price == 0.0 or total_volume == 0.0:
+                            entry_price = current_price
+                            total_cost = balance.balance * current_price
+                            logger.debug(f"{pair}: No trade history found, using current price as entry")
+                        
+                        # Calculate P&L
+                        current_value = balance.balance * current_price
+                        position_cost = entry_price * balance.balance
+                        net_pnl = current_value - position_cost - total_fees
                         
                         # Create position
                         position = KrakenPosition(
                             pair=pair,
                             side='long',  # Kraken spot trading is always long
                             volume=balance.balance,
-                            cost=balance.balance * current_price,  # Approximate
-                            fee=0.0,  # Unknown without trade history
+                            cost=position_cost,
+                            fee=total_fees,
                             margin=0.0,  # Spot trading has no margin
-                            net_pnl=0.0,  # Would need trade history to calculate
+                            net_pnl=net_pnl,
                             current_price=current_price,
-                            entry_price=0.0  # Unknown without trade history
+                            entry_price=entry_price
                         )
                         
                         positions.append(position)
-                    except:
+                        
+                    except Exception as e:
                         # Skip if we can't get price data
+                        logger.warning(f"⚠️ Skipping {pair}: Error fetching data - {str(e)}")
+                        skipped_assets.append((currency, f"Error: {str(e)}"))
                         pass
+            
+            # Summary logging
+            logger.info(f"✅ Loaded {len(positions)} open position(s) with accurate entry prices")
+            
+            if skipped_assets:
+                logger.warning(f"⚠️ Skipped {len(skipped_assets)} asset(s):")
+                for currency, reason in skipped_assets:
+                    logger.warning(f"   • {currency}: {reason}")
             
             return positions
             
         except Exception as e:
             logger.error(f"Error fetching open positions: {e}")
+            return []
+    
+    def get_staked_balances(self) -> List[Dict]:
+        """
+        Get staked/flex savings balances (read-only, cannot be traded)
+        
+        Returns:
+            List of staked asset dictionaries with keys: currency, balance, type, current_price, value_usd
+        """
+        try:
+            balances = self.get_account_balance()
+            staked_assets = []
+            
+            for balance in balances:
+                if balance.balance > 0:
+                    currency = balance.currency
+                    
+                    # Check if it's a staked/flex asset
+                    staked_type = None
+                    clean_currency = currency
+                    
+                    if currency.endswith('.F'):
+                        staked_type = 'Flex Staking'
+                        clean_currency = currency.replace('.F', '')
+                    elif currency.endswith('.S'):
+                        staked_type = 'Locked Staking'
+                        clean_currency = currency.replace('.S', '')
+                    elif currency.endswith('.M'):
+                        staked_type = 'Staking (M)'
+                        clean_currency = currency.replace('.M', '')
+                    elif currency.endswith('.P'):
+                        staked_type = 'Parachain'
+                        clean_currency = currency.replace('.P', '')
+                    
+                    if staked_type:
+                        # Get current price
+                        pair = f"{clean_currency}/USD"
+                        current_price = 0.0
+                        value_usd = 0.0
+                        
+                        try:
+                            ticker = self.get_ticker_data(pair)
+                            if ticker:
+                                current_price = ticker.get('last_price', 0)
+                                value_usd = balance.balance * current_price
+                        except:
+                            # If can't get price, just show the balance
+                            pass
+                        
+                        staked_assets.append({
+                            'currency': clean_currency,
+                            'raw_currency': currency,
+                            'balance': balance.balance,
+                            'type': staked_type,
+                            'current_price': current_price,
+                            'value_usd': value_usd
+                        })
+            
+            if staked_assets:
+                logger.info(f"✅ Found {len(staked_assets)} staked asset(s)")
+            
+            return staked_assets
+            
+        except Exception as e:
+            logger.error(f"Error fetching staked balances: {e}")
             return []
     
     # =========================================================================
@@ -1029,6 +1232,150 @@ class KrakenClient:
             return datetime.fromtimestamp(data['unixtime'])
         except:
             return datetime.now()
+    
+    def get_portfolio_analysis(self) -> Dict:
+        """
+        Get comprehensive portfolio analysis for AI recommendations
+        
+        Returns:
+            Dictionary with portfolio metrics, position details, recommendations, and staked assets
+        """
+        try:
+            positions = self.get_open_positions(calculate_real_cost=True)
+            staked_assets = self.get_staked_balances()
+            
+            # Calculate staked value
+            total_staked_value = sum(asset['value_usd'] for asset in staked_assets)
+            
+            if not positions and not staked_assets:
+                return {
+                    'total_value': 0.0,
+                    'total_cost': 0.0,
+                    'total_pnl': 0.0,
+                    'total_pnl_pct': 0.0,
+                    'num_positions': 0,
+                    'positions': [],
+                    'winners': [],
+                    'losers': [],
+                    'recommendations': [],
+                    'staked_assets': [],
+                    'total_staked_value': 0.0,
+                    'combined_value': 0.0
+                }
+            
+            total_value = 0.0
+            total_cost = 0.0
+            total_pnl = 0.0
+            winners = []
+            losers = []
+            position_details = []
+            
+            for pos in positions:
+                current_value = pos.volume * pos.current_price
+                position_cost = pos.cost if pos.cost > 0 else (pos.volume * pos.entry_price)
+                pnl = pos.net_pnl if pos.net_pnl != 0 else (current_value - position_cost)
+                pnl_pct = (pnl / position_cost * 100) if position_cost > 0 else 0.0
+                
+                total_value += current_value
+                total_cost += position_cost
+                total_pnl += pnl
+                
+                pos_detail = {
+                    'pair': pos.pair,
+                    'volume': pos.volume,
+                    'entry_price': pos.entry_price,
+                    'current_price': pos.current_price,
+                    'cost': position_cost,
+                    'current_value': current_value,
+                    'pnl': pnl,
+                    'pnl_pct': pnl_pct,
+                    'allocation_pct': 0.0  # Will calculate after getting total
+                }
+                
+                position_details.append(pos_detail)
+                
+                if pnl > 0:
+                    winners.append(pos_detail)
+                elif pnl < 0:
+                    losers.append(pos_detail)
+            
+            # Calculate allocation percentages
+            for pos_detail in position_details:
+                pos_detail['allocation_pct'] = (pos_detail['current_value'] / total_value * 100) if total_value > 0 else 0.0
+            
+            # Sort winners and losers by P&L percentage
+            winners.sort(key=lambda x: x['pnl_pct'], reverse=True)
+            losers.sort(key=lambda x: x['pnl_pct'])
+            
+            total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
+            
+            # Generate AI recommendations
+            recommendations = []
+            
+            # Recommendation 1: Take profits on big winners
+            for winner in winners[:3]:  # Top 3 winners
+                if winner['pnl_pct'] > 20:
+                    recommendations.append({
+                        'action': 'TAKE_PROFIT',
+                        'pair': winner['pair'],
+                        'reason': f"Strong gain of +{winner['pnl_pct']:.1f}%. Consider taking partial profits.",
+                        'priority': 'HIGH'
+                    })
+            
+            # Recommendation 2: Cut losses on big losers
+            for loser in losers[:3]:  # Top 3 losers
+                if loser['pnl_pct'] < -15:
+                    recommendations.append({
+                        'action': 'CUT_LOSS',
+                        'pair': loser['pair'],
+                        'reason': f"Significant loss of {loser['pnl_pct']:.1f}%. Consider cutting losses or dollar-cost averaging.",
+                        'priority': 'HIGH'
+                    })
+            
+            # Recommendation 3: Rebalance if too concentrated
+            for pos_detail in position_details:
+                if pos_detail['allocation_pct'] > 30:
+                    recommendations.append({
+                        'action': 'REBALANCE',
+                        'pair': pos_detail['pair'],
+                        'reason': f"High concentration at {pos_detail['allocation_pct']:.1f}% of portfolio. Consider diversifying.",
+                        'priority': 'MEDIUM'
+                    })
+            
+            # Calculate combined portfolio value
+            combined_value = total_value + total_staked_value
+            
+            return {
+                'total_value': total_value,
+                'total_cost': total_cost,
+                'total_pnl': total_pnl,
+                'total_pnl_pct': total_pnl_pct,
+                'num_positions': len(positions),
+                'num_winners': len(winners),
+                'num_losers': len(losers),
+                'positions': position_details,
+                'winners': winners,
+                'losers': losers,
+                'recommendations': recommendations,
+                'staked_assets': staked_assets,
+                'total_staked_value': total_staked_value,
+                'combined_value': combined_value  # Tradeable + Staked
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing portfolio: {e}", exc_info=True)
+            return {
+                'total_value': 0.0,
+                'total_cost': 0.0,
+                'total_pnl': 0.0,
+                'total_pnl_pct': 0.0,
+                'num_positions': 0,
+                'positions': [],
+                'winners': [],
+                'losers': [],
+                'recommendations': [],
+                'error': str(e)
+            }
 
 
 def validate_kraken_connection(api_key: str, api_secret: str) -> Tuple[bool, str]:

@@ -77,6 +77,15 @@ class AutoTraderConfig:
     max_position_hold_minutes: int = 480  # Max hold time (8 hours default)
     # Long-Term Holdings Protection (CRITICAL SAFETY FEATURE)
     long_term_holdings: Optional[List[str]] = None  # Tickers to never sell (e.g., ['BXP', 'AAPL'])
+    # AI Entry Timing (NEW - Stock Entry Assistant)
+    use_ai_entry_timing: bool = False  # Enable AI entry analysis before execution
+    enable_auto_entry: bool = False  # Auto-execute when monitored conditions met
+    min_ai_entry_confidence: float = 85.0  # Min confidence for immediate entry
+    # Fractional Shares (NEW - IBKR Fractional Share Support)
+    use_fractional_shares: bool = False  # Enable fractional share trading (IBKR only)
+    fractional_price_threshold: float = 100.0  # Auto-use fractional for stocks above this price
+    fractional_min_amount: float = 50.0  # Minimum dollar amount per fractional trade
+    fractional_max_amount: float = 1000.0  # Maximum dollar amount per fractional trade
 
 
 class AutoTrader:
@@ -149,6 +158,24 @@ class AutoTrader:
             except Exception as e:
                 logger.warning(f"⚠️ AI Capital Advisor not available: {e}")
         
+        # Fractional Share Manager (NEW - fractional share support for IBKR)
+        self._fractional_manager = None
+        if getattr(config, 'use_fractional_shares', False):
+            try:
+                from services.fractional_share_manager import get_fractional_share_manager, FractionalShareConfig
+                
+                frac_config = FractionalShareConfig(
+                    enabled=True,
+                    min_price_threshold=getattr(config, 'fractional_price_threshold', 100.0),
+                    min_dollar_amount=getattr(config, 'fractional_min_amount', 50.0),
+                    max_dollar_amount=getattr(config, 'fractional_max_amount', 1000.0)
+                )
+                self._fractional_manager = get_fractional_share_manager(frac_config)
+                logger.info(f"📊 Fractional Share Manager ENABLED: Auto-use for stocks >${frac_config.min_price_threshold:.2f}")
+            except Exception as e:
+                logger.warning(f"⚠️ Fractional Share Manager initialization failed: {e}")
+                config.use_fractional_shares = False
+        
         # Short position tracking (for paper trading)
         # Format: {symbol: {'quantity': int, 'entry_price': float, 'entry_time': datetime}}
         self._short_positions: Dict[str, Dict] = {}
@@ -191,6 +218,25 @@ class AutoTrader:
                 config.enable_position_monitoring = False
         else:
             logger.warning("⚠️ Position Exit Monitor DISABLED: Positions rely on bracket orders only!")
+        
+        # Stock AI Entry Assistant (NEW - intelligent entry timing)
+        self._stock_entry_assistant = None
+        if getattr(config, 'use_ai_entry_timing', False):
+            try:
+                from services.ai_stock_entry_assistant import get_ai_stock_entry_assistant
+                from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                
+                llm_analyzer = LLMStrategyAnalyzer()
+                self._stock_entry_assistant = get_ai_stock_entry_assistant(
+                    broker_client=self.broker_client,
+                    llm_analyzer=llm_analyzer,
+                    check_interval_seconds=60,
+                    enable_auto_entry=getattr(config, 'enable_auto_entry', False)
+                )
+                logger.info("🎯 AI Stock Entry Assistant ENABLED: Intelligent entry timing analysis")
+            except Exception as e:
+                logger.warning(f"⚠️ Stock Entry Assistant initialization failed: {e}")
+                config.use_ai_entry_timing = False
         
         if config.use_ml_enhanced_scanner:
             try:
@@ -1437,6 +1483,27 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                     logger.error(f"Error getting AI capital recommendation: {e}")
                     # Continue with traditional sizing on error
             
+            # Fractional Share Support (Override whole share sizing if fractional is appropriate)
+            if self._fractional_manager and self._fractional_manager.should_use_fractional(signal.symbol, signal.entry_price):
+                try:
+                    # Calculate fractional quantity based on available capital
+                    fractional_qty, actual_cost = self._fractional_manager.calculate_fractional_quantity(
+                        symbol=signal.symbol,
+                        price=signal.entry_price,
+                        available_capital=available_capital if available_capital else bucket_cash,
+                        target_dollar_amount=None  # Uses custom amount or default
+                    )
+                    
+                    if fractional_qty > 0:
+                        logger.info(f"📊 Using fractional shares: {fractional_qty} shares @ ${signal.entry_price:.2f} = ${actual_cost:.2f}")
+                        logger.info(f"   (Traditional would have been {final_shares} shares = ${final_shares * signal.entry_price:.2f})")
+                        return fractional_qty, True
+                    else:
+                        logger.warning(f"⚠️ Fractional sizing returned 0 shares, falling back to whole shares")
+                except Exception as e:
+                    logger.error(f"Error calculating fractional quantity: {e}, falling back to whole shares")
+                    # Fall through to return whole shares
+            
             return final_shares, True
             
         except APIError as e:
@@ -1449,10 +1516,111 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             logger.error(f"Error calculating position size: {e}")
             return 0, False
     
+    def _check_ai_entry_timing(self, signal):
+        """Check with AI if now is good time to enter this stock"""
+        try:
+            # Lazy initialize assistant if not already done
+            if not self._stock_entry_assistant:
+                logger.warning("Stock Entry Assistant not initialized")
+                # Return default ENTER_NOW to not block trades
+                from services.ai_stock_entry_assistant import EntryAnalysis
+                return EntryAnalysis(
+                    symbol=signal.symbol,
+                    action="ENTER_NOW",
+                    confidence=60.0,
+                    reasoning="Entry assistant not initialized",
+                    urgency="LOW",
+                    current_price=signal.entry_price
+                )
+            
+            # Calculate position size in USD
+            position_size_usd = signal.position_size * signal.entry_price
+            
+            # Calculate risk/reward percentages
+            risk_pct = abs((signal.entry_price - signal.stop_loss) / signal.entry_price) * 100 if signal.stop_loss else 2.0
+            tp_pct = abs((signal.target_price - signal.entry_price) / signal.entry_price) * 100 if signal.target_price else 5.0
+            
+            # Get AI analysis
+            entry_analysis = self._stock_entry_assistant.analyze_entry(
+                symbol=signal.symbol,
+                side=signal.signal,
+                position_size=position_size_usd,
+                risk_pct=risk_pct,
+                take_profit_pct=tp_pct
+            )
+            
+            return entry_analysis
+            
+        except Exception as e:
+            logger.error(f"Error checking AI entry timing: {e}", exc_info=True)
+            # On error, default to ENTER_NOW (don't block trades)
+            from services.ai_stock_entry_assistant import EntryAnalysis
+            return EntryAnalysis(
+                symbol=signal.symbol,
+                action="ENTER_NOW",
+                confidence=60.0,
+                reasoning=f"AI check failed: {e}",
+                urgency="LOW",
+                current_price=signal.entry_price
+            )
+    
     def _execute_signal(self, signal):
         """Execute a trading signal"""
         try:
             logger.info(f"🎯 Executing signal: {signal.symbol} {signal.signal} (confidence: {signal.confidence}%)")
+            
+            # ==========================================
+            # 🆕 AI ENTRY TIMING CHECK
+            # ==========================================
+            if self.config.use_ai_entry_timing:
+                entry_analysis = self._check_ai_entry_timing(signal)
+                
+                # DO NOT ENTER - Skip this trade
+                if entry_analysis.action == "DO_NOT_ENTER":
+                    logger.warning(f"❌ AI Entry: DO NOT ENTER {signal.symbol} (Confidence: {entry_analysis.confidence:.1f}%)")
+                    logger.warning(f"   Reasoning: {entry_analysis.reasoning}")
+                    return  # Skip trade
+                
+                # WAIT - Add to monitoring
+                elif entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+                    logger.info(f"⏳ AI Entry: WAIT for {signal.symbol} (Confidence: {entry_analysis.confidence:.1f}%)")
+                    logger.info(f"   Reasoning: {entry_analysis.reasoning}")
+                    
+                    # Add to entry monitoring
+                    if self._stock_entry_assistant:
+                        # Calculate risk/reward
+                        risk_pct = abs((signal.entry_price - signal.stop_loss) / signal.entry_price) * 100 if signal.stop_loss else 2.0
+                        tp_pct = abs((signal.target_price - signal.entry_price) / signal.entry_price) * 100 if signal.target_price else 5.0
+                        position_size_usd = signal.position_size * signal.entry_price
+                        
+                        self._stock_entry_assistant.monitor_entry_opportunity(
+                            symbol=signal.symbol,
+                            side=signal.signal,
+                            position_size=position_size_usd,
+                            risk_pct=risk_pct,
+                            take_profit_pct=tp_pct,
+                            analysis=entry_analysis,
+                            auto_execute=self.config.enable_auto_entry
+                        )
+                        logger.info(f"🔔 Added {signal.symbol} to entry monitoring")
+                    return  # Don't execute now, wait
+                
+                # ENTER NOW - Continue with execution
+                elif entry_analysis.action == "ENTER_NOW":
+                    logger.info(f"✅ AI Entry: ENTER NOW {signal.symbol} (Confidence: {entry_analysis.confidence:.1f}%)")
+                    logger.info(f"   Reasoning: {entry_analysis.reasoning}")
+                    
+                    # Optional: Update signal with AI suggestions
+                    if entry_analysis.suggested_stop:
+                        signal.stop_loss = entry_analysis.suggested_stop
+                        logger.debug(f"   Updated stop loss to AI suggestion: ${signal.stop_loss:.2f}")
+                    if entry_analysis.suggested_target:
+                        signal.target_price = entry_analysis.suggested_target
+                        logger.debug(f"   Updated target to AI suggestion: ${signal.target_price:.2f}")
+            
+            # ==========================================
+            # EXISTING EXECUTION CODE CONTINUES BELOW
+            # ==========================================
             
             # Check current positions with retry handling
             success, positions = self.tradier_client.get_positions()
@@ -1678,6 +1846,31 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             reason=f"Signal (confidence: {signal.confidence}%)"
                         )
                         
+                        # LOG EXIT TO UNIFIED JOURNAL
+                        try:
+                            from services.unified_trade_journal import get_unified_journal
+                            journal = get_unified_journal()
+                            
+                            # Find the trade_id from recent trades
+                            recent_trades = journal.get_trades(
+                                symbol=signal.symbol,
+                                status="OPEN",
+                                limit=10
+                            )
+                            
+                            if recent_trades:
+                                # Update the most recent open trade for this symbol
+                                trade = recent_trades[0]
+                                journal.update_trade_exit(
+                                    trade_id=trade.trade_id,
+                                    exit_price=signal.entry_price,
+                                    exit_time=datetime.now(),
+                                    exit_reason=f"Auto-trader signal (confidence: {signal.confidence}%)"
+                                )
+                                logger.info(f"📝 Updated journal with trade exit: {signal.symbol}")
+                        except Exception as journal_err:
+                            logger.debug(f"Could not update journal with exit: {journal_err}")
+                        
                         # RELEASE CAPITAL (NEW)
                         if self._capital_manager:
                             # Calculate P&L
@@ -1722,6 +1915,48 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             bracket_order_ids=bracket_ids,
                             reason=f"Signal (confidence: {signal.confidence}%)"
                         )
+                        
+                        # LOG TO UNIFIED JOURNAL
+                        try:
+                            from services.unified_trade_journal import get_unified_journal, UnifiedTradeEntry, TradeType
+                            journal = get_unified_journal()
+                            
+                            # Calculate risk/reward percentages
+                            if signal.signal == 'BUY':
+                                risk_pct = ((signal.entry_price - signal.stop_loss) / signal.entry_price) * 100 if signal.stop_loss else 2.0
+                                reward_pct = ((signal.target_price - signal.entry_price) / signal.entry_price) * 100 if signal.target_price else 5.0
+                            else:
+                                risk_pct = ((signal.stop_loss - signal.entry_price) / signal.entry_price) * 100 if signal.stop_loss else 2.0
+                                reward_pct = ((signal.entry_price - signal.target_price) / signal.entry_price) * 100 if signal.target_price else 5.0
+                            
+                            rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+                            
+                            trade_entry = UnifiedTradeEntry(
+                                trade_id=f"{signal.symbol}_{order_id}_{int(datetime.now().timestamp())}",
+                                trade_type=TradeType.STOCK.value,
+                                symbol=signal.symbol,
+                                side=signal.signal,
+                                entry_time=datetime.now(),
+                                entry_price=signal.entry_price,
+                                quantity=signal.position_size,
+                                position_size_usd=signal.entry_price * signal.position_size,
+                                stop_loss=signal.stop_loss if signal.stop_loss else 0,
+                                take_profit=signal.target_price if signal.target_price else 0,
+                                risk_pct=risk_pct,
+                                reward_pct=reward_pct,
+                                risk_reward_ratio=rr_ratio,
+                                strategy=self.config.trading_mode,
+                                setup_type=getattr(signal, 'setup_type', None),
+                                ai_managed=False,  # Auto-trader but not AI position manager
+                                broker="TRADIER" if hasattr(self.tradier_client, '__class__') and "Tradier" in self.tradier_client.__class__.__name__ else "IBKR",
+                                order_id=str(order_id) if order_id else None,
+                                status="OPEN"
+                            )
+                            
+                            journal.log_trade_entry(trade_entry)
+                            logger.info(f"📝 Logged stock trade to unified journal: {signal.symbol}")
+                        except Exception as journal_err:
+                            logger.debug(f"Could not log to unified journal: {journal_err}")
                         
                         # ADD TO POSITION MONITOR (CRITICAL)
                         if self._position_monitor and signal.entry_price and signal.stop_loss and signal.target_price:

@@ -3,11 +3,12 @@ Crypto Sentiment Analyzer - Social sentiment for cryptocurrency markets
 
 Combines:
 1. CoinGecko trending API (emerging coins gaining attention)
-2. Reddit sentiment (r/cryptocurrency, r/CryptoCurrency, r/defi)
-3. Twitter sentiment (crypto hashtags via Nitter)
+2. Reddit sentiment (r/cryptocurrency, r/CryptoCurrency, r/defi, r/bitcoin, r/ethereum, etc.)
+3. Forum sentiment (StockTwits, etc.)
 4. On-chain metrics (optional)
 
-Optimized for finding monster runners by focusing on trending/emerging coins.
+Note: Twitter/X is skipped for crypto (as requested). Reddit uses existing RSS + API framework
+with crypto-specific subreddits automatically detected.
 """
 
 import os
@@ -84,8 +85,11 @@ class CryptoSentimentAnalyzer:
         
         logger.info("🔧 Crypto Sentiment Analyzer initialized")
         logger.info("   • CoinGecko trending API (10 calls/min limit)")
-        logger.info("   • Reddit sentiment (RSS feeds + API)")
-        logger.info("   • Twitter sentiment (Nitter mirrors)")
+        logger.info("   • Reddit sentiment: Uses existing RSS + API framework")
+        logger.info("     - Crypto subreddits: r/cryptocurrency, r/CryptoCurrency, r/defi, r/bitcoin, r/ethereum, etc.")
+        logger.info("     - Auto-detects crypto symbols and uses appropriate subreddits")
+        logger.info("   • Forum sentiment: StockTwits (crypto trading discussions)")
+        logger.info("   • Twitter/X: Skipped for crypto (as requested)")
         logger.info("   • 1-hour cache for trending data")
     
     async def get_trending_cryptos(self, top_n: int = 10) -> List[CryptoTrendingData]:
@@ -224,7 +228,7 @@ class CryptoSentimentAnalyzer:
     
     async def analyze_crypto_sentiment(self, symbol: str) -> Dict:
         """
-        Analyze social sentiment for a specific crypto
+        Analyze social sentiment for a specific crypto from Reddit and popular forums
         
         Args:
             symbol: Crypto symbol (e.g., 'BTC', 'ETH', 'SHIB')
@@ -233,12 +237,12 @@ class CryptoSentimentAnalyzer:
             Dict with sentiment analysis
         """
         try:
-            # Get sentiment from multiple sources
+            # Get sentiment from Reddit and forums (skip Twitter/X)
             reddit_sentiment = await self._get_reddit_sentiment(symbol)
-            twitter_sentiment = await self._get_twitter_sentiment(symbol)
+            forum_sentiment = await self._get_forum_sentiment(symbol)
             
             # Combine sentiments
-            all_mentions = reddit_sentiment['mentions'] + twitter_sentiment['mentions']
+            all_mentions = reddit_sentiment['mentions'] + forum_sentiment['mentions']
             
             if not all_mentions:
                 return {
@@ -270,7 +274,8 @@ class CryptoSentimentAnalyzer:
             
             return {
                 'reddit_mentions': len(reddit_sentiment['mentions']),
-                'twitter_mentions': len(twitter_sentiment['mentions']),
+                'forum_mentions': len(forum_sentiment['mentions']),
+                'total_mentions': len(all_mentions),
                 'overall_sentiment': overall_sentiment,
                 'overall_sentiment_score': overall_score,
                 'bullish_count': bullish_count,
@@ -283,7 +288,8 @@ class CryptoSentimentAnalyzer:
             logger.error(f"Error analyzing sentiment for {symbol}: {e}")
             return {
                 'reddit_mentions': 0,
-                'twitter_mentions': 0,
+                'forum_mentions': 0,
+                'total_mentions': 0,
                 'overall_sentiment': 'NEUTRAL',
                 'overall_sentiment_score': 0.0,
                 'bullish_count': 0,
@@ -292,15 +298,27 @@ class CryptoSentimentAnalyzer:
             }
     
     async def _get_reddit_sentiment(self, symbol: str) -> Dict:
-        """Get Reddit sentiment for crypto symbol"""
+        """Get Reddit sentiment for crypto symbol from popular crypto subreddits"""
         try:
             # Import from existing social sentiment analyzer
             from services.social_sentiment_analyzer import SocialSentimentAnalyzer
             
             analyzer = SocialSentimentAnalyzer()
             
+            # Extract base symbol (remove /USD, /USDT, etc.)
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+            
             # Use RSS feeds for fast, rate-limit-free access
-            mentions = await analyzer._scrape_reddit_via_rss(symbol)
+            # Pass is_crypto=True to use crypto subreddits (r/cryptocurrency, r/defi, etc.)
+            mentions = await analyzer._scrape_reddit_via_rss(base_symbol, is_crypto=True)
+            
+            # Also try Reddit API if available (covers more subreddits)
+            try:
+                api_mentions = analyzer._scrape_reddit_via_api(base_symbol, is_crypto=True)
+                if api_mentions:
+                    mentions.extend(api_mentions)
+            except Exception as e:
+                logger.debug(f"Reddit API not available for {symbol}: {e}")
             
             return {
                 'mentions': [
@@ -319,16 +337,25 @@ class CryptoSentimentAnalyzer:
             logger.debug(f"Reddit sentiment error for {symbol}: {e}")
             return {'mentions': []}
     
-    async def _get_twitter_sentiment(self, symbol: str) -> Dict:
-        """Get Twitter sentiment for crypto symbol"""
+    async def _get_forum_sentiment(self, symbol: str) -> Dict:
+        """Get sentiment from popular crypto forums (StockTwits, etc.)"""
         try:
             # Import from existing social sentiment analyzer
             from services.social_sentiment_analyzer import SocialSentimentAnalyzer
             
             analyzer = SocialSentimentAnalyzer()
             
-            # Use Nitter mirrors for fast, rate-limit-free access
-            mentions = await analyzer._scrape_twitter_via_nitter(symbol)
+            # Initialize the crawler for StockTwits scraping
+            await analyzer._ensure_initialized()
+            
+            # Get StockTwits sentiment (popular crypto trading forum)
+            forum_mentions = []
+            try:
+                stocktwits_mentions = await analyzer._scrape_stocktwits(symbol)
+                if stocktwits_mentions:
+                    forum_mentions.extend(stocktwits_mentions)
+            except Exception as e:
+                logger.debug(f"StockTwits not available for {symbol}: {e}")
             
             return {
                 'mentions': [
@@ -339,12 +366,12 @@ class CryptoSentimentAnalyzer:
                         'author': m.author,
                         'timestamp': m.timestamp
                     }
-                    for m in mentions
+                    for m in forum_mentions
                 ]
             }
             
         except Exception as e:
-            logger.debug(f"Twitter sentiment error for {symbol}: {e}")
+            logger.debug(f"Forum sentiment error for {symbol}: {e}")
             return {'mentions': []}
     
     def _analyze_text_sentiment(self, text: str) -> Tuple[str, float]:

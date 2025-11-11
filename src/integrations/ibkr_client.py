@@ -483,14 +483,15 @@ class IBKRClient:
             logger.error(f"Error getting open orders: {e}")
             return []
     
-    def place_market_order(self, symbol: str, action: str, quantity: int) -> Optional[IBKROrder]:
+    def place_market_order(self, symbol: str, action: str, quantity: float) -> Optional[IBKROrder]:
         """
         Place a market order (for immediate execution)
+        Supports fractional shares for US stocks
         
         Args:
             symbol: Stock symbol
             action: 'BUY' or 'SELL'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional, e.g., 0.5)
             
         Returns:
             IBKROrder object or None if error
@@ -507,6 +508,11 @@ class IBKRClient:
             # Create stock contract - SMART routing for US stocks
             # Note: For standard US stocks, we can skip qualification to avoid timeout issues
             contract = Stock(symbol, 'SMART', 'USD')
+            
+            # Log if this is a fractional share order
+            is_fractional = (quantity % 1 != 0)
+            if is_fractional:
+                logger.info(f"📊 Fractional share order: {quantity} shares")
             logger.info(f"✅ Contract created for {symbol} (SMART routing, USD)")
             
             # Create market order
@@ -540,15 +546,16 @@ class IBKRClient:
             logger.error(f"Error placing market order: {e}")
             return None
     
-    def place_limit_order(self, symbol: str, action: str, quantity: int, 
+    def place_limit_order(self, symbol: str, action: str, quantity: float, 
                          limit_price: float) -> Optional[IBKROrder]:
         """
         Place a limit order
+        Supports fractional shares for US stocks
         
         Args:
             symbol: Stock symbol
             action: 'BUY' or 'SELL'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional, e.g., 0.5)
             limit_price: Limit price
             
         Returns:
@@ -592,15 +599,16 @@ class IBKRClient:
             logger.error(f"Error placing limit order: {e}")
             return None
     
-    def place_stop_order(self, symbol: str, action: str, quantity: int, 
+    def place_stop_order(self, symbol: str, action: str, quantity: float, 
                         stop_price: float) -> Optional[IBKROrder]:
         """
         Place a stop order (stop-loss or stop-entry)
+        Supports fractional shares for US stocks
         
         Args:
             symbol: Stock symbol
             action: 'BUY' or 'SELL'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional, e.g., 0.5)
             stop_price: Stop trigger price
             
         Returns:
@@ -644,17 +652,18 @@ class IBKRClient:
             logger.error(f"Error placing stop order: {e}")
             return None
     
-    def place_bracket_order(self, symbol: str, action: str, quantity: int,
+    def place_bracket_order(self, symbol: str, action: str, quantity: float,
                            take_profit_price: float, stop_loss_price: float,
                            limit_price: Optional[float] = None) -> Optional[Dict]:
         """
         Place a proper IBKR bracket order (parent + 2 child orders)
         Uses ib_insync's bracketOrder() for proper order linking
+        Supports fractional shares for US stocks
         
         Args:
             symbol: Stock symbol
             action: 'BUY' or 'SELL'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional, e.g., 0.5)
             take_profit_price: Take profit limit price
             stop_loss_price: Stop loss price
             limit_price: Limit price for parent order (if None, uses midpoint)

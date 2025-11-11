@@ -24,6 +24,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import re
+import random
 from collections import Counter
 from dataclasses import dataclass
 
@@ -121,7 +122,7 @@ class SocialSentimentAnalyzer:
         self.reddit = None
         self._reddit_initialized = False
         self.last_reddit_request = 0
-        self.reddit_request_interval = 2.0  # 2 seconds between Reddit API calls (increased from 1.0)
+        self.reddit_request_interval = 3.0  # 3 seconds between Reddit API calls (increased from 2.0)
         self.reddit_error_count = 0  # Track consecutive errors for exponential backoff
         self.reddit_backoff_until = 0  # Timestamp when we can retry after rate limit
         
@@ -137,7 +138,8 @@ class SocialSentimentAnalyzer:
         
         logger.info("🔧 Social Sentiment Analyzer - SPEED OPTIMIZATIONS:")
         logger.info(f"   • Reddit: RSS feeds (FAST, no rate limits!) + API fallback")
-        logger.info(f"   • Twitter: CSS selectors + caching (10s timeout)")
+        logger.info(f"   • Reddit: Auto-detects crypto vs stock symbols, uses appropriate subreddits")
+        logger.info(f"   • Twitter: CSS selectors + caching (10s timeout) - skipped for crypto")
         logger.info(f"   • StockTwits: CSS selectors + caching (8s timeout)")
         logger.info(f"   • RSS = lightweight polling, regex pre-filter, no auth")
         logger.info(f"   • Target: 2-3s per ticker (vs 6s before)")
@@ -174,16 +176,19 @@ class SocialSentimentAnalyzer:
         """Lazy initialization of Crawl4ai crawler with Windows subprocess fix"""
         if not self._initialized:
             try:
-                from crawl4ai import AsyncWebCrawler
-                
-                # Crawler configuration
-                crawler_config = {
-                    'headless': True,
-                    'verbose': False
-                }
-                
+                from crawl4ai import AsyncWebCrawler, BrowserConfig
+
+                # Crawler configuration for crawl4ai v0.7+
+                browser_config = BrowserConfig(
+                    headless=True,
+                    verbose=False
+                )
+
                 logger.info("Initializing Crawl4ai crawler...")
-                self.crawler = AsyncWebCrawler(**crawler_config)
+                # For crawl4ai 0.7.6+, pass browser_config directly without verbose parameter
+                self.crawler = AsyncWebCrawler(
+                    config=browser_config
+                )
                 await self.crawler.__aenter__()
                 self._initialized = True
                 logger.info("✅ Crawl4ai initialized successfully (Windows compatible mode)")
@@ -237,24 +242,34 @@ class SocialSentimentAnalyzer:
                 logger.warning(f"Executor shutdown, skipping social analysis for {ticker}")
                 return self._empty_result()
             
+            # Determine if this is a crypto symbol (auto-detect)
+            is_crypto = self._is_crypto_symbol(ticker)
+            
             # Hybrid approach: combine public scraping + API for Reddit
             loop = asyncio.get_event_loop()
             
+            # Helper to safely run sync functions in executor
+            async def run_in_executor(sync_func, *args):
+                return await loop.run_in_executor(self._executor, sync_func, *args)
+
             if self.reddit_use_hybrid:
                 # HYBRID MODE: Use FAST RSS feeds + API fallback
-                logger.debug(f"🔀 Using HYBRID mode for Reddit (RSS feeds + API)")
+                logger.debug(f"🔀 Using HYBRID mode for Reddit (RSS + API)")
                 
                 # Build task dictionary for cleaner result mapping
                 task_map = {
-                    'reddit_rss': self._scrape_reddit_via_rss(ticker),
-                    'twitter': self._scrape_twitter_via_nitter(ticker),
+                    'reddit_rss': self._scrape_reddit_via_rss(ticker, is_crypto=is_crypto),
                     'stocktwits': self._scrape_stocktwits(ticker),
                     'news': self._scrape_financial_news(ticker)
                 }
                 
+                # Skip Twitter for crypto (user requested to skip X/Twitter)
+                if not is_crypto:
+                    task_map['twitter'] = self._scrape_twitter_via_nitter(ticker)
+                
                 # Only add Reddit API if available (not in backoff)
                 if self._is_reddit_available():
-                    task_map['reddit_api'] = loop.run_in_executor(self._executor, self._scrape_reddit_via_api, ticker)
+                    task_map['reddit_api'] = run_in_executor(self._scrape_reddit_via_api, ticker, is_crypto)
                 else:
                     logger.debug(f"⏸️  Skipping Reddit API for {ticker} (in backoff or unavailable)")
                 
@@ -263,11 +278,13 @@ class SocialSentimentAnalyzer:
             else:
                 # Original: API only - use dedicated executor
                 task_map = {
-                    'reddit_api': loop.run_in_executor(self._executor, self._scrape_reddit_via_api, ticker),
-                    'twitter': self._scrape_twitter_via_nitter(ticker),
+                    'reddit_api': loop.run_in_executor(self._executor, self._scrape_reddit_via_api, ticker, is_crypto),
                     'stocktwits': self._scrape_stocktwits(ticker),
                     'news': self._scrape_financial_news(ticker)
                 }
+                # Skip Twitter for crypto
+                if not is_crypto:
+                    task_map['twitter'] = self._scrape_twitter_via_nitter(ticker)
                 tasks = list(task_map.values())
                 task_names = list(task_map.keys())
             
@@ -279,6 +296,8 @@ class SocialSentimentAnalyzer:
                     asyncio.gather(*tasks, return_exceptions=True),
                     timeout=timeout
                 )
+                # Map results back to their task names
+                named_results = {name: res for name, res in zip(task_names, results)}
             except asyncio.TimeoutError:
                 logger.warning(f"Social analysis timeout for {ticker} after {timeout}s, returning partial results")
                 return self._empty_result()
@@ -304,26 +323,26 @@ class SocialSentimentAnalyzer:
             stocktwits_mentions = []
             news_mentions = []
             
-            # Process results using task name mapping (cleaner than index-based)
-            for task_name, result in zip(task_names, results):
+            # Process results using the named_results dictionary
+            for task_name, result in named_results.items():
                 if isinstance(result, Exception):
                     logger.debug(f"Source {task_name} failed: {result}")
                     continue
                 
-                if task_name == 'reddit_rss':
-                    reddit_mentions.extend(result)
-                    logger.debug(f"   Reddit RSS: {len(result)} mentions")
-                elif task_name == 'reddit_api':
-                    reddit_mentions.extend(result)
-                    logger.debug(f"   Reddit API: {len(result)} mentions")
-                elif task_name == 'twitter':
-                    twitter_mentions = result
-                elif task_name == 'stocktwits':
-                    stocktwits_mentions = result
-                elif task_name == 'news':
-                    news_mentions = result
-                
-                all_mentions.extend(result)
+                if isinstance(result, list):
+                    all_mentions.extend(result)
+                    if task_name == 'reddit_rss':
+                        reddit_mentions.extend(result)
+                        logger.debug(f"   Reddit RSS: {len(result)} mentions")
+                    elif task_name == 'reddit_api':
+                        reddit_mentions.extend(result)
+                        logger.debug(f"   Reddit API: {len(result)} mentions")
+                    elif task_name == 'twitter':
+                        twitter_mentions = result
+                    elif task_name == 'stocktwits':
+                        stocktwits_mentions = result
+                    elif task_name == 'news':
+                        news_mentions = result
             
             if self.reddit_use_hybrid:
                 logger.info(f"📱 Reddit HYBRID: {len(reddit_mentions)} total mentions (RSS + API)")
@@ -411,12 +430,50 @@ class SocialSentimentAnalyzer:
         
         self.last_reddit_request = time.time()
     
-    def _scrape_reddit_via_api(self, ticker: str) -> List[SocialMention]:
+    def _is_crypto_symbol(self, ticker: str) -> bool:
+        """Detect if a symbol is a cryptocurrency (vs stock)"""
+        # Common crypto symbols (major coins)
+        common_crypto = {
+            'BTC', 'ETH', 'SOL', 'ADA', 'AVAX', 'DOT', 'ATOM', 'NEAR', 'APT', 'SUI',
+            'MATIC', 'ARB', 'OP', 'LINK', 'UNI', 'AAVE', 'XRP', 'DOGE', 'SHIB',
+            'PEPE', 'FLOKI', 'BONK', 'WIF', 'USDC', 'USDT', 'BNB', 'LTC', 'BCH',
+            'ALGO', 'VET', 'TRX', 'HBAR', 'GALA', 'SAND', 'MANA', 'ENJ', 'THETA',
+            'FLOW', 'RENDER', 'FET', 'AGIX', 'OCEAN', 'ARKM', 'JTO', 'PYTH', 'ONDO'
+        }
+        
+        ticker_upper = ticker.upper()
+        # Remove common suffixes/prefixes
+        ticker_clean = ticker_upper.replace('/USD', '').replace('/USDT', '').replace('/USDC', '')
+        
+        return ticker_clean in common_crypto or len(ticker_clean) <= 5  # Assume short symbols are crypto
+    
+    def _get_subreddits_for_symbol(self, ticker: str, is_crypto: bool = False) -> List[str]:
+        """Get appropriate subreddits based on symbol type (crypto vs stock)"""
+        if is_crypto:
+            # Crypto-specific subreddits
+            return [
+                'cryptocurrency',      # 7M+ members - main crypto discussion
+                'CryptoCurrency',      # Alternative capitalization
+                'defi',                # DeFi discussions
+                'bitcoin',             # Bitcoin-specific
+                'ethereum',            # Ethereum-specific
+                'CryptoMoonShots',     # High-risk crypto plays
+                'SatoshiStreetBets'    # Crypto trading/WSB-style
+            ]
+        else:
+            # Stock trading subreddits
+            return ['wallstreetbets', 'stocks', 'investing', 'pennystocks']
+    
+    def _scrape_reddit_via_api(self, ticker: str, is_crypto: bool = False) -> List[SocialMention]:
         """Fetch Reddit mentions using official API (PRAW) - much more reliable!"""
         mentions = []
         
         try:
             self._init_reddit()
+
+            if not self.reddit:
+                logger.warning("Reddit API client not initialized. Skipping API scrape.")
+                return mentions
             
             # Quick check - skip if Reddit is unavailable or in backoff
             if not self._is_reddit_available():
@@ -427,9 +484,8 @@ class SocialSentimentAnalyzer:
                     logger.debug(f"⏸️  Skipping Reddit for {ticker} - API not initialized")
                 return mentions
             
-            # Top trading subreddits for API (matching RSS list)
-            # Limited to most active to respect API rate limits
-            subreddits = ['wallstreetbets', 'stocks', 'investing', 'pennystocks']
+            # Get appropriate subreddits based on symbol type
+            subreddits = self._get_subreddits_for_symbol(ticker, is_crypto)
             
             for subreddit_name in subreddits:
                 try:
@@ -452,7 +508,7 @@ class SocialSentimentAnalyzer:
                         
                         # Determine sentiment
                         sentiment, score = self._analyze_text_sentiment(text)
-                        
+
                         mentions.append(SocialMention(
                             source='reddit',
                             text=text,
@@ -462,7 +518,7 @@ class SocialSentimentAnalyzer:
                             timestamp=datetime.fromtimestamp(post.created_utc).isoformat(),
                             url=f"https://reddit.com{post.permalink}",
                             engagement=post.score + post.num_comments,
-                            platform_specific={'upvote_ratio': post.upvote_ratio}
+                            relevance_score=post.upvote_ratio  # Use upvote_ratio as relevance
                         ))
                     
                     if posts:
@@ -478,7 +534,7 @@ class SocialSentimentAnalyzer:
                         self.reddit_error_count += 1
                         
                         # Exponential backoff: 30s, 60s, 120s, 300s (5 min max)
-                        backoff_seconds = min(30 * (2 ** (self.reddit_error_count - 1)), 300)
+                        backoff_seconds = min(60 * (2 ** (self.reddit_error_count - 1)), 300) + random.uniform(0, 5)
                         self.reddit_backoff_until = time.time() + backoff_seconds
                         
                         logger.warning(f"⚠️ Reddit rate limit hit! Backing off for {backoff_seconds}s (error #{self.reddit_error_count})")
@@ -498,22 +554,25 @@ class SocialSentimentAnalyzer:
             logger.error(f"Reddit API error for {ticker}: {e}")
             return mentions
     
-    async def _scrape_reddit_via_rss(self, ticker: str) -> List[SocialMention]:
+    async def _scrape_reddit_via_rss(self, ticker: str, is_crypto: bool = False) -> List[SocialMention]:
         """Fast Reddit polling via RSS feeds (no rate limits!) + selective API expansion"""
         mentions = []
         
-        logger.info(f"📡 Starting Reddit RSS scan for ${ticker}...")
+        symbol_type = "crypto" if is_crypto else "stock"
+        logger.info(f"📡 Starting Reddit RSS scan for {symbol_type} ${ticker}...")
         
         try:
             import feedparser
             import httpx
             
-            # Top trading subreddits (reduced to 3 most active for speed)
-            subreddits = [
-                'wallstreetbets',   # 15M+ members - most active, options/meme stocks
-                'stocks',            # 5M+ members - general stock discussion
-                'investing',         # 2M+ members - serious long-term investors
-            ]
+            # Get appropriate subreddits based on symbol type
+            # For crypto, use crypto subreddits; for stocks, use stock subreddits
+            all_subreddits = self._get_subreddits_for_symbol(ticker, is_crypto)
+            # Use top 3-5 most active for speed
+            if is_crypto:
+                subreddits = all_subreddits[:5]  # Top 5 crypto subreddits
+            else:
+                subreddits = all_subreddits[:3]  # Top 3 stock subreddits (reduced for speed)
             
             # Pre-filter: compile ticker regex for fast matching
             # More flexible pattern - match $TICKER, TICKER with spaces/punctuation around it
@@ -557,7 +616,7 @@ class SocialSentimentAnalyzer:
                                 # Quick regex check - also do simple string search as fallback
                                 if (ticker_pattern.search(combined_text) or 
                                     f"${ticker.upper()}" in combined_text.upper() or
-                                    f" {ticker.upper()} " in f" {combined_text.upper()} "):
+                                    (combined_text and f" {ticker.upper()} " in f" {combined_text.upper()} ")):
                                     candidate_posts.append(entry)
                                     logger.debug(f"Found match in: {title[:50]}...")
                             

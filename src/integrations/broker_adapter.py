@@ -60,7 +60,7 @@ class BrokerAdapter(ABC):
         pass
     
     @abstractmethod
-    def place_equity_order(self, symbol: str, side: str, quantity: int, 
+    def place_equity_order(self, symbol: str, side: str, quantity: float, 
                           order_type: str = "market", duration: str = "day",
                           limit_price: Optional[float] = None,
                           stop_price: Optional[float] = None,
@@ -71,7 +71,7 @@ class BrokerAdapter(ABC):
         Args:
             symbol: Stock symbol
             side: 'buy' or 'sell'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional for supported brokers)
             order_type: 'market', 'limit', 'stop'
             duration: 'day', 'gtc'
             limit_price: Limit price (for limit orders)
@@ -84,7 +84,7 @@ class BrokerAdapter(ABC):
         pass
     
     @abstractmethod
-    def place_bracket_order(self, symbol: str, side: str, quantity: int,
+    def place_bracket_order(self, symbol: str, side: str, quantity: float,
                            stop_loss_price: float, take_profit_price: float,
                            duration: str = "day", tag: Optional[str] = None,
                            entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
@@ -94,7 +94,7 @@ class BrokerAdapter(ABC):
         Args:
             symbol: Stock symbol
             side: 'buy' or 'sell'
-            quantity: Number of shares
+            quantity: Number of shares (can be fractional for supported brokers)
             stop_loss_price: Stop loss price
             take_profit_price: Take profit price
             duration: 'day', 'gtc'
@@ -285,7 +285,7 @@ class IBKRAdapter(BrokerAdapter):
             for pos in positions:
                 normalized.append({
                     'symbol': pos.symbol,
-                    'quantity': int(pos.position),  # IBKRPosition uses 'position' not 'quantity'
+                    'quantity': float(pos.position),  # Support fractional shares
                     'cost_basis': float(pos.avg_cost * abs(pos.position)),
                     'current_price': float(pos.market_price)
                 })
@@ -336,7 +336,7 @@ class IBKRAdapter(BrokerAdapter):
         try:
             symbol = order_data.get('symbol')
             side = order_data.get('side')  # 'buy' or 'sell'
-            quantity = int(order_data.get('quantity'))
+            quantity = float(order_data.get('quantity'))  # Support fractional shares
             order_type = order_data.get('type', 'market')
             
             # Map to IBKR action ('BUY' or 'SELL')
@@ -361,12 +361,12 @@ class IBKRAdapter(BrokerAdapter):
             logger.error(f"Error placing IBKR order: {e}")
             return False, {}
     
-    def place_equity_order(self, symbol: str, side: str, quantity: int,
+    def place_equity_order(self, symbol: str, side: str, quantity: float,
                           order_type: str = "market", duration: str = "day",
                           limit_price: Optional[float] = None,
                           stop_price: Optional[float] = None,
                           tag: Optional[str] = None) -> Tuple[bool, Dict]:
-        """Place equity order via IBKR"""
+        """Place equity order via IBKR (supports fractional shares)"""
         try:
             action = side.upper()
             
@@ -387,11 +387,11 @@ class IBKRAdapter(BrokerAdapter):
             logger.error(f"Error placing IBKR equity order: {e}")
             return False, {}
     
-    def place_bracket_order(self, symbol: str, side: str, quantity: int,
+    def place_bracket_order(self, symbol: str, side: str, quantity: float,
                            stop_loss_price: float, take_profit_price: float,
                            duration: str = "day", tag: Optional[str] = None,
                            entry_price: Optional[float] = None) -> Tuple[bool, Dict]:
-        """Place bracket order via IBKR"""
+        """Place bracket order via IBKR (supports fractional shares)"""
         try:
             action = side.upper()
             

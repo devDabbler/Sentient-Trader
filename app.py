@@ -59,6 +59,8 @@ from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, Sc
 from analyzers.comprehensive import ComprehensiveAnalyzer
 from models.analysis import StockAnalysis
 from analyzers.trading_styles import TradingStyleAnalyzer
+from analyzers.news import NewsAnalyzer
+from services.social_sentiment_analyzer import SocialSentimentAnalyzer
 from services.event_detectors.sec_detector import SECDetector
 from services.enhanced_catalyst_detector import EnhancedCatalystDetector
 
@@ -199,104 +201,6 @@ def get_cached_news(ticker: str):
     except Exception as e:
         logger.error(f"Error fetching cached news for {ticker}: {e}")
         return []
-# Logging is now handled by Loguru (see utils/logging_config.py)
-# All logging output goes to logs/sentient_trader.log with automatic rotation
-
-# Log app startup
-logger.info("="*80)
-logger.info("🚀 Sentient Trader Application Started")
-logger.info(f"📅 Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-logger.info(f"📁 Log file: logs/sentient_trader_app.log (resets on each start)")
-logger.info("="*80)
-
-# Optional: Create a timestamped archive of previous logs (disabled by default)
-# Uncomment the following lines if you want to preserve historical logs
-# try:
-#     log_dir = os.path.join(os.path.dirname(__file__), 'logs')
-#     archive_name = f"sentient_trader_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-#     # This would save a timestamped copy before reset
-# except Exception:
-#     pass
-
-# Third-party logger suppression is now handled by Loguru in utils/logging_config.py
-# No need to manually configure individual loggers
-
-# Compatibility shims for newer Streamlit APIs that may not exist in older versions.
-# This avoids AttributeError during script-run and lets the app degrade gracefully.
-try:
-    # st is imported at module top; ensure we have it
-    _st = st
-except Exception:
-    _st = None
-
-if _st is not None:
-    # toggle -> fallback to checkbox
-    if not hasattr(st, 'toggle'):
-        def _toggle(label, value=False, **kwargs):
-            return st.checkbox(label, value)
-        setattr(st, 'toggle', _toggle)
-
-    # status -> fallback to a dummy context manager with an update method
-    if not hasattr(st, 'status'):
-        class _DummyStatus:
-            def __init__(self, *a, **k):
-                pass
-            def __enter__(self):
-                return self
-            def __exit__(self, exc_type, exc, tb):
-                return False
-            def update(self, label=None, state=None):
-                # best-effort: show a spinner or simple text
-                try:
-                    if label:
-                        st.write(label)
-                except Exception:
-                    pass
-
-        def _status(msg, expanded=False):
-            return _DummyStatus()
-
-        setattr(st, 'status', _status)
-
-    # data_editor -> fallback to dataframe display and return the passed DataFrame
-    if not hasattr(st, 'data_editor'):
-        def _data_editor(df, **kwargs):
-            try:
-                st.dataframe(df)
-            except Exception:
-                pass
-            return df
-        setattr(st, 'data_editor', _data_editor)
-
-    # divider -> fallback to markdown horizontal rule
-    if not hasattr(st, 'divider'):
-        def _divider():
-            try:
-                st.markdown('---')
-            except Exception:
-                pass
-        setattr(st, 'divider', _divider)
-
-    # fragment decorator -> no-op decorator when missing
-    if not hasattr(st, 'fragment'):
-        def _fragment(fn):
-            return fn
-        setattr(st, 'fragment', _fragment)
-
-    # Provide a minimal column_config namespace to avoid attribute errors when building
-    # column_config objects; these dummies are ignored by our fallback data_editor.
-    if not hasattr(st, 'column_config'):
-        class _DummyCol:
-            def __init__(self, *a, **k):
-                pass
-
-        class _DummyColConfig:
-            TextColumn = _DummyCol
-            SelectboxColumn = _DummyCol
-            NumberColumn = _DummyCol
-            DatetimeColumn = _DummyCol
-
-        setattr(st, 'column_config', _DummyColConfig())
 
 class MarketCondition(Enum):
     HIGH_VOLATILITY = "high_volatility"
@@ -555,239 +459,6 @@ class TechnicalAnalyzer:
             return {"A": A, "B": B, "C": C, "T1_1272": float(t1), "T2_1618": float(t2), "T3_200": float(t3a), "T3_2618": float(t3b)}
         except Exception:
             return None
-
-class NewsAnalyzer:
-    """Fetch and analyze news and catalysts"""
-    
-    @staticmethod
-    def get_stock_news(ticker: str, max_articles: int = 5) -> List[Dict]:
-        """Fetch recent news for a stock with enhanced error handling"""
-        try:
-            logger.info(f"Getting news for {ticker} (max {max_articles} articles)")
-            
-            # Use cached news for better performance
-            news = get_cached_news(ticker)
-            
-            if not news:
-                logger.warning(f"No news data returned from cache for {ticker}")
-                # Try direct fetch as fallback
-                try:
-                    stock = yf.Ticker(ticker)
-                    news = stock.news
-                    logger.info(f"Direct fetch returned {len(news) if news else 0} articles")
-                except Exception as direct_error:
-                    logger.error(f"Direct fetch also failed for {ticker}: {direct_error}")
-                    return []
-            
-            articles = []
-            for idx, item in enumerate(news[:max_articles]):
-                try:
-                    # Handle both old and new Yahoo Finance API structures
-                    content = item.get('content', item)  # New API has nested content
-                    
-                    # Extract title from nested content or direct item
-                    title = content.get('title', item.get('title', 'No title available'))
-                    
-                    # Extract publisher information
-                    provider = content.get('provider', {})
-                    publisher = provider.get('displayName', item.get('publisher', 'Unknown Publisher'))
-                    
-                    # Extract link - try multiple possible locations
-                    link = ''
-                    if content.get('canonicalUrl', {}).get('url'):
-                        link = content['canonicalUrl']['url']
-                    elif content.get('clickThroughUrl', {}).get('url'):
-                        link = content['clickThroughUrl']['url']
-                    elif item.get('link'):
-                        link = item['link']
-                    
-                    # Handle timestamp conversion more safely
-                    published_time = 'Unknown'
-                    pub_date = content.get('pubDate', content.get('displayTime', item.get('providerPublishTime')))
-                    
-                    if pub_date:
-                        try:
-                            # Handle different timestamp formats
-                            if isinstance(pub_date, str):
-                                # Parse ISO format dates
-                                if 'T' in pub_date and 'Z' in pub_date:
-                                    from datetime import datetime
-                                    dt = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
-                                    published_time = dt.strftime('%Y-%m-%d %H:%M')
-                                else:
-                                    published_time = pub_date
-                            elif isinstance(pub_date, (int, float)):
-                                # Handle Unix timestamps
-                                published_time = datetime.fromtimestamp(pub_date).strftime('%Y-%m-%d %H:%M')
-                            else:
-                                published_time = 'Recent'
-                        except (ValueError, TypeError, OSError) as time_error:
-                            logger.warning(f"Could not parse timestamp for article {idx}: {time_error}")
-                            published_time = 'Recent'
-                    
-                    # Extract summary/description
-                    summary = content.get('summary', content.get('description', ''))
-                    if summary and len(summary) > 200:
-                        summary = summary[:200] + '...'
-                    
-                    article = {
-                        'title': title,
-                        'publisher': publisher,
-                        'link': link,
-                        'published': published_time,
-                        'type': content.get('contentType', item.get('type', 'NEWS')),
-                        'summary': summary
-                    }
-                    articles.append(article)
-                    logger.debug(f"Processed article {idx + 1}: {article['title'][:50]}...")
-                    
-                except Exception as article_error:
-                    logger.error(f"Error processing article {idx} for {ticker}: {article_error}")
-                    continue
-            
-            logger.info(f"Successfully processed {len(articles)} articles for {ticker}")
-            return articles
-            
-        except Exception as e:
-            logger.error(f"Error fetching news for {ticker}: {e}")
-            return []
-    
-    @staticmethod
-    def analyze_sentiment(news_articles: List[Dict]) -> Tuple[float, List[str]]:
-        """Enhanced sentiment analysis from news titles and summaries"""
-        # Expanded sentiment word lists with weights
-        positive_words = {
-            'surge': 2, 'jump': 2, 'gain': 2, 'profit': 2, 'beat': 3, 'upgrade': 2, 'buy': 2, 'strong': 2, 
-            'growth': 2, 'bullish': 3, 'rally': 3, 'soar': 3, 'win': 2, 'success': 2, 'breakthrough': 3,
-            'exceeds': 2, 'outperforms': 2, 'rises': 2, 'climbs': 2, 'advances': 2, 'boosts': 2, 'increases': 2,
-            'positive': 2, 'optimistic': 2, 'confident': 2, 'expansion': 2, 'record': 2, 'milestone': 2
-        }
-        
-        negative_words = {
-            'fall': 2, 'drop': 2, 'loss': 3, 'miss': 3, 'downgrade': 2, 'sell': 2, 'weak': 2, 'decline': 2, 
-            'bearish': 3, 'crash': 4, 'plunge': 3, 'concern': 2, 'risk': 2, 'lawsuit': 3, 'investigation': 3,
-            'disappoints': 2, 'underperforms': 2, 'declines': 2, 'falls': 2, 'drops': 2, 'sinks': 3, 'tumbles': 3,
-            'negative': 2, 'pessimistic': 2, 'worried': 2, 'contraction': 2, 'cut': 2, 'reduce': 2, 'warning': 2
-        }
-        
-        sentiment_score = 0
-        signals = []
-        total_articles = len(news_articles)
-        
-        if not news_articles:
-            return 0.0, ["No news articles to analyze"]
-        
-        for article in news_articles:
-            title = article.get('title', '').lower()
-            summary = article.get('summary', '').lower()
-            combined_text = f"{title} {summary}"
-            
-            # Calculate positive and negative scores with weights
-            pos_score = sum(weight for word, weight in positive_words.items() if word in combined_text)
-            neg_score = sum(weight for word, weight in negative_words.items() if word in combined_text)
-            
-            # Determine sentiment for this article
-            if pos_score > neg_score:
-                sentiment_score += 1
-                sentiment_icon = "✅"
-                sentiment_label = "Positive"
-            elif neg_score > pos_score:
-                sentiment_score -= 1
-                sentiment_icon = "⚠️"
-                sentiment_label = "Negative"
-            else:
-                sentiment_icon = "ℹ️"
-                sentiment_label = "Neutral"
-            
-            # Create detailed signal with sentiment strength
-            strength = abs(pos_score - neg_score)
-            if strength > 3:
-                strength_indicator = "🔥 Strong"
-            elif strength > 1:
-                strength_indicator = "📈 Moderate"
-            else:
-                strength_indicator = "📊 Weak"
-            
-            signals.append(f"{sentiment_icon} {sentiment_label} ({strength_indicator}): {article['title'][:60]}...")
-        
-        # Normalize to -1 to 1 scale
-        sentiment_score = sentiment_score / total_articles if total_articles > 0 else 0
-        
-        logger.info(f"Sentiment analysis complete: {sentiment_score:.3f} from {total_articles} articles")
-        
-        return sentiment_score, signals
-    
-    @staticmethod
-    def get_catalysts(ticker: str) -> List[Dict]:
-        """Identify upcoming catalysts"""
-        catalysts = []
-        
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            # Earnings date
-            earnings_date = info.get('earningsDate')
-            if earnings_date:
-                if isinstance(earnings_date, list) and earnings_date:
-                    earnings_date = earnings_date[0]
-                
-                if isinstance(earnings_date, (int, float)):
-                    earnings_dt = datetime.fromtimestamp(earnings_date)
-                    days_away = (earnings_dt - datetime.now()).days
-                    
-                    if days_away >= 0 and days_away <= 60:
-                        impact = "HIGH" if days_away <= 7 else "MEDIUM"
-                        catalysts.append({
-                            'type': 'Earnings Report',
-                            'date': earnings_dt.strftime('%Y-%m-%d'),
-                            'days_away': days_away,
-                            'impact': impact,
-                            'description': f'Earnings report in {days_away} days'
-                        })
-            
-            # Ex-dividend date
-            ex_div_date = info.get('exDividendDate')
-            if ex_div_date:
-                if isinstance(ex_div_date, (int, float)):
-                    div_dt = datetime.fromtimestamp(ex_div_date)
-                    days_away = (div_dt - datetime.now()).days
-                    
-                    if days_away >= 0 and days_away <= 30:
-                        catalysts.append({
-                            'type': 'Ex-Dividend',
-                            'date': div_dt.strftime('%Y-%m-%d'),
-                            'days_away': days_away,
-                            'impact': 'LOW',
-                            'description': f'Ex-dividend date in {days_away} days'
-                        })
-            
-            # Check for recent analyst upgrades/downgrades in news
-            news = NewsAnalyzer.get_stock_news(ticker, max_articles=10)
-            for article in news:
-                if article and article.get('title'):
-                    title_lower = article['title'].lower()
-                    if 'upgrade' in title_lower or 'raises price target' in title_lower:
-                        catalysts.append({
-                            'type': 'Analyst Upgrade',
-                            'date': article.get('published', 'Unknown'),
-                            'days_away': 0,
-                            'impact': 'MEDIUM',
-                            'description': article['title'][:80]
-                        })
-                    elif 'downgrade' in title_lower or 'lowers price target' in title_lower:
-                        catalysts.append({
-                            'type': 'Analyst Downgrade',
-                            'date': article.get('published', 'Unknown'),
-                            'days_away': 0,
-                            'impact': 'MEDIUM',
-                            'description': article['title'][:80]
-                        })
-            
-        except Exception as e:
-            logger.error(f"Error getting catalysts for {ticker}: {e}")
-        
-        return catalysts
 
 
 class StrategyAdvisor:
@@ -1547,6 +1218,13 @@ def main():
         st.session_state.ticker_manager = get_ticker_manager()
     if 'ai_scanner' not in st.session_state:
         st.session_state.ai_scanner = get_ai_scanner()
+    if 'llm_analyzer' not in st.session_state:
+        st.session_state.llm_analyzer = LLMStrategyAnalyzer()
+    # These services depend on the llm_analyzer, so they are initialized after.
+    if 'news_analyzer' not in st.session_state:
+        st.session_state.news_analyzer = NewsAnalyzer(llm_analyzer=st.session_state.llm_analyzer)
+    if 'social_sentiment_analyzer' not in st.session_state:
+        st.session_state.social_sentiment_analyzer = SocialSentimentAnalyzer()
     if 'ml_scanner' not in st.session_state:
         st.session_state.ml_scanner = get_ml_scanner()
     if 'advanced_scanner' not in st.session_state:
@@ -5133,31 +4811,34 @@ def main():
         
         # Use cached ticker manager from session state
         tm = st.session_state.ticker_manager
+
+        # --- Centralized Client and Assistant Initialization ---
+        from services.ai_stock_entry_assistant import get_ai_stock_entry_assistant
+
+        # Get broker client (prefer IBKR if available, fallback to Tradier, then BrokerAdapter)
+        broker_client = st.session_state.get('ibkr_client') or st.session_state.get('tradier_client') or st.session_state.get('broker_client')
+        llm_analyzer = st.session_state.get('llm_analyzer')
+
+        # Ensure AI Entry Assistant is initialized once and available for all components on this page
+        if 'stock_ai_entry_assistant' not in st.session_state:
+            if broker_client and llm_analyzer:
+                st.session_state.stock_ai_entry_assistant = get_ai_stock_entry_assistant(
+                    broker_client=broker_client,
+                    llm_analyzer=llm_analyzer
+                )
         
-        # Debug: Show connection status (cached to prevent repeated database queries)
+        # Debug: Show connection status
         if tm.supabase:
-            # Cache connection test result in session state to avoid repeated queries
             if 'supabase_connection_test' not in st.session_state:
                 st.session_state.supabase_connection_test = tm.test_connection()
             
             if st.session_state.supabase_connection_test:
-                st.success("✅ Supabase connected and table accessible")
+                st.success("✅ Supabase connected")
             else:
-                st.error("❌ Supabase connected but table not accessible - check table exists")
+                st.error("❌ Supabase connection failed")
                 st.stop()
         else:
-            st.error("❌ Supabase not connected - check your secrets")
-            
-            # Show debug info about secrets
-            try:
-                if 'supabase' in st.secrets:
-                    st.info(f"✅ Found supabase section in secrets")
-                    st.info(f"URL: {st.secrets['supabase'].get('url', 'Not set')}")
-                    st.info(f"Service key: {'Set' if st.secrets['supabase'].get('service_key') else 'Not set'}")
-                else:
-                    st.error("❌ No [supabase] section found in Streamlit secrets")
-            except Exception as e:
-                st.error(f"❌ Error reading secrets: {e}")
+            st.error("❌ Supabase not connected")
             st.stop()
         
         # Add new ticker
@@ -5211,8 +4892,53 @@ def main():
                 st.session_state.refresh_all_tickers = True
                 st.info("🔄 Refreshing all tickers... This will update on the next analysis run.")
         
+        st.divider()
+        
+        # AI Entry Analysis Section
+        st.subheader("🤖 AI Entry Analysis")
+        st.write("Analyze whether now is a good time to enter a stock trade using AI-powered market analysis.")
+        
+        from ui.stock_ai_entry_ui import display_stock_ai_entry_analysis
+        from services.ai_stock_entry_assistant import get_ai_stock_entry_assistant
+
+        # Get broker client (prefer IBKR if available, fallback to Tradier, then BrokerAdapter)
+        broker_client = st.session_state.get('ibkr_client') or st.session_state.get('tradier_client') or st.session_state.get('broker_client')
+
+        # Ensure AI Entry Assistant is initialized and available for all components on this page
+        if 'stock_ai_entry_assistant' not in st.session_state:
+            if broker_client and 'llm_analyzer' in st.session_state:
+                st.session_state.stock_ai_entry_assistant = get_ai_stock_entry_assistant(
+                    broker_client=broker_client,
+                    llm_analyzer=st.session_state.llm_analyzer
+                )
+        
+        if st.session_state.get('stock_ai_entry_assistant'):
+            display_stock_ai_entry_analysis(broker_client, st.session_state.llm_analyzer)
+        else:
+            st.warning("⚠️ AI Entry Assistant not available. Please connect to a broker and ensure LLM is configured.")
+            st.info("💡 Go to the '🏦 Tradier Account' or '📈 IBKR Trading' tab to connect.")
+        
+        st.divider()
+        
         # View saved tickers with pagination
         st.subheader("📋 Your Saved Tickers")
+
+        # --- Filter and Sort Controls ---
+        filter_col1, filter_col2 = st.columns(2)
+        with filter_col1:
+            ai_action_filter = st.selectbox(
+                "Filter by AI Action",
+                options=["All", "ENTER_NOW", "WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT", "PLACE_LIMIT_ORDER", "DO_NOT_ENTER"],
+                key="ai_action_filter",
+                help="Show only tickers with a specific AI recommendation."
+            )
+        with filter_col2:
+            sort_by = st.selectbox(
+                "Sort By",
+                options=["Default", "AI Confidence (Highest First)", "Analysis Date (Newest First)"],
+                key="ai_sort_by",
+                help="Sort the list of tickers based on AI analysis results."
+            )
         
         # Pagination settings
         import math
@@ -5239,6 +4965,24 @@ def main():
             st.session_state.ticker_cache['all_tickers'] = all_tickers_full
             st.session_state.ticker_cache_timestamp = datetime.now()
             logger.debug("Fetched fresh ticker data and cached it")
+
+        # Apply filtering
+        if ai_action_filter != "All":
+            all_tickers_full = [t for t in all_tickers_full if t.get('ai_entry_action') == ai_action_filter]
+
+        # Apply sorting
+        if sort_by == "AI Confidence (Highest First)":
+            all_tickers_full = sorted(
+                all_tickers_full, 
+                key=lambda t: t.get('ai_entry_confidence', 0) or 0, 
+                reverse=True
+            )
+        elif sort_by == "Analysis Date (Newest First)":
+            all_tickers_full = sorted(
+                all_tickers_full, 
+                key=lambda t: t.get('ai_entry_timestamp', '1970-01-01T00:00:00+00:00') or '1970-01-01T00:00:00+00:00', 
+                reverse=True
+            )
         
         total_tickers = len(all_tickers_full)
         total_pages = max(1, math.ceil(total_tickers / items_per_page))
@@ -5299,6 +5043,33 @@ def main():
                 
                 # Main card container
                 with st.container():
+                    # AI Entry Analysis Badge
+                    ai_action = ticker.get('ai_entry_action')
+                    ai_confidence = ticker.get('ai_entry_confidence')
+                    ai_timestamp_str = ticker.get('ai_entry_timestamp')
+
+                    if ai_action and ai_confidence is not None and ai_timestamp_str:
+                        try:
+                            ai_timestamp = datetime.fromisoformat(ai_timestamp_str.replace('Z', '+00:00'))
+                            time_ago = (datetime.now(timezone.utc) - ai_timestamp).total_seconds()
+                            if time_ago < 3600:
+                                time_label = f"{int(time_ago / 60)}m ago"
+                            elif time_ago < 86400:
+                                time_label = f"{int(time_ago / 3600)}h ago"
+                            else:
+                                time_label = f"{int(time_ago / 86400)}d ago"
+
+                            badge_color = "green" if ai_action == "ENTER_NOW" else "yellow" if "WAIT" in ai_action else "red"
+                            
+                            st.markdown(
+                                f'<div style="background-color:{badge_color};color:white;padding:5px 10px;border-radius:5px;margin-bottom:5px;font-size:0.9em;">' 
+                                f'🤖 **AI Rec:** {ai_action.replace("_", " ")} ({ai_confidence:.0f}%) - {time_label}'
+                                f'</div>',
+                                unsafe_allow_html=True
+                            )
+                        except (ValueError, TypeError):
+                            pass # Ignore parsing errors
+
                     # Card header with action buttons
                     col_header, col_actions = st.columns([5, 2])
                     
@@ -6343,142 +6114,26 @@ def main():
         if st.session_state.get('refresh_all_tickers', False):
             st.session_state.refresh_all_tickers = False
         
-        # Bulk Analysis Section with Trading Style Support
+        # New Bulk AI Entry Analysis Section
         if all_tickers:
             st.divider()
-            st.subheader("🧠 Bulk Analysis")
-            
-            # Get the selected trading style from above
-            selected_style = st.session_state.get('analysis_timeframe', 'OPTIONS')
-            
-            bulk_col1, bulk_col2 = st.columns([3, 1])
-            with bulk_col1:
-                st.write(f"Run comprehensive analysis on all your saved tickers using **{selected_style}** trading style.")
-            with bulk_col2:
-                max_tickers = st.number_input("Max tickers", min_value=5, max_value=50, value=10, step=5, key="bulk_max")
-            
-            if st.button("🚀 Analyze All My Tickers", type="primary", width="stretch"):
-                # Logging is now handled by Loguru - no need for manual handlers
-                results = []
-                style_results = []  # Store trading style-specific results
-                
-                with st.expander("📊 Live Analysis Logs", expanded=True):
-                    log_container = st.empty()
-                    with st.status(f"Analyzing your tickers with {selected_style} style...", expanded=True) as status:
-                        ticker_list = [t['ticker'] for t in all_tickers[:max_tickers]]
-                        
-                        for i, ticker_symbol in enumerate(ticker_list):
-                            status.update(label=f"Analyzing {ticker_symbol} ({i+1}/{len(ticker_list)})...", state="running")
-                            try:
-                                # Run comprehensive analysis with selected trading style
-                                analysis = ComprehensiveAnalyzer.analyze_stock(ticker_symbol, selected_style)
-                                
-                                if analysis:
-                                    results.append(analysis.__dict__)
-                                    tm.update_analysis(ticker_symbol, analysis.__dict__)
-                                    
-                                    # Run trading style-specific analysis
-                                    hist, _ = get_cached_stock_data(ticker_symbol)
-                                    if not hist.empty:
-                                        if selected_style == "AI":
-                                            style_result = TradingStyleAnalyzer.analyze_ai_style(analysis, hist)
-                                        elif selected_style == "SCALP":
-                                            style_result = TradingStyleAnalyzer.analyze_scalp_style(analysis, hist)
-                                        elif selected_style == "WARRIOR_SCALPING":
-                                            style_result = TradingStyleAnalyzer.analyze_warrior_scalping_style(analysis, hist)
-                                        elif selected_style == "BUY_AND_HOLD":
-                                            style_result = TradingStyleAnalyzer.analyze_buy_and_hold_style(analysis, hist)
-                                        else:
-                                            style_result = None
-                                        
-                                        if style_result:
-                                            style_result['ticker'] = ticker_symbol
-                                            style_result['analysis'] = analysis
-                                            style_results.append(style_result)
-                                            
-                            except Exception as e:
-                                logger.error(f"⚠️ Error analyzing {ticker_symbol}: {e}")
-                            log_container.code(log_stream.getvalue())
-                        
-                        status.update(label="✅ Analysis complete!", state="complete")
-                
-                alpha_factors_logger.removeHandler(st_handler)
+            from ui.bulk_ai_entry_analysis_ui import display_bulk_ai_entry_analysis
+            from services.ai_stock_entry_assistant import get_ai_stock_entry_assistant
 
-                # Display results based on trading style
-                if style_results:
-                    # Sort by style-specific score
-                    style_results.sort(key=lambda x: x.get('score', 0), reverse=True)
-                    st.success(f"✅ Analyzed {len(style_results)} tickers with {selected_style} style")
-                    
-                    st.subheader(f"🏆 Top {selected_style} Opportunities")
-                    
-                    for i, result in enumerate(style_results[:5], 1):
-                        ticker_sym = result['ticker']
-                        score = result.get('score', 0)
-                        analysis = result['analysis']
-                        
-                        # Score-based emoji
-                        emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
-                        
-                        with st.expander(f"{emoji} #{i} - **{ticker_sym}** - Score: {score}/100", expanded=(i <= 3)):
-                            # Basic metrics
-                            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-                            with metric_col1:
-                                st.metric("Price", f"${analysis.price:.2f}", f"{analysis.change_pct:+.2f}%")
-                            with metric_col2:
-                                st.metric(f"{selected_style} Score", f"{score}/100")
-                            with metric_col3:
-                                st.metric("Risk Level", result.get('risk_level', 'N/A'))
-                            with metric_col4:
-                                st.metric("Trend", analysis.trend)
-                            
-                            # Style-specific signals
-                            if result.get('signals'):
-                                st.write("**📊 Key Signals:**")
-                                for signal in result['signals'][:5]:  # Top 5 signals
-                                    st.write(signal)
-                            
-                            # Style-specific recommendations
-                            if result.get('recommendations'):
-                                st.write("**💡 Recommendations:**")
-                                for rec in result['recommendations'][:3]:  # Top 3 recommendations
-                                    st.write(rec)
-                            
-                            # Targets if available
-                            if result.get('targets'):
-                                st.write("**🎯 Targets:**")
-                                for target in result['targets']:
-                                    st.write(target)
-                            
-                            # Special fields for specific styles
-                            if selected_style == "AI" and result.get('ml_prediction'):
-                                st.info(f"🤖 **ML Prediction:** {result['ml_prediction']}")
-                            elif selected_style == "WARRIOR_SCALPING" and result.get('setup_type'):
-                                st.info(f"⚔️ **Setup Type:** {result['setup_type']}")
-                            elif selected_style == "BUY_AND_HOLD" and result.get('valuation'):
-                                st.info(f"📊 **Valuation:** {result['valuation']}")
-                
-                elif results:
-                    # Fallback to standard results if no style-specific analysis
-                    results.sort(key=lambda x: x['confidence_score'], reverse=True)
-                    st.success(f"✅ Analyzed {len(results)} tickers")
-                    st.subheader("🏆 Top Opportunities from Your Tickers")
-                    for i, result in enumerate(results[:5], 1):
-                        score = result['confidence_score']
-                        emoji = "🟢" if score >= 70 else "🟡" if score >= 50 else "🔴"
-                        col_r1, col_r2, col_r3, col_r4, col_r5 = st.columns([1, 1, 1, 1, 1])
-                        with col_r1:
-                            st.write(f"{emoji} **{result['ticker']}**")
-                        with col_r2:
-                            st.write(f"Score: **{score:.0f}**/100")
-                        with col_r3:
-                            st.write(f"Trend: {result['trend']}")
-                        with col_r4:
-                            st.write(f"Sentiment: {result['sentiment_score']:.2f}")
-                        with col_r5:
-                            st.write(f"RSI: {result['rsi']:.0f}")
-                else:
-                    st.warning("No results to display after analysis.")
+            # Ensure AI Entry Assistant is initialized
+            if 'stock_ai_entry_assistant' not in st.session_state:
+                if broker_client and 'llm_analyzer' in st.session_state:
+                    st.session_state.stock_ai_entry_assistant = get_ai_stock_entry_assistant(
+                        broker_client=broker_client,
+                        llm_analyzer=st.session_state.llm_analyzer
+                    )
+            
+            if 'stock_ai_entry_assistant' in st.session_state:
+                entry_assistant = st.session_state.stock_ai_entry_assistant
+                ticker_list = [t['ticker'] for t in all_tickers_full]
+                display_bulk_ai_entry_analysis(ticker_list, entry_assistant, tm)
+            else:
+                st.info("AI Entry Assistant is not available. Please ensure broker and LLM connections are active.")
     
     elif selected_main_tab == "🔍 Stock Intelligence":
         st.header("🔍 Stock Intelligence")
@@ -8655,6 +8310,17 @@ def main():
                     logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
                     st.session_state.tradier_client = None
             
+            # Trade Journal section
+            with st.expander("📓 Trade Journal", expanded=False):
+                try:
+                    from ui.trade_journal_ui import display_trade_journal
+                    display_trade_journal()
+                except Exception as e:
+                    st.error(f"Failed to load trade journal: {e}")
+                    logger.error(f"Trade journal error: {e}", exc_info=True)
+            
+            st.divider()
+            
             col1, col2 = st.columns([1, 2])
             
             with col1:
@@ -9017,6 +8683,17 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     st.session_state.ibkr_client = None
                     st.session_state.ibkr_connected = False
             
+                # Trade Journal section
+                with st.expander("📓 Trade Journal", expanded=False):
+                    try:
+                        from ui.trade_journal_ui import display_trade_journal
+                        display_trade_journal()
+                    except Exception as e:
+                        st.error(f"Failed to load trade journal: {e}")
+                        logger.error(f"Trade journal error: {e}", exc_info=True)
+                
+                st.divider()
+                
                 # Connection Section
                 st.subheader("🔌 Connection Settings")
             
@@ -9129,18 +8806,26 @@ TRADIER_API_URL=https://sandbox.tradier.com
                         if positions:
                             positions_data = []
                             for pos in positions:
+                                # Check if position is fractional
+                                is_fractional = (pos.position % 1 != 0)
+                                qty_display = f"{pos.position:.4f} 📊" if is_fractional else f"{int(pos.position)}"
+                                
+                                # Calculate ROI percentage
+                                roi_pct = ((pos.market_price - pos.avg_cost) / pos.avg_cost * 100) if pos.avg_cost > 0 else 0
+                                
                                 positions_data.append({
                                     'Symbol': pos.symbol,
-                                    'Quantity': int(pos.position),
+                                    'Quantity': qty_display,
                                     'Avg Cost': f"${pos.avg_cost:.2f}",
                                     'Market Price': f"${pos.market_price:.2f}",
                                     'Market Value': f"${pos.market_value:,.2f}",
                                     'Unrealized P&L': f"${pos.unrealized_pnl:,.2f}",
+                                    'ROI %': f"{roi_pct:+.2f}%",
                                     'Realized P&L': f"${pos.realized_pnl:,.2f}"
                                 })
                         
                             positions_df = pd.DataFrame(positions_data)
-                            st.dataframe(positions_df, width="stretch")
+                            st.dataframe(positions_df, use_container_width=True, hide_index=True)
                         
                             # Quick flatten buttons
                             st.write("**Quick Actions:**")
@@ -9214,6 +8899,17 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     except Exception as e:
                         st.error(f"Error fetching orders: {e}")
                 
+                    st.divider()
+                    
+                    # Fractional Shares Configuration (expander)
+                    with st.expander("📊 Fractional Share Settings (IBKR Only)"):
+                        try:
+                            from ui.fractional_share_config_ui import display_fractional_share_config
+                            display_fractional_share_config()
+                        except Exception as e:
+                            st.error(f"Error loading fractional share settings: {e}")
+                            logger.error(f"Fractional share UI error: {e}", exc_info=True)
+                    
                     st.divider()
                 
                     # Place New Order
@@ -10568,6 +10264,11 @@ TRADIER_API_URL=https://sandbox.tradier.com
                     'use_ai_validation': getattr(cfg, 'USE_AI_VALIDATION', True),
                     'min_ensemble_score': getattr(cfg, 'MIN_ENSEMBLE_SCORE', 70.0),
                     'min_ai_validation_confidence': getattr(cfg, 'MIN_AI_VALIDATION_CONFIDENCE', 0.7),
+                    # Fractional Shares (IBKR Only)
+                    'use_fractional_shares': getattr(cfg, 'USE_FRACTIONAL_SHARES', False),
+                    'fractional_price_threshold': getattr(cfg, 'FRACTIONAL_PRICE_THRESHOLD', 100.0),
+                    'fractional_min_amount': getattr(cfg, 'FRACTIONAL_MIN_AMOUNT', 50.0),
+                    'fractional_max_amount': getattr(cfg, 'FRACTIONAL_MAX_AMOUNT', 1000.0),
                     # Extra fields for special strategies
                     'config_filename': config_filename,
                 }
@@ -10672,6 +10373,25 @@ ALLOW_SHORT_SELLING = {config_dict['allow_short_selling']}
 
 # Multi-Agent System
 USE_AGENT_SYSTEM = False
+
+# ==============================================================================
+# FRACTIONAL SHARES (IBKR ONLY) 📊
+# ==============================================================================
+
+# Enable fractional share trading for expensive stocks
+USE_FRACTIONAL_SHARES = {config_dict.get('use_fractional_shares', False)}
+
+# Auto-use fractional shares for stocks above this price
+FRACTIONAL_PRICE_THRESHOLD = {config_dict.get('fractional_price_threshold', 100.0)}  # ${config_dict.get('fractional_price_threshold', 100.0):.0f}
+
+# Dollar amount limits for fractional trades
+FRACTIONAL_MIN_AMOUNT = {config_dict.get('fractional_min_amount', 50.0)}  # Min ${config_dict.get('fractional_min_amount', 50.0):.2f} per trade
+FRACTIONAL_MAX_AMOUNT = {config_dict.get('fractional_max_amount', 1000.0)}  # Max ${config_dict.get('fractional_max_amount', 1000.0):.2f} per trade
+
+# NOTE: Fractional shares only work with Interactive Brokers (IBKR)
+# - Automatically uses fractional shares for stocks above threshold
+# - Allows precise dollar-based position sizing (e.g., $250 in NVDA)
+# - Better diversification with limited capital
 '''
                 
                 with open(config_filename, 'w', encoding='utf-8') as f:
@@ -11197,6 +10917,85 @@ USE_AGENT_SYSTEM = False
                     st.info("🛡️ AI Validation active. Enable ML-Enhanced Scanner for full knockout combo!")
                 else:
                     st.warning("⚠️ AI features disabled. Enable for superior trade quality!")
+                
+                st.divider()
+                st.subheader("📊 Fractional Shares (IBKR Only)")
+                st.markdown("""
+                **Trade expensive stocks with smaller capital** - Automatically use fractional shares for stocks above your threshold.
+                
+                - 📊 **Auto-Detection**: Automatically use fractional for stocks above threshold
+                - 💰 **Dollar-Based**: Set exact dollar amounts per stock (e.g., $250 in NVDA)
+                - 🎯 **Better Diversification**: Spread capital across more positions
+                - ⚠️ **IBKR Only**: Fractional shares only work with Interactive Brokers
+                """)
+                
+                # Initialize fractional share settings if not in session state
+                use_fractional_shares = st.session_state[config_key].get('use_fractional_shares', current_config.get('use_fractional_shares', False))
+                fractional_price_threshold = st.session_state[config_key].get('fractional_price_threshold', current_config.get('fractional_price_threshold', 100.0))
+                fractional_min_amount = st.session_state[config_key].get('fractional_min_amount', current_config.get('fractional_min_amount', 50.0))
+                fractional_max_amount = st.session_state[config_key].get('fractional_max_amount', current_config.get('fractional_max_amount', 1000.0))
+                
+                col_frac1, col_frac2 = st.columns(2)
+                
+                with col_frac1:
+                    use_fractional_shares = st.checkbox(
+                        "✅ Enable Fractional Shares (IBKR Only)",
+                        value=use_fractional_shares,
+                        help="Automatically use fractional shares for expensive stocks (IBKR only)",
+                        key=f"{config_key}_use_fractional_shares"
+                    )
+                    st.session_state[config_key]['use_fractional_shares'] = use_fractional_shares
+                    
+                    if use_fractional_shares:
+                        fractional_price_threshold = st.slider(
+                            "Auto-Enable Above Price",
+                            min_value=50.0,
+                            max_value=500.0,
+                            value=float(fractional_price_threshold),
+                            step=10.0,
+                            format="$%.0f",
+                            help="Automatically use fractional shares for stocks above this price",
+                            key=f"{config_key}_fractional_price_threshold"
+                        )
+                        st.session_state[config_key]['fractional_price_threshold'] = fractional_price_threshold
+                
+                with col_frac2:
+                    if use_fractional_shares:
+                        fractional_min_amount = st.number_input(
+                            "Min Dollar Amount",
+                            min_value=10.0,
+                            max_value=1000.0,
+                            value=float(fractional_min_amount),
+                            step=10.0,
+                            format="%.2f",
+                            help="Minimum dollar amount per fractional trade",
+                            key=f"{config_key}_fractional_min_amount"
+                        )
+                        st.session_state[config_key]['fractional_min_amount'] = fractional_min_amount
+                        
+                        fractional_max_amount = st.number_input(
+                            "Max Dollar Amount",
+                            min_value=50.0,
+                            max_value=10000.0,
+                            value=float(fractional_max_amount),
+                            step=50.0,
+                            format="%.2f",
+                            help="Maximum dollar amount per fractional trade",
+                            key=f"{config_key}_fractional_max_amount"
+                        )
+                        st.session_state[config_key]['fractional_max_amount'] = fractional_max_amount
+                
+                if use_fractional_shares:
+                    # Example calculation
+                    st.info(f"""
+                    📊 **Example:** 
+                    - Stock at **${fractional_price_threshold:.0f}** → Fractional used → Buy **${fractional_max_amount:.0f}** worth = **{fractional_max_amount/fractional_price_threshold:.2f} shares**
+                    - Stock at **${fractional_price_threshold - 10:.0f}** → Below threshold → Regular whole share sizing
+                    """)
+                    
+                    # Link to detailed configuration
+                    if st.button("⚙️ Advanced Fractional Share Settings", key="open_fractional_config"):
+                        st.info("Navigate to 'Fractional Shares' tab in the sidebar for advanced per-ticker configuration")
             
             elif cfg_tab3_active:
                 st.subheader("🎯 Step 3: Save Configuration")
@@ -11713,114 +11512,224 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
         
         st.divider()
         
-        # Check for background auto-trader
-        def check_background_trader():
-            """Check if background auto-trader is running"""
-            try:
-                import psutil
-                for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                    try:
-                        if proc.info['name'] in ['pythonw.exe', 'python.exe']:
-                            cmdline = proc.info.get('cmdline', [])
-                            if cmdline and any('run_autotrader_background' in str(cmd) for cmd in cmdline):
-                                return True, proc.info['pid']
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-            except ImportError:
-                pass  # psutil not installed
-            return False, None
+        # ========================================================================
+        # AUTO-TRADER TABS
+        # ========================================================================
         
-        bg_running, bg_pid = check_background_trader()
+        # Use stateful navigation instead of st.tabs() to prevent reruns
+        if 'autotrader_tab' not in st.session_state:
+            st.session_state.autotrader_tab = "📊 Status & Control"
         
-        if bg_running:
-            st.info(f"""
-            🟢 **Background Auto-Trader Detected**
-            
-            A background auto-trader is currently running (PID: {bg_pid})
-            
-            ⚠️ **IMPORTANT**: Don't start another auto-trader here to avoid duplicate trades!
-            
-            📊 **Monitor it via:**
-            - Logs: `logs/autotrader_background.log`
-            - State: `data/trade_state.json`
-            - Command: `Get-Content logs\\autotrader_background.log -Tail 50 -Wait`
-            
-            🛑 **To stop it:** Run `stop_autotrader.bat` or kill process {bg_pid}
-            """)
+        # Tab selector using radio buttons
+        autotrader_tab_selector = st.radio(
+            "Select Section:",
+            ["⚙️ Settings", "📊 Status & Control", "🔔 Entry Monitors", "📈 Active Positions", "📓 Trade History"],
+            key="autotrader_tab_radio",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
         
-        # Status display
-        st.subheader("📊 Status")
+        # Update session state when tab is selected
+        if autotrader_tab_selector != st.session_state.autotrader_tab:
+            st.session_state.autotrader_tab = autotrader_tab_selector
+            st.rerun()
         
-        if st.session_state.auto_trader:
-            status = st.session_state.auto_trader.get_status()
+        st.divider()
+        
+        # Display content based on selected tab
+        if st.session_state.autotrader_tab == "⚙️ Settings":
+            st.subheader("⚙️ Auto-Trader Settings")
+            st.info("Configuration settings are managed above in the 'Dynamic Strategy Configuration' section.")
+        
+        elif st.session_state.autotrader_tab == "🔔 Entry Monitors":
+            st.subheader("🔔 Stock Entry Monitors")
             
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            
-            with col_stat1:
-                status_icon = "🟢" if status['is_running'] else "🔴"
-                st.metric("Status", f"{status_icon} {'Running' if status['is_running'] else 'Stopped'}")
-            
-            with col_stat2:
-                st.metric("Daily Orders", f"{status['daily_orders']}/{status['max_daily_orders']}")
-            
-            with col_stat3:
-                st.metric("Watchlist Size", status['watchlist_size'])
-            
-            with col_stat4:
-                if status['config'].get('test_mode', False):
-                    hours_status = "🧪 Test Mode"
-                else:
-                    hours_status = "✅ Yes" if status['in_trading_hours'] else "❌ No"
-                st.metric("Trading Hours", hours_status)
-            
-            # Short positions display (if enabled)
-            if status.get('short_positions', 0) > 0:
-                st.divider()
-                st.subheader("📉 Active Short Positions")
-                short_details = status.get('short_positions_details', [])
-                for short_pos in short_details:
-                    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-                    with col_s1:
-                        st.write(f"**{short_pos['symbol']}**")
-                    with col_s2:
-                        st.write(f"Qty: {short_pos['quantity']}")
-                    with col_s3:
-                        st.write(f"Entry: ${short_pos['entry_price']:.2f}")
-                    with col_s4:
-                        st.write(f"Time: {short_pos['entry_time'][:16]}")
-            
-            # Configuration display
-            with st.expander("⚙️ Current Configuration"):
-                st.json(status['config'])
-            
-            # Execution history
-            st.subheader("📜 Execution History")
-            history = st.session_state.auto_trader.get_execution_history()
-            
-            if history:
-                st.write(f"**Total Executions:** {len(history)}")
+            # Custom Stock Analysis Section
+            with st.expander("🎯 Analyze Custom Stock", expanded=True):
+                st.write("Analyze any stock ticker for optimal entry timing using AI.")
                 
-                for idx, execution in enumerate(reversed(history[-10:]), 1):  # Show last 10
-                    with st.expander(f"{idx}. {execution['symbol']} - {execution['signal']} ({execution['timestamp']})"):
-                        col_ex1, col_ex2, col_ex3 = st.columns(3)
+                from ui.stock_ai_entry_ui import display_stock_ai_entry_analysis
+                
+                # Get broker client
+                broker_client = None
+                if st.session_state.get('ibkr_client'):
+                    broker_client = st.session_state.ibkr_client
+                elif st.session_state.get('tradier_client'):
+                    broker_client = st.session_state.tradier_client
+                elif st.session_state.get('broker_client'):
+                    broker_client = st.session_state.broker_client
+                
+                if broker_client:
+                    display_stock_ai_entry_analysis(broker_client)
+                else:
+                    st.warning("⚠️ Please connect to a broker (Tradier or IBKR) to use AI entry analysis.")
+            
+            st.divider()
+            
+            # Monitored Stocks Section
+            st.markdown("### 📊 Monitored Stocks - Waiting for Optimal Timing")
+            try:
+                from ui.stock_entry_monitors_ui import display_stock_entry_monitors
+                display_stock_entry_monitors()
+            except Exception as e:
+                st.error(f"Error loading entry monitors: {e}")
+                logger.error(f"Stock entry monitors error: {e}", exc_info=True)
+        
+        elif st.session_state.autotrader_tab == "📈 Active Positions":
+            st.subheader("📈 Active Positions")
+            # Display position exit monitor data
+            if st.session_state.auto_trader and hasattr(st.session_state.auto_trader, '_position_monitor') and st.session_state.auto_trader._position_monitor:
+                monitor = st.session_state.auto_trader._position_monitor
+                positions = monitor.get_monitored_positions()
+                
+                if positions:
+                    st.success(f"Monitoring {len(positions)} position(s)")
+                    for pos in positions:
+                        # Check if fractional
+                        is_fractional = (pos.quantity % 1 != 0)
+                        qty_label = f"{pos.quantity:.4f} 📊" if is_fractional else str(int(pos.quantity))
                         
-                        with col_ex1:
-                            st.write(f"**Confidence:** {execution['confidence']:.1f}%")
-                            st.write(f"**Quantity:** {execution['quantity']}")
-                        
-                        with col_ex2:
-                            st.write(f"**Entry:** ${execution['entry_price']:.2f}")
-                            st.write(f"**Target:** ${execution['target_price']:.2f}")
-                        
-                        with col_ex3:
-                            st.write(f"**Stop Loss:** ${execution['stop_loss']:.2f}")
-                            
-                            profit_pct = ((execution['target_price'] - execution['entry_price']) / execution['entry_price'] * 100) if execution['entry_price'] else 0
-                            st.write(f"**Potential:** {profit_pct:+.1f}%")
+                        with st.expander(f"**{pos.symbol}** - ${pos.current_price:.2f} {('📊' if is_fractional else '')}"):
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Quantity", qty_label)
+                                st.metric("Entry", f"${pos.entry_price:.2f}")
+                                if is_fractional:
+                                    st.caption(f"💰 Cost: ${pos.quantity * pos.entry_price:.2f}")
+                            with col2:
+                                unrealized_pnl = (pos.current_price - pos.entry_price) * pos.quantity
+                                unrealized_pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
+                                st.metric("Unrealized P&L", f"${unrealized_pnl:.2f}", f"{unrealized_pnl_pct:+.2f}%")
+                                if is_fractional:
+                                    st.caption(f"📊 Value: ${pos.quantity * pos.current_price:.2f}")
+                            with col3:
+                                if pos.stop_loss:
+                                    st.metric("Stop Loss", f"${pos.stop_loss:.2f}")
+                                if pos.take_profit:
+                                    st.metric("Take Profit", f"${pos.take_profit:.2f}")
+                else:
+                    st.info("No active positions being monitored.")
             else:
-                st.info("No executions yet. The bot will execute when it finds high-confidence signals.")
-        else:
-            st.info("Auto-Trader is not running. Configure settings above and click 'Start Auto-Trader'.")
+                st.info("Position monitoring not enabled or auto-trader not running.")
+        
+        elif st.session_state.autotrader_tab == "📓 Trade History":
+            st.subheader("📓 Trade History")
+            if st.session_state.auto_trader:
+                history = st.session_state.auto_trader.get_execution_history()
+                
+                if history:
+                    st.write(f"**Total Executions:** {len(history)}")
+                    
+                    for idx, execution in enumerate(reversed(history[-10:]), 1):  # Show last 10
+                        with st.expander(f"{idx}. {execution['symbol']} - {execution['signal']} ({execution['timestamp']})"):
+                            col_ex1, col_ex2, col_ex3 = st.columns(3)
+                            
+                            with col_ex1:
+                                st.write(f"**Confidence:** {execution['confidence']:.1f}%")
+                                st.write(f"**Quantity:** {execution['quantity']}")
+                            
+                            with col_ex2:
+                                st.write(f"**Entry:** ${execution['entry_price']:.2f}")
+                                st.write(f"**Target:** ${execution['target_price']:.2f}")
+                            
+                            with col_ex3:
+                                st.write(f"**Stop Loss:** ${execution['stop_loss']:.2f}")
+                                
+                                profit_pct = ((execution['target_price'] - execution['entry_price']) / execution['entry_price'] * 100) if execution['entry_price'] else 0
+                                st.write(f"**Potential:** {profit_pct:+.1f}%")
+                else:
+                    st.info("No executions yet. The bot will execute when it finds high-confidence signals.")
+            else:
+                st.info("Auto-Trader is not running.")
+        
+        else:  # Status & Control tab (default)
+            st.subheader("📊 Auto-Trader Status")
+        
+        # Check for background auto-trader (keep this for Status & Control tab)
+        if st.session_state.autotrader_tab == "📊 Status & Control":
+            def check_background_trader():
+                """Check if background auto-trader is running"""
+                try:
+                    import psutil
+                    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                        try:
+                            if proc.info['name'] in ['pythonw.exe', 'python.exe']:
+                                cmdline = proc.info.get('cmdline', [])
+                                if cmdline and any('run_autotrader_background' in str(cmd) for cmd in cmdline):
+                                    return True, proc.info['pid']
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                except ImportError:
+                    pass  # psutil not installed
+                return False, None
+            
+            bg_running, bg_pid = check_background_trader()
+        
+            if bg_running:
+                st.info(f"""
+                🟢 **Background Auto-Trader Detected**
+                
+                A background auto-trader is currently running (PID: {bg_pid})
+                
+                ⚠️ **IMPORTANT**: Don't start another auto-trader here to avoid duplicate trades!
+                
+                📊 **Monitor it via:**
+                - Logs: `logs/autotrader_background.log`
+                - State: `data/trade_state.json`
+                - Command: `Get-Content logs\\autotrader_background.log -Tail 50 -Wait`
+                
+                🛑 **To stop it:** Run `stop_autotrader.bat` or kill process {bg_pid}
+                """)
+            
+            # Status display
+            st.subheader("📊 Status")
+            
+            if st.session_state.auto_trader:
+                status = st.session_state.auto_trader.get_status()
+                
+                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                
+                with col_stat1:
+                    status_icon = "🟢" if status['is_running'] else "🔴"
+                    st.metric("Status", f"{status_icon} {'Running' if status['is_running'] else 'Stopped'}")
+                
+                with col_stat2:
+                    st.metric("Daily Orders", f"{status['daily_orders']}/{status['max_daily_orders']}")
+                
+                with col_stat3:
+                    st.metric("Watchlist Size", status['watchlist_size'])
+                
+                with col_stat4:
+                    if status['config'].get('test_mode', False):
+                        hours_status = "🧪 Test Mode"
+                    else:
+                        hours_status = "✅ Yes" if status['in_trading_hours'] else "❌ No"
+                    st.metric("Trading Hours", hours_status)
+                
+                # Short positions display (if enabled)
+                if status.get('short_positions', 0) > 0:
+                    st.divider()
+                    st.subheader("📉 Active Short Positions")
+                    short_details = status.get('short_positions_details', [])
+                    for short_pos in short_details:
+                        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                        with col_s1:
+                            st.write(f"**{short_pos['symbol']}**")
+                        with col_s2:
+                            st.write(f"Qty: {short_pos['quantity']}")
+                        with col_s3:
+                            st.write(f"Entry: ${short_pos['entry_price']:.2f}")
+                        with col_s4:
+                            st.write(f"Time: {short_pos['entry_time'][:16]}")
+                
+                # Configuration display
+                with st.expander("⚙️ Current Configuration"):
+                    st.json(status['config'])
+                
+                # Execution history (moved to separate tab - keeping for backward compatibility)
+                # Now primarily shown in "📓 Trade History" tab
+            else:
+                st.info("Auto-Trader is not running. Configure settings above and click 'Start Auto-Trader'.")
         
         # Help section
         with st.expander("❓ How It Works"):
@@ -11959,29 +11868,39 @@ Always start with paper trading and only risk capital you can afford to lose.
         if 'active_crypto_tab' not in st.session_state:
             st.session_state.active_crypto_tab = "🔍 Crypto Scanner"
         
-        # Preserve active_crypto_tab during reruns to prevent redirects
-        # This ensures we stay on the current tab even when widgets trigger reruns
-        current_active_tab = st.session_state.get('active_crypto_tab', "🔍 Crypto Scanner")
-        
         # Tab selector
         tab_options = [
             "📊 Market Overview",
             "🔍 Crypto Scanner",
             "💰 Penny Cryptos (<$1)",
             "⭐ My Watchlist",
+            "🔥 CoinMarketCap Features",
             "🎯 Signal Generator",
             "⚡ Quick Trade",
+            "🔔 Entry Monitors",
+            "🤖 AI Position Monitor",
+            "📓 Trade Journal",
             "📈 Portfolio & Settings"
         ]
         
-        # Get current index, with fallback if tab not found
-        try:
-            current_index = tab_options.index(current_active_tab)
-        except ValueError:
-            # If tab not found, default to Crypto Scanner
+        # Check if active_crypto_tab was set programmatically (e.g., from Generate Signal button)
+        # This must be checked BEFORE the radio widget is created
+        programmatic_tab = st.session_state.get('active_crypto_tab', None)
+        
+        # Determine the index for the radio button
+        if programmatic_tab and programmatic_tab in tab_options:
+            # Use the programmatically set tab
+            current_index = tab_options.index(programmatic_tab)
+            logger.info(f"📍 Using programmatic tab: {programmatic_tab} (index {current_index})")
+        elif 'crypto_tab_selector' in st.session_state:
+            # Use the radio button's current value
+            try:
+                current_index = tab_options.index(st.session_state.crypto_tab_selector)
+            except (ValueError, KeyError):
+                current_index = 1  # Default to Crypto Scanner
+        else:
+            # First load, default to Crypto Scanner
             current_index = 1
-            current_active_tab = "🔍 Crypto Scanner"
-            st.session_state.active_crypto_tab = current_active_tab
         
         active_crypto_tab = st.radio(
             "Select Crypto Feature:",
@@ -11991,16 +11910,13 @@ Always start with paper trading and only risk capital you can afford to lose.
             key="crypto_tab_selector"
         )
         
-        # Update session state only if tab actually changed
-        if active_crypto_tab != current_active_tab:
-            st.session_state.active_crypto_tab = active_crypto_tab
-        else:
-            # Ensure session state is set even if unchanged (prevents reset on rerun)
-            st.session_state.active_crypto_tab = active_crypto_tab
+        # Always update session state to match the radio button
+        st.session_state.active_crypto_tab = active_crypto_tab
         
         st.divider()
         
         # Render only the active tab content
+        logger.info(f"🔍 Rendering crypto tab: {active_crypto_tab}")
         if active_crypto_tab == "📊 Market Overview":
             st.subheader("📊 Crypto Market Overview")
             
@@ -13123,12 +13039,24 @@ Always start with paper trading and only risk capital you can afford to lose.
             # Import and render watchlist UI
             try:
                 from ui.crypto_watchlist_ui import render_crypto_watchlist_tab
-                render_crypto_watchlist_tab(crypto_wl_manager)
+                render_crypto_watchlist_tab(crypto_wl_manager, kraken_client, crypto_config)
             except Exception as e:
                 st.error(f"Error loading watchlist: {e}")
                 logger.error(f"Crypto watchlist UI error: {e}", exc_info=True)
         
+        elif active_crypto_tab == "🔥 CoinMarketCap Features":
+            st.subheader("🔥 CoinMarketCap Features")
+            
+            # Import and render CoinMarketCap features UI
+            try:
+                from ui.coinmarketcap_features_ui import render_coinmarketcap_features_tab
+                render_coinmarketcap_features_tab(crypto_wl_manager)
+            except Exception as e:
+                st.error(f"Error loading CoinMarketCap features: {e}")
+                logger.error(f"CoinMarketCap features UI error: {e}", exc_info=True)
+        
         elif active_crypto_tab == "🎯 Signal Generator":
+            logger.info("🎯 SIGNAL GENERATOR TAB RENDERING")
             st.subheader("🎯 Crypto Signal Generator")
             
             # Import and render signal generation UI
@@ -13170,6 +13098,39 @@ Always start with paper trading and only risk capital you can afford to lose.
                 logger.error(f"Crypto quick trade UI error: {e}", exc_info=True)
                 # Ensure we stay on Quick Trade tab even after error
                 st.session_state.active_crypto_tab = "⚡ Quick Trade"
+        
+        elif active_crypto_tab == "🔔 Entry Monitors":
+            st.subheader("🔔 Entry Monitors - Waiting for Optimal Entry Timing")
+            
+            # Import entry monitors UI
+            try:
+                from ui.crypto_entry_monitors_ui import display_entry_monitors
+                display_entry_monitors()
+            except Exception as e:
+                st.error(f"Error loading Entry Monitors: {e}")
+                logger.error(f"Entry Monitors error: {e}", exc_info=True)
+        
+        elif active_crypto_tab == "🤖 AI Position Monitor":
+            st.subheader("🤖 AI Position Monitor - Intelligent Trade Management")
+            
+            # Import AI monitor UI
+            try:
+                from ui.crypto_ai_monitor_ui import display_ai_position_monitor
+                display_ai_position_monitor()
+            except Exception as e:
+                st.error(f"Error loading AI Position Monitor: {e}")
+                logger.error(f"AI Monitor error: {e}", exc_info=True)
+        
+        elif active_crypto_tab == "📓 Trade Journal":
+            st.subheader("📓 Trade Journal - Learn from Every Trade")
+            
+            # Import journal UI
+            try:
+                from ui.trade_journal_ui import display_trade_journal
+                display_trade_journal()
+            except Exception as e:
+                st.error(f"Error loading Trade Journal: {e}")
+                logger.error(f"Journal error: {e}", exc_info=True)
         
         elif active_crypto_tab == "📈 Portfolio & Settings":
             st.subheader("📈 Crypto Portfolio & Settings")

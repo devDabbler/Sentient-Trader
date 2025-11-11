@@ -61,8 +61,10 @@ class CryptoDataAggregator:
         self.coinmarketcap_rate_limit = 260.0  # Free tier: 333 calls/day
         
         logger.info("🔗 Crypto Data Aggregator initialized")
-        logger.info(f"   • CoinGecko: Enabled (free tier)")
-        logger.info(f"   • CoinMarketCap: {'Enabled' if self.coinmarketcap_api_key else 'Disabled (no API key)'}")
+        logger.info(f"   • CoinGecko: Enabled (free tier) - used for coin research & scanning")
+        logger.info(f"   • CoinMarketCap: {'✅ Enabled' if self.coinmarketcap_api_key else '❌ Disabled (no API key)'} - used for coin research & scanning")
+        if self.coinmarketcap_api_key:
+            logger.info(f"     Note: CoinMarketCap provides market data, not news (news uses CoinGecko)")
     
     async def fetch_all_coins(
         self,

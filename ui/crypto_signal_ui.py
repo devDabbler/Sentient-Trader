@@ -64,10 +64,17 @@ def display_single_symbol_input():
     """Display input for single symbol analysis"""
     col1, col2 = st.columns([3, 1])
     
+    # Check if a symbol was passed from watchlist via session state
+    default_symbol = "BTC/USD"
+    if 'crypto_signal_symbol' in st.session_state and st.session_state.crypto_signal_symbol:
+        default_symbol = st.session_state.crypto_signal_symbol
+        # Clear the session state after using it
+        st.session_state.crypto_signal_symbol = None
+    
     with col1:
         symbol = st.text_input(
             "Crypto Pair Symbol",
-            value="BTC/USD",
+            value=default_symbol,
             placeholder="e.g., BTC/USD, ETH/USD",
             help="Enter crypto pair to analyze"
         ).upper()
@@ -494,7 +501,16 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
     if not analyze_all:
         symbol, timeframe = display_single_symbol_input()
         
-        if st.button("🎯 Generate Signals", type="primary", use_container_width=True):
+        # Check if we should auto-trigger signal generation (from watchlist)
+        auto_generate = st.session_state.get('crypto_auto_generate_signal', False)
+        logger.info(f"🔍 Signal Generator: auto_generate = {auto_generate}")
+        logger.info(f"🔍 Signal Generator: symbol = {symbol}")
+        if auto_generate:
+            logger.info(f"✅ Auto-trigger detected! Clearing flag and generating signals...")
+            st.session_state.crypto_auto_generate_signal = False  # Clear flag
+        
+        # Generate signals on button click OR auto-trigger
+        if st.button("🎯 Generate Signals", type="primary", use_container_width=True) or auto_generate:
             if not symbol:
                 st.warning("Please enter a symbol")
                 return

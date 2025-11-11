@@ -34,6 +34,11 @@ class CryptoOpportunity:
     confidence: str  # 'HIGH', 'MEDIUM', 'LOW'
     risk_level: str  # 'LOW', 'MEDIUM', 'HIGH', 'EXTREME'
     fear_greed_index: Optional[int] = None
+    # Whale tracking data
+    whale_activity_score: Optional[float] = None  # 0-100 whale activity score
+    whale_alert: Optional[str] = None  # Whale alert description if any
+    exchange_flow_direction: Optional[str] = None  # 'INFLOW', 'OUTFLOW', 'NEUTRAL'
+    whale_confidence: Optional[str] = None  # Confidence in whale signal validity
 
 
 class CryptoOpportunityScanner:
