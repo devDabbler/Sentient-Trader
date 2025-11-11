@@ -93,7 +93,23 @@ def get_base_scanner():
 def get_llm_analyzer():
     """Cached LLMStrategyAnalyzer - shared by all scanners that need LLM"""
     from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-    return LLMStrategyAnalyzer(provider="openrouter", model="google/gemini-2.5-flash")
+    
+    # Try to get API key from multiple sources (environment, Streamlit secrets, .toml)
+    api_key = os.getenv('OPENROUTER_API_KEY')
+    if not api_key and hasattr(st, 'secrets'):
+        try:
+            api_key = st.secrets.get('openrouter', {}).get('api_key') or st.secrets.get('OPENROUTER_API_KEY')
+        except Exception:
+            pass
+    
+    model = os.getenv('AI_ANALYZER_MODEL', 'google/gemini-2.5-flash')
+    if not model and hasattr(st, 'secrets'):
+        try:
+            model = st.secrets.get('models', {}).get('ai_analyzer_model', 'google/gemini-2.5-flash')
+        except Exception:
+            pass
+    
+    return LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
 
 @st.cache_resource
 def get_social_analyzer():

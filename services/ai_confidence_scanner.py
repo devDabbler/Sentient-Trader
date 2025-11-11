@@ -56,21 +56,39 @@ class AIConfidenceScanner:
         elif self.use_llm:
             try:
                 from .llm_strategy_analyzer import LLMStrategyAnalyzer
+                
+                # Try to get API key from multiple sources
                 api_key = os.getenv('OPENROUTER_API_KEY')
+                if not api_key:
+                    try:
+                        import streamlit as st
+                        if hasattr(st, 'secrets'):
+                            api_key = st.secrets.get('openrouter', {}).get('api_key') or st.secrets.get('OPENROUTER_API_KEY')
+                    except Exception:
+                        pass
+                
                 model = os.getenv('AI_CONFIDENCE_MODEL', 'google/gemini-2.0-flash-exp:free')
+                if not model:
+                    try:
+                        import streamlit as st
+                        if hasattr(st, 'secrets'):
+                            model = st.secrets.get('models', {}).get('ai_confidence_model', 'google/gemini-2.0-flash-exp:free')
+                    except Exception:
+                        pass
                 
                 if not api_key:
                     logger.error("❌ OPENROUTER_API_KEY not found - AI analysis disabled")
                     self.use_llm = False
                     self.llm_analyzer = None
                 else:
-                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model)
+                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
                     logger.info(f"✅ AI Confidence Scanner initialized with OpenRouter")
                     logger.info(f"   Model: {model}")
                     logger.info(f"   API Key: {'*' * (len(api_key) - 8) + api_key[-8:]}")
             except Exception as e:
                 logger.error(f"❌ LLM initialization failed: {e}", exc_info=True)
                 self.use_llm = False
+                self.llm_analyzer = None
         else:
             self.llm_analyzer = None
     
