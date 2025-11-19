@@ -168,7 +168,7 @@ def display_trade_journal():
         
         if strategy_data:
             df_strategy = pd.DataFrame(strategy_data)
-            st.dataframe(df_strategy, use_container_width=True, hide_index=True)
+            st.dataframe(df_strategy, width='stretch', hide_index=True)
     
     st.markdown("---")
     
@@ -232,7 +232,7 @@ def display_trade_journal():
         })
     
     df_trades = pd.DataFrame(trade_records)
-    st.dataframe(df_trades, use_container_width=True, hide_index=True)
+    st.dataframe(df_trades, width='stretch', hide_index=True)
     
     # Trade details
     st.markdown("#### 🔍 Trade Details")
@@ -316,7 +316,7 @@ def display_trade_journal():
                             })
                         
                         df_decisions = pd.DataFrame(decision_data)
-                        st.dataframe(df_decisions, use_container_width=True, hide_index=True)
+                        st.dataframe(df_decisions, width='stretch', hide_index=True)
                     else:
                         st.info("No AI decisions logged")
             
@@ -366,7 +366,7 @@ def display_trade_journal():
     export_col1, export_col2 = st.columns(2)
     
     with export_col1:
-        if st.button("Export to CSV", use_container_width=True):
+        if st.button("Export to CSV", width='stretch'):
             try:
                 output_path = f"data/exports/trade_journal_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
                 journal.export_to_csv(output_path, start_date=start_date)
@@ -375,7 +375,7 @@ def display_trade_journal():
                 st.error(f"Export failed: {e}")
     
     with export_col2:
-        if st.button("View Analysis Tips", use_container_width=True):
+        if st.button("View Analysis Tips", width='stretch'):
             st.info("""
             **📚 Journal Analysis Tips:**
             

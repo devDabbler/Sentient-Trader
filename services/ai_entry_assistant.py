@@ -127,7 +127,8 @@ class AIEntryAssistant:
         side: str,
         position_size: float,
         risk_pct: float,
-        take_profit_pct: float
+        take_profit_pct: float,
+        additional_context: str = None
     ) -> EntryAnalysis:
         """
         Analyze if NOW is a good time to enter this trade
@@ -138,6 +139,7 @@ class AIEntryAssistant:
             position_size: Position size in USD
             risk_pct: Risk percentage for stop loss
             take_profit_pct: Take profit percentage
+            additional_context: Optional context (e.g., scanner analysis) to include
         
         Returns:
             EntryAnalysis with recommendation
@@ -167,7 +169,8 @@ class AIEntryAssistant:
                 position_size=position_size,
                 risk_pct=risk_pct,
                 take_profit_pct=take_profit_pct,
-                technical_data=technical_data
+                technical_data=technical_data,
+                additional_context=additional_context
             )
             
             # Get AI recommendation
@@ -180,23 +183,43 @@ class AIEntryAssistant:
             decision_data = self._parse_ai_response(response)
             
             if decision_data:
+                # Safe float conversion helper
+                def safe_float(value, default=0.0):
+                    """Convert value to float, return default if None or invalid"""
+                    if value is None:
+                        return default
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        return default
+                
+                # Safe optional float conversion (returns None if value is missing)
+                def safe_optional_float(value):
+                    """Convert value to float or None if missing/invalid"""
+                    if value is None or value == '':
+                        return None
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        return None
+                
                 analysis = EntryAnalysis(
                     pair=pair,
                     action=decision_data.get('action', 'DO_NOT_ENTER'),
-                    confidence=float(decision_data.get('confidence', 0)),
-                    reasoning=decision_data.get('reasoning', ''),
+                    confidence=safe_float(decision_data.get('confidence'), 0.0),
+                    reasoning=decision_data.get('reasoning', 'No reasoning provided'),
                     urgency=decision_data.get('urgency', 'LOW'),
                     current_price=current_price,
-                    suggested_entry=decision_data.get('suggested_entry'),
-                    suggested_stop=decision_data.get('suggested_stop'),
-                    suggested_target=decision_data.get('suggested_target'),
-                    risk_reward_ratio=float(decision_data.get('risk_reward_ratio', 0)),
-                    technical_score=float(decision_data.get('technical_score', 0)),
-                    trend_score=float(decision_data.get('trend_score', 0)),
-                    timing_score=float(decision_data.get('timing_score', 0)),
-                    risk_score=float(decision_data.get('risk_score', 0)),
-                    wait_for_price=decision_data.get('wait_for_price'),
-                    wait_for_rsi=decision_data.get('wait_for_rsi')
+                    suggested_entry=safe_optional_float(decision_data.get('suggested_entry')),
+                    suggested_stop=safe_optional_float(decision_data.get('suggested_stop')),
+                    suggested_target=safe_optional_float(decision_data.get('suggested_target')),
+                    risk_reward_ratio=safe_float(decision_data.get('risk_reward_ratio'), 0.0),
+                    technical_score=safe_float(decision_data.get('technical_score'), 0.0),
+                    trend_score=safe_float(decision_data.get('trend_score'), 0.0),
+                    timing_score=safe_float(decision_data.get('timing_score'), 0.0),
+                    risk_score=safe_float(decision_data.get('risk_score'), 100.0),
+                    wait_for_price=safe_optional_float(decision_data.get('wait_for_price')),
+                    wait_for_rsi=safe_optional_float(decision_data.get('wait_for_rsi'))
                 )
                 
                 logger.info(f"✅ Entry analysis complete: {analysis.action} (Confidence: {analysis.confidence:.1f}%)")
@@ -289,7 +312,8 @@ class AIEntryAssistant:
         position_size: float,
         risk_pct: float,
         take_profit_pct: float,
-        technical_data: Dict
+        technical_data: Dict,
+        additional_context: str = None
     ) -> str:
         """Build AI prompt for entry analysis"""
         
@@ -322,49 +346,64 @@ Analyze this POTENTIAL trade setup and determine if NOW is a good time to ENTER 
         else:
             prompt += "\n**Technical Indicators:** Unavailable (analyze price action)\n"
         
+        # Add scanner context if provided
+        if additional_context:
+            prompt += f"\n{additional_context}\n"
+            prompt += """
+**IMPORTANT: Scanner Analysis Was Just Run (Minutes Ago)**
+The scanner recommendation above is RECENT and based on solid 24h momentum, volume, and trend analysis.
+Unless there has been a MAJOR deterioration in the last few minutes (price crashed >5%, volume went to zero, etc.),
+you should TRUST the scanner's analysis and focus on confirming entry timing, NOT re-analyzing the entire setup.
+
+Ask yourself: "Has anything DRASTICALLY changed in the last few minutes that invalidates the scanner's bullish view?"
+- If NO major change → Recommend ENTER_NOW or WAIT_FOR_PULLBACK (if slightly overbought)
+- If YES major change → Explain what specifically deteriorated (e.g., "Price just dropped 8% in 5 minutes")
+"""
+        
         prompt += f"""
 **Entry Timing Analysis Framework:**
 Evaluate these critical factors:
 
-1. **Trend Alignment** (0-100):
+1. **Scanner Alignment Check** (if scanner context provided):
+   - Has price moved significantly since scanner analysis? (>5% drop = major change)
+   - Has volume dried up completely vs scanner's high volume finding?
+   - Are current indicators DRASTICALLY different from scanner's findings?
+   - Default to TRUST scanner unless major deterioration
+
+2. **Trend Alignment** (0-100):
    - Is the trend strong and confirmed?
    - Are we entering WITH the trend or against it?
    - Is momentum building or weakening?
 
-2. **Entry Price Quality** (0-100):
+3. **Entry Price Quality** (0-100):
    - Are we buying near support or chasing resistance?
    - Is this a good price or are we FOMOing into a pump?
    - Is there room to the upside or are we at resistance?
 
-3. **Technical Setup** (0-100):
+4. **Technical Setup** (0-100):
    - Are indicators aligned for entry?
    - Is RSI in a good zone (not overbought)?
    - Is MACD confirming or diverging?
 
-4. **Risk/Reward at Current Price** (0-100):
+5. **Risk/Reward at Current Price** (0-100):
    - Is the R:R favorable at this price?
    - Would waiting for pullback improve R:R?
    - Is the stop loss too tight for current volatility?
 
-5. **Volume & Conviction** (0-100):
-   - Is volume confirming the move?
-   - Is this a "hot coin" with genuine interest?
-   - Or is volume dying (low conviction)?
-
 **Available Actions:**
-1. **ENTER_NOW** - Excellent setup, execute immediately (85%+ confidence)
-2. **WAIT_FOR_PULLBACK** - Good coin but overbought, wait for better entry (provide wait_for_price and wait_for_rsi)
+1. **ENTER_NOW** - Excellent setup, execute immediately (75%+ confidence if scanner approved, 85%+ if no scanner)
+2. **WAIT_FOR_PULLBACK** - Good coin but slightly overbought, wait for minor dip (provide wait_for_price and wait_for_rsi)
 3. **WAIT_FOR_BREAKOUT** - Consolidating, wait for confirmed move (provide wait_for_price)
 4. **PLACE_LIMIT_ORDER** - Set limit at better price (provide suggested_entry)
-5. **DO_NOT_ENTER** - Poor setup, avoid this trade (<50% confidence)
+5. **DO_NOT_ENTER** - MAJOR deterioration since scanner or fundamentally poor setup (<50% confidence)
 
 **Critical Rules for Entry Timing:**
-- Only ENTER_NOW if 85%+ confidence AND good technical setup
-- WAIT_FOR_PULLBACK if RSI > 70 (overbought) even if trend is good
-- WAIT_FOR_PULLBACK if price just moved >10% in last few hours (let it reset)
-- WAIT_FOR_BREAKOUT if price is consolidating near resistance
-- DO_NOT_ENTER if trend is against you or setup is poor
-- Consider volatility - wider stops needed for volatile assets
+- **IF SCANNER CONTEXT PROVIDED:** Trust scanner's 24h analysis unless DRASTIC change in last few minutes
+- **IF SCANNER SAYS HIGH CONFIDENCE:** Only reject if price dropped >5%, volume died completely, or other MAJOR change
+- Only ENTER_NOW if 75%+ confidence (with scanner) or 85%+ (without scanner)
+- WAIT_FOR_PULLBACK if RSI > 75 (very overbought) - minor concern, not rejection
+- DO_NOT_ENTER only for MAJOR problems: price crashed, fundamentals changed, or no scanner approval
+- Remember: Low recent volume ≠ rejection if scanner found high 24h volume average
 
 **Respond ONLY with valid JSON (no other text):**
 {{
@@ -596,9 +635,10 @@ Evaluate these critical factors:
         """Send notification that entry conditions are met"""
         try:
             try:
-                from services.discord_notifier import send_discord_alert, TradingAlert, AlertType, AlertPriority
+                from src.integrations.discord_webhook import send_discord_alert
+                from models.alerts import TradingAlert, AlertType, AlertPriority
             except ImportError:
-                logger.debug("Discord notifier not available, skipping notification")
+                logger.debug("Discord webhook not available, skipping notification")
                 return
             
             rsi_text = f"RSI: {technical_data.get('rsi', 0):.2f}" if technical_data else ""
@@ -623,8 +663,11 @@ Evaluate these critical factors:
             send_discord_alert(alert)
             logger.info(f"📢 Entry notification sent for {opportunity.pair}")
             
+        except ImportError:
+            # Already handled above, but catch here too for safety
+            logger.debug("Discord webhook not available, skipping notification")
         except Exception as e:
-            logger.warning(f"Failed to send entry notification: {e}")
+            logger.warning(f"Failed to send entry notification for {opportunity.pair}: {type(e).__name__}: {e}", exc_info=True)
     
     def remove_opportunity(self, opportunity_id: str) -> bool:
         """Remove opportunity from monitoring"""

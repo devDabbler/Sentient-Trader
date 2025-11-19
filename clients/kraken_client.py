@@ -465,7 +465,7 @@ class KrakenClient:
         
         # Get the actual Kraken pair format
         kraken_pair = self.POPULAR_PAIRS.get(normalized_pair, normalized_pair)
-        
+
         # If pair is not in POPULAR_PAIRS, try common format conversions
         if kraken_pair == normalized_pair:
             # Try common formats: ATOM/USD -> ATOMUSD
@@ -473,6 +473,10 @@ class KrakenClient:
                 kraken_pair = normalized_pair.replace('/', '').upper()
             else:
                 kraken_pair = normalized_pair.upper()
+        else:
+            # Ensure pair is in Kraken format by removing slash if present
+            if '/' in kraken_pair:
+                kraken_pair = kraken_pair.replace('/', '').upper()
         
         # Convert interval to integer (handle string formats like "5" or "5m")
         if isinstance(interval, str):
@@ -503,6 +507,10 @@ class KrakenClient:
         try:
             data = self._public_request('OHLC', params)
             
+            if not data:
+                logger.debug(f"No OHLC data returned from API for {pair} ({kraken_pair})")
+                return []
+
             ohlc_data = []
             
             # Kraken OHLC can return data with different key formats
@@ -696,6 +704,86 @@ class KrakenClient:
     # ORDER MANAGEMENT METHODS
     # =========================================================================
     
+    def check_margin_enabled(self) -> bool:
+        """
+        Check if margin trading is enabled on the account
+        
+        Returns:
+            True if margin trading is available, False otherwise
+        """
+        try:
+            # Query trade balance which includes margin info
+            data = self._private_request('TradeBalance', {'asset': 'ZUSD'})
+            
+            # If we can query trade balance without error, margin is likely enabled
+            # Note: You need to enable margin trading in Kraken settings first
+            logger.info("✅ Margin trading API access confirmed")
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Permission denied" in error_msg or "Invalid key" in error_msg:
+                logger.warning("⚠️ Margin trading not enabled or insufficient API permissions")
+                logger.warning("   Enable margin trading at: https://www.kraken.com/u/funding/margin")
+                return False
+            logger.error(f"Error checking margin status: {e}")
+            return False
+    
+    def get_margin_info(self) -> Dict:
+        """
+        Get margin trading account information
+        
+        Returns:
+            Dictionary with margin balance, equity, margin level, etc.
+        """
+        try:
+            data = self._private_request('TradeBalance', {'asset': 'ZUSD'})
+            
+            return {
+                'equity': float(data.get('eb', 0)),  # Equivalent balance (combined balance of all currencies)
+                'trade_balance': float(data.get('tb', 0)),  # Trade balance (equity - credit)
+                'margin_used': float(data.get('m', 0)),  # Margin amount of open positions
+                'unrealized_pnl': float(data.get('n', 0)),  # Unrealized net profit/loss
+                'cost_basis': float(data.get('c', 0)),  # Cost basis of open positions
+                'floating_valuation': float(data.get('v', 0)),  # Current floating valuation
+                'margin_level': float(data.get('ml', 0)) if data.get('ml') else None,  # Margin level percentage
+                'free_margin': float(data.get('mf', 0))  # Free margin
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching margin info: {e}")
+            return {}
+    
+    def _get_pair_decimals(self, pair: str) -> int:
+        """
+        Get the number of decimal places allowed for a trading pair's price
+        
+        Args:
+            pair: Trading pair (e.g., "UNI/USD", "BTC/USD")
+            
+        Returns:
+            Number of decimals allowed (default: 6)
+        """
+        try:
+            kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+            data = self._public_request('AssetPairs', {'pair': kraken_pair})
+            
+            # Get first result (should only be one)
+            for pair_info in data.values():
+                # pair_decimals = number of decimals for price
+                return pair_info.get('pair_decimals', 6)
+            
+            return 6  # Default fallback
+        except:
+            # If API call fails, use sensible defaults based on pair
+            if 'USD' in pair or 'EUR' in pair or 'GBP' in pair:
+                # Fiat pairs typically use 2-3 decimals for most altcoins
+                if pair.startswith(('BTC', 'ETH')):
+                    return 1  # BTC/USD, ETH/USD = 1 decimal
+                else:
+                    return 3  # Most altcoin/fiat = 3 decimals
+            return 6  # Crypto/crypto pairs = 6 decimals
+
     def place_order(
         self,
         pair: str,
@@ -705,10 +793,11 @@ class KrakenClient:
         price: Optional[float] = None,
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
+        leverage: Optional[int] = None,
         validate: bool = False
     ) -> Optional[KrakenOrder]:
         """
-        Place an order on Kraken
+        Place an order on Kraken (supports both spot and margin trading)
         
         Args:
             pair: Trading pair
@@ -718,12 +807,21 @@ class KrakenClient:
             price: Limit price (required for limit orders)
             stop_loss: Stop loss price (optional)
             take_profit: Take profit price (optional)
+            leverage: Leverage amount (2, 3, 4, 5 for margin trading). None = spot trading
             validate: If True, only validate the order without placing it
             
         Returns:
             KrakenOrder object if successful, None otherwise
+            
+        Note:
+            - Leverage enables margin trading and short selling
+            - For SELL orders with leverage > 1, you're opening a short position
+            - Requires margin trading enabled on your Kraken account
         """
         kraken_pair = self.POPULAR_PAIRS.get(pair, pair)
+        
+        # Get correct decimal precision for this pair
+        decimals = self._get_pair_decimals(pair)
         
         params = {
             'pair': kraken_pair,
@@ -732,22 +830,47 @@ class KrakenClient:
             'volume': str(volume)
         }
         
-        # Add price for limit orders (Kraken requires max 6 decimals)
-        if order_type == OrderType.LIMIT and price:
-            params['price'] = str(round(price, 6))
+        # Add leverage for margin trading (enables short selling)
+        # Note: Not all pairs support leverage on Kraken
+        if leverage and leverage > 1:
+            # Check if pair supports leverage by querying asset pair details
+            try:
+                pair_info = self._public_request('AssetPairs', {'pair': kraken_pair})
+                pair_data = pair_info.get(kraken_pair, {})
+                leverage_buy = pair_data.get('leverage_buy', [])
+                leverage_sell = pair_data.get('leverage_sell', [])
+                
+                # Check if requested leverage is supported
+                if side == OrderSide.BUY and leverage_buy and int(leverage) in leverage_buy:
+                    params['leverage'] = str(int(leverage))
+                    logger.info(f"🔧 Using {leverage}x leverage for {side.value} order on {pair}")
+                elif side == OrderSide.SELL and leverage_sell and int(leverage) in leverage_sell:
+                    params['leverage'] = str(int(leverage))
+                    logger.info(f"🔧 Using {leverage}x leverage for {side.value} order on {pair}")
+                else:
+                    logger.warning(f"⚠️ {pair} does not support {leverage}x leverage on Kraken. Placing as spot order instead.")
+                    logger.warning(f"   Supported leverage: BUY={leverage_buy}, SELL={leverage_sell}")
+                    # Don't add leverage parameter - will execute as spot trade
+            except Exception as e:
+                logger.warning(f"⚠️ Could not validate leverage for {pair}. Placing as spot order: {e}")
+                # Don't add leverage parameter - safer to execute as spot trade
         
-        # Add stop loss and take profit (Kraken requires max 6 decimals)
+        # Add price for limit orders (use pair-specific decimals)
+        if order_type == OrderType.LIMIT and price:
+            params['price'] = str(round(price, decimals))
+        
+        # Add stop loss and take profit (use pair-specific decimals)
         # Note: Kraken API only supports one close order at a time
         # Priority: stop-loss for safety, then take-profit if no stop-loss
         if stop_loss:
             params['close[ordertype]'] = 'stop-loss'
-            params['close[price]'] = str(round(stop_loss, 6))
-            logger.info(f"Setting stop-loss at ${stop_loss:.6f} for {pair}")
+            params['close[price]'] = str(round(stop_loss, decimals))
+            logger.info(f"Setting stop-loss at ${stop_loss:.{decimals}f} for {pair} ({decimals} decimals)")
         elif take_profit:
             # Only set take-profit if no stop-loss (safety first)
             params['close[ordertype]'] = 'take-profit'
-            params['close[price]'] = str(round(take_profit, 6))
-            logger.info(f"Setting take-profit at ${take_profit:.6f} for {pair}")
+            params['close[price]'] = str(round(take_profit, decimals))
+            logger.info(f"Setting take-profit at ${take_profit:.{decimals}f} for {pair} ({decimals} decimals)")
         
         # Note: If both stop_loss and take_profit are provided, only stop_loss will be set
         # This is a limitation of Kraken's API - only one close order per entry order
@@ -1074,6 +1197,97 @@ class KrakenClient:
         except Exception as e:
             logger.error(f"Error fetching open positions: {e}")
             return []
+    
+    def get_margin_positions(self) -> List[KrakenPosition]:
+        """
+        Get open margin positions (includes both long and short positions)
+        
+        Returns:
+            List of KrakenPosition objects for margin positions
+        """
+        try:
+            data = self._private_request('OpenPositions')
+            
+            positions = []
+            open_positions = data.get('result', {})
+            
+            if not open_positions:
+                logger.info("No open margin positions found")
+                return []
+            
+            for pos_id, pos_data in open_positions.items():
+                try:
+                    # Extract position details
+                    pair = pos_data.get('pair', '')
+                    side = pos_data.get('type', '')  # 'buy' or 'sell'
+                    volume = float(pos_data.get('vol', 0))
+                    cost = float(pos_data.get('cost', 0))
+                    fee = float(pos_data.get('fee', 0))
+                    margin = float(pos_data.get('margin', 0))
+                    net_pnl = float(pos_data.get('net', 0))
+                    
+                    # Calculate average entry price
+                    entry_price = cost / volume if volume > 0 else 0
+                    
+                    # Get current price
+                    current_price = 0
+                    try:
+                        # Normalize pair format
+                        normalized_pair = pair.replace('X', '').replace('Z', '')
+                        # Try to get ticker
+                        ticker = self.get_ticker_data(normalized_pair)
+                        current_price = ticker.get('last_price', 0) if ticker else 0
+                    except:
+                        pass
+                    
+                    if current_price == 0:
+                        logger.warning(f"Could not get current price for margin position: {pair}")
+                        current_price = entry_price  # Fallback
+                    
+                    position = KrakenPosition(
+                        pair=pair,
+                        side=side,  # 'buy' = long, 'sell' = short
+                        volume=volume,
+                        cost=cost,
+                        fee=fee,
+                        margin=margin,
+                        net_pnl=net_pnl,
+                        current_price=current_price,
+                        entry_price=entry_price
+                    )
+                    
+                    positions.append(position)
+                    
+                except Exception as e:
+                    logger.warning(f"Error processing margin position {pos_id}: {e}")
+                    continue
+            
+            logger.info(f"✅ Loaded {len(positions)} margin position(s)")
+            return positions
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Invalid key" in error_msg or "Permission denied" in error_msg:
+                logger.debug("No margin positions (margin trading may not be enabled)")
+                return []
+            logger.error(f"Error fetching margin positions: {e}")
+            return []
+    
+    def get_all_positions(self) -> List[KrakenPosition]:
+        """
+        Get all positions (both spot and margin)
+        
+        Returns:
+            Combined list of all KrakenPosition objects
+        """
+        spot_positions = self.get_open_positions()
+        margin_positions = self.get_margin_positions()
+        
+        all_positions = spot_positions + margin_positions
+        
+        logger.info(f"📊 Total positions: {len(all_positions)} (Spot: {len(spot_positions)}, Margin: {len(margin_positions)})")
+        
+        return all_positions
     
     def get_staked_balances(self) -> List[Dict]:
         """

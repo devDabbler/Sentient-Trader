@@ -13,14 +13,16 @@ from services.crypto_strategies import (
     EMASwingTrader, MACDRSISwing, BollingerSqueezeBreakout,
     TradingSignal
 )
+from services.freqtrade_signal_adapter import get_freqtrade_strategy_wrappers
 from services.crypto_watchlist_manager import CryptoWatchlistManager
 from utils.crypto_pair_utils import normalize_crypto_pair
 
 
 
-def get_all_crypto_strategies():
-    """Get all available crypto strategies"""
-    return {
+def get_all_crypto_strategies(kraken_client=None):
+    """Get all available crypto strategies including Freqtrade strategies"""
+    # Original strategies
+    strategies = {
         'VWAP+EMA Pullback (Scalping)': VWAPEMAScalper(),
         'Bollinger Mean Reversion (Scalping)': BollingerMeanReversion(),
         'EMA Momentum Nudge (Scalping)': EMAMomentumNudge(),
@@ -28,6 +30,21 @@ def get_all_crypto_strategies():
         'MACD+RSI Confirmation': MACDRSISwing(),
         'Bollinger Squeeze Breakout': BollingerSqueezeBreakout()
     }
+    
+    # Add Freqtrade strategies if kraken_client is available
+    if kraken_client:
+        try:
+            logger.debug(f"🔧 Loading Freqtrade strategies with kraken_client type: {type(kraken_client)}")
+            freqtrade_strategies = get_freqtrade_strategy_wrappers(kraken_client)
+            strategies.update(freqtrade_strategies)
+            logger.info(f"✅ Added {len(freqtrade_strategies)} Freqtrade strategies to signal generator")
+            logger.info(f"📊 Total strategies available: {len(strategies)}")
+        except Exception as e:
+            logger.error(f"❌ Could not load Freqtrade strategies: {e}", exc_info=True)
+    else:
+        logger.warning(f"⚠️ Kraken client is None - skipping Freqtrade strategies (only {len(strategies)} original strategies available)")
+    
+    return strategies
 
 
 def display_signal_generation_header():
@@ -36,18 +53,21 @@ def display_signal_generation_header():
     st.write("Generate trading signals using advanced crypto strategies")
 
 
-def display_strategy_selector():
+def display_strategy_selector(kraken_client=None):
     """Display strategy selection controls"""
-    strategies = get_all_crypto_strategies()
+    strategies = get_all_crypto_strategies(kraken_client)
     
     col1, col2 = st.columns([3, 1])
     
     with col1:
+        # Show strategy count
+        st.caption(f"💡 {len(strategies)} strategies available ({6 if kraken_client else 0} Freqtrade + 6 Original)")
+        
         selected_strategies = st.multiselect(
             "Select Strategies to Run",
             options=list(strategies.keys()),
-            default=list(strategies.keys())[:3],
-            help="Choose one or more strategies to generate signals"
+            default=list(strategies.keys())[:6],  # Default to first 6 (mix of both)
+            help="Choose one or more strategies to generate signals. Freqtrade strategies are battle-tested from the crypto community."
         )
     
     with col2:
@@ -413,7 +433,7 @@ def display_strategy_comparison(signals: List[TradingSignal]):
         })
     
     df = pd.DataFrame(comparison_data)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch')
     
     # Consensus analysis
     buy_signals = sum(1 for s in signals if s.signal_type == 'BUY')
@@ -446,41 +466,80 @@ def display_strategy_comparison(signals: List[TradingSignal]):
 
 def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_client = None):
     """Main function to render signal generation tab"""
+    logger.info(f"🎯 render_signal_generation_tab called with kraken_client type: {type(kraken_client)}")
+    logger.info(f"🎯 kraken_client is None: {kraken_client is None}")
+    if kraken_client:
+        logger.info(f"🎯 kraken_client object: {kraken_client}")
+    
     display_signal_generation_header()
     
     # Strategy info
     with st.expander("ℹ️ Available Strategies", expanded=False):
         st.markdown("""
-        ### 🎯 Scalping Strategies (5-30 minutes)
+        ### 🔥 Freqtrade Strategies (Battle-Tested)
         
-        **1. VWAP + EMA Pullback**
+        **1. EMA Crossover + Heikin Ashi**
+        - EMA 20/50/100 crossovers with Heikin Ashi confirmation
+        - Best for: Trending markets with clear momentum
+        - Timeframe: 5m, 15m
+        
+        **2. RSI + Stochastic + Hammer**
+        - Oversold signals with Bollinger Bands and hammer candlestick
+        - Best for: Mean reversion entries at support
+        - Timeframe: 5m, 15m
+        
+        **3. Fisher RSI Multi-Indicator**
+        - Fisher RSI with MFI, Stochastic, and EMA confirmation
+        - Best for: High-probability oversold bounces
+        - Timeframe: 5m, 15m
+        
+        **4. MACD + Volume + RSI**
+        - MACD crossovers with volume spikes and Fisher RSI
+        - Best for: Momentum trades with volume confirmation
+        - Timeframe: 5m, 15m
+        
+        **5. Aggressive Scalping**
+        - Fast EMA crosses with tight stops (1-3% targets)
+        - Best for: Quick scalps in volatile markets
+        - Timeframe: 1m, 5m
+        
+        **6. ORB + Fair Value Gap**
+        - Opening Range Breakout with Fair Value Gap confirmation
+        - Best for: Intraday breakout trades
+        - Timeframe: 1m, 5m
+        
+        ---
+        
+        ### 🎯 Original Scalping Strategies (5-30 minutes)
+        
+        **7. VWAP + EMA Pullback**
         - Trade with VWAP direction, enter on pullbacks to EMA
         - Best for: Intraday momentum with mean reversion entries
         - Timeframe: 5m, 15m
         
-        **2. Bollinger Mean Reversion**
+        **8. Bollinger Mean Reversion**
         - Fade extreme moves back to middle band
         - Best for: Range-bound or choppy markets
         - Timeframe: 5m, 15m
         
-        **3. EMA Momentum Nudge**
+        **9. EMA Momentum Nudge**
         - 1-minute candle patterns with EMA/VWAP filter
         - Best for: Ultra-fast scalping with strong momentum
         - Timeframe: 1m, 5m
         
-        ### 📊 Swing Strategies (Hours to Days)
+        ### 📊 Original Swing Strategies (Hours to Days)
         
-        **4. 10/21 EMA Swing**
+        **10. 10/21 EMA Swing**
         - Pullbacks to fast EMA with trend filter
         - Best for: Trending markets with clear direction
         - Timeframe: 1h, 4h
         
-        **5. MACD + RSI Confirmation**
+        **11. MACD + RSI Confirmation**
         - Combined momentum indicators
         - Best for: High-probability setups with double confirmation
         - Timeframe: 1h, 4h, 1d
         
-        **6. Bollinger Squeeze Breakout**
+        **12. Bollinger Squeeze Breakout**
         - Low volatility compression followed by expansion
         - Best for: Catching the start of new trends
         - Timeframe: 1h, 4h, 1d
@@ -489,7 +548,7 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
     st.divider()
     
     # Strategy selector
-    selected_strategies, analyze_all = display_strategy_selector()
+    selected_strategies, analyze_all = display_strategy_selector(kraken_client)
     
     if not selected_strategies:
         st.warning("⚠️ Please select at least one strategy")
@@ -510,7 +569,7 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
             st.session_state.crypto_auto_generate_signal = False  # Clear flag
         
         # Generate signals on button click OR auto-trigger
-        if st.button("🎯 Generate Signals", type="primary", use_container_width=True) or auto_generate:
+        if st.button("🎯 Generate Signals", type="primary", width='stretch') or auto_generate:
             if not symbol:
                 st.warning("Please enter a symbol")
                 return
@@ -521,8 +580,8 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
             
             with st.spinner(f"Generating signals for {symbol}..."):
                 try:
-                    # Get all strategies
-                    all_strategies = get_all_crypto_strategies()
+                    # Get all strategies including Freqtrade
+                    all_strategies = get_all_crypto_strategies(kraken_client)
                     
                     # Analyze symbol with selected strategies
                     signals = analyze_symbol_with_strategies(
@@ -563,7 +622,7 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
             st.session_state[signals_key] = []
         
         # Analyze entire watchlist
-        if st.button("🎯 Analyze Watchlist", type="primary", use_container_width=True):
+        if st.button("🎯 Analyze Watchlist", type="primary", width='stretch'):
             if not manager:
                 st.error("Watchlist manager not available")
                 return
@@ -579,8 +638,8 @@ def render_signal_generation_tab(manager: CryptoWatchlistManager = None, kraken_
                     st.warning("Your watchlist is empty. Add some cryptos first!")
                     return
                 
-                # Get all strategies
-                all_strategies = get_all_crypto_strategies()
+                # Get all strategies including Freqtrade
+                all_strategies = get_all_crypto_strategies(kraken_client)
                 
                 # Determine timeframe (default to 15m for watchlist analysis)
                 timeframe = '15m'

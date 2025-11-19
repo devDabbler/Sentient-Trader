@@ -111,17 +111,17 @@ def display_entry_monitors():
             btn_col1, btn_col2, btn_col3 = st.columns([2, 1, 1])
             
             with btn_col1:
-                if st.button(f"🔄 Re-Analyze {opp.pair}", key=f"reanalyze_{opp.pair}", use_container_width=True):
+                if st.button(f"🔄 Re-Analyze {opp.pair}", key=f"reanalyze_{opp.pair}", width='stretch'):
                     st.info(f"Navigate to Quick Trade tab and analyze {opp.pair} again to get updated recommendation")
             
             with btn_col2:
-                if st.button("📊 Quick Trade", key=f"goto_qt_{opp.pair}", use_container_width=True):
+                if st.button("📊 Quick Trade", key=f"goto_qt_{opp.pair}", width='stretch'):
                     # Store pair for quick access
                     st.session_state['crypto_custom_pair'] = opp.pair
                     st.info(f"Switch to 'Quick Trade' tab to execute {opp.pair}")
             
             with btn_col3:
-                if st.button("🗑️ Remove", key=f"remove_{opp.pair}", use_container_width=True, type="secondary"):
+                if st.button("🗑️ Remove", key=f"remove_{opp.pair}", width='stretch', type="secondary"):
                     # Find the opportunity ID
                     opp_id = None
                     for oid, opportunity in entry_assistant.opportunities.items():

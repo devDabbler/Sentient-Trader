@@ -92,3 +92,4 @@ archive/
 # Cursor
 # .cursorignore  # Keep this file in git so Cursor settings are shared
 .cursor/.streamlit/secrets.toml
+.streamlit/secrets.toml

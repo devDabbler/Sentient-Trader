@@ -82,20 +82,20 @@ def display_fractional_share_config():
     preferred_amounts = manager.config.preferred_dollar_amounts
     
     with quick_col1:
-        st.button(f"${preferred_amounts[0]:.0f}", key="quick_50", use_container_width=True)
+        st.button(f"${preferred_amounts[0]:.0f}", key="quick_50", width='stretch')
     with quick_col2:
-        st.button(f"${preferred_amounts[1]:.0f}", key="quick_100", use_container_width=True)
+        st.button(f"${preferred_amounts[1]:.0f}", key="quick_100", width='stretch')
     with quick_col3:
-        st.button(f"${preferred_amounts[2]:.0f}", key="quick_250", use_container_width=True)
+        st.button(f"${preferred_amounts[2]:.0f}", key="quick_250", width='stretch')
     with quick_col4:
-        st.button(f"${preferred_amounts[3]:.0f}", key="quick_500", use_container_width=True)
+        st.button(f"${preferred_amounts[3]:.0f}", key="quick_500", width='stretch')
     with quick_col5:
-        st.button(f"${preferred_amounts[4]:.0f}", key="quick_1000", use_container_width=True)
+        st.button(f"${preferred_amounts[4]:.0f}", key="quick_1000", width='stretch')
     
     st.markdown("---")
     
     # Save global settings button
-    if st.button("💾 Save Global Settings", type="primary", use_container_width=True):
+    if st.button("💾 Save Global Settings", type="primary", width='stretch'):
         try:
             # Update config
             manager.config.enabled = enabled
@@ -137,7 +137,7 @@ def display_fractional_share_config():
         
         if custom_data:
             df = pd.DataFrame(custom_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
     else:
         st.info("No custom amounts configured yet. Add tickers below to set custom amounts.")
     
@@ -168,7 +168,7 @@ def display_fractional_share_config():
     
     with add_col3:
         st.markdown("<br>", unsafe_allow_html=True)  # Spacing
-        if st.button("➕ Add/Update", use_container_width=True):
+        if st.button("➕ Add/Update", width='stretch'):
             if new_symbol:
                 try:
                     manager.set_custom_amount(new_symbol, new_amount)
@@ -196,7 +196,7 @@ def display_fractional_share_config():
         
         with remove_col2:
             st.markdown("<br>", unsafe_allow_html=True)  # Spacing
-            if st.button("🗑️ Remove", use_container_width=True):
+            if st.button("🗑️ Remove", width='stretch'):
                 try:
                     manager.remove_custom_amount(symbol_to_remove)
                     st.success(f"✅ Removed {symbol_to_remove}")
@@ -213,17 +213,17 @@ def display_fractional_share_config():
     action_col1, action_col2, action_col3 = st.columns(3)
     
     with action_col1:
-        if st.button("🔥 Apply to Expensive Stocks (>$100)", use_container_width=True):
+        if st.button("🔥 Apply to Expensive Stocks (>$100)", width='stretch'):
             st.info("This will scan your watchlist and apply default amounts to stocks >$100")
             # This would need watchlist integration
     
     with action_col2:
-        if st.button("📋 Apply to All Watchlist", use_container_width=True):
+        if st.button("📋 Apply to All Watchlist", width='stretch'):
             st.info("This will apply fractional settings to all watchlist tickers")
             # This would need watchlist integration
     
     with action_col3:
-        if st.button("🔄 Reset to Defaults", use_container_width=True):
+        if st.button("🔄 Reset to Defaults", width='stretch'):
             try:
                 manager.custom_amounts = {}
                 manager._save_state()

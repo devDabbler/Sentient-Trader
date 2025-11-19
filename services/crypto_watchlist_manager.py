@@ -414,6 +414,15 @@ class CryptoWatchlistManager:
             logger.error(f"Error updating notes for {symbol}: {e}")
             return False
     
+    def get_watchlist(self) -> List[Dict]:
+        """
+        Get full watchlist with all data (alias for get_all_cryptos for compatibility)
+        
+        Returns:
+            List of dicts with all watchlist crypto data
+        """
+        return self.get_all_cryptos()
+    
     def get_watchlist_symbols(self) -> List[str]:
         """Get list of all watchlist symbols"""
         if not self._check_client():

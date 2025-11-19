@@ -221,9 +221,18 @@ Focus on practical, actionable insights for options trading. Consider the specif
         
         return prompt
     
-    
-    
-    
+    def analyze_with_llm(self, prompt: str) -> str:
+        """
+        General-purpose LLM analysis method for AI trade reviewer and other services.
+        Wrapper around _call_llm_api for compatibility with external callers.
+        
+        Args:
+            prompt: The analysis prompt/query
+            
+        Returns:
+            str: LLM response text
+        """
+        return self._call_llm_api(prompt)
     
     def _call_llm_api(self, prompt: str) -> str:
         """Call the selected LLM API. Returns string or empty on error."""
