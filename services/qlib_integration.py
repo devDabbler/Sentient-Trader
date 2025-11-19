@@ -25,23 +25,27 @@ import numpy as np
 
 
 # Check if qlib is installed
+QLIB_AVAILABLE = False
+QLIB_SUBMODULES_AVAILABLE = False
+
 try:
     import qlib
-    from qlib.config import REG_CN
-    from qlib.contrib.data.handler import Alpha158
-    from qlib.model.gbdt import LGBModel
-    from qlib.data import D
-    from qlib.contrib.strategy import TopkDropoutStrategy
-    from qlib.contrib.evaluate import backtest
     QLIB_AVAILABLE = True
-except ImportError as e:
-    QLIB_AVAILABLE = False
-    # Only log if qlib is truly not installed (not just a submodule issue)
+    # Try importing submodules
     try:
-        import qlib
-        logger.info("Qlib is installed but some features may not be available")
-    except ImportError:
-        logger.warning("Qlib not installed. Run: pip install pyqlib")
+        from qlib.config import REG_CN
+        from qlib.contrib.data.handler import Alpha158
+        from qlib.model.gbdt import LGBModel
+        from qlib.data import D
+        from qlib.contrib.strategy import TopkDropoutStrategy
+        from qlib.contrib.evaluate import backtest
+        QLIB_SUBMODULES_AVAILABLE = True
+        logger.info("✅ Qlib installed and all features available")
+    except ImportError as submodule_error:
+        QLIB_SUBMODULES_AVAILABLE = False
+        logger.info(f"⚠️ Qlib is installed but some features may not be available: {submodule_error}")
+except ImportError:
+    logger.debug("Qlib not installed. Install with: pip install pyqlib")
 
 
 class QLIbEnhancedAnalyzer:
@@ -63,9 +67,9 @@ class QLIbEnhancedAnalyzer:
             use_qlib: Whether to use Qlib features. Auto-detect if None.
         """
         if use_qlib is None:
-            self.use_qlib = QLIB_AVAILABLE
+            self.use_qlib = QLIB_SUBMODULES_AVAILABLE
         else:
-            self.use_qlib = use_qlib and QLIB_AVAILABLE
+            self.use_qlib = use_qlib and QLIB_SUBMODULES_AVAILABLE
         
         if self.use_qlib:
             try:
@@ -324,8 +328,13 @@ def check_qlib_installation() -> Tuple[bool, str]:
     if not QLIB_AVAILABLE:
         return False, "Qlib not installed. Install with: pip install pyqlib"
     
+    if not QLIB_SUBMODULES_AVAILABLE:
+        return False, "Qlib installed but some required submodules are not available. Check installation."
+    
     try:
-        # Try to initialize
+        # Try to initialize (only if submodules are available)
+        import qlib
+        from qlib.config import REG_CN
         qlib.init(provider_uri='~/.qlib/qlib_data/us_data', region=REG_CN)
         return True, "Qlib installed and configured"
     except Exception as e:

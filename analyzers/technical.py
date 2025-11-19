@@ -1,11 +1,12 @@
 """Technical analysis calculations."""
 
 from loguru import logger
-from typing import Tuple
+from typing import Tuple, cast, Optional
 from math import log2
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from utils.helpers import fetch_ticker_history, fetch_ticker_info, fetch_ticker_options, fetch_ticker_option_chain
 
 
 
@@ -16,7 +17,8 @@ class TechnicalAnalyzer:
     def ema(series: pd.Series, period: int) -> pd.Series:
         """Exponential Moving Average using pandas ewm."""
         try:
-            return pd.to_numeric(series, errors='coerce').ewm(span=period, adjust=False).mean()
+            numeric_series = cast(pd.Series, pd.to_numeric(series, errors='coerce'))
+            return cast(pd.Series, numeric_series.ewm(span=period, adjust=False).mean())
         except Exception:
             return series
 
@@ -28,10 +30,10 @@ class TechnicalAnalyzer:
         DeM = SMA(DeMM, n) / (SMA(DeMM, n) + SMA(DeMm, n))
         """
         try:
-            high = pd.to_numeric(df['High'], errors='coerce')
-            low = pd.to_numeric(df['Low'], errors='coerce')
-            up = (high - high.shift(1)).clip(lower=0.0)
-            dn = (low.shift(1) - low).clip(lower=0.0)
+            high = cast(pd.Series, pd.to_numeric(df['High'], errors='coerce'))
+            low = cast(pd.Series, pd.to_numeric(df['Low'], errors='coerce'))
+            up = (high - cast(pd.Series, high.shift(1))).clip(lower=0.0)
+            dn = (cast(pd.Series, low.shift(1)) - low).clip(lower=0.0)
             up_sum = up.rolling(window=period, min_periods=period).sum()
             dn_sum = dn.rolling(window=period, min_periods=period).sum()
             denom = (up_sum + dn_sum).replace(0, np.nan)
@@ -54,14 +56,15 @@ class TechnicalAnalyzer:
             Current ATR value
         """
         try:
-            high = pd.to_numeric(df['High'], errors='coerce')
-            low = pd.to_numeric(df['Low'], errors='coerce')
-            close = pd.to_numeric(df['Close'], errors='coerce')
+            high = cast(pd.Series, pd.to_numeric(df['High'], errors='coerce'))
+            low = cast(pd.Series, pd.to_numeric(df['Low'], errors='coerce'))
+            close = cast(pd.Series, pd.to_numeric(df['Close'], errors='coerce'))
+            prev_close = cast(pd.Series, close.shift(1))
             
             # True Range = max(H-L, abs(H-Cp), abs(L-Cp))
             tr1 = high - low
-            tr2 = abs(high - close.shift(1))
-            tr3 = abs(low - close.shift(1))
+            tr2 = (high - prev_close).abs()
+            tr3 = (low - prev_close).abs()
             
             true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             atr = true_range.rolling(window=period).mean()
@@ -156,7 +159,7 @@ class TechnicalAnalyzer:
         - is_reclaim: prior close below at least one EMA, now above both with rising EMAs, volume > avg, and follow-through
         """
         try:
-            close = pd.to_numeric(df['Close'], errors='coerce')
+            close = cast(pd.Series, pd.to_numeric(df['Close'], errors='coerce'))
             vol = df['Volume'] if 'Volume' in df.columns else None
 
             power_zone = bool(close.iloc[-1] > ema8.iloc[-1] > ema21.iloc[-1])
@@ -262,9 +265,9 @@ class TechnicalAnalyzer:
         """Calculate RSI indicator"""
         try:
             # Ensure numeric dtype
-            prices = pd.to_numeric(prices, errors='coerce').dropna()
+            prices = cast(pd.Series, pd.to_numeric(prices, errors='coerce')).dropna()
             # Calculate price changes and force numeric dtype for safe comparisons
-            delta = pd.to_numeric(prices.diff(), errors='coerce').fillna(0.0)
+            delta = cast(pd.Series, pd.to_numeric(prices.diff(), errors='coerce')).fillna(0.0)
             gain = (delta.where(delta > 0.0, 0.0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0.0, 0.0)).rolling(window=period).mean()
             rs = gain / loss
@@ -307,7 +310,7 @@ class TechnicalAnalyzer:
     @staticmethod
     def analyze_timeframe_alignment(
         ticker: str,
-        timeframes: list[tuple[str, str]] = None
+        timeframes: Optional[list[tuple[str, str]]] = None
     ) -> dict:
         """
         Multi-timeframe trend confirmation.
@@ -324,11 +327,11 @@ class TechnicalAnalyzer:
                 try:
                     if interval == "1h":
                         # Get hourly data for ~4-hour equivalent check
-                        hist = stock.history(period="5d", interval="1h")
+                        hist = fetch_ticker_history(stock, period="5d", interval="1h")
                     elif interval == "1wk":
-                        hist = stock.history(period="6mo", interval="1wk")
+                        hist = fetch_ticker_history(stock, period="6mo", interval="1wk")
                     else:
-                        hist = stock.history(period="3mo", interval=interval)
+                        hist = fetch_ticker_history(stock, period="3mo", interval=interval)
                     
                     if hist.empty or len(hist) < 10:
                         results[label] = {"trend": "UNKNOWN", "strength": 0}
@@ -394,13 +397,13 @@ class TechnicalAnalyzer:
         """
         try:
             stock = yf.Ticker(ticker)
-            info = stock.info
+            info = fetch_ticker_info(stock)
             
             # Get sector
             sector = info.get('sector', 'Unknown')
             
             # Get stock history (3 months)
-            stock_hist = stock.history(period="3mo")
+            stock_hist = fetch_ticker_history(stock, period="3mo")
             if stock_hist.empty:
                 return {"sector": sector, "rs_score": 50, "vs_spy": 0, "vs_sector": 0}
             
@@ -409,7 +412,7 @@ class TechnicalAnalyzer:
             
             # SPY comparison
             spy = yf.Ticker("SPY")
-            spy_hist = spy.history(period="3mo")
+            spy_hist = fetch_ticker_history(spy, period="3mo")
             spy_return = 0
             if not spy_hist.empty:
                 spy_return = ((spy_hist['Close'].iloc[-1] / spy_hist['Close'].iloc[0]) - 1) * 100
@@ -435,7 +438,7 @@ class TechnicalAnalyzer:
             sector_return = 0
             try:
                 sector_ticker = yf.Ticker(sector_etf)
-                sector_hist = sector_ticker.history(period="3mo")
+                sector_hist = fetch_ticker_history(sector_ticker, period="3mo")
                 if not sector_hist.empty:
                     sector_return = ((sector_hist['Close'].iloc[-1] / sector_hist['Close'].iloc[0]) - 1) * 100
             except:
@@ -475,9 +478,9 @@ class TechnicalAnalyzer:
             
             # Get options data if available
             try:
-                options_dates = stock.options
+                options_dates = fetch_ticker_options(stock)
                 if options_dates:
-                    opt_chain = stock.option_chain(options_dates[0])
+                    opt_chain = fetch_ticker_option_chain(stock, options_dates[0])
                     
                     # Calculate average implied volatility
                     calls_iv = opt_chain.calls['impliedVolatility'].mean()
@@ -486,7 +489,7 @@ class TechnicalAnalyzer:
                     
                     # Simulate IV rank (in production, use historical IV data)
                     # IV rank = where current IV sits in the range of past year's IV
-                    hist = stock.history(period="1y")
+                    hist = fetch_ticker_history(stock, period="1y")
                     volatility = hist['Close'].pct_change().std() * np.sqrt(252) * 100
                     
                     # Estimate IV rank (simplified)
@@ -498,7 +501,7 @@ class TechnicalAnalyzer:
                 pass
             
             # Fallback: estimate from historical volatility
-            hist = stock.history(period="1y")
+            hist = fetch_ticker_history(stock, period="1y")
             if not hist.empty:
                 volatility = hist['Close'].pct_change().std() * np.sqrt(252) * 100
                 iv_rank = min(100, max(0, volatility))
@@ -588,7 +591,7 @@ class TechnicalAnalyzer:
         """
         try:
             # Use recent window
-            data = prices.tail(window).values
+            data = np.asarray(prices.tail(window).values, dtype=float)
             N = len(data)
             
             if N < m + 1:

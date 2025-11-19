@@ -33,7 +33,7 @@ def display_ai_position_monitor():
         st.markdown("#### 🔄 Load Existing Positions")
         st.info("💡 **Tip:** You can load your existing Kraken positions into AI monitoring")
         
-        if st.button("🔍 Scan & Load Kraken Positions", use_container_width=True, type="primary"):
+        if st.button("🔍 Scan & Load Kraken Positions", width='stretch', type="primary"):
             with st.spinner("Scanning your Kraken account for open positions..."):
                 try:
                     # Get Kraken client from environment variables
@@ -270,7 +270,7 @@ def display_ai_position_monitor():
         
         if positions_data:
             df = pd.DataFrame(positions_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
             
             # Position details
             st.markdown("#### 🔍 Position Details")
@@ -404,23 +404,23 @@ def display_ai_position_monitor():
     control_col1, control_col2, control_col3 = st.columns(3)
     
     with control_col1:
-        if st.button("🔄 Refresh Status", use_container_width=True):
+        if st.button("🔄 Refresh Status", width='stretch'):
             st.rerun()
     
     with control_col2:
         if status['is_running']:
-            if st.button("⏸️ Stop Monitoring", use_container_width=True):
+            if st.button("⏸️ Stop Monitoring", width='stretch'):
                 ai_manager.stop()
                 st.success("AI monitoring stopped")
                 st.rerun()
         else:
-            if st.button("▶️ Start Monitoring", use_container_width=True):
+            if st.button("▶️ Start Monitoring", width='stretch'):
                 ai_manager.start_monitoring_loop()
                 st.success("AI monitoring started")
                 st.rerun()
     
     with control_col3:
-        if st.button("🗑️ Clear All", use_container_width=True):
+        if st.button("🗑️ Clear All", width='stretch'):
             if st.session_state.get('confirm_clear', False):
                 # Stop monitoring
                 ai_manager.stop()
@@ -504,13 +504,13 @@ def display_portfolio_analysis():
     # Fetch portfolio analysis button
     col1, col2 = st.columns([3, 1])
     with col2:
-        if st.button("🔄 Refresh Analysis", use_container_width=True):
+        if st.button("🔄 Refresh Analysis", width='stretch'):
             # Clear cached data
             if 'portfolio_analysis' in st.session_state:
                 del st.session_state.portfolio_analysis
     
     # Get portfolio analysis (cached in session state)
-    if 'portfolio_analysis' not in st.session_state or st.button("📈 Analyze Portfolio", use_container_width=True, type="primary"):
+    if 'portfolio_analysis' not in st.session_state or st.button("📈 Analyze Portfolio", width='stretch', type="primary"):
         with st.spinner("Analyzing your Kraken portfolio..."):
             try:
                 analysis = kraken_client.get_portfolio_analysis()
@@ -612,7 +612,7 @@ def display_portfolio_analysis():
             'Allocation': positions_df['allocation_pct'].apply(lambda x: f"{x:.1f}%")
         })
         
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width='stretch', hide_index=True)
         
         # Top Winners and Losers
         col1, col2 = st.columns(2)
@@ -648,7 +648,7 @@ def display_portfolio_analysis():
                 'Value': staked_df['value_usd'].apply(lambda x: f"${x:,.2f}" if x > 0 else "N/A")
             })
             
-            st.dataframe(display_staked, use_container_width=True, hide_index=True)
+            st.dataframe(display_staked, width='stretch', hide_index=True)
             
             # Show instructions for unstaking
             with st.expander("ℹ️ How to unstake your crypto"):

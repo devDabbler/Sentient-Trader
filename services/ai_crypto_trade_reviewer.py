@@ -82,6 +82,53 @@ class AICryptoTradeReviewer:
                 remaining = actual_balance - position_size_usd
                 capital_info += f"\n- Kraken Balance: ${actual_balance:,.2f}\n- Remaining After Trade: ${remaining:,.2f}"
         
+        # Build strategy context for AI
+        strategy_profiles = {
+            "MOMENTUM": {
+                "description": "Mid-cap coins ($0.01-$1) with strong directional trends",
+                "typical_rr": "2.5-3.5:1",
+                "hold_time": "Hours to days",
+                "risk_level": "Moderate",
+                "key_factors": "Volume surge, RSI momentum, trend strength, support/resistance levels"
+            },
+            "SCALP": {
+                "description": "Quick trades on high-liquidity coins (>$1) for small gains",
+                "typical_rr": "2.5-4:1",
+                "hold_time": "Minutes to hours",
+                "risk_level": "Moderate-High (requires tight execution)",
+                "key_factors": "Bid/ask spread, order book depth, tick volatility, fee optimization"
+            },
+            "HIGH_RISK_PENNY": {
+                "description": "Sub-penny cryptos (<$0.01) with extreme volatility",
+                "typical_rr": "5:1+ (high risk requires high reward)",
+                "hold_time": "Hours to days (momentum plays)",
+                "risk_level": "Very High (can lose 50%+ quickly)",
+                "key_factors": "News catalysts, social sentiment, volume spikes, avoid illiquid pairs"
+            },
+            "SWING": {
+                "description": "Multi-day position trades on established coins",
+                "typical_rr": "3-5:1",
+                "hold_time": "Days to weeks",
+                "risk_level": "Moderate",
+                "key_factors": "Daily chart patterns, macro trends, fundamental strength"
+            },
+            "CONSERVATIVE": {
+                "description": "Low-risk trades on major coins (BTC, ETH) with tight stops",
+                "typical_rr": "2-3:1",
+                "hold_time": "Hours to days",
+                "risk_level": "Low",
+                "key_factors": "Strong support levels, low volatility periods, high liquidity"
+            }
+        }
+        
+        strategy_context = strategy_profiles.get(strategy, {
+            "description": "Custom strategy - manual risk/reward settings",
+            "typical_rr": "Varies",
+            "hold_time": "Varies",
+            "risk_level": "Depends on settings",
+            "key_factors": "User-defined parameters"
+        })
+        
         # Build analysis prompt
         prompt = f"""
         As an expert cryptocurrency trader, analyze this proposed trade for risk and opportunity:
@@ -98,6 +145,13 @@ class AICryptoTradeReviewer:
         - Reward Amount: ${reward_amount:,.2f}
         - Risk:Reward Ratio: {risk_reward_ratio:.2f}:1
         
+        **Strategy Profile - {strategy}:**
+        - Description: {strategy_context['description']}
+        - Typical R:R: {strategy_context['typical_rr']}
+        - Expected Hold Time: {strategy_context['hold_time']}
+        - Risk Level: {strategy_context['risk_level']}
+        - Key Success Factors: {strategy_context['key_factors']}
+        
         **Capital & Account Context:**{capital_info}
         
         **Market Context:**
@@ -106,21 +160,29 @@ class AICryptoTradeReviewer:
         **Your Analysis Must Include:**
         1. **APPROVE or REJECT** (first line)
         2. **Confidence Score** (0-100)
-        3. **Key Risks** (top 3)
+        3. **Key Risks** (top 3 - consider strategy-specific risks)
         4. **Entry Timing** (optimal, acceptable, poor)
-        5. **Position Size Assessment** (too large, appropriate, too small)
-        6. **Specific Recommendations** (adjustments if needed)
-        7. **Exit Strategy Review** (stop loss and take profit levels)
-        8. **Market Conditions** (favorable, neutral, unfavorable)
+        5. **Position Size Assessment** (too large, appropriate, too small for THIS strategy)
+        6. **Strategy Fit** (does this trade align with the strategy's typical profile?)
+        7. **Specific Recommendations** (adjustments if needed)
+        8. **Exit Strategy Review** (stop loss and take profit levels appropriate for strategy?)
+        9. **Market Conditions** (favorable, neutral, unfavorable for THIS strategy)
+        
+        **Strategy-Specific Evaluation:**
+        - Does the R:R ratio ({risk_reward_ratio:.2f}:1) meet the typical range for {strategy} ({strategy_context['typical_rr']})?
+        - Is the position size appropriate for the risk level ({strategy_context['risk_level']})?
+        - Are the key success factors ({strategy_context['key_factors']}) present in market data?
+        - Does the entry price and coin characteristics match strategy expectations?
         
         **Rejection Criteria:**
-        - Risk:Reward ratio < 1.5:1
-        - Position size > 15% of capital (without strong justification)
+        - Risk:Reward ratio below strategy minimum
+        - Position size > 15% of capital (or >5% for HIGH_RISK_PENNY)
+        - Strategy mismatch (e.g., SCALP on illiquid penny coin, MOMENTUM on sideways chart)
         - Extremely unfavorable market conditions
         - Entry during high volatility without proper protection
         - Conflicting technical/fundamental signals
         
-        Provide concise, actionable analysis focusing on risk management.
+        Provide concise, actionable analysis focusing on risk management and strategy alignment.
         """
         
         # Get AI analysis if available
@@ -162,40 +224,133 @@ class AICryptoTradeReviewer:
         side: str,
         pair: str
     ) -> Tuple[bool, float, str, Dict]:
-        """Fallback rule-based review"""
+        """Fallback rule-based review with strategy-aware risk assessment"""
+        
+        # Strategy-specific requirements
+        strategy_requirements = {
+            "MOMENTUM": {"min_rr": 2.5, "max_position_pct": 10, "description": "Momentum trades need 2.5:1+ R:R"},
+            "SCALP": {"min_rr": 2.5, "max_position_pct": 10, "description": "Scalping needs 2.5:1+ for fees/slippage"},
+            "HIGH_RISK_PENNY": {"min_rr": 4.0, "max_position_pct": 5, "description": "Penny cryptos need 4:1+ R:R, max 5% position"},
+            "SWING": {"min_rr": 3.0, "max_position_pct": 15, "description": "Swing trades need 3:1+ R:R"},
+            "CONSERVATIVE": {"min_rr": 2.0, "max_position_pct": 8, "description": "Conservative needs 2:1+ R:R"},
+        }
+        
+        # Get strategy requirements or use defaults
+        req = strategy_requirements.get(strategy, {"min_rr": 2.0, "max_position_pct": 10, "description": "General trading"})
         
         approved = True
         confidence = 70.0
         issues = []
         
-        # Check R:R ratio
-        if risk_reward_ratio < 1.5:
-            issues.append(f"Low R:R ratio ({risk_reward_ratio:.2f}:1)")
+        # Strategy-specific R:R check
+        if risk_reward_ratio < req["min_rr"]:
+            issues.append(f"{req['description']} (current: {risk_reward_ratio:.2f}:1)")
+            confidence -= 25
+            if risk_reward_ratio < req["min_rr"] - 0.5:
+                approved = False
+                issues.append(f"R:R too low for {strategy} strategy")
+        
+        # Strategy-specific position size check
+        max_position = (req["max_position_pct"] / 100) * 1000  # Assume $1000 capital
+        capital_percentage = (position_size_usd / 1000) * 100
+        
+        if position_size_usd > max_position:
+            issues.append(f"Position size (${position_size_usd:,.2f} = {capital_percentage:.1f}%) exceeds {strategy} limit ({req['max_position_pct']}%)")
             confidence -= 20
-            if risk_reward_ratio < 1.0:
+            if capital_percentage > req["max_position_pct"] + 5:
                 approved = False
+                issues.append(f"{strategy} strategy requires smaller position (<{req['max_position_pct']}% of capital)")
         
-        # Check position size (assuming $1000 capital)
-        if position_size_usd > 150:
-            issues.append(f"Large position size (${position_size_usd:,.2f})")
+        # HIGH_RISK_PENNY specific warnings
+        if strategy == "HIGH_RISK_PENNY":
+            issues.append("High volatility penny crypto - extreme risk")
             confidence -= 15
-            if position_size_usd > 200:
-                approved = False
         
-        # Strategy-specific checks
-        if strategy == "SCALP" and risk_reward_ratio < 2.0:
-            issues.append("Scalping requires minimum 2:1 R:R")
+        # SELL/SHORT specific risks
+        if side == "SELL":
+            issues.append("Short selling has unlimited loss potential")
             confidence -= 10
+            if pair not in ["BTC/USD", "ETH/USD", "SOL/USD"]:  # Major coins
+                issues.append(f"Shorting {pair} - low liquidity risk")
+                confidence -= 15
+                if position_size_usd > 75:
+                    approved = False
+                    issues.append("Short position too large for altcoin")
         
-        reasoning = " | ".join(issues) if issues else "Rule-based approval"
+        # Penny/meme coin detection (risky patterns)
+        risky_indicators = ["PEPE", "SHIB", "DOGE", "MEME", "MOON", "SAFE", "FLOKI"]
+        if any(indicator in pair.upper() for indicator in risky_indicators):
+            issues.append(f"{pair} is high-risk meme/penny crypto")
+            confidence -= 20
+            if position_size_usd > 50:
+                approved = False
+                issues.append("Meme coins require very small positions")
+        
+        # Final confidence adjustment
+        if not approved:
+            confidence = min(confidence, 45)  # Rejected trades get low confidence
+        
+        reasoning = " | ".join(issues) if issues else f"Rule-based approval - {strategy} strategy parameters met"
+        
+        # Strategy-aware recommendations
+        strategy_recommendations = {
+            "MOMENTUM": [
+                "Watch for volume confirmation",
+                "Monitor RSI for overbought/oversold",
+                "Trail stop loss as position moves in profit",
+                "Exit on trend reversal signals"
+            ],
+            "SCALP": [
+                "Use limit orders to reduce fees",
+                "Monitor order book depth",
+                "Set tight stop losses",
+                "Take profit quickly on target hit"
+            ],
+            "HIGH_RISK_PENNY": [
+                "Use very small position size",
+                "Set wide stop loss for volatility",
+                "Consider scaling out at multiple levels",
+                "Monitor social sentiment and news"
+            ],
+            "SWING": [
+                "Set wider stop loss for daily volatility",
+                "Use daily chart for trend confirmation",
+                "Be patient for target levels",
+                "Review position every 12-24 hours"
+            ],
+            "CONSERVATIVE": [
+                "Stick to major coins only",
+                "Use tight stops",
+                "Avoid high volatility periods",
+                "Only trade with strong confluence"
+            ]
+        }
+        
+        base_recommendations = strategy_recommendations.get(strategy, [
+            'Monitor closely',
+            'Use limit orders for better fills',
+            'Set stop loss alerts',
+            'Review position regularly'
+        ])
+        
+        # Add position size warning if needed
+        if position_size_usd > max_position:
+            base_recommendations.insert(0, f"Reduce position to <{req['max_position_pct']}% of capital")
+        
+        # Add R:R warning if needed
+        if risk_reward_ratio < req["min_rr"]:
+            base_recommendations.insert(0, f"Increase R:R to meet {strategy} minimum ({req['min_rr']}:1)")
         
         recommendations = {
-            'entry_timing': 'acceptable',
-            'position_size': 'appropriate' if position_size_usd <= 100 else 'review',
-            'risks': issues[:3],
-            'recommendations': ['Monitor closely', 'Use limit orders', 'Set alerts'],
-            'market_conditions': 'neutral'
+            'entry_timing': 'acceptable' if approved else 'poor',
+            'position_size': 'appropriate' if position_size_usd <= max_position else 'too large',
+            'risks': issues[:5],  # Top 5 risks
+            'recommendations': base_recommendations[:4],  # Top 4 recommendations
+            'market_conditions': 'neutral - rule-based analysis (AI unavailable)',
+            'strategy_context': req['description']
         }
+        
+        logger.info(f"🤖 Rule-based review ({strategy}): {'APPROVED' if approved else 'REJECTED'} - {len(issues)} issues found")
         
         return approved, confidence, reasoning, recommendations
     

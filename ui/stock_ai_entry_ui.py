@@ -80,7 +80,7 @@ def display_stock_ai_entry_analysis(broker_client, llm_analyzer=None):
     analysis_col1, analysis_col2 = st.columns([2, 1])
     
     with analysis_col1:
-        if st.button("🤖 Analyze Entry Timing", use_container_width=True, type="primary", disabled=not ticker_input):
+        if st.button("🤖 Analyze Entry Timing", width='stretch', type="primary", disabled=not ticker_input):
             if not ticker_input:
                 st.warning("⚠️ Please enter a ticker symbol")
             else:
@@ -163,7 +163,7 @@ def display_stock_ai_entry_analysis(broker_client, llm_analyzer=None):
             if 'stock_entry_params' in st.session_state:
                 del st.session_state.stock_entry_params
         
-        st.button("🔄 Clear", use_container_width=True, on_click=clear_analysis)
+        st.button("🔄 Clear", width='stretch', on_click=clear_analysis)
     
     # Display AI entry analysis if available
     if 'stock_entry_analysis' in st.session_state:
@@ -237,7 +237,7 @@ def display_stock_ai_entry_analysis(broker_client, llm_analyzer=None):
             monitor_col1, monitor_col2 = st.columns([2, 1])
             
             with monitor_col1:
-                if st.button("🔔 Monitor & Alert Me", use_container_width=True, type="primary"):
+                if st.button("🔔 Monitor & Alert Me", width='stretch', type="primary"):
                     try:
                         entry_assistant = st.session_state.get('stock_ai_entry_assistant')
                         if entry_assistant:
@@ -303,7 +303,7 @@ def display_compact_stock_ai_entry(broker_client, llm_analyzer=None, default_tic
                 key=f"compact_ai_position_{default_ticker}"
             )
         
-        if st.button("🤖 Analyze", use_container_width=True, type="primary", key=f"compact_ai_btn_{default_ticker}"):
+        if st.button("🤖 Analyze", width='stretch', type="primary", key=f"compact_ai_btn_{default_ticker}"):
             if not ticker:
                 st.warning("Enter a ticker symbol")
             else:

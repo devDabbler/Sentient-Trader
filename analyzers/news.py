@@ -7,6 +7,7 @@ import yfinance as yf
 
 # Import from utils module
 from utils.caching import get_cached_news
+from utils.helpers import fetch_ticker_info
 
 
 
@@ -209,7 +210,7 @@ class NewsAnalyzer:
         
         try:
             stock = yf.Ticker(ticker)
-            info = stock.info
+            info = fetch_ticker_info(stock)
             
             # Earnings date
             earnings_date = info.get('earningsDate')

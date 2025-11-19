@@ -176,7 +176,11 @@ class AIStockEntryAssistant:
                 logger.error("LLM analyzer not configured")
                 return self._create_error_analysis(symbol, "LLM analyzer not initialized")
             
-            response = self.llm_analyzer._call_openrouter(prompt, max_retries=2, try_fallbacks=True)
+            # Use appropriate method based on provider
+            if getattr(self.llm_analyzer, 'provider', '') == 'ollama':
+                response = self.llm_analyzer.analyze_with_llm(prompt)
+            else:
+                response = self.llm_analyzer._call_openrouter(prompt, max_retries=2, try_fallbacks=True)
             
             if not response:
                 logger.error("Failed to get AI response")
@@ -815,11 +819,12 @@ Evaluate these critical factors:
     ):
         """Send notification that entry conditions are met"""
         try:
-            # Try to import Discord notifier (optional dependency)
+            # Try to import Discord webhook (optional dependency)
             try:
-                from services.discord_notifier import send_discord_alert, TradingAlert, AlertType, AlertPriority  # type: ignore
+                from src.integrations.discord_webhook import send_discord_alert
+                from models.alerts import TradingAlert, AlertType, AlertPriority
             except (ImportError, ModuleNotFoundError):
-                logger.debug("Discord notifier not available, logging notification instead")
+                logger.debug("Discord webhook not available, logging notification instead")
                 rsi_text = f"RSI: {technical_data.get('rsi', 0):.2f}" if technical_data else "N/A"
                 trend_text = f"Trend: {technical_data.get('trend', 'N/A')}" if technical_data else "N/A"
                 logger.info(f"📢 ENTRY NOTIFICATION: {opportunity.symbol} {opportunity.side} @ ${current_price:,.2f} | {rsi_text} | {trend_text}")

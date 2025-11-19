@@ -30,6 +30,13 @@ class FreqtradeStrategyAdapter:
         
         # Strategy configurations
         self.strategies = {
+            'orb_fvg': {
+                'name': 'ORB+FVG (15min)',
+                'timeframe': '1m',  # 1-minute bars for FVG detection
+                'minimal_roi': {"30": 0.01, "15": 0.02, "0": 0.03},
+                'stoploss': -0.02,  # Dynamic stop based on FVG
+                'description': 'Opening Range Breakout with Fair Value Gap confirmation'
+            },
             'ema_crossover': {
                 'name': 'EMA Crossover + Heikin Ashi',
                 'timeframe': '5m',
@@ -196,17 +203,41 @@ class FreqtradeStrategyAdapter:
         ha_green = current['ha_close'] > current['ha_open']
         entry = ema20_cross_up and (current['ha_close'] > current['ema20']) and ha_green
         
+        # Near-entry condition
+        near_entry = (
+            not entry and
+            current['ema20'] > current['ema50'] * 0.995 and  # EMAs converging
+            current['ema20'] < current['ema50'] * 1.005 and
+            ha_green and
+            current['ha_close'] > current['ema20']
+        )
+        
         # Exit signal
         ema50_cross_up = (previous['ema50'] <= previous['ema100']) and (current['ema50'] > current['ema100'])
         ha_red = current['ha_close'] < current['ha_open']
         exit_signal = ema50_cross_up and (current['ha_close'] < current['ema20']) and ha_red
+        
+        # Near-exit condition
+        near_exit = (
+            not exit_signal and
+            (ha_red or current['ha_close'] < current['ema20'])
+        )
+        
+        # EMA alignment
+        ema_aligned = current['ema20'] > current['ema50'] > current['ema100']
         
         signals = {
             'ema20': current['ema20'],
             'ema50': current['ema50'],
             'ema100': current['ema100'],
             'ha_close': current['ha_close'],
-            'ha_type': 'green' if ha_green else 'red'
+            'ha_type': 'green' if ha_green else 'red',
+            'ema_aligned': ema_aligned,
+            'near_entry': near_entry,
+            'near_exit': near_exit,
+            'rsi': current.get('rsi', 50),  # Include RSI for confidence calc
+            'volume_ratio': current['volume'] / current['volume_ma'] if current.get('volume_ma', 0) > 0 else 1.0,
+            'adx': current.get('adx', 0)
         }
         
         return entry, exit_signal, signals
@@ -307,13 +338,26 @@ class FreqtradeStrategyAdapter:
         # MACD crossover
         macd_cross = (previous['macd'] <= previous['macdsignal']) and (current['macd'] > current['macdsignal'])
         
+        # Volume ratio
+        volume_ratio = current['volume'] / current['volume_ma'] if current['volume_ma'] > 0 else 1.0
+        volume_spike = volume_ratio > 1.5
+        
         # Entry signal
         entry = (
             macd_cross and
-            current['volume'] > current['volume_ma'] * 1.5 and
+            volume_spike and
             current['rsi'] < 30 and
             current['fastd'] < 30 and
             current['fisher_rsi_norma'] < 30
+        )
+        
+        # Near-entry condition
+        near_entry = (
+            not entry and
+            current['macd'] > current['macdsignal'] * 0.95 and  # MACD converging
+            volume_ratio > 1.2 and
+            current['rsi'] < 35 and
+            current['fastd'] < 35
         )
         
         # Exit signal
@@ -323,14 +367,28 @@ class FreqtradeStrategyAdapter:
             current['fisher_rsi_norma'] > 50
         )
         
+        # Near-exit condition
+        near_exit = (
+            not exit_signal and
+            (current['rsi'] > 65 or current['fisher_rsi_norma'] > 45)
+        )
+        
+        # EMA alignment for trend strength
+        ema_aligned = current.get('ema5', 0) > current.get('ema10', 0) > current.get('ema20', 0)
+        
         signals = {
             'macd': current['macd'],
             'macdsignal': current['macdsignal'],
-            'volume_ratio': current['volume'] / current['volume_ma'] if current['volume_ma'] > 0 else 0,
+            'volume_ratio': volume_ratio,
+            'volume_spike': volume_spike,
             'rsi': current['rsi'],
             'fastd': current['fastd'],
             'fisher_rsi_norma': current['fisher_rsi_norma'],
-            'minus_di': current['minus_di']
+            'minus_di': current['minus_di'],
+            'ema_aligned': ema_aligned,
+            'near_entry': near_entry,
+            'near_exit': near_exit,
+            'adx': current.get('adx', 0)
         }
         
         return entry, exit_signal, signals
@@ -350,16 +408,33 @@ class FreqtradeStrategyAdapter:
         # Fast EMA crossover
         ema_cross = (previous['ema5'] <= previous['ema10']) and (current['ema5'] > current['ema10'])
         
-        # Volume spike
+        # Volume spike and volume ratio for confidence calc
         volume_spike = current['volume'] > current['volume_ma'] * 2
+        volume_ratio = current['volume'] / current['volume_ma'] if current['volume_ma'] > 0 else 1.0
         
-        # Entry signal
+        # EMA alignment for trend strength
+        ema_aligned = (current['ema5'] > current['ema10'] > current['ema20'])
+        
+        # Calculate MACD if available for additional confirmation
+        macd = current.get('macd', 0)
+        macdsignal = current.get('macdsignal', 0)
+        
+        # Entry signal (strict conditions)
         entry = (
             ema_cross and
             current['rsi'] < 35 and
             volume_spike and
             current['adx'] > 20 and
             current['close'] > current['ema20']
+        )
+        
+        # Near-entry condition (almost ready to buy - helps with confidence scoring)
+        near_entry = (
+            not entry and  # Not already an entry signal
+            current['rsi'] < 40 and  # Oversold but not extreme
+            current['adx'] > 15 and  # Some trend strength
+            current['ema5'] > current['ema10'] * 0.995 and  # EMAs converging for possible cross
+            volume_ratio > 1.2  # Some volume increase
         )
         
         # Exit signal (quick profit or reversal)
@@ -369,15 +444,95 @@ class FreqtradeStrategyAdapter:
             current['close'] < current['ema10']
         )
         
+        # Near-exit condition (approaching exit)
+        near_exit = (
+            not exit_signal and  # Not already an exit signal
+            (current['rsi'] > 60 or  # Getting overbought
+             current['ema5'] < current['ema10'] * 1.005)  # EMAs converging for possible cross down
+        )
+        
         signals = {
             'ema5': current['ema5'],
             'ema10': current['ema10'],
+            'ema20': current['ema20'],
             'rsi': current['rsi'],
             'adx': current['adx'],
-            'volume_spike': volume_spike
+            'volume_spike': volume_spike,
+            'volume_ratio': volume_ratio,
+            'ema_aligned': ema_aligned,
+            'macd': macd,
+            'macdsignal': macdsignal,
+            'near_entry': near_entry,
+            'near_exit': near_exit,
+            'ema_cross_strength': abs(current['ema5'] - current['ema10']) / current['ema10'] * 100  # % difference
         }
         
         return entry, exit_signal, signals
+    
+    def strategy_orb_fvg(self, df: pd.DataFrame) -> Tuple[bool, bool, Dict]:
+        """
+        Opening Range Breakout + Fair Value Gap Strategy
+        
+        Detects:
+        - Opening Range High/Low from first 15 minutes
+        - Fair Value Gaps in price action
+        - Breakout confirmation with FVG alignment
+        
+        Returns: (entry_signal, exit_signal, signals_dict)
+        """
+        try:
+            from analyzers.orb_fvg_strategy import ORBFVGAnalyzer
+            
+            if len(df) < 20:
+                logger.warning("Insufficient data for ORB+FVG analysis")
+                return False, False, {}
+            
+            # Initialize ORB+FVG analyzer
+            orb_analyzer = ORBFVGAnalyzer()
+            
+            # Get current price
+            current_price = float(df.iloc[-1]['close'])
+            
+            # Run ORB+FVG analysis (pass empty ticker since we already have the data)
+            orb_results = orb_analyzer.analyze("CRYPTO", df, current_price)
+            
+            # Convert ORB+FVG results to entry/exit signals
+            entry_signal = orb_results['signal'] == 'BUY'
+            exit_signal = orb_results['signal'] == 'SELL'
+            
+            # Build signals dict with ORB+FVG-specific data
+            signals = {
+                'orb_signal': orb_results['signal'],
+                'confidence': orb_results['confidence'],
+                'fvg_signal': orb_results.get('fvg_signal', 'NEUTRAL'),
+                'fvg_strength': orb_results.get('fvg_strength', 0),
+                'risk_level': orb_results.get('risk_level', 'MEDIUM'),
+                'entry_price': orb_results.get('entry', current_price),
+                'stop_loss': orb_results.get('stop_loss', current_price * 0.98),
+                'target': orb_results.get('target', current_price * 1.02),
+                'risk_reward_ratio': orb_results.get('risk_reward_ratio', 1.0)
+            }
+            
+            # Add opening range data if available
+            if orb_results.get('opening_range'):
+                orb = orb_results['opening_range']
+                signals['orh'] = orb.get('orh', 0)
+                signals['orl'] = orb.get('orl', 0)
+                signals['range_pct'] = orb.get('range_pct', 0)
+            
+            # Add key signals if available
+            if orb_results.get('key_signals'):
+                signals['key_signals'] = orb_results['key_signals'][:5]
+            
+            # Add recommendations if available
+            if orb_results.get('recommendations'):
+                signals['recommendations'] = orb_results['recommendations'][:5]
+            
+            return entry_signal, exit_signal, signals
+            
+        except Exception as e:
+            logger.error(f"Error in ORB+FVG strategy: {e}", exc_info=True)
+            return False, False, {'error': str(e)}
     
     def analyze_crypto(self, symbol: str, strategy: str = 'ema_crossover', interval: str = '5') -> Dict:
         """
@@ -517,93 +672,216 @@ class FreqtradeStrategyAdapter:
         Returns: Confidence score 0-100
         """
         confidence = 50  # Base confidence
+        confidence_factors = []  # Track what drives the confidence score
         
         try:
             current = df.iloc[-1] if len(df) > 0 else None
             if current is None:
                 return confidence
             
-            # ENTRY SIGNAL CONFIDENCE (75-95%)
+            # ENTRY SIGNAL CONFIDENCE (70-95%)
             if entry_signal:
-                confidence = 75
+                confidence = 70
+                confidence_factors.append("Entry signal detected (+70)")
                 
                 # Boost for strong RSI conditions
                 if 'rsi' in signals:
                     rsi = signals['rsi']
                     if rsi < 20:  # Very oversold
-                        confidence += 8
+                        confidence += 10
+                        confidence_factors.append(f"Very oversold RSI {rsi:.1f} (+10)")
                     elif rsi < 30:  # Oversold
-                        confidence += 5
+                        confidence += 7
+                        confidence_factors.append(f"Oversold RSI {rsi:.1f} (+7)")
+                    elif rsi < 35:
+                        confidence += 4
+                        confidence_factors.append(f"Low RSI {rsi:.1f} (+4)")
                 
                 # Boost for volume confirmation
-                if 'volume_ratio' in signals and signals['volume_ratio'] > 2.0:
-                    confidence += 8
-                elif 'volume_spike' in signals and signals['volume_spike']:
-                    confidence += 5
+                if 'volume_ratio' in signals:
+                    vol_ratio = signals['volume_ratio']
+                    if vol_ratio > 3.0:
+                        confidence += 10
+                        confidence_factors.append(f"Huge volume {vol_ratio:.1f}x (+10)")
+                    elif vol_ratio > 2.0:
+                        confidence += 7
+                        confidence_factors.append(f"High volume {vol_ratio:.1f}x (+7)")
+                    elif vol_ratio > 1.5:
+                        confidence += 4
+                        confidence_factors.append(f"Elevated volume {vol_ratio:.1f}x (+4)")
                 
                 # Boost for EMA alignment
                 if 'ema_aligned' in signals and signals['ema_aligned']:
-                    confidence += 5
+                    confidence += 6
+                    confidence_factors.append("EMA trend aligned (+6)")
                 
                 # Boost for MACD alignment
                 if 'macd' in signals and 'macdsignal' in signals:
-                    if signals['macd'] > signals['macdsignal']:
+                    macd_diff = signals['macd'] - signals['macdsignal']
+                    if macd_diff > 0:
+                        confidence += 4
+                        confidence_factors.append(f"MACD bullish (+4)")
+                
+                # Boost for strong ADX
+                if 'adx' in signals:
+                    adx = signals['adx']
+                    if adx > 30:
+                        confidence += 5
+                        confidence_factors.append(f"Strong trend ADX {adx:.1f} (+5)")
+                    elif adx > 25:
                         confidence += 3
+                        confidence_factors.append(f"Decent trend ADX {adx:.1f} (+3)")
                 
                 confidence = min(confidence, 95)
             
-            # EXIT SIGNAL CONFIDENCE (55-75%)
+            # EXIT SIGNAL CONFIDENCE (60-80%)
             elif exit_signal:
                 confidence = 60
+                confidence_factors.append("Exit signal detected (+60)")
                 
                 # Boost for strong overbought conditions
-                if 'rsi' in signals and signals['rsi'] > 70:
-                    confidence += 8
-                elif 'rsi' in signals and signals['rsi'] > 65:
-                    confidence += 5
+                if 'rsi' in signals:
+                    rsi = signals['rsi']
+                    if rsi > 80:
+                        confidence += 12
+                        confidence_factors.append(f"Extreme overbought RSI {rsi:.1f} (+12)")
+                    elif rsi > 70:
+                        confidence += 8
+                        confidence_factors.append(f"Overbought RSI {rsi:.1f} (+8)")
+                    elif rsi > 65:
+                        confidence += 5
+                        confidence_factors.append(f"High RSI {rsi:.1f} (+5)")
                 
                 # Boost for Fisher RSI extreme
-                if 'fisher_rsi' in signals and signals['fisher_rsi'] > 0.5:
-                    confidence += 5
+                if 'fisher_rsi' in signals:
+                    fisher = signals['fisher_rsi']
+                    if fisher > 0.7:
+                        confidence += 7
+                        confidence_factors.append(f"Extreme Fisher {fisher:.2f} (+7)")
+                    elif fisher > 0.5:
+                        confidence += 4
+                        confidence_factors.append(f"High Fisher {fisher:.2f} (+4)")
                 
-                confidence = min(confidence, 75)
+                # MACD bearish confirmation
+                if 'macd' in signals and 'macdsignal' in signals:
+                    macd_diff = signals['macd'] - signals['macdsignal']
+                    if macd_diff < 0:
+                        confidence += 5
+                        confidence_factors.append("MACD bearish (+5)")
+                
+                confidence = min(confidence, 80)
             
-            # HOLD SIGNAL CONFIDENCE (25-55%)
+            # HOLD SIGNAL CONFIDENCE (30-70%)
             else:
-                confidence = 40
+                confidence = 45  # Start at 45 for neutral
+                confidence_factors.append("No clear signal (base 45)")
+                
+                # Check for near-entry conditions (potential upcoming buy)
+                if 'near_entry' in signals and signals['near_entry']:
+                    confidence += 12
+                    confidence_factors.append("Near BUY signal (+12)")
+                    
+                # Check for near-exit conditions (potential upcoming sell)
+                if 'near_exit' in signals and signals['near_exit']:
+                    confidence -= 8
+                    confidence_factors.append("Near SELL signal (-8)")
                 
                 # Adjust based on RSI position
                 if 'rsi' in signals:
                     rsi = signals['rsi']
-                    if 40 < rsi < 60:
-                        confidence += 10  # Neutral zone is good for HOLD
-                    elif 30 < rsi < 70:
-                        confidence += 5   # Tradeable zone
-                    elif rsi < 30 or rsi > 70:
-                        confidence -= 10  # Extreme conditions = lower hold confidence
+                    if 45 < rsi < 55:
+                        confidence += 8
+                        confidence_factors.append(f"Perfect neutral RSI {rsi:.1f} (+8)")
+                    elif 40 < rsi < 60:
+                        confidence += 5
+                        confidence_factors.append(f"Good neutral RSI {rsi:.1f} (+5)")
+                    elif 35 < rsi < 40:
+                        confidence += 6
+                        confidence_factors.append(f"Slight oversold RSI {rsi:.1f} (+6)")
+                    elif 30 < rsi < 35:
+                        confidence += 8
+                        confidence_factors.append(f"Oversold building RSI {rsi:.1f} (+8)")
+                    elif rsi < 30:
+                        confidence += 10
+                        confidence_factors.append(f"Very oversold RSI {rsi:.1f} (+10)")
+                    elif 60 < rsi < 65:
+                        confidence += 3
+                        confidence_factors.append(f"Slightly high RSI {rsi:.1f} (+3)")
+                    elif 65 < rsi < 70:
+                        confidence -= 3
+                        confidence_factors.append(f"Getting hot RSI {rsi:.1f} (-3)")
+                    elif rsi > 70:
+                        confidence -= 8
+                        confidence_factors.append(f"Overbought RSI {rsi:.1f} (-8)")
                 
                 # Adjust based on trend alignment
                 if 'ema_aligned' in signals:
                     if signals['ema_aligned']:
-                        confidence += 5
+                        confidence += 7
+                        confidence_factors.append("Bullish EMA trend (+7)")
                     else:
-                        confidence -= 5
+                        confidence -= 4
+                        confidence_factors.append("No EMA trend (-4)")
                 
                 # Adjust based on volume
                 if 'volume_ratio' in signals:
                     vol_ratio = signals['volume_ratio']
-                    if 0.8 < vol_ratio < 1.5:
-                        confidence += 3  # Normal volume = good for hold
-                    elif vol_ratio > 2.0:
-                        confidence -= 5  # Spike = less likely to hold
+                    if 0.9 < vol_ratio < 1.2:
+                        confidence += 4
+                        confidence_factors.append(f"Stable volume {vol_ratio:.1f}x (+4)")
+                    elif 0.8 < vol_ratio < 1.5:
+                        confidence += 2
+                        confidence_factors.append(f"Normal volume {vol_ratio:.1f}x (+2)")
+                    elif vol_ratio > 2.5:
+                        confidence -= 6
+                        confidence_factors.append(f"Spike warning {vol_ratio:.1f}x (-6)")
+                    elif vol_ratio > 1.8:
+                        confidence -= 3
+                        confidence_factors.append(f"Rising volume {vol_ratio:.1f}x (-3)")
+                    elif vol_ratio < 0.5:
+                        confidence -= 5
+                        confidence_factors.append(f"Very low volume {vol_ratio:.1f}x (-5)")
                 
-                # Adjust based on MACD
+                # Adjust based on MACD trend
                 if 'macd' in signals and 'macdsignal' in signals:
                     macd_diff = signals['macd'] - signals['macdsignal']
-                    if abs(macd_diff) < 0.001:  # Converging = uncertain
-                        confidence += 5
+                    if macd_diff > 0.002:  # Strong bullish
+                        confidence += 6
+                        confidence_factors.append(f"Strong MACD bullish (+6)")
+                    elif macd_diff > 0:
+                        confidence += 3
+                        confidence_factors.append(f"MACD bullish (+3)")
+                    elif macd_diff < -0.002:  # Strong bearish
+                        confidence -= 6
+                        confidence_factors.append(f"Strong MACD bearish (-6)")
+                    elif macd_diff < 0:
+                        confidence -= 3
+                        confidence_factors.append(f"MACD bearish (-3)")
+                    else:
+                        confidence += 2
+                        confidence_factors.append("MACD neutral (+2)")
                 
-                confidence = max(25, min(55, confidence))  # Clamp between 25-55 for HOLD
+                # Adjust based on ADX (trend strength)
+                if 'adx' in signals:
+                    adx = signals['adx']
+                    if 25 < adx < 40:
+                        confidence += 6
+                        confidence_factors.append(f"Good trend ADX {adx:.1f} (+6)")
+                    elif 20 < adx < 25:
+                        confidence += 3
+                        confidence_factors.append(f"Building trend ADX {adx:.1f} (+3)")
+                    elif adx < 15:
+                        confidence -= 4
+                        confidence_factors.append(f"Weak trend ADX {adx:.1f} (-4)")
+                    elif adx > 45:
+                        confidence -= 2
+                        confidence_factors.append(f"Overextended ADX {adx:.1f} (-2)")
+                
+                # Clamp between 30-70 for HOLD
+                confidence = max(30, min(70, confidence))
+            
+            # Store confidence factors in signals for UI display
+            signals['confidence_factors'] = confidence_factors
             
             return int(confidence)
         

@@ -31,7 +31,7 @@ def display_add_crypto_form(manager: CryptoWatchlistManager):
             ).upper()
         
         with col2:
-            if st.button("Add to Watchlist", type="primary", use_container_width=True):
+            if st.button("Add to Watchlist", type="primary", width='stretch'):
                 if new_symbol:
                     if '/' not in new_symbol:
                         st.error("❌ Invalid format. Use format like: BTC/USD")
@@ -376,11 +376,11 @@ def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManage
                         if not kraken_client:
                             st.error("Kraken client not available. Please ensure you're connected to Kraken.")
                         else:
-                            # Get all strategies
-                            all_strategies = get_all_crypto_strategies()
+                            # Get all strategies INCLUDING Freqtrade strategies
+                            all_strategies = get_all_crypto_strategies(kraken_client)
                             
-                            # Analyze with default strategies (first 3)
-                            selected_strategies = list(all_strategies.keys())[:3]
+                            # Analyze with MORE strategies (first 6 includes Freqtrade)
+                            selected_strategies = list(all_strategies.keys())[:6]  # Changed from 3 to 6
                             timeframe = '15m'
                             
                             signals = analyze_symbol_with_strategies(
@@ -476,7 +476,7 @@ def display_crypto_watchlist_actions(manager: CryptoWatchlistManager, watchlist:
         hint_text = f" ({', '.join(feature_hints)} enabled)" if feature_hints else ""
         
         with col1:
-            if st.button(f"🔄 Refresh All Data{hint_text}", use_container_width=True):
+            if st.button(f"🔄 Refresh All Data{hint_text}", width='stretch'):
                 with st.spinner("Refreshing all cryptos..."):
                     # Trigger full refresh
                     st.session_state.crypto_refresh_all = True
@@ -487,7 +487,7 @@ def display_crypto_watchlist_actions(manager: CryptoWatchlistManager, watchlist:
             selected_count = len(st.session_state.get('crypto_selected_symbols', []))
             if watchlist:
                 selected_text = f" ({selected_count} selected)" if selected_count > 0 else ""
-                if st.button(f"🔄 Refresh Selected{selected_text}", use_container_width=True, 
+                if st.button(f"🔄 Refresh Selected{selected_text}", width='stretch', 
                            disabled=selected_count == 0):
                     if selected_count > 0:
                         st.session_state.crypto_refresh_selected = True
@@ -495,10 +495,10 @@ def display_crypto_watchlist_actions(manager: CryptoWatchlistManager, watchlist:
                     else:
                         st.warning("Please select at least one crypto to refresh")
             else:
-                st.button("🔄 Refresh Selected", use_container_width=True, disabled=True)
+                st.button("🔄 Refresh Selected", width='stretch', disabled=True)
         
         with col3:
-            if st.button("📊 Export to CSV", use_container_width=True):
+            if st.button("📊 Export to CSV", width='stretch'):
                 try:
                     if watchlist is None:
                         watchlist = manager.get_all_cryptos()
@@ -518,7 +518,7 @@ def display_crypto_watchlist_actions(manager: CryptoWatchlistManager, watchlist:
                     st.error(f"Export failed: {e}")
         
         with col4:
-            if st.button("🗑️ Clear Watchlist", use_container_width=True, type="secondary"):
+            if st.button("🗑️ Clear Watchlist", width='stretch', type="secondary"):
                 if st.session_state.get('confirm_clear_crypto_watchlist'):
                     # Perform clear
                     st.warning("⚠️ Clear functionality - requires confirmation in database")
@@ -1329,12 +1329,12 @@ def render_crypto_watchlist_tab(
             # Select all / Deselect all buttons
             select_col1, select_col2, select_col3 = st.columns([1, 1, 4])
             with select_col1:
-                if st.button("✅ Select All", use_container_width=True, key="select_all_crypto"):
+                if st.button("✅ Select All", width='stretch', key="select_all_crypto"):
                     st.session_state.crypto_selected_symbols = all_symbols.copy()
                     st.rerun()
             
             with select_col2:
-                if st.button("❌ Deselect All", use_container_width=True, key="deselect_all_crypto"):
+                if st.button("❌ Deselect All", width='stretch', key="deselect_all_crypto"):
                     st.session_state.crypto_selected_symbols = []
                     st.rerun()
             

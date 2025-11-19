@@ -47,7 +47,7 @@ def display_trending_cryptos(trending: List[TrendingCrypto]):
         })
     
     df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width='stretch', hide_index=True)
     
     # Display detailed cards
     st.markdown("### 📊 Detailed View")
@@ -135,7 +135,7 @@ def display_new_cryptos(new_coins: List[NewCrypto]):
         })
     
     df = pd.DataFrame(data)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width='stretch', hide_index=True)
     
     # Display detailed cards
     st.markdown("### 📊 Detailed View")

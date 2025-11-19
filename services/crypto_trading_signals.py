@@ -76,25 +76,36 @@ class CryptoTradingSignal:
 
 
 class CryptoTradingSignalGenerator:
-    """Generate trading signals specifically for cryptocurrency markets"""
+    """Generate trading signals specifically for cryptocurrency markets with hybrid LLM support"""
     
-    def __init__(self, api_key: Optional[str] = None, config=None):
+    def __init__(self, api_key: Optional[str] = None, config=None, use_local_llm: bool = True):
         """
-        Initialize crypto signal generator
+        Initialize crypto signal generator with hybrid LLM support
         
         Args:
             api_key: OpenRouter API key (optional if in env)
             config: Trading configuration object
+            use_local_llm: Whether to prefer local Ollama models
         """
         self.api_key = api_key or os.getenv('OPENROUTER_API_KEY')
         self.config = config
+        self.use_local_llm = use_local_llm
+        
+        # Initialize hybrid LLM analyzer
+        try:
+            from .hybrid_llm_analyzer import get_best_trading_analyzer
+            self.llm_analyzer = get_best_trading_analyzer()
+            logger.success("🚀 Crypto hybrid LLM analyzer initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize hybrid LLM: {e}")
+            # Fallback to original implementation
+            self.llm_analyzer = None
+            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
+            logger.info(f"Crypto Trading Signal Generator fallback to direct API using model: {model}")
         
         # Crypto-specific parameters
         self.high_volatility_threshold = 5.0  # 5% daily volatility
         self.extreme_volatility_threshold = 10.0  # 10% daily volatility
-        
-        model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-        logger.info(f"Crypto Trading Signal Generator initialized with model: {model}")
     
     def generate_signal(
         self,
@@ -153,9 +164,12 @@ class CryptoTradingSignalGenerator:
                 current_positions=current_positions or [],
                 time_horizon=time_horizon
             )
-            
-            # Get AI analysis
-            response = self._call_ai_model(prompt)
+              # Get AI analysis using hybrid LLM (local Ollama or cloud fallback)
+            if self.llm_analyzer:
+                response = self.llm_analyzer.analyze_with_llm(prompt, 'crypto_analysis')
+            else:
+                # Fallback to original implementation
+                response = self._call_ai_model(prompt)
             
             if response:
                 # Parse AI response into crypto trading signal

@@ -72,6 +72,7 @@ trading_signals.log
 
 # Data folder and all contents
 data/
+backups/
 
 # Configuration files (user-specific)
 active_strategy.json
@@ -92,3 +93,4 @@ archive/
 # Cursor
 # .cursorignore  # Keep this file in git so Cursor settings are shared
 .cursor/.streamlit/secrets.toml
+.streamlit/secrets.toml
