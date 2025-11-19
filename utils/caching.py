@@ -6,6 +6,7 @@ from loguru import logger
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 import threading
+from utils.helpers import fetch_ticker_history, fetch_ticker_info, fetch_ticker_news
 
 # Manual cache for background processes (non-Streamlit context)
 _cache_lock = threading.Lock()
@@ -51,8 +52,8 @@ def get_cached_stock_data(ticker: str):
     
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="3mo", timeout=10)  # 10s timeout
-        info = stock.info
+        hist = fetch_ticker_history(stock, period="3mo", timeout=10)  # 10s timeout
+        info = fetch_ticker_info(stock)
         result = (hist, info)
         _set_manual_cache(cache_key, result)
         return result
@@ -78,7 +79,7 @@ def get_cached_news(ticker: str) -> List[Dict]:
         # Add timeout to prevent hanging
         news = None
         try:
-            news = stock.news
+            news = fetch_ticker_news(stock)
         except Exception as fetch_error:
             logger.warning(f"Failed to fetch news for {ticker}: {fetch_error}")
             return []

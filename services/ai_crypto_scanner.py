@@ -243,7 +243,6 @@ Respond ONLY with valid JSON, no extra text:
   "market_cycle": "..."
 }}
 ```"""
-        
         return prompt
     
     def _query_llm(self, prompt: str, symbol: str) -> str:
@@ -251,9 +250,12 @@ Respond ONLY with valid JSON, no extra text:
         try:
             if not self.llm_analyzer:
                 return ""
-            
-            # Use LLMStrategyAnalyzer's _call_openrouter method
-            response = self.llm_analyzer._call_openrouter(prompt)
+              # Try hybrid analyzer first
+            if hasattr(self.llm_analyzer, 'analyze_with_llm'):
+                response = self.llm_analyzer.analyze_with_llm(prompt, 'crypto_analysis')  # type: ignore
+            else:
+                # Fallback to original method
+                response = self.llm_analyzer._call_openrouter(prompt)
             
             return response if response else ""
             

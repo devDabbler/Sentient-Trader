@@ -176,7 +176,11 @@ class AIStockEntryAssistant:
                 logger.error("LLM analyzer not configured")
                 return self._create_error_analysis(symbol, "LLM analyzer not initialized")
             
-            response = self.llm_analyzer._call_openrouter(prompt, max_retries=2, try_fallbacks=True)
+            # Use appropriate method based on provider
+            if getattr(self.llm_analyzer, 'provider', '') == 'ollama':
+                response = self.llm_analyzer.analyze_with_llm(prompt)
+            else:
+                response = self.llm_analyzer._call_openrouter(prompt, max_retries=2, try_fallbacks=True)
             
             if not response:
                 logger.error("Failed to get AI response")

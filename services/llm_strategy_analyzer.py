@@ -12,6 +12,14 @@ from dataclasses import dataclass
 from datetime import datetime
 import requests
 
+# Import Ollama client for local GPU-accelerated LLM support
+try:
+    from .ollama_client import create_ollama_client, OllamaClient
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    logger.warning("Ollama client not available - will use only OpenRouter")
+
 
 # Enhanced logging for OpenRouter integration (Loguru uses enable/disable, not setLevel)
 logger.enable("llm_strategy_analyzer")
@@ -90,6 +98,15 @@ class LLMStrategyAnalyzer:
         return fallbacks
     
     def __init__(self, provider: str = "openrouter", model: Optional[str] = None, api_key: Optional[str] = None):
+        # Auto-detect model if not provided
+        if not model:
+            model = os.getenv("AI_ANALYZER_MODEL", "google/gemini-2.0-flash-exp:free")
+        
+        # Auto-detect provider from model name if using default provider
+        if provider == "openrouter" and model and (model.lower().startswith("ollama/") or model.lower().startswith("ollama:")):
+            provider = "ollama"
+            logger.info(f"🔄 Auto-detected Ollama model from name: {model}, switching provider to 'ollama'")
+        
         self.provider = provider
         self.model = model
         self.api_key = api_key
@@ -108,6 +125,17 @@ class LLMStrategyAnalyzer:
             self.api_key = api_key or os.getenv("OPENAI_API_KEY")
             if not self.model:
                 self.model = "gpt-4-turbo"
+        elif provider == "ollama":
+            if not OLLAMA_AVAILABLE:
+                raise ValueError("Ollama provider requested but Ollama client not available")
+            self.base_url = "http://localhost:11434"
+            # Strip 'ollama/' prefix if present
+            if self.model and self.model.startswith("ollama/"):
+                self.model = self.model.replace("ollama/", "")
+            self.ollama_client = create_ollama_client(model=self.model)
+            logger.info(f"Using local Ollama with model: {self.model}")
+            # No API key check needed for Ollama
+            return 
         # Add other providers as needed
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
@@ -236,6 +264,20 @@ Focus on practical, actionable insights for options trading. Consider the specif
     
     def _call_llm_api(self, prompt: str) -> str:
         """Call the selected LLM API. Returns string or empty on error."""
+        if self.provider == "ollama":
+            try:
+                logger.info(f"🤖 Calling local Ollama with model: {self.model}")
+                response = self.ollama_client.generate_trading_signal(prompt, analysis_type="market_analysis")
+                if response:
+                    logger.info(f"✅ Ollama call successful - received {len(response)} characters")
+                    return response
+                else:
+                    logger.error("❌ Ollama returned empty response")
+                    return ""
+            except Exception as e:
+                logger.error(f"❌ Ollama error: {e}", exc_info=True)
+                return ""
+
         try:
             logger.info(f"🤖 Calling {self.provider} API with model: {self.model}")
             logger.debug(f"Base URL: {self.base_url}")

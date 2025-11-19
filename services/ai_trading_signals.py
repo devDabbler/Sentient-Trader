@@ -9,7 +9,10 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import json
+from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
 
 
 @dataclass
@@ -34,18 +37,30 @@ class TradingSignal:
 
 
 class AITradingSignalGenerator:
-    """Generate trading signals using AI analysis"""
+    """Generate trading signals using AI analysis with hybrid local/cloud LLM support"""
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, use_local_llm: bool = True):
         """
-        Initialize AI signal generator
+        Initialize AI signal generator with hybrid LLM support
         
         Args:
-            api_key: API key (optional if in env)
+            api_key: API key for cloud fallback (optional if in env)
+            use_local_llm: Whether to prefer local Ollama models
         """
         self.api_key = api_key
-        model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-        logger.info(f"AI Trading Signal Generator initialized with OpenRouter using model: {model}")
+        self.use_local_llm = use_local_llm
+        
+        # Initialize hybrid LLM analyzer
+        try:
+            from .hybrid_llm_analyzer import get_best_trading_analyzer
+            self.llm_analyzer = get_best_trading_analyzer()
+            logger.success("🚀 Hybrid LLM analyzer initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize hybrid LLM: {e}")
+            # Fallback to original OpenRouter implementation
+            self.llm_analyzer = None
+            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
+            logger.info(f"AI Trading Signal Generator fallback to OpenRouter using model: {model}")
     
     def generate_signal(
         self,
@@ -57,7 +72,7 @@ class AITradingSignalGenerator:
         discord_data: Optional[Dict] = None,
         account_balance: float = 10000.0,
         risk_tolerance: str = "MEDIUM",
-        current_positions: List[str] = None
+        current_positions: Optional[List[str]] = None
     ) -> Optional[TradingSignal]:
         """
         Generate AI trading signal
@@ -78,6 +93,7 @@ class AITradingSignalGenerator:
         """
         try:
             # Build comprehensive analysis prompt
+            logger.debug(f"Building analysis prompt for {symbol}...")
             prompt = self._build_analysis_prompt(
                 symbol=symbol,
                 technical_data=technical_data,
@@ -90,18 +106,33 @@ class AITradingSignalGenerator:
                 current_positions=current_positions or []
             )
             
-            # Get AI analysis
-            response = self._call_openrouter(prompt)
+            # Get AI analysis using hybrid LLM (local Ollama or cloud fallback)
+            logger.info(f"🧠 Requesting LLM analysis for {symbol}...")
+            if self.llm_analyzer:
+                logger.debug("Using hybrid LLM analyzer")
+                response = self.llm_analyzer.analyze_with_llm(prompt, 'trading_signals')
+            else:
+                logger.debug("Using OpenRouter fallback")
+                response = self._call_openrouter(prompt)
             
             if response:
+                logger.info(f"✅ Received response ({len(response)} chars), parsing signal...")
+                logger.debug(f"Response preview: {response[:200]}...")
                 # Parse AI response into trading signal
                 signal = self._parse_signal(response, symbol)
+                if signal:
+                    logger.success(f"✅ Successfully generated signal for {symbol}: {signal.signal} ({signal.confidence}%)")
+                else:
+                    logger.error(f"❌ Failed to parse signal from response")
                 return signal
-            
-            return None
+            else:
+                logger.error(f"❌ No response received from LLM for {symbol}")
+                return None
             
         except Exception as e:
-            logger.error(f"Error generating AI signal for {symbol}: {e}")
+            logger.error(f"❌ Error generating AI signal for {symbol}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     def _build_analysis_prompt(
@@ -257,10 +288,15 @@ Analyze all the data above and provide a trading recommendation. Consider:
         
         return prompt
     
-    
     def _call_openrouter(self, prompt: str) -> Optional[str]:
-        """Call OpenRouter API"""
+        """Call LLM (hybrid local/cloud support)"""
         try:
+            # Use hybrid LLM analyzer if available
+            if hasattr(self, 'llm_analyzer') and self.llm_analyzer:
+                logger.info("🚀 Using hybrid LLM analyzer for trading signal")
+                return self.llm_analyzer.analyze_with_llm(prompt, 'trading_signals')
+            
+            # Fallback to original OpenRouter implementation
             import os
             import requests
             
@@ -272,7 +308,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
                 logger.error("Set OPENROUTER_API_KEY in your .env file")
                 return None
             
-            logger.info(f"🤖 Calling OpenRouter API with model: {model}")
+            logger.info(f"☁️ Fallback to OpenRouter API with model: {model}")
             logger.debug(f"API Key present: {bool(api_key)}, Length: {len(api_key)}")
             
             response = requests.post(
@@ -428,12 +464,11 @@ Analyze all the data above and provide a trading recommendation. Consider:
     def batch_analyze(
         self,
         symbols: List[str],
-        technical_data_dict: Dict[str, Dict],
-        news_data_dict: Dict[str, List[Dict]],
+        technical_data_dict: Dict[str, Dict],        news_data_dict: Dict[str, List[Dict]],
         sentiment_data_dict: Dict[str, Dict],
         account_balance: float = 10000.0,
         risk_tolerance: str = "MEDIUM",
-        current_positions: List[str] = None
+        current_positions: Optional[List[str]] = None
     ) -> List[TradingSignal]:
         """
         Analyze multiple symbols and return signals
