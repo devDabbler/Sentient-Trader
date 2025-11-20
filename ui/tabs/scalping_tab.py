@@ -10,13 +10,24 @@ from typing import Dict, List, Optional, Tuple
 
 def render_tab():
     """Main render function called from app.py"""
-    st.header("Scalping/Day Trade")
+    st.header("⚡ Scalping & Day Trading Dashboard")
+    
+    # Add ORB+FVG Strategy Scanner at the top
+    st.info("🔥 **NEW!** 15-Min ORB + FVG Strategy - Based on r/tradingmillionaires $2K payout strategy!")
+    
+    with st.expander("🎯 15-Min ORB + FVG Strategy Scanner", expanded=True):
+        try:
+            from ui.orb_fvg_ui import render_orb_fvg_scanner, render_orb_fvg_education
+            render_orb_fvg_scanner()
+            render_orb_fvg_education()
+        except ImportError as e:
+            st.error(f"Failed to load ORB+FVG scanner: {e}")
+            logger.error(f"ORB+FVG import error: {e}", exc_info=True)
+    
+    st.divider()
     
     # TODO: Review and fix imports
     # Tab implementation below (extracted from app.py)
-
-
-    st.header("⚡ Scalping & Day Trading Dashboard")
     st.write("Quick entry/exit interface for stock day trading and scalping. Works with both Tradier and IBKR.")
     st.info("💡 **Perfect for:** Blue chips, penny stocks, runners, and high-momentum plays. Get instant scalping signals!")
     
