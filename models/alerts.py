@@ -40,6 +40,12 @@ class AlertType(Enum):
     SELL_SIGNAL = "SELL_SIGNAL"
     SPECULATION_OPPORTUNITY = "SPECULATION_OPPORTUNITY"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    TRADE_EXECUTED = "TRADE_EXECUTED"
+    
+    # AI decision alerts
+    AI_SIGNAL = "AI_SIGNAL"
+    AI_CLOSE_NOW = "AI_CLOSE_NOW"
+    AI_HOLD = "AI_HOLD"
 
 
 class AlertPriority(Enum):

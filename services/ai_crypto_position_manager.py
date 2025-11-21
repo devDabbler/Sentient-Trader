@@ -185,7 +185,7 @@ class AICryptoPositionManager:
         logger.info(f"   Breakeven Moves: {' ENABLED' if enable_breakeven_moves else ' DISABLED'}")
         logger.info(f"   Partial Exits: {' ENABLED' if enable_partial_exits else ' DISABLED'}")
         logger.info(f"   Min AI Confidence: {min_ai_confidence}%")
-        logger.info(f"   SAFETY - MANUAL APPROVAL: {' REQUIRED' if require_manual_approval else ' AUTO-EXECUTE (DANGEROUS!)'}")
+        logger.info("   SAFETY - MANUAL APPROVAL: {}", str(' REQUIRED' if require_manual_approval else ' AUTO-EXECUTE (DANGEROUS!)'))
         logger.info("=" * 80)
     
     def add_position(
@@ -271,7 +271,7 @@ class AICryptoPositionManager:
             logger.info(f"   Position: {side} {volume:.6f} @ ${entry_price:,.2f}")
             logger.info(f"   Stop Loss: ${stop_loss:,.2f} ({-risk_pct:.2f}%)")
             logger.info(f"   Take Profit: ${take_profit:,.2f} (+{reward_pct:.2f}%)")
-            logger.info(f"   Risk/Reward: {rr_ratio:.2f}:1")
+            logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
             logger.info(f"   Strategy: {strategy}")
             logger.info(f"   Trailing Stop: {trailing_stop_pct}%")
             logger.info(f"   Breakeven Trigger: {breakeven_trigger_pct}%")
@@ -323,7 +323,7 @@ class AICryptoPositionManager:
             return True
             
         except Exception as e:
-            logger.error(f"Error adding position {trade_id}: {e}", exc_info=True)
+            logger.error("Error adding position {trade_id}: {}", str(e), exc_info=True)
             return False
     
     def remove_position(self, trade_id: str, reason: str = "Manual") -> bool:
@@ -465,11 +465,11 @@ class AICryptoPositionManager:
                 
                 # Log status periodically
                 hold_time = (datetime.now() - position.entry_time).total_seconds() / 60
-                logger.debug(f"✓ {position.pair}: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%), "
+                logger.debug("✓ {}: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%), ", str(position.pair)
                            f"Hold: {hold_time:.0f}min, AI: {position.last_ai_action}")
                 
             except Exception as e:
-                logger.error(f"Error monitoring position {trade_id}: {e}", exc_info=True)
+                logger.error("Error monitoring position {trade_id}: {}", str(e), exc_info=True)
                 continue
         
         # Save state after check
@@ -667,7 +667,7 @@ class AICryptoPositionManager:
                 
                 if recent_news:
                     logger.info(
-                        f"📰 Fetched {len(recent_news)} recent news articles for {base_asset} "
+                        f"📰 Fetched {len(recent_news))} recent news articles for {base_asset} "
                         f"(sentiment: {sentiment_score:.1f}/100)"
                     )
                 
@@ -741,7 +741,7 @@ class AICryptoPositionManager:
                 )
             
         except Exception as e:
-            logger.error(f"Error getting AI recommendation for {position.pair}: {e}", exc_info=True)
+            logger.error("Error getting AI recommendation for {position.pair}: {}", str(e), exc_info=True)
         
         return None
     
@@ -804,7 +804,7 @@ class AICryptoPositionManager:
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating indicators for {pair}: {e}", exc_info=True)
+            logger.error("Error calculating indicators for {pair}: {}", str(e), exc_info=True)
             return {}
     
     def _build_ai_prompt(
@@ -979,6 +979,31 @@ Analyze the position using these factors:
             logger.warning(f"   Reasoning: {decision.reasoning}")
             logger.warning(f"   Approval ID: {approval_id}")
             logger.warning(f"   ⚠️ Trade will NOT execute until you approve it in the UI")
+            
+            # Send Discord notification for pending approval
+            position = self.positions[trade_id]
+            current_price = position.last_price or position.entry_price
+            pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+            
+            action_emoji = {
+                'CLOSE_NOW': '🚪',
+                'HOLD': '✋',
+                'TIGHTEN_STOP': '🎯',
+                'EXTEND_TARGET': '📈',
+                'TAKE_PARTIAL': '💰',
+                'MOVE_TO_BREAKEVEN': '🛡️'
+            }
+            
+            self._send_notification(
+                f"{action_emoji.get(decision.action, '🤖')} AI Recommendation: {position.pair}",
+                f"**Action:** {decision.action}\n"
+                f"**Confidence:** {decision.confidence:.1f}%\n"
+                f"**Current P&L:** {pnl_pct:+.2f}%\n"
+                f"**Reasoning:** {decision.reasoning[:200]}\n\n"
+                f"⚠️ **APPROVAL REQUIRED** - Check the app to approve/reject",
+                color=15844367  # Orange for pending approval
+            )
+            
             return False  # Not executed, awaiting approval
         
         position = self.positions[trade_id]
@@ -988,7 +1013,7 @@ Analyze the position using these factors:
             logger.info(f"🤖 EXECUTING AI DECISION: {position.pair}")
             logger.info("=" * 80)
             logger.info(f"   Action: {decision.action}")
-            logger.info(f"   Confidence: {decision.confidence:.1f}%")
+            logger.info(f"   Confidence: {}% {decision.confidence:.1f}")
             logger.info(f"   Reasoning: {decision.reasoning}")
             logger.info("=" * 80)
             
@@ -1016,7 +1041,7 @@ Analyze the position using these factors:
                 return False
                 
         except Exception as e:
-            logger.error(f"Error executing decision for {trade_id}: {e}", exc_info=True)
+            logger.error("Error executing decision for {trade_id}: {}", str(e), exc_info=True)
             return False
     
     def _execute_close_position(
@@ -1096,7 +1121,7 @@ Analyze the position using these factors:
                 return False
                 
         except Exception as e:
-            logger.error(f"Error closing position: {e}", exc_info=True)
+            logger.error("Error closing position: {}", str(e), exc_info=True)
             return False
     
     def _execute_tighten_stop(
@@ -1196,7 +1221,7 @@ Analyze the position using these factors:
                 return False
                 
         except Exception as e:
-            logger.error(f"Error executing partial exit: {e}", exc_info=True)
+            logger.error("Error executing partial exit: {}", str(e), exc_info=True)
             return False
     
     def _execute_move_to_breakeven(
@@ -1269,7 +1294,7 @@ Analyze the position using these factors:
                 json.dump(state, f, indent=2, default=str)
                 
         except Exception as e:
-            logger.error(f"Error saving state: {e}", exc_info=True)
+            logger.error("Error saving state: {}", str(e), exc_info=True)
     
     def _load_state(self):
         """Load position state from file"""
@@ -1301,7 +1326,7 @@ Analyze the position using these factors:
             logger.info(f"📂 Loaded {len(self.positions)} positions from state file")
             
         except Exception as e:
-            logger.error(f"Error loading state: {e}", exc_info=True)
+            logger.error("Error loading state: {}", str(e), exc_info=True)
     
     def start_monitoring_loop(self):
         """
@@ -1337,7 +1362,7 @@ Analyze the position using these factors:
                     time.sleep(self.check_interval_seconds)
                     
                 except Exception as e:
-                    logger.error(f"Error in monitoring loop: {e}", exc_info=True)
+                    logger.error("Error in monitoring loop: {}", str(e), exc_info=True)
                     time.sleep(10)  # Short sleep on error
             
             logger.info("🛑 AI Crypto Position Manager stopped")
@@ -1354,6 +1379,153 @@ Analyze the position using these factors:
         if self.thread:
             self.thread.join(timeout=5)
     
+    def _generate_portfolio_recommendations(self, position_details: List[Dict]) -> List[Dict]:
+        """Generate high-level portfolio recommendations"""
+        recommendations = []
+        total_value = sum(p['current_value'] for p in position_details)
+
+        # 1. Concentration risk
+        for pos in position_details:
+            if pos['allocation_pct'] > 30:  # Over 30% in one asset
+                recommendations.append({
+                    'pair': pos['pair'],
+                    'priority': 'MEDIUM',
+                    'action': 'REBALANCE',
+                    'reason': f"High concentration at {pos['allocation_pct']:.0f}% of portfolio. Consider diversifying."
+                })
+
+        # 2. Significant loss
+        for pos in position_details:
+            if pos['pnl_pct'] < -15:  # Over 15% loss
+                recommendations.append({
+                    'pair': pos['pair'],
+                    'priority': 'HIGH',
+                    'action': 'CUT_LOSS',
+                    'reason': f"Significant loss of {pos['pnl_pct']:.1f}%. Consider cutting losses or dollar-cost averaging."
+                })
+
+        # 3. Significant gain
+        for pos in position_details:
+            if pos['pnl_pct'] > 30:  # Over 30% gain
+                recommendations.append({
+                    'pair': pos['pair'],
+                    'priority': 'MEDIUM',
+                    'action': 'TAKE_PROFIT',
+                    'reason': f"Significant unrealized gain of {pos['pnl_pct']:.1f}%. Consider taking partial profits."
+                })
+        
+        return recommendations
+
+    def analyze_portfolio(self, positions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Run a comprehensive analysis of the provided portfolio positions.
+
+        Args:
+            positions: A list of position dictionaries from the broker client.
+
+        Returns:
+            A dictionary with portfolio summary, aggregated positions, and recommendations.
+        """
+        if not positions:
+            return {
+                'summary': {
+                    'total_value': 0,
+                    'total_pnl': 0,
+                    'total_pnl_pct': 0,
+                    'realized_gains': 0,
+                    'win_rate': 0,
+                    'top_gainers': [],
+                    'top_losers': []
+                },
+                'positions': [],
+                'winners': [],  # Add top-level winners key
+                'losers': [],   # Add top-level losers key
+                'recommendations': []
+            }
+
+        # 1. Aggregate positions by pair
+        aggregated = {}
+        for pos in positions:
+            pair = pos.get('pair')
+            if not pair: continue
+
+            volume = float(pos.get('volume', 0))
+            entry_price = float(pos.get('entry_price', 0))
+            current_price = float(pos.get('current_price', 0))
+            
+            cost_basis = entry_price * volume
+            current_value = current_price * volume
+
+            if pair not in aggregated:
+                aggregated[pair] = {
+                    'pair': pair,
+                    'volume': 0,
+                    'cost_basis': 0,
+                    'current_value': 0,
+                    'entry_price': 0 # This will be an aggregated average
+                }
+
+            aggregated[pair]['volume'] += volume
+            aggregated[pair]['cost_basis'] += cost_basis
+            aggregated[pair]['current_value'] += current_value
+
+        # 2. Calculate final metrics for aggregated positions
+        position_details = []
+        total_value = 0
+        total_cost_basis = 0
+
+        for pair, data in aggregated.items():
+            if data['volume'] > 0:
+                avg_entry_price = data['cost_basis'] / data['volume']
+                current_price = data['current_value'] / data['volume'] # Assumes uniform current price
+                pnl = data['current_value'] - data['cost_basis']
+                pnl_pct = (pnl / data['cost_basis']) * 100 if data['cost_basis'] > 0 else 0
+
+                position_details.append({
+                    'pair': pair,
+                    'volume': data['volume'],
+                    'entry_price': avg_entry_price,  # Changed from 'entry'
+                    'current_price': current_price,   # Changed from 'current'
+                    'current_value': data['current_value'],  # Changed from 'value'
+                    'pnl': pnl,
+                    'pnl_pct': pnl_pct
+                })
+                
+                total_value += data['current_value']
+                total_cost_basis += data['cost_basis']
+
+        # 3. Calculate portfolio summary
+        total_pnl = total_value - total_cost_basis
+        total_pnl_pct = (total_pnl / total_cost_basis) * 100 if total_cost_basis > 0 else 0
+
+        # Sort by value and add allocation
+        position_details = sorted(position_details, key=lambda x: x['current_value'], reverse=True)
+        for pos in position_details:
+            pos['allocation_pct'] = (pos['current_value'] / total_value) * 100 if total_value > 0 else 0
+
+        # Top gainers/losers
+        top_gainers = sorted([p for p in position_details if p['pnl'] > 0], key=lambda x: x['pnl'], reverse=True)[:3]
+        top_losers = sorted([p for p in position_details if p['pnl'] < 0], key=lambda x: x['pnl'])[:3]
+
+        # AI Recommendations
+        recommendations = self._generate_portfolio_recommendations(position_details)
+
+        return {
+            'summary': {
+                'total_value': total_value,
+                'total_pnl': total_pnl,
+                'total_pnl_pct': total_pnl_pct,
+                'realized_gains': 0,  # Placeholder
+                'win_rate': 0,  # Placeholder
+                'top_gainers': top_gainers,
+                'top_losers': top_losers
+            },
+            'positions': position_details,
+            'winners': top_gainers,  # Add top-level winners key
+            'losers': top_losers,    # Add top-level losers key
+            'recommendations': recommendations
+        }
+
     def get_status(self) -> Dict:
         """Get current manager status"""
         return {

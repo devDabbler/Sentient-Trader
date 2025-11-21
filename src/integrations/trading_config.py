@@ -81,8 +81,8 @@ class TradingModeManager:
         prod_access_token = os.getenv('TRADIER_PROD_ACCESS_TOKEN', '').strip()
         prod_api_url = os.getenv('TRADIER_PROD_API_URL', 'https://api.tradier.com').strip()
         
-        logger.info(f"🔍 Debug - prod_account_id: '{prod_account_id}' (len={len(prod_account_id)})")
-        logger.info(f"🔍 Debug - prod_access_token: '{prod_access_token[:10]}...' (len={len(prod_access_token)})")
+        logger.info("🔍 Debug - prod_account_id: '{}' (len={len(prod_account_id))})", str(prod_account_id))
+        logger.info("🔍 Debug - prod_access_token: '{}...' (len={len(prod_access_token))})", str(prod_access_token[:10]))
         
         if prod_account_id and prod_access_token:
             self.tradier_credentials[TradingMode.PRODUCTION] = TradingCredentials(
@@ -129,8 +129,8 @@ class TradingModeManager:
         live_port_str = os.getenv('IBKR_LIVE_PORT', '').strip()
         live_client_id_str = os.getenv('IBKR_LIVE_CLIENT_ID', '1').strip()
         
-        logger.info(f"🔍 Debug - IBKR live_port: '{live_port_str}' (len={len(live_port_str)})")
-        logger.info(f"🔍 Debug - IBKR live_host: '{live_host}' (len={len(live_host)})")
+        logger.info("🔍 Debug - IBKR live_port: '{}' (len={len(live_port_str))})", str(live_port_str))
+        logger.info("🔍 Debug - IBKR live_host: '{}' (len={len(live_host))})", str(live_host))
         
         if live_port_str:
             try:
@@ -152,7 +152,7 @@ class TradingModeManager:
     
     def set_mode(self, mode: TradingMode) -> bool:
         """Set the current trading mode"""
-        logger.info(f"🔍 Debug set_mode - Requested mode: {mode} (type: {type(mode)}, value: {mode.value})")
+        logger.info(f"🔍 Debug set_mode - Requested mode: {mode} (type: {type(mode)}), value: {mode.value}")
         logger.info(f"🔍 Debug set_mode - Available credentials: {list(self.credentials.keys())}")
         logger.info(f"🔍 Debug set_mode - Mode in credentials (direct): {mode in self.credentials}")
         

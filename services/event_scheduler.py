@@ -101,10 +101,10 @@ class EventScheduler:
             self.job_stats[detector_name]['alerts'] += len(alerts)
             self.job_stats[detector_name]['last_run'] = datetime.now()
             
-            logger.info(f"{detector_name} detector completed: {len(alerts)} alerts generated")
+            logger.info(f"{detector_name} detector completed: {len(alerts))} alerts generated")
             
         except Exception as e:
-            logger.error(f"Error running {detector_name} detector: {e}", exc_info=True)
+            logger.error("Error running {detector_name} detector: {}", str(e), exc_info=True)
             self.job_stats[detector_name]['errors'] += 1
     
     def setup_schedules(self):
@@ -174,7 +174,7 @@ class EventScheduler:
             self._run_detector('economic', self.economic_detector)
             
         except Exception as e:
-            logger.error(f"Failed to start scheduler: {e}", exc_info=True)
+            logger.error("Failed to start scheduler: {}", str(e), exc_info=True)
             self.is_running = False
     
     def stop(self):

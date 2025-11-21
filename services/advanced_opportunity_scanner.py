@@ -301,7 +301,7 @@ class AdvancedOpportunityScanner:
         max_workers: int = 8
     ) -> List[OpportunityResult]:
         """Parallel opportunity scanning using ThreadPoolExecutor (4-8x faster)"""
-        logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(universe)} tickers")
+        logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(universe))} tickers")
         
         opportunities = []
         start_time = time.time()
@@ -329,7 +329,7 @@ class AdvancedOpportunityScanner:
                 
                 # Log progress every 10 tickers
                 if completed % 10 == 0:
-                    logger.info(f"Progress: {completed}/{len(universe)} tickers analyzed")
+                    logger.info(f"Progress: {completed}/{len(universe))} tickers analyzed")
         
         # Sort by score
         opportunities.sort(key=lambda x: x.score, reverse=True)
@@ -470,7 +470,7 @@ class AdvancedOpportunityScanner:
         
         logger.info(f"🔥 Found {len(opportunities)} buzzing stocks with social sentiment")
         if opportunities:
-            logger.info(f"   Top 3: {', '.join([f'{o.ticker}({o.buzz_score:.0f})' for o in opportunities[:3]])}")
+            logger.info("   Top 3: {}({o.buzz_score:.0f})' for o in opportunities[:3]])}", str(', '.join([f'{o.ticker))
         
         return opportunities[:top_n]
     
@@ -938,7 +938,7 @@ class AdvancedOpportunityScanner:
                         reverse_splits.append({
                             'date': split_date.strftime('%Y-%m-%d'),
                             'ratio': reverse_ratio,
-                            'ratio_str': f"1:{int(reverse_ratio)}"
+                            'ratio_str': f"1:{int(reverse_ratio))}"
                         })
             
             # Check if recent reverse split (within last year)

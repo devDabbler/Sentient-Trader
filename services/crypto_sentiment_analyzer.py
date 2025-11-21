@@ -108,7 +108,7 @@ class CryptoSentimentAnalyzer:
             if cache_key in self.coingecko_cache:
                 cached_data, cached_time = self.coingecko_cache[cache_key]
                 if time.time() - cached_time < self.cache_ttl:
-                    logger.info(f"📊 Using cached trending data (age: {int(time.time() - cached_time)}s)")
+                    logger.info("📊 Using cached trending data (age: {}s)", str(int(time.time() - cached_time)))
                     return cached_data
             
             # Rate limiting: max 10 calls/min = 1 call every 6 seconds

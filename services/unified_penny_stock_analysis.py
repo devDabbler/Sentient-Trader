@@ -62,7 +62,7 @@ class UnifiedPennyStockAnalysis:
                 logger.error(f"❌ Base analysis error for {ticker}: {base_analysis['error']}")
                 return base_analysis
             
-            logger.info(f"✅ Base analysis completed for {ticker}: price=${base_analysis.get('price', 'N/A')}, classification={base_analysis.get('classification', 'N/A')}")
+            logger.info("✅ Base analysis completed for {}: price=${base_analysis.get('price', 'N/A')}, classification={base_analysis.get('classification', 'N/A')}", str(ticker))
             
             # 2. Stock classification (using enhanced classifier)
             classification = base_analysis.get('classification', 'UNKNOWN')
@@ -77,7 +77,7 @@ class UnifiedPennyStockAnalysis:
                 volume=base_analysis['volume'],
                 avg_volume=base_analysis['avg_volume']
             )
-            logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A')}")
+            logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A'}"))
             
             # 4. ATR-based stops (already in base_analysis)
             logger.info(f"🎯 Step 4: Extracting ATR stops from base analysis...")
@@ -88,7 +88,7 @@ class UnifiedPennyStockAnalysis:
                 'atr_target_pct': base_analysis.get('atr_target_pct'),
                 'atr_risk_reward': base_analysis.get('atr_risk_reward'),
             }
-            logger.info(f"✅ ATR stops: stop=${atr_stops['atr_stop_loss']}, stop_pct={atr_stops['atr_stop_pct']}%")
+            logger.info("✅ ATR stops: stop=${}, stop_pct={atr_stops['atr_stop_pct']}%", str(atr_stops['atr_stop_loss']))
             
             # 5. Trading recommendation based on stops
             stop_pct = base_analysis.get('atr_stop_pct', 8.0)
@@ -144,13 +144,13 @@ class UnifiedPennyStockAnalysis:
             }
             
             logger.info(f"✅ UnifiedPennyStockAnalysis.analyze_comprehensive completed for {ticker}")
-            logger.info(f"   Result keys: {list(result.keys())[:10]}... (total: {len(result)} keys)")
-            logger.info(f"   Final recommendation: {final_recommendation.get('decision', 'N/A') if final_recommendation else 'N/A'}")
+            logger.info(f"   Result keys: {list(result.keys(}... (total: {len(result))} keys)")[:10]))
+            logger.info("   Final recommendation: {}", str(final_recommendation.get('decision', 'N/A') if final_recommendation else 'N/A'))
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ ERROR in comprehensive analysis for {ticker}: {e}", exc_info=True)
+            logger.error("❌ ERROR in comprehensive analysis for {ticker}: {}", str(e), exc_info=True)
             return {'ticker': ticker, 'error': str(e)}
     
     def _analyze_options(self, ticker: str, base_analysis: Dict) -> Optional[Dict]:

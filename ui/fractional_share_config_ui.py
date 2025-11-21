@@ -22,7 +22,7 @@ def display_fractional_share_config():
         manager = get_fractional_share_manager()
     except Exception as e:
         st.error(f"Error loading Fractional Share Manager: {e}")
-        logger.error(f"Fractional Share Manager loading error: {e}", exc_info=True)
+        logger.error("Fractional Share Manager loading error: {}", str(e), exc_info=True)
         return
     
     # Global Settings Section
@@ -110,7 +110,7 @@ def display_fractional_share_config():
             logger.info(f"Fractional share settings saved: enabled={enabled}, threshold=${price_threshold:.2f}")
         except Exception as e:
             st.error(f"Error saving settings: {e}")
-            logger.error(f"Error saving fractional share settings: {e}", exc_info=True)
+            logger.error("Error saving fractional share settings: {}", str(e), exc_info=True)
     
     st.markdown("---")
     
@@ -176,7 +176,7 @@ def display_fractional_share_config():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error setting custom amount: {e}")
-                    logger.error(f"Error setting custom amount for {new_symbol}: {e}", exc_info=True)
+                    logger.error("Error setting custom amount for {new_symbol}: {}", str(e), exc_info=True)
             else:
                 st.warning("Please enter a ticker symbol")
     
@@ -203,7 +203,7 @@ def display_fractional_share_config():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error removing custom amount: {e}")
-                    logger.error(f"Error removing custom amount for {symbol_to_remove}: {e}", exc_info=True)
+                    logger.error("Error removing custom amount for {symbol_to_remove}: {}", str(e), exc_info=True)
     
     st.markdown("---")
     
@@ -329,7 +329,7 @@ def display_fractional_positions():
         manager = get_fractional_share_manager()
     except Exception as e:
         st.error(f"Error loading Fractional Share Manager: {e}")
-        logger.error(f"Fractional Share Manager loading error: {e}", exc_info=True)
+        logger.error("Fractional Share Manager loading error: {}", str(e), exc_info=True)
         return
     
     # This would integrate with broker to get actual positions

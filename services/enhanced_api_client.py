@@ -439,7 +439,7 @@ class EnhancedYFinanceClient:
                         self.stats['successful_tickers'] += 1
                     else:
                         self.stats['failed_tickers'] += 1
-                        logger.warning(f"Failed to fetch {ticker}: {result['error']}")
+                        logger.warning("Failed to fetch {}: {result['error']}", str(ticker))
                         
                 except Exception as e:
                     self.stats['failed_tickers'] += 1

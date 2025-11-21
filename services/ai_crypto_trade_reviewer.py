@@ -30,7 +30,7 @@ class AICryptoTradeReviewer:
         else:
             self.active_monitors = self._load_monitors_from_db() if self.supabase else {}
         
-        logger.info(f"🔧 AI Trade Reviewer initialized with {len(self.active_monitors)} monitors (DB: {'enabled' if self.supabase else 'disabled'})")
+        logger.info("🔧 AI Trade Reviewer initialized with {} monitors (DB: {'enabled' if self.supabase else 'disabled'})", str(len(self.active_monitors)))
         
     def pre_trade_review(
         self,
@@ -190,25 +190,33 @@ class AICryptoTradeReviewer:
             try:
                 ai_response = self.llm_analyzer.analyze_with_llm(prompt)
                 
-                # Parse AI response
-                approved = self._parse_approval(ai_response)
-                confidence = self._parse_confidence(ai_response)
-                reasoning = ai_response[:500]  # First 500 chars as summary
-                
-                recommendations = {
-                    'entry_timing': self._extract_field(ai_response, 'Entry Timing'),
-                    'position_size': self._extract_field(ai_response, 'Position Size'),
-                    'risks': self._extract_risks(ai_response),
-                    'recommendations': self._extract_recommendations(ai_response),
-                    'market_conditions': self._extract_field(ai_response, 'Market Conditions')
-                }
-                
-                logger.info(f"✅ AI Review: {'APPROVED' if approved else 'REJECTED'} ({confidence}% confidence)")
-                
-                return approved, confidence, reasoning, recommendations
+                # Validate response is not empty
+                if not ai_response or not isinstance(ai_response, str):
+                    logger.warning(f"⚠️ AI returned empty/invalid response, falling back to rule-based review")
+                    # Fall through to rule-based backup
+                elif len(ai_response) < 20:
+                    logger.warning(f"⚠️ AI response too short ({len(ai_response)} chars), falling back to rule-based review")
+                    # Fall through to rule-based backup
+                else:
+                    # Parse AI response
+                    approved = self._parse_approval(ai_response)
+                    confidence = self._parse_confidence(ai_response)
+                    reasoning = ai_response[:500]  # First 500 chars as summary
+                    
+                    recommendations = {
+                        'entry_timing': self._extract_field(ai_response, 'Entry Timing'),
+                        'position_size': self._extract_field(ai_response, 'Position Size'),
+                        'risks': self._extract_risks(ai_response),
+                        'recommendations': self._extract_recommendations(ai_response),
+                        'market_conditions': self._extract_field(ai_response, 'Market Conditions')
+                    }
+                    
+                    logger.info(f"✅ AI Review: {'APPROVED' if approved else 'REJECTED'} ({confidence}% confidence)")
+                    
+                    return approved, confidence, reasoning, recommendations
                 
             except Exception as e:
-                logger.error(f"AI analysis error: {e}")
+                logger.error("AI analysis error: {}", str(e), exc_info=True)
                 # Fall through to rule-based backup
         
         # Rule-based backup if AI unavailable
@@ -350,7 +358,7 @@ class AICryptoTradeReviewer:
             'strategy_context': req['description']
         }
         
-        logger.info(f"🤖 Rule-based review ({strategy}): {'APPROVED' if approved else 'REJECTED'} - {len(issues)} issues found")
+        logger.info("🤖 Rule-based review ({}): {'APPROVED' if approved else 'REJECTED'} - {len(issues))} issues found", str(strategy))
         
         return approved, confidence, reasoning, recommendations
     
@@ -585,7 +593,7 @@ class AICryptoTradeReviewer:
     def _extract_field(self, response: str, field: str) -> str:
         """Extract specific field from response"""
         import re
-        pattern = f"{field}[:\s]+([^\n]+)"
+        pattern = rf"{field}[:\s]+([^\n]+)"  # Use raw string for regex
         matches = re.findall(pattern, response, re.IGNORECASE)
         return matches[0].strip() if matches else 'unknown'
     

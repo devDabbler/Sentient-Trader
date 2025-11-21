@@ -298,7 +298,7 @@ class ORBFVGStrategy:
                 return signal
         
         except Exception as e:
-            logger.error(f"Error analyzing {symbol}: {e}", exc_info=True)
+            logger.error("Error analyzing {symbol}: {}", str(e), exc_info=True)
             return None
         
         return None
@@ -312,9 +312,27 @@ class ORBFVGStrategy:
         # Check cache
         if symbol in self._orb_cache:
             cached_orb = self._orb_cache[symbol]
-            # Verify it's from today
-            if cached_orb.established_time.date() == current_time.date():
+            # Verify it's from today - handle timezone-aware and naive datetimes
+            established_time = cached_orb.established_time
+            # Convert to naive datetime if timezone-aware, then get date
+            if hasattr(established_time, 'tzinfo') and established_time.tzinfo is not None:
+                # Timezone-aware: convert to naive
+                established_time = established_time.replace(tzinfo=None)
+            established_date = established_time.date()
+            current_date = current_time.date()
+            
+            if established_date == current_date:
                 return cached_orb
+        
+        # Normalize DataFrame index timezone if needed
+        # yfinance returns timezone-aware indices (America/New_York)
+        # Convert to naive for comparison with naive datetime objects
+        if hist_5m.index.tz is not None:
+            # DataFrame has timezone-aware index, convert to naive for comparison
+            hist_5m = hist_5m.copy()
+            # Remove timezone info while keeping the same local time
+            # Use .values to get numpy datetime64[ns] which is naive
+            hist_5m.index = pd.DatetimeIndex(hist_5m.index.values)
         
         # Calculate ORB from first 15 minutes
         market_open_time = current_time.replace(hour=9, minute=30, second=0, microsecond=0)

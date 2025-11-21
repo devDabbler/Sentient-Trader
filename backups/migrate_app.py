@@ -28,7 +28,7 @@ class AppModularizer:
         if self.app_py_path.exists():
             with open(self.app_py_path, 'r', encoding='utf-8') as f:
                 self.lines = f.readlines()
-            print(f"✅ Loaded {self.app_py_path} ({len(self.lines)} lines)")
+            print(f"✅ Loaded {self.app_py_path} ({len(self.lines))} lines)")
         else:
             print(f"❌ {self.app_py_path} not found!")
             exit(1)
@@ -55,7 +55,7 @@ class AppModularizer:
                     f.write('\n\n')
                 f.writelines(extracted)
             
-            print(f"✅ Created {dest_file} ({len(extracted)} lines)")
+            print(f"✅ Created {dest_file} ({len(extracted))} lines)")
             return True
             
         except Exception as e:
@@ -315,7 +315,7 @@ def main():
             st.error(f"Unknown tab: {selected_tab}")
             
     except Exception as e:
-        logger.error(f"Error rendering tab {selected_tab}: {e}", exc_info=True)
+        logger.error("Error rendering tab {selected_tab}: {}", str(e), exc_info=True)
         st.error(f"Failed to load {selected_tab}")
         st.exception(e)
 
@@ -323,7 +323,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"Application error: {e}", exc_info=True)
+        logger.error("Application error: {}", str(e), exc_info=True)
         st.error("Application encountered an error. Check logs for details.")
         st.exception(e)
 '''

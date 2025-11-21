@@ -324,7 +324,7 @@ class UnifiedTradeJournal:
             return True
             
         except Exception as e:
-            logger.error(f"Error logging trade entry: {e}", exc_info=True)
+            logger.error("Error logging trade entry: {}", str(e), exc_info=True)
             return False
     
     def log_ai_decision(self, trade_id: str, decision: AIDecisionLog) -> bool:
@@ -369,7 +369,7 @@ class UnifiedTradeJournal:
             return True
             
         except Exception as e:
-            logger.error(f"Error logging AI decision: {e}", exc_info=True)
+            logger.error("Error logging AI decision: {}", str(e), exc_info=True)
             return False
     
     def update_trade_exit(
@@ -477,7 +477,7 @@ class UnifiedTradeJournal:
             return True
             
         except Exception as e:
-            logger.error(f"Error updating trade exit: {e}", exc_info=True)
+            logger.error("Error updating trade exit: {}", str(e), exc_info=True)
             return False
     
     def get_trades(
@@ -557,7 +557,7 @@ class UnifiedTradeJournal:
             return trades
             
         except Exception as e:
-            logger.error(f"Error querying trades: {e}", exc_info=True)
+            logger.error("Error querying trades: {}", str(e), exc_info=True)
             return []
     
     def _row_to_trade_entry(self, row: tuple) -> Optional[UnifiedTradeEntry]:
@@ -653,7 +653,7 @@ class UnifiedTradeJournal:
             return decisions
             
         except Exception as e:
-            logger.error(f"Error getting AI decisions: {e}", exc_info=True)
+            logger.error("Error getting AI decisions: {}", str(e), exc_info=True)
             return []
     
     def get_statistics(

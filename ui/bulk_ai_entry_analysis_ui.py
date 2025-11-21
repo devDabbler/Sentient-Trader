@@ -89,13 +89,13 @@ def display_bulk_ai_entry_analysis(tickers: List[str], entry_assistant: AIStockE
     # Use fast assistant if available, otherwise use default
     active_assistant = fast_assistant if fast_assistant else entry_assistant
     
-    if st.button(f"🤖 Analyze {len(selected_tickers)} Selected Tickers", type="primary", disabled=not selected_tickers):
+    if st.button(f"🤖 Analyze {len(selected_tickers))} Selected Tickers", type="primary", disabled=not selected_tickers):
         st.session_state.bulk_ai_analysis_results = []
         progress_bar = st.progress(0, text="Starting bulk analysis...")
         results = []
 
         for i, ticker in enumerate(selected_tickers):
-            progress_text = f"Analyzing {ticker} ({i + 1}/{len(selected_tickers)})..."
+            progress_text = f"Analyzing {ticker} ({i + 1}/{len(selected_tickers))})..."
             progress_bar.progress((i + 1) / len(selected_tickers), text=progress_text)
             
             try:
@@ -267,8 +267,8 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
         st.warning("⚠️ No configurations to test. Select at least one trading style.")
         return
     
-    st.info(f"🔬 Ready to test **{total_configs} configurations** across **{len(selected_tickers)} tickers**")
-    st.caption(f"Test Matrix: {len(position_sizes)} positions × {len(risk_levels)} risks × {len(selected_styles)} styles = {len(position_sizes) * len(risk_levels) * len(selected_styles)} configs per ticker")
+    st.info(f"🔬 Ready to test **{total_configs} configurations** across **{len(selected_tickers))} tickers**")
+    st.caption(f"Test Matrix: {len(position_sizes))} positions × {len(risk_levels))} risks × {len(selected_styles))} styles = {len(position_sizes) * len(risk_levels) * len(selected_styles))} configs per ticker")
     
     # --- Analysis Execution ---
     st.write("**3. Run Analysis**")
@@ -375,7 +375,7 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
                 st.error("No results generated. Check logs for errors.")
                 
         except Exception as e:
-            logger.error(f"Multi-config bulk analysis error: {e}", exc_info=True)
+            logger.error("Multi-config bulk analysis error: {}", str(e), exc_info=True)
             st.error(f"Analysis failed: {str(e)}")
             progress_bar.empty()
             status_text.empty()
@@ -463,7 +463,7 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
                         ticker_manager.update_ai_entry_analysis(row['Ticker'], analysis_to_save)
                         st.success(f"✅ Saved best configuration for {row['Ticker']}!")
                     except Exception as e:
-                        logger.error(f"Error saving config for {row['Ticker']}: {e}")
+                        logger.error("Error saving config for {row['Ticker']}: {}", str(e))
                         st.error(f"Failed to save: {str(e)}")
         
         # Full comparison table

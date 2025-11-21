@@ -419,7 +419,7 @@ class SocialSentimentAnalyzer:
         # Check if we're in a backoff period (after rate limit hit)
         if current_time < self.reddit_backoff_until:
             backoff_remaining = self.reddit_backoff_until - current_time
-            logger.warning(f"⏳ Reddit rate limit backoff: waiting {backoff_remaining:.1f}s")
+            logger.warning(f"\u23f3 Reddit rate limit backoff: waiting {int(backoff_remaining)}s {backoff_remaining:.1f}")
             time.sleep(backoff_remaining)
             current_time = time.time()
         
@@ -604,7 +604,7 @@ class SocialSentimentAnalyzer:
                                 logger.debug(f"RSS feed r/{subreddit} has no entries")
                                 continue
                             
-                            logger.debug(f"RSS feed r/{subreddit}: scanning {len(feed.entries)} posts for ${ticker}")
+                            logger.debug(f"RSS feed r/{subreddit}: scanning {len(feed.entries))} posts for ${ticker}")
                             
                             # STEP B: Pre-filter for ticker mentions (FAST regex scan)
                             candidate_posts = []
@@ -653,7 +653,7 @@ class SocialSentimentAnalyzer:
                                 mentions.append(mention)
                             
                             if candidate_posts:
-                                logger.info(f"✅ Reddit RSS r/{subreddit}: {len(candidate_posts)} posts matching ${ticker}")
+                                logger.info(f"✅ Reddit RSS r/{subreddit}: {len(candidate_posts))} posts matching ${ticker}")
                             else:
                                 logger.debug(f"No matches found in r/{subreddit} for ${ticker}")
                         
@@ -665,7 +665,7 @@ class SocialSentimentAnalyzer:
             try:
                 await asyncio.wait_for(_fetch_rss(), timeout=10.0)
             except asyncio.TimeoutError:
-                logger.warning(f"Reddit RSS timeout after 10s for {ticker}, returning {len(mentions)} mentions")
+                logger.warning(f"Reddit RSS timeout after 10s for {ticker}, returning {len(mentions))} mentions")
             
             logger.info(f"📱 Reddit RSS: {len(mentions)} total mentions for {ticker}")
             return mentions
@@ -998,13 +998,13 @@ class SocialSentimentAnalyzer:
         # Sources
         sources = []
         if reddit:
-            sources.append(f"Reddit: {len(reddit)} mentions")
+            sources.append(f"Reddit: {len(reddit))} mentions")
         if twitter:
-            sources.append(f"Twitter: {len(twitter)} tweets")
+            sources.append(f"Twitter: {len(twitter))} tweets")
         if stocktwits:
-            sources.append(f"StockTwits: {len(stocktwits)} messages")
+            sources.append(f"StockTwits: {len(stocktwits))} messages")
         if news:
-            sources.append(f"News: {len(news)} articles")
+            sources.append(f"News: {len(news))} articles")
         
         return SocialSentimentResult(
             ticker=ticker,

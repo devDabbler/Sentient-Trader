@@ -214,11 +214,11 @@ class PositionExitMonitor:
             logger.info(f"🎯 MONITORING STARTED: {symbol}")
             logger.info("=" * 80)
             logger.info(f"   Position: {side} {quantity} shares @ ${entry_price:.2f}")
-            logger.info(f"   Stop Loss: ${stop_loss:.2f} ({-risk_pct:.2f}%)")
-            logger.info(f"   Take Profit: ${take_profit:.2f} (+{reward_pct:.2f}%)")
-            logger.info(f"   Risk/Reward: {rr_ratio:.2f}:1")
+            logger.info(f"   Stop Loss: ${} ({-risk_pct:.2f}%) {stop_loss:.2f}")
+            logger.info(f"   Take Profit: ${} (+{reward_pct:.2f}%) {take_profit:.2f}")
+            logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
             if trailing_stop_pct:
-                logger.info(f"   Trailing Stop: {trailing_stop_pct:.1f}%")
+                logger.info(f"   Trailing Stop: {}% {trailing_stop_pct:.1f}")
             if max_hold_minutes:
                 logger.info(f"   Max Hold Time: {max_hold_minutes} minutes")
             if bracket_order_ids:
@@ -228,7 +228,7 @@ class PositionExitMonitor:
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error adding position {symbol}: {e}", exc_info=True)
+            logger.error("❌ Error adding position {symbol}: {}", str(e), exc_info=True)
             return False
     
     def remove_position(self, symbol: str) -> bool:
@@ -336,7 +336,7 @@ class PositionExitMonitor:
             
         except Exception as e:
             self.connection_retry_count += 1
-            logger.error(f"❌ Error syncing with broker (attempt {self.connection_retry_count}/{self.max_connection_retries}): {e}", exc_info=True)
+            logger.error("❌ Error syncing with broker (attempt {self.connection_retry_count}/{self.max_connection_retries}): {}", str(e), exc_info=True)
             
             if self.connection_retry_count >= self.max_connection_retries:
                 logger.error(f"❌ Max connection retries ({self.max_connection_retries}) reached. Entering emergency mode.")
@@ -371,7 +371,7 @@ class PositionExitMonitor:
                     self.tradier_circuit_breaker_active = False
                     self.consecutive_tradier_errors = 0
                 else:
-                    logger.debug(f"⚠️ Circuit breaker active: Tradier backend issues ({time_since_error:.1f} min ago)")
+                    logger.debug(f"⚠️ Circuit breaker active: Tradier backend issues ({} min ago) {time_since_error:.1f}")
         
         logger.debug(f"🔍 Checking {len(self.monitored_positions)} positions...")
         
@@ -421,7 +421,7 @@ class PositionExitMonitor:
                         logger.debug(f"✓ {symbol}: ${current_price:.2f} (P&L: {pnl_pct:+.2f}%), Stop: ${position.stop_loss:.2f}, Target: ${position.take_profit:.2f}")
                 
             except Exception as e:
-                logger.error(f"❌ Error checking {symbol}: {e}", exc_info=True)
+                logger.error("❌ Error checking {symbol}: {}", str(e), exc_info=True)
                 continue
         
         return positions_to_exit
@@ -506,8 +506,8 @@ class PositionExitMonitor:
             logger.info("=" * 80)
             logger.info(f"   Reason: {exit_reason.value}")
             logger.info(f"   Quantity: {position.quantity}")
-            logger.info(f"   Entry: ${position.entry_price:.2f}")
-            logger.info(f"   Current: ${current_price:.2f}")
+            logger.info(f"   Entry: ${} {position.entry_price:.2f}")
+            logger.info(f"   Current: ${} {current_price:.2f}")
             
             # Calculate P&L
             if position.side == 'BUY':
@@ -560,7 +560,7 @@ class PositionExitMonitor:
                 # Release capital
                 if self.capital_manager:
                     self.capital_manager.release_capital(symbol, pnl=pnl)
-                    logger.info(f"💰 Capital released: ${self.capital_manager.get_available_capital():,.2f} available")
+                    logger.info("💰 Capital released: ${} available", str(self.capital_manager.get_available_capital():,.2f))
                 
                 # Update statistics
                 self.total_exits_executed += 1
@@ -679,7 +679,7 @@ class PositionExitMonitor:
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Error executing exit for {symbol}: {e}", exc_info=True)
+            logger.error("❌ Error executing exit for {symbol}: {}", str(e), exc_info=True)
             position.exit_attempts += 1
             self.failed_exit_attempts += 1
             return False
@@ -799,7 +799,7 @@ class PositionExitMonitor:
             except Exception as e:
                 logger.error(f"Error closing {symbol}: {e}")
         
-        logger.warning(f"⚠️ Closed {closed_count}/{len(self.monitored_positions)} positions")
+        logger.warning(f"⚠️ Closed {closed_count}/{len(self.monitored_positions))} positions")
         return closed_count
     
     def get_status(self) -> Dict:
@@ -928,7 +928,7 @@ class PositionExitMonitor:
                 
             except Exception as e:
                 consecutive_errors += 1
-                logger.error(f"❌ Error in monitoring loop: {e}", exc_info=True)
+                logger.error("❌ Error in monitoring loop: {}", str(e), exc_info=True)
                 
                 # If too many consecutive errors, enter emergency mode
                 if consecutive_errors >= max_consecutive_errors:

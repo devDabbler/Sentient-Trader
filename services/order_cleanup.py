@@ -85,7 +85,7 @@ class OrderCleanup:
                     })
             
             logger.info("=" * 80)
-            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(rejected_orders)} orders cancelled")
+            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(rejected_orders))} orders cancelled")
             logger.info("=" * 80)
             
             return True, {
@@ -95,7 +95,7 @@ class OrderCleanup:
             }
             
         except Exception as e:
-            logger.error(f"Error during order cleanup: {e}", exc_info=True)
+            logger.error("Error during order cleanup: {}", str(e), exc_info=True)
             return False, {"error": str(e)}
     
     def cancel_stuck_orders(self, max_age_minutes: int = 60) -> Tuple[bool, Dict]:
@@ -183,7 +183,7 @@ class OrderCleanup:
                     })
             
             logger.info("=" * 80)
-            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(stuck_orders)} stuck orders cancelled")
+            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(stuck_orders))} stuck orders cancelled")
             logger.info("=" * 80)
             
             return True, {
@@ -193,5 +193,5 @@ class OrderCleanup:
             }
             
         except Exception as e:
-            logger.error(f"Error during stuck order cleanup: {e}", exc_info=True)
+            logger.error("Error during stuck order cleanup: {}", str(e), exc_info=True)
             return False, {"error": str(e)}

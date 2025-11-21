@@ -193,7 +193,7 @@ class WarriorTradingDetector:
         
         else:
             # Default fallback
-            logger.warning(f"Unknown SCAN_UNIVERSE type '{universe_type}', falling back to watchlist")
+            logger.warning("Unknown SCAN_UNIVERSE type '{}', falling back to watchlist", str(universe_type))
             return self.watchlist
     
     def _load_sp500_symbols(self) -> List[str]:
@@ -415,7 +415,7 @@ class WarriorTradingDetector:
         
         for i in range(0, len(universe), chunk_size):
             chunk = universe[i:i + chunk_size]
-            logger.debug(f"Processing chunk {i//chunk_size + 1}: {len(chunk)} tickers")
+            logger.debug(f"Processing chunk {i//chunk_size + 1}: {len(chunk))} tickers")
             
             # Step 1: Get previous day closes (yfinance - batch)
             prev_closes = {}

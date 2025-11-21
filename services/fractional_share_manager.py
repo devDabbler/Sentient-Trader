@@ -59,8 +59,8 @@ class FractionalShareManager:
         
         logger.info("📊 Fractional Share Manager initialized")
         logger.info(f"   Enabled: {self.config.enabled}")
-        logger.info(f"   Price threshold: ${self.config.min_price_threshold:.2f}")
-        logger.info(f"   Min dollar amount: ${self.config.min_dollar_amount:.2f}")
+        logger.info(f"   Price threshold: ${} {self.config.min_price_threshold:.2f}")
+        logger.info(f"   Min dollar amount: ${} {self.config.min_dollar_amount:.2f}")
         
         # Load saved custom amounts
         self._load_state()
@@ -143,10 +143,10 @@ class FractionalShareManager:
             actual_dollar_amount = quantity * price
             
             logger.info(f"📊 Fractional sizing for {symbol}:")
-            logger.info(f"   Price: ${price:.2f}")
-            logger.info(f"   Target amount: ${target_dollar_amount:.2f}")
+            logger.info(f"   Price: ${} {price:.2f}")
+            logger.info(f"   Target amount: ${} {target_dollar_amount:.2f}")
             logger.info(f"   Calculated quantity: {quantity}")
-            logger.info(f"   Actual cost: ${actual_dollar_amount:.2f}")
+            logger.info(f"   Actual cost: ${} {actual_dollar_amount:.2f}")
             
             return quantity, actual_dollar_amount
             
@@ -163,11 +163,11 @@ class FractionalShareManager:
             dollar_amount: Dollar amount to invest
         """
         if dollar_amount < self.config.min_dollar_amount:
-            logger.warning(f"Dollar amount ${dollar_amount:.2f} below minimum ${self.config.min_dollar_amount:.2f}")
+            logger.warning(f"Dollar amount ${} below minimum ${self.config.min_dollar_amount:.2f} {dollar_amount:.2f}")
             dollar_amount = self.config.min_dollar_amount
         
         if self.config.max_dollar_amount and dollar_amount > self.config.max_dollar_amount:
-            logger.warning(f"Dollar amount ${dollar_amount:.2f} above maximum ${self.config.max_dollar_amount:.2f}")
+            logger.warning(f"Dollar amount ${} above maximum ${self.config.max_dollar_amount:.2f} {dollar_amount:.2f}")
             dollar_amount = self.config.max_dollar_amount
         
         self.custom_amounts[symbol] = dollar_amount

@@ -22,7 +22,7 @@ def display_trade_journal():
         journal = get_unified_journal()
     except Exception as e:
         st.error(f"Error loading journal: {e}")
-        logger.error(f"Journal loading error: {e}", exc_info=True)
+        logger.error("Journal loading error: {}", str(e), exc_info=True)
         return
     
     # Filters

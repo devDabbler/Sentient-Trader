@@ -24,7 +24,7 @@ class OptionAlphaClient:
             
             signal['timestamp'] = datetime.now().isoformat()
             
-            logger.info(f"Sending signal to Option Alpha: {json.dumps(signal, indent=2)}")
+            logger.info(f"Sending signal to Option Alpha: {json.dumps(signal, indent=2}")
             
             response = requests.post(
                 self.webhook_url,
@@ -43,10 +43,10 @@ class OptionAlphaClient:
             logger.error(error_msg)
             return False, error_msg
         except requests.exceptions.RequestException as e:
-            error_msg = f"Request failed: {str(e)}"
+            error_msg = f"Request failed: {str(e))}"
             logger.error(error_msg)
             return False, error_msg
         except Exception as e:
-            error_msg = f"Unexpected error: {str(e)}"
+            error_msg = f"Unexpected error: {str(e))}"
             logger.error(error_msg)
             return False, error_msg

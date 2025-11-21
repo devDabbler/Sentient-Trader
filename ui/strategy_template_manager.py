@@ -556,7 +556,7 @@ def render_search_templates():
         results = template_manager.search_templates(search_query)
         
         if results:
-            st.success(f"Found {len(results)} matching templates")
+            st.success(f"Found {len(results))} matching templates")
             
             for template in results:
                 with st.expander(f"🎯 {template.name}"):

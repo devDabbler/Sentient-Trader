@@ -369,7 +369,9 @@ def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManage
                 # Generate signals inline without switching tabs
                 with st.spinner(f"Generating signals for {symbol}..."):
                     try:
-                        from ui.crypto_signal_ui import get_all_crypto_strategies, analyze_symbol_with_strategies
+                        # Signal generation moved to Daily Scanner Tier 3
+                        st.info("🔍 Signal generation moved to Daily Scanner → Tier 3 Deep Analysis")
+                        return
                         from loguru import logger
                         
                         # Check if Kraken client is available
@@ -393,7 +395,7 @@ def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManage
                             
                             # Display results inline
                             if signals:
-                                st.success(f"✅ Generated {len(signals)} signal(s)")
+                                st.success(f"✅ Generated {len(signals))} signal(s)")
                                 
                                 # Sort by confidence
                                 signals.sort(key=lambda x: x.confidence, reverse=True)
@@ -411,7 +413,7 @@ def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManage
                                 st.info("No signals generated. Market conditions may not meet strategy criteria.")
                     except Exception as e:
                         st.error(f"Error generating signals: {e}")
-                        logger.error(f"Inline signal generation error: {e}", exc_info=True)
+                        logger.error("Inline signal generation error: {}", str(e), exc_info=True)
         
         with bcol2:
             if st.button("🔄 Refresh Data", key=f"refresh_{symbol}_{index}"):
@@ -942,7 +944,7 @@ def bulk_refresh_cryptos(
                         
                         # Add confidence reasoning if multiple signals align
                         if len(confidence_signals) >= 3:
-                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals)} signals aligned - {', '.join(confidence_signals[:3])}"
+                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals))} signals aligned - {', '.join(confidence_signals[:3])}"
                         
                         # Update confidence level with AI confidence if available
                         if hasattr(ai_opportunity, 'ai_confidence') and ai_opportunity.ai_confidence:
@@ -1053,7 +1055,7 @@ def bulk_refresh_cryptos(
                         
                         # Add confidence reasoning if multiple signals align
                         if len(confidence_signals) >= 3:
-                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals)} signals aligned - {', '.join(confidence_signals[:3])}"
+                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals))} signals aligned - {', '.join(confidence_signals[:3])}"
                     
                     # Add technical indicators if available
                     if rsi is not None:
@@ -1116,7 +1118,7 @@ def bulk_refresh_cryptos(
                     results[symbol] = False
                     
             except Exception as e:
-                logger.error(f"Error refreshing {symbol}: {e}", exc_info=True)
+                logger.error("Error refreshing {symbol}: {}", str(e), exc_info=True)
                 results[symbol] = False
         
         progress_bar.progress(1.0)
@@ -1125,7 +1127,7 @@ def bulk_refresh_cryptos(
         return results
         
     except Exception as e:
-        logger.error(f"Bulk refresh error: {e}", exc_info=True)
+        logger.error("Bulk refresh error: {}", str(e), exc_info=True)
         status_text.empty()
         return results
 
@@ -1198,7 +1200,7 @@ def render_crypto_watchlist_tab(
                         'error': "Watchlist is empty"
                     }
             except Exception as e:
-                logger.error(f"Bulk refresh error: {e}", exc_info=True)
+                logger.error("Bulk refresh error: {}", str(e), exc_info=True)
                 st.session_state.crypto_refresh_status = {
                     'successful': 0,
                     'failed': 0,
@@ -1220,7 +1222,7 @@ def render_crypto_watchlist_tab(
             st.session_state.crypto_refresh_selected = False
         else:
             try:
-                with st.spinner(f"Refreshing {len(selected_symbols)} selected cryptos..."):
+                with st.spinner(f"Refreshing {len(selected_symbols))} selected cryptos..."):
                     results = bulk_refresh_cryptos(
                         manager,
                         kraken_client,
@@ -1235,7 +1237,7 @@ def render_crypto_watchlist_tab(
                     failed = len(results) - successful
                     
                     if successful > 0:
-                        st.success(f"✅ Successfully refreshed {successful} of {len(selected_symbols)} cryptos")
+                        st.success(f"✅ Successfully refreshed {successful} of {len(selected_symbols))} cryptos")
                     if failed > 0:
                         failed_symbols = [s for s, v in results.items() if not v]
                         st.warning(f"⚠️ Failed to refresh {failed} cryptos: {', '.join(failed_symbols)}")
@@ -1248,7 +1250,7 @@ def render_crypto_watchlist_tab(
                     }
             except Exception as e:
                 st.error(f"Error refreshing selected cryptos: {e}")
-                logger.error(f"Selected refresh error: {e}", exc_info=True)
+                logger.error("Selected refresh error: {}", str(e), exc_info=True)
                 st.session_state.crypto_refresh_status = {
                     'successful': 0,
                     'failed': len(selected_symbols),
@@ -1280,7 +1282,7 @@ def render_crypto_watchlist_tab(
                     st.warning(f"⚠️ Failed to refresh {symbol}")
             except Exception as e:
                 st.error(f"Error refreshing {symbol}: {e}")
-                logger.error(f"Individual refresh error: {e}", exc_info=True)
+                logger.error("Individual refresh error: {}", str(e), exc_info=True)
         
         # Clear the flag and rerun
         st.session_state.crypto_refresh_symbol = None
@@ -1387,4 +1389,4 @@ def render_crypto_watchlist_tab(
     
     except Exception as e:
         st.error(f"Error loading watchlist: {e}")
-        logger.error(f"Crypto watchlist error: {e}", exc_info=True)
+        logger.error("Crypto watchlist error: {}", str(e), exc_info=True)

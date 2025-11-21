@@ -116,7 +116,7 @@ def display_ai_position_monitor():
                             
                 except Exception as e:
                     st.error(f"Failed to load positions: {e}")
-                    logger.error(f"Position load error: {e}", exc_info=True)
+                    logger.error("Position load error: {}", str(e), exc_info=True)
         
         # Show configuration options
         st.markdown("---")
@@ -147,7 +147,7 @@ def display_ai_position_monitor():
         status = ai_manager.get_status()
     except Exception as e:
         st.error(f"Error getting AI manager status: {e}")
-        logger.error(f"AI manager status error: {e}", exc_info=True)
+        logger.error("AI manager status error: {}", str(e), exc_info=True)
         return
     
     # Status header
@@ -190,7 +190,7 @@ def display_ai_position_monitor():
     # 🚨 SAFETY: Show pending approvals first
     if hasattr(ai_manager, 'pending_approvals') and ai_manager.pending_approvals:
         st.markdown("#### 🚨 Pending Trade Approvals")
-        st.warning(f"⚠️ **{len(ai_manager.pending_approvals)} trade(s) awaiting your approval!** AI will NOT execute without your explicit confirmation.")
+        st.warning(f"⚠️ **{len(ai_manager.pending_approvals))} trade(s) awaiting your approval!** AI will NOT execute without your explicit confirmation.")
         
         for approval_id, approval_data in list(ai_manager.pending_approvals.items()):
             decision = approval_data['decision']
@@ -513,11 +513,25 @@ def display_portfolio_analysis():
     if 'portfolio_analysis' not in st.session_state or st.button("📈 Analyze Portfolio", width='stretch', type="primary"):
         with st.spinner("Analyzing your Kraken portfolio..."):
             try:
-                analysis = kraken_client.get_portfolio_analysis()
+                # 1. Fetch raw positions from client
+                from dataclasses import asdict
+                positions_raw = kraken_client.get_open_positions(calculate_real_cost=True)
+                positions_dict = [asdict(p) for p in positions_raw]
+
+                # 2. Get AI manager instance to access analysis method
+                from services.ai_crypto_position_manager import get_ai_position_manager
+                from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                
+                llm_analyzer = LLMStrategyAnalyzer() # This can be a dummy for analysis
+                ai_manager = get_ai_position_manager(kraken_client=kraken_client, llm_analyzer=llm_analyzer)
+
+                # 3. Run new, corrected analysis function
+                analysis = ai_manager.analyze_portfolio(positions_dict)
                 st.session_state.portfolio_analysis = analysis
+
             except Exception as e:
                 st.error(f"❌ Error analyzing portfolio: {e}")
-                logger.error(f"Portfolio analysis error: {e}", exc_info=True)
+                logger.error("Portfolio analysis error: {}", str(e), exc_info=True)
                 return
     
     if 'portfolio_analysis' not in st.session_state:
@@ -530,50 +544,56 @@ def display_portfolio_analysis():
         st.error(f"❌ Analysis error: {analysis['error']}")
         return
     
-    if analysis['num_positions'] == 0 and not analysis.get('staked_assets'):
+    if not analysis.get('positions') and not analysis.get('staked_assets'):
         st.info("📭 No positions found in your Kraken account")
         return
-    
+
+    summary = analysis.get('summary', {})
+    positions = analysis.get('positions', [])
+    num_positions = len(positions)
+
     # Portfolio Summary Metrics
     st.markdown("##### 💰 Portfolio Summary")
     col1, col2, col3, col4, col5 = st.columns(5)
-    
+
     with col1:
         st.metric(
             "Tradeable Value",
-            f"${analysis['total_value']:,.2f}",
+            f"${summary.get('total_value', 0):,.2f}",
             delta=None
         )
-    
+
     with col2:
-        pnl_color = "normal" if analysis['total_pnl'] >= 0 else "inverse"
+        pnl_color = "normal" if summary.get('total_pnl', 0) >= 0 else "inverse"
         st.metric(
             "P&L",
-            f"${analysis['total_pnl']:,.2f}",
-            delta=f"{analysis['total_pnl_pct']:+.2f}%",
+            f"${summary.get('total_pnl', 0):,.2f}",
+            delta=f"{summary.get('total_pnl_pct', 0):+.2f}%",
             delta_color=pnl_color
         )
-    
+
     with col3:
         st.metric(
             "Staked Value",
             f"${analysis.get('total_staked_value', 0):,.2f}",
-            delta=f"{len(analysis.get('staked_assets', []))} asset(s)"
+            delta=f"{len(analysis.get('staked_assets', [])))} asset(s)"
         )
-    
+
     with col4:
         st.metric(
             "Combined Total",
-            f"${analysis.get('combined_value', analysis['total_value']):,.2f}",
+            f"${analysis.get('combined_value', summary.get('total_value', 0)):,.2f}",
             delta="Tradeable + Staked"
         )
-    
+
     with col5:
-        win_rate = (analysis['num_winners'] / analysis['num_positions'] * 100) if analysis['num_positions'] > 0 else 0
+        num_winners = len(summary.get('top_gainers', []))
+        num_losers = len(summary.get('top_losers', []))
+        win_rate = (num_winners / num_positions * 100) if num_positions > 0 else 0
         st.metric(
             "Win Rate",
             f"{win_rate:.0f}%",
-            delta=f"{analysis['num_winners']}W / {analysis['num_losers']}L" if analysis['num_positions'] > 0 else "No positions"
+            delta=f"{num_winners}W / {num_losers}L" if num_positions > 0 else "No positions"
         )
     
     # AI Recommendations

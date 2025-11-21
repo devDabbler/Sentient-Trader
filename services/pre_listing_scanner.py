@@ -102,8 +102,8 @@ class PreListingScanner:
         self.reddit_secret = os.getenv('REDDIT_CLIENT_SECRET')
         
         logger.info("🚀 Pre-Listing Scanner initialized")
-        logger.info(f"   Twitter: {'Enabled' if self.twitter_bearer else 'Disabled (set TWITTER_BEARER_TOKEN)'}")
-        logger.info(f"   Reddit: {'Enabled' if self.reddit_client_id else 'Disabled (set REDDIT_CLIENT_ID)'}")
+        logger.info("   Twitter: {}", str('Enabled' if self.twitter_bearer else 'Disabled (set TWITTER_BEARER_TOKEN)'))
+        logger.info("   Reddit: {}", str('Enabled' if self.reddit_client_id else 'Disabled (set REDDIT_CLIENT_ID)'))
     
     def scan_new_listings(
         self,

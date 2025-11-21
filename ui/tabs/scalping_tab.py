@@ -22,7 +22,7 @@ def render_tab():
             render_orb_fvg_education()
         except ImportError as e:
             st.error(f"Failed to load ORB+FVG scanner: {e}")
-            logger.error(f"ORB+FVG import error: {e}", exc_info=True)
+            logger.error("ORB+FVG import error: {}", str(e), exc_info=True)
     
     st.divider()
     
@@ -313,10 +313,10 @@ def render_tab():
                             risk_tolerance=ai_risk
                         )
                         
-                        status.update(label=f"✅ AI analysis complete! Found {len(signals)} signals", state="complete")
+                        status.update(label=f"✅ AI analysis complete! Found {len(signals))} signals", state="complete")
                         
                         if signals:
-                            st.success(f"🎯 AI found {len(signals)} high-confidence trading opportunities!")
+                            st.success(f"🎯 AI found {len(signals))} high-confidence trading opportunities!")
                             
                             # Display signals
                             for idx, signal in enumerate(signals, 1):
@@ -465,7 +465,7 @@ def render_tab():
                             logger.error("Tradier client initialization returned None")
                     except Exception as e:
                         st.error(f"Connection error: {e}")
-                        logger.error(f"Tradier connection error: {e}", exc_info=True)
+                        logger.error("Tradier connection error: {}", str(e), exc_info=True)
             
             with col_init2:
                 st.info("Or go to **🏦 Tradier Account** tab to configure.")
@@ -502,7 +502,7 @@ def render_tab():
                 st.warning("Unable to fetch account balance. Please check connection.")
         except Exception as e:
             st.error(f"Error fetching account balance: {str(e)}")
-            logger.error(f"Account balance error: {e}", exc_info=True)
+            logger.error("Account balance error: {}", str(e), exc_info=True)
         
         st.divider()
         
@@ -699,7 +699,7 @@ def render_tab():
         
         except Exception as e:
             st.error(f"Error fetching positions: {e}")
-            logger.error(f"Positions error details: {type(positions) if 'positions' in locals() else 'undefined'}", exc_info=True)
+            logger.error("Positions error details: {}", str(type(positions) if 'positions' in locals() else 'undefined'), exc_info=True)
         
         st.divider()
         
@@ -761,7 +761,7 @@ def render_tab():
         
         except Exception as e:
             st.error(f"Error fetching orders: {e}")
-            logger.error(f"Orders error details: {type(orders) if 'orders' in locals() else 'undefined'}", exc_info=True)
+            logger.error("Orders error details: {}", str(type(orders) if 'orders' in locals() else 'undefined'), exc_info=True)
     
     elif scalp_platform == "IBKR":
         # Check IBKR connection

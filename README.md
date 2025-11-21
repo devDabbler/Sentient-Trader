@@ -1,254 +1,100 @@
 # 📈 Sentient Trader Platform
 
-> **A comprehensive, AI-driven trading platform for stocks, options, and cryptocurrencies with real-time analysis, news integration, technical indicators, and intelligent strategy recommendations for automated and manual trading.**
+> **AI-powered trading platform for stocks, options, and cryptocurrencies with real-time analysis, automated strategies, and intelligent risk management.**
 
-![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
+![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)
 ![Streamlit](https://img.shields.io/badge/streamlit-1.28%2B-red)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-production--ready-brightgreen)
+![Status](https://img.shields.io/badge/status-production-brightgreen)
+
+---
 
 ## 🆕 Latest Updates (November 2025)
 
-### **₿ Cryptocurrency Trading Integration** 🔥 **BRAND NEW!**
-- ✅ **Kraken Exchange Integration** - Full API support for crypto trading
-- ✅ **24/7 Markets** - Trade Bitcoin, Ethereum, and 20+ cryptos anytime
-- ✅ **AI-Powered Crypto Signals** - Crypto-specific analysis and strategies
-- ✅ **Crypto Scanner** - Find opportunities across all major pairs
-- ✅ **Adaptive Strategies** - Scalping, swing, and momentum trading for crypto
-- ✅ **Volatility Management** - Position sizing adapted for crypto volatility
-- ✅ **Fear & Greed Index** - Sentiment-driven trading signals
-- ✅ **Social Sentiment** - Twitter/Reddit/Discord integration
-- ✅ **Paper Trading** - Test crypto strategies risk-free
-- ✅ **All Safety Features** - Your stock trading safeguards adapted for crypto
+### **₿ Crypto Trading UX Overhaul** 🔥 **NEW!**
 
-**See:** `documentation/CRYPTO_TRADING_INTEGRATION_SUMMARY.md` for complete details
+**Streamlined Interface: 12 tabs → 7 tabs (42% reduction)**
 
-### **⚔️ Warrior Trading Scalping System**
-- ✅ **Gap & Go Strategy** - Trade premarket gappers with momentum continuation
-- ✅ **1-Minute Entry Triggers** - Breakout, micro pullback, red-to-green detection
-- ✅ **Market-Wide Scanner** 🔥 - Scan entire S&P 500/NASDAQ 100 for gappers automatically
-- ✅ **Automated Discovery** - No manual screening needed, finds best setups for you
-- ✅ **Tight Risk Management** - 1% stop, 2% profit, scale-out exits
-- ✅ **Morning Momentum Window** - Focus on 9:30 AM - 10:00 AM for best setups
-- ✅ **Hybrid Data Approach** - yfinance (free) + Tradier (real-time) for cost-effective scanning
+- 📊 **Dashboard** (NEW) - Market overview + portfolio + quick actions (merged 3 tabs)
+- 🔍 **Daily Scanner** (ENHANCED) - All-in-one progressive scanning workflow
+  - Tier 1: 7 scan sources (Penny, Sub-Penny, CoinGecko, Watchlist, Top Gainers, Volume Surge, All Coins)
+  - Tier 2: Technical analysis (RSI, MACD, EMAs, volume)
+  - Tier 3: Deep analysis (Full strategy + AI review)
+  - Tier 4: Active monitoring (Real-time P&L tracking)
+- ⭐ **My Watchlist** - Curated coin lists
+- ⚡ **Quick Trade** - Fast execution workflow  
+- 🔔 **Entry Monitors** - Optimal entry timing
+- 🤖 **AI Position Monitor** - Intelligent trade management
+- 📓 **Trade Journal** - Performance tracking
 
-**Market-Wide Scanning Features:** 🔥 **NEW!**
-- Scan 500+ stocks (S&P 500) or 100+ stocks (NASDAQ 100) in < 60 seconds
-- Automatic gapper discovery: 2-20% gap, 1.5-10x volume
-- Parallel processing with ThreadPoolExecutor for speed
-- Configurable universes: SP500, NASDAQ100, ALL, CUSTOM, WATCHLIST
-- Batch processing to avoid API rate limits
-- Intelligent fallback: Tradier → yfinance if needed
+**Consolidated Features:**
+- ❌ Removed: Old Crypto Scanner, Penny Cryptos tab, CoinMarketCap tab, Signal Generator
+- ✅ All features now in Daily Scanner with unified workflow
+- ✅ 70+ coins across 11 categories
+- ✅ Kraken API integration (24/7 trading)
+- ✅ Freqtrade battle-tested strategies
+- ✅ AI pre-trade review + monitoring
 
-**Core Filters:**
-- Price filter: $2-$20
-- Gap filter: 2-20% premarket gap (adjustable)
-- Volume filter: 1.5-10x average volume (adjustable)
-- Trading window: 9:30 AM - 10:00 AM ET
-- Profit target: 2% (scale out)
-- Stop loss: 1% (low of breakout candle)
+### **⚔️ Warrior Scalping System**
+- Gap & Go strategy (9:30-10:00 AM, $2-$20 stocks, 2-20% gaps)
+- Market-wide scanner (500+ stocks in <60s)
+- 1% stop, 2% profit, PDT-safe
+- Config: `config_warrior_scalping.py`
 
-**Supported Setups:**
-- **Gap & Go**: Breakout above premarket high after 9:30 AM
-- **Micro Pullback**: 0.2-0.5% pullback in uptrend, bounce off 9 EMA
-- **Red-to-Green**: Reversal after red candles, above premarket low
-- **Bull Flag**: Breakout above flag high with volume confirmation
+### **🎯 Dynamic Multi-Strategy System**
+- Intelligent per-ticker strategy selection (Scalping, Swing, Mean Reversion, Breakout, Wheel, Buy & Hold)
+- Dynamic position sizing (3-10%) based on volatility and confidence
+- Capital tracking with 10% cash reserve
 
-**Integration:**
-- Fully integrated with dynamic strategy selector
-- Auto-Trader mode: `WARRIOR_SCALPING`
-- Config file: `config_warrior_scalping.py`
-- Toggle: `USE_MARKET_WIDE_SCAN = True/False`
-- PDT-safe (cash account compatible)
-- Paper trading mode only (for now)
+### **🔔 Event Alert System**
+- Earnings, news, SEC filings, economic calendar
+- Discord notifications with rich embeds
+- Watchlist-filtered alerts
 
-**Documentation:**
-- 📚 Implementation Guide: `documentation/WARRIOR_MARKET_SCANNER_IMPLEMENTATION.md`
-- ⚡ Quick Start: `documentation/WARRIOR_SCANNER_QUICK_START.md`
-- 🧪 Test Suite: `tests/test_warrior_market_scanner.py`
-
-### **🎯 Dynamic Multi-Strategy System** 🆕 NEW!
-- ✅ **Intelligent Strategy Selection** - Each ticker gets the optimal strategy based on its characteristics
-- ✅ **Capital Management** - Tracks available capital, position sizing, and intelligent allocation
-- ✅ **Automatic Strategy Detection** - PLUG → Scalping | PLTR → Swing | RIOT → Breakout | AMC → Mean Reversion
-- ✅ **6 Trading Strategies** - Scalping, Swing, Mean Reversion, Breakout, Options Wheel, Buy & Hold
-- ✅ **Per-Ticker Optimization** - Volatility, trend, RSI, volume analyzed to pick best approach
-- ✅ **Risk-Aware Position Sizing** - Dynamic position sizes (3-10%) based on strategy and confidence
-- ✅ **Capital Utilization Tracking** - Real-time monitoring of allocated vs available capital
-- ✅ **Reserve Cash Management** - Keeps 10% cash reserve, never over-allocates
-
-**Example**: On a $10,000 account, system might allocate:
-- PLUG (Scalping): $300 (3%) - High volatility, quick 2% profits
-- PLTR (Swing): $500 (5%) - Strong uptrend, EMA reclaim, target 10%
-- SOFI (Options Wheel): $800 (8%) - High IV, sell puts for 3%/month
-- AMC (Mean Reversion): $400 (4%) - Oversold RSI 25, target 7% bounce
-
-### **🔔 Enhanced Event Alert System** 🆕
-- ✅ **Earnings Detection** - Upcoming earnings with IV rank, position warnings, and countdown alerts
-- ✅ **News Monitoring** - Real-time news with sentiment analysis (positive/negative/critical)
-- ✅ **SEC Filing Alerts** - Material events (8-K), insider trading (Form 4), quarterly reports
-- ✅ **Economic Calendar** - Fed decisions, CPI, jobs reports with sector impact analysis
-- ✅ **Trading Decision Alerts** - Buy/Sell signals and speculation opportunities with R/R ratios
-- ✅ **Rich Discord Embeds** - Beautiful notifications with all relevant details and links
-- ✅ **Automated Scheduling** - Runs detectors at optimal times (earnings daily 4PM, news every 30min, SEC hourly)
-- ✅ **Watchlist Filtering** - All alerts automatically filtered to your saved tickers
-- ✅ **Multi-Source Data** - yfinance (free), Finnhub, NewsAPI, SEC EDGAR API support
-
-### **🤖 PDT-Safe Trading System** 🆕
-- ✅ **Multi-Agent Architecture** - Event-driven agents for data, setups, risk, execution, and journaling
-- ✅ **SLOW_SCALPER Mode** - Intraday ORB/VWAP strategies with 3-bucket cash rotation
-- ✅ **MICRO_SWING Mode** - Key level rejections with T+2 settlement tracking
-- ✅ **Strategy Detectors** - ORB, VWAP Bounce, Key Level Rejection with multi-timeframe confirmation
-- ✅ **Settled Funds Only** - Avoid PDT rules by trading only settled cash
-- ✅ **Cash Bucket Rotation** - 3 buckets enable daily trading in cash accounts
-- ✅ **Risk Management** - Per-mode limits, cooldowns, dynamic position sizing
-- ✅ **Trade Journaling** - SQLite persistence with settlement dates, R multiples, per-setup stats
-- ✅ **Async Event Bus** - Non-blocking pub/sub for agent communication
+### **🤖 PDT-Safe Trading**
+- SLOW_SCALPER & MICRO_SWING modes
+- 3-bucket cash rotation for daily trading
+- T+2 settlement tracking
 
 ### **🤖 Automated Trading Bot**
-- ✅ **Full Auto-Trading System** - Monitor watchlist and execute trades automatically
-- ✅ **Per-Ticker Control** - Enable/disable auto-trading for each ticker individually
-- ✅ **Scalping Mode** - Fast intraday trades with 2% profit / 1% stop targets
-- ✅ **Multiple Trading Modes** - STOCKS, OPTIONS, SCALPING, SLOW_SCALPER, MICRO_SWING, or ALL
-- ✅ **Safety Features** - Trading hours enforcement, daily limits, confidence filtering
-- ✅ **Bracket Orders** - Automatic stop-loss and take-profit on every trade
-- ✅ **Paper Trading** - Test strategies risk-free before going live
-- ✅ **Execution History** - Track all automated trades with detailed metrics
+- Full auto-trading with per-ticker control
+- Multiple modes: STOCKS, OPTIONS, SCALPING, SLOW_SCALPER, MICRO_SWING
+- Safety features: trading hours, daily limits, bracket orders
+- Paper trading support
 
-### **🥊 AI-Powered Hybrid Mode (1-2 KNOCKOUT COMBO)** 🆕 NEW!
-
-**The ultimate trade quality and risk control system** - Only the best trades survive the double-validation gauntlet!
-
-#### **PUNCH 1: ML-Enhanced Scanner (Triple Validation)**
-- ✅ **40% ML Weight** - 158 alpha factors from Microsoft Qlib predict profitable moves
-- ✅ **35% LLM Weight** - GPT/Gemini/Claude reasoning explains WHY trades work
-- ✅ **25% Quantitative Weight** - Traditional RSI, MACD, IV analysis for reliability
-- ✅ **Ensemble Scoring** - Only trades passing ALL THREE systems with 70%+ combined score
-- ✅ **Adaptive Learning** - ML models retrain on recent data to adapt to market changes
-- ✅ **Explainable AI** - Know exactly why each trade was selected
-
-#### **PUNCH 2: AI Pre-Trade Validation (Final Risk Check)**
-- ✅ **Portfolio Analysis** - LLM reviews capital utilization, diversification, and concentration risk
-- ✅ **Risk/Reward Assessment** - Validates minimum 1.5:1 risk/reward ratio
-- ✅ **Position Sizing Validation** - Ensures appropriate sizing for available capital
-- ✅ **Red Flag Detection** - Identifies hidden risks in setup reasoning
-- ✅ **Confidence Scoring** - 0-1.0 validation confidence (minimum 0.7 required)
-- ✅ **Conservative Bias** - Blocks trades that don't meet stringent risk criteria
-
-#### **Why This Combo Works:**
-🎯 **Higher Win Rate** - Three independent systems must agree before PUNCH 1 passes  
-🛡️ **Better Risk Management** - AI validator identifies risks ML/Quant might miss in PUNCH 2  
-🧠 **Adaptive** - ML continuously learns from market changes  
-📊 **Explainable** - Full transparency on why trades are selected or rejected  
-💰 **Capital Efficient** - Portfolio-aware validation prevents over-concentration  
-
-#### **Configuration (config_paper_trading.py):**
-```python
-# Enable ML-Enhanced Scanner (PUNCH 1)
-USE_ML_ENHANCED_SCANNER = True
-MIN_ENSEMBLE_SCORE = 70.0  # 70% combined confidence minimum
-
-# Enable AI Pre-Trade Validation (PUNCH 2)
-USE_AI_VALIDATION = True
-MIN_AI_VALIDATION_CONFIDENCE = 0.7  # 70% AI approval confidence
-
-# Enable both for 1-2 KNOCKOUT COMBO! 🥊
-```
-
-#### **How It Works:**
-1. **ML-Enhanced Scanner** scans market using triple validation (ML + LLM + Quant)
-2. Only trades scoring 70%+ on ensemble pass to execution queue
-3. **AI Validator** performs final risk assessment on each trade
-4. Reviews portfolio fit, risk/reward, position sizing, and hidden risks
-5. Trade executes ONLY if AI validation confidence ≥ 70%
-6. Result: Only highest-quality, lowest-risk trades make it through!
-
-**Performance Impact:**
-- 📈 **30-50% higher win rate** vs standard signals (triple validation)
-- 🛡️ **60% fewer high-risk trades** (AI risk check blocks bad setups)
-- 💡 **Better portfolio balance** (concentration risk detection)
-- ⚡ **Faster signal processing** (pre-filtered high-quality trades only)
+### **🥊 AI-Powered Hybrid Mode**
+**Double-validation system:**
+- **PUNCH 1**: ML (40%) + LLM (35%) + Quant (25%) = 70%+ ensemble score required
+- **PUNCH 2**: AI pre-trade validation checks portfolio fit, risk/reward, position sizing
+- Microsoft Qlib 158 alpha factors + GPT/Gemini/Claude reasoning
+- Result: 30-50% higher win rate, 60% fewer high-risk trades
 
 ### **Google Gemini 2.5 Flash Integration**
-- ✅ **AI Trading Signals** now powered by Gemini for superior buy/sell recommendations
-- ✅ **Strategy Analyzer** uses Gemini for advanced bot configuration critique
-- ✅ **AI Confidence Scanner** upgraded to Gemini for better stock analysis
-- ✅ Configurable via `.env` - easily switch between free and premium models
-- ✅ Fixed environment variable handling (`AI_TRADING_MODEL`, `AI_CONFIDENCE_MODEL`, `AI_ANALYZER_MODEL`)
-
-### **Tradier Production Trading**
-- ✅ **Fixed Production Connection** - Resolved enum comparison issues for live trading
-- ✅ **Bracket Order Display** - View stop-loss and take-profit prices for all orders
-- ✅ **Enhanced Order Management** - Detailed order leg information with status tracking
-
-### **Bug Fixes & Improvements**
-- 🐛 Fixed `AttributeError` in stock analysis (corrected `sentiment_score` and removed non-existent `social_sentiment`)
-- 🐛 Resolved module import issues with `ComprehensiveAnalyzer`
-- 🐛 Fixed Tradier production mode credential loading with whitespace handling
-- 🔧 Improved Streamlit cache handling for reliable code reloading
-- 📝 Updated documentation with comprehensive AI model configuration guide
-
-**Performance:** Gemini provides 2-3x better analysis quality with ~2 second response times at a fraction of GPT-4 cost.
+- AI signals, strategy analyzer, confidence scanner
+- 2-3x better analysis quality vs free models
+- ~2 second response times
+- Configurable via `.env`
 
 ---
 
 ## 🌟 Overview
 
-This platform transforms options trading by combining real-time market data, technical analysis, news sentiment, and AI-powered strategy recommendations into a single, intuitive interface. Built for traders of all experience levels, it integrates seamlessly with Option Alpha's webhook system to automate your trading strategies with comprehensive guardrails and risk management.
+AI-powered trading platform for stocks, options, and cryptocurrencies. Combines real-time data, technical analysis, news sentiment, and intelligent strategy recommendations with comprehensive risk management.
 
-### **What Makes This Special?**
+### **Key Features**
 
-- 🔍 **360° Stock Intelligence** - Real-time technical indicators, IV metrics, news, and catalysts
-- 🤖 **AI Strategy Advisor** - Personalized recommendations based on 15+ market factors
-- 📊 **Multi-Factor Analysis** - Combines RSI, MACD, IV Rank, sentiment, and catalysts
-- 📈 **EMA Power Zone & Fibonacci System** - 8-21 EMA reclaim detection, DeMarker timing, A-B-C extension targets
-- 🎯 **Multi-Timeframe Alignment** - Weekly/Daily/4H trend confirmation for highest-conviction setups
-- 💪 **Sector Relative Strength** - Compare vs sector ETFs and SPY for leading stock selection
-- 🔬 **Entropy Analysis** - Information theory-based noise filtering to separate signal from random market chaos
-- 🧠 **Microsoft Qlib Integration** - Advanced ML models with 158 alpha factors and backtesting (optional)
-- 🛡️ **Smart Guardrails** - Built-in risk management and position limits
-- 📰 **Live News Integration** - Real-time sentiment analysis from market news
-- 📅 **Catalyst Detection** - Automatic earnings and event tracking
-- 🔔 **Smart Alerts** - Discord notifications for My Tickers setups + real-time position monitoring
-- 🎯 **Option Alpha Integration** - Direct webhook support for automated execution
-- 🚀 **Advanced Scanner** - 200+ ticker universe, **social sentiment analysis** (Reddit/Twitter/StockTwits), buzzing stock detection with Crawl4ai web scraping, reverse merger candidates, penny stock risk analysis
+- 🔍 **360° Intelligence** - Technical indicators, IV metrics, news, catalysts
+- 🤖 **AI Strategy Advisor** - ML + LLM recommendations (Microsoft Qlib + Gemini)
+- 📊 **Multi-Factor Analysis** - RSI, MACD, IV Rank, EMA zones, Fibonacci, entropy
+- 🛡️ **Risk Management** - Position limits, bracket orders, PDT-safe modes
+- 🔔 **Smart Alerts** - Discord notifications for setups + position monitoring
+- 🚀 **Advanced Scanner** - 200+ tickers, social sentiment (Reddit/Twitter/StockTwits)
 
 ---
 
 ## 🚀 Quick Start
 
-### Installation
-
-# Sentient Trader Platform
-
-A Streamlit-based research and signal generation tool that combines market data, technical indicators, news sentiment, implied volatility analysis, and an LLM-powered strategy critic to produce actionable options strategy recommendations and signals.
-
-This repository contains a local GUI that helps you research tickers, evaluate option strategies, run pricing and greeks, and build/send validated signals (paper or live) to Option Alpha (via webhook) or Tradier (via API client).
-
-## What this project contains
-
-- `app.py` — Full Streamlit application. Tabs include Stock Intelligence, Strategy Advisor, Signal Builder, Signal History, Strategy Guide, Advanced Analytics (pricing + greeks + binomial convergence tooling), Tradier account helpers, and an LLM Strategy Analyzer panel.
-- `llm_strategy_analyzer.py` — Utilities to analyze Option Alpha bot configurations using various LLM providers (OpenAI, Anthropic, Google, OpenRouter). Exposes `LLMStrategyAnalyzer` and example extraction helpers.
-- `options_pricing.py` — Black-Scholes pricing + analytical greeks and a Cox-Ross-Rubinstein binomial pricer for American options. Also includes a finite-difference greeks wrapper used by the UI.
-- `tradier_client.py` — Lightweight Tradier API client used for paper/live order placement, quotes, and account summary helpers.
-- `services/qlib_integration.py` — Microsoft Qlib integration for advanced ML-based stock prediction, 158 alpha factors (Alpha158 dataset), backtesting framework, and rolling model retraining for market adaptation (optional feature).
-- `services/ml_enhanced_scanner.py` — **Your ultimate confidence scanner** that combines Qlib ML predictions + LLM reasoning + quantitative analysis for maximum confidence trading decisions. This is the recommended scanner for serious trading.
-- `examples/ml_enhanced_trading_workflow.py` — Complete daily trading workflow showing how to use ML-enhanced scanning for the most confident decisions.
-- `requirements.txt` — Python dependencies used by the project.
-- `tests/` — Pytest tests for pricing and analyzer modules.
-
-## Main features
-
-- Comprehensive on-screen stock analysis (RSI, MACD, support/resistance, IV Rank/Percentile, news & catalysts).
-- AI-driven strategy recommendations (several predefined strategies: sell put, sell call, iron condor, credit/debit spreads, straddles, wheel, etc.).
-- Signal builder with guardrails (DTE, quantity limits, max daily orders, max daily risk, allowed strategies).
-- Paper trading mode (default) and webhook integration for Option Alpha.
-- Tradier client helpers (create client from env, validate connection, convert signals to Tradier orders).
-- Advanced analytics: option pricing, greeks, binomial convergence benchmarking, and sensitivity explorers.
-- **Microsoft Qlib ML enhancements (optional)**: 158 alpha factors, LightGBM/LSTM predictions, backtesting framework, rolling retraining for market adaptation.
-- **Alert system**: Discord notifications for technical setups on your saved tickers (My Tickers) + real-time position monitoring with P&L alerts.
-
-## Quickstart (Windows)
+### Installation (Windows)
 
 1. Create and activate a virtual environment (recommended):
 
@@ -263,542 +109,94 @@ venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-3. (Optional) Install Crawl4ai for social sentiment analysis:
+3. Run the app:
 
 ```powershell
-pip install crawl4ai
-crawl4ai-setup  # Downloads headless browser for JS rendering
-python test_crawl4ai.py  # Test installation
+streamlit run app.py  # Opens at http://localhost:8501
 ```
 
-4. (Optional) Install Microsoft Qlib for advanced ML features:
-
+4. **(Optional)** Advanced features:
 ```powershell
+# Social sentiment
+pip install crawl4ai && crawl4ai-setup
+
+# ML-enhanced scanning
 pip install pyqlib
 python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/us_data --region us
 ```
 
-5. Run the app:
+## ⚙️ Configuration
 
-```powershell
-streamlit run app.py
-```
-
-The Streamlit UI opens (default) at http://localhost:8501.
-
-## ⚙️ Configuration & Strategy Setup
-
-### **Overview**
-
-Sentient Trader uses a two-part configuration system:
-1. **`active_strategy.json`** - Controls which strategy/config file the background trader uses
-2. **Config files** (e.g., `config_warrior_scalping.py`) - Contains all trading parameters for each strategy
+### **Two-Part System**
+1. **`active_strategy.json`** - Controls active strategy
+2. **Config files** (e.g., `config_warrior_scalping.py`) - Trading parameters
 
 ### **Available Strategies**
+| Strategy | Config File | Description |
+|----------|-------------|-------------|
+| WARRIOR_SCALPING | `config_warrior_scalping.py` | Gap & Go (9:30-10 AM) |
+| GENERAL_TRADING | `config_background_trader.py` | Standard trading |
+| OPTIONS_PREMIUM | `config_options_premium.py` | Wheel, spreads |
+| SWING_TRADING | `config_swing_trader.py` | 1-5 day positions |
 
-The platform supports multiple trading strategies, each with its own configuration:
-
-| Strategy Key | Name | Config File | Description |
-|--------------|------|-------------|-------------|
-| `WARRIOR_SCALPING` | Warrior Scalping | `config_warrior_scalping.py` | Gap & Go strategy (9:30-10:00 AM, $2-$20 stocks, 2-20% gaps) |
-| `GENERAL_TRADING` | General Trading | `config_background_trader.py` | Standard scalping, stocks, or options trading |
-| `OPTIONS_PREMIUM` | Options Premium Selling | `config_options_premium.py` | Wheel strategy, credit spreads, iron condors |
-| `SWING_TRADING` | Swing Trading | `config_swing_trader.py` | Medium-term positions (1-5 days) |
-| `PAPER_TRADING` | Paper Trading (Legacy) | `config_paper_trading.py` | Legacy paper trading configuration |
-| `LIVE_TRADING` | Live Trading (Legacy) | `config_live_trading.py` | Legacy live trading configuration |
-
-### **Setting Up Paper Trading vs Live Trading**
-
-The platform uses **two separate settings** that work together:
-
-1. **`.env` file** - Controls which broker API to connect to (sandbox vs production)
-2. **`active_strategy.json`** - Controls which strategy/config file to load
-
-#### **For Paper Trading (Safe Testing):**
-
-1. **Update `.env` file:**
-   ```bash
-   IS_PAPER_TRADING=True
-   PAPER_TRADING_MODE=True
-   ```
-
-2. **Set your desired strategy** (see "Switching Strategies" below)
-
-3. **Start the background trader** - it will connect to Tradier sandbox (paper trading)
-
-#### **For Live Trading (Real Money):**
-
-⚠️ **WARNING: This uses REAL MONEY!** Only proceed if you're ready for live trading.
-
-1. **Update `.env` file:**
-   ```bash
-   IS_PAPER_TRADING=False
-   PAPER_TRADING_MODE=False
-   ```
-
-2. **Set your desired strategy** (see "Switching Strategies" below)
-
-3. **Start the background trader** - it will connect to Tradier production API
-
-### **Switching Strategies**
-
-You can switch strategies in two ways:
-
-#### **Method 1: Via Streamlit UI (Recommended)**
-
-1. Start Streamlit: `streamlit run app.py`
-2. Navigate to **Auto-Trader** tab
-3. Go to **Configuration** section
-4. Select your desired strategy from the dropdown
-5. Click **"Activate Strategy"** button
-6. The system will update `active_strategy.json` automatically
-
-#### **Method 2: Manual Edit**
-
-1. **Edit `active_strategy.json`:**
-   ```json
-   {
-     "active_strategy": "WARRIOR_SCALPING",
-     "config_file": "config_warrior_scalping.py",
-     "last_updated": "2025-11-02 09:01:16",
-     ...
-   }
-   ```
-
-2. **Restart the background trader** for changes to take effect
-
-### **Customizing Strategy Settings**
-
-Each strategy has its own config file (e.g., `config_warrior_scalping.py`) where you can customize:
-
-- **Trading Mode**: `TRADING_MODE = "WARRIOR_SCALPING"`
-- **Capital Management**: `TOTAL_CAPITAL`, `RESERVE_CASH_PCT`, `MAX_POSITION_SIZE_PCT`
-- **Risk Settings**: `MIN_CONFIDENCE`, `MAX_DAILY_LOSS`, `MAX_TRADES_PER_DAY`
-- **AI Features**: `USE_ML_ENHANCED_SCANNER`, `USE_AI_VALIDATION`
-- **Strategy-Specific**: Watchlists, filters, time windows, etc.
-
-**Example - `config_warrior_scalping.py`:**
-```python
-# Trading Mode
-TRADING_MODE = "WARRIOR_SCALPING"
-
-# Capital Settings
-TOTAL_CAPITAL = 10000.0  # $10,000
-RESERVE_CASH_PCT = 10.0  # 10% reserved
-MAX_POSITION_SIZE_PCT = 5.0  # Max 5% per position
-
-# Risk Management
-MIN_CONFIDENCE = 70  # Only trades with 70%+ confidence
-MAX_DAILY_LOSS = 200.0  # Stop after $200 loss
-MAX_TRADES_PER_DAY = 10  # Maximum trades per day
-
-# AI Features
-USE_ML_ENHANCED_SCANNER = True
-USE_AI_VALIDATION = True
-MIN_ENSEMBLE_SCORE = 70.0
-```
-
-### **Starting & Stopping Background Trader**
-
-#### **Starting the Background Trader:**
-
-**Windows:**
-```powershell
-# Activate virtual environment
-.\venv\Scripts\Activate.ps1
-
-# Start in background (no console window)
-Start-Process pythonw -ArgumentList "run_autotrader_background.py" -WindowStyle Hidden
-
-# Or start with console visible
-python run_autotrader_background.py
-```
-
-**Linux/Mac:**
+### **Paper vs Live Trading**
+**.env settings:**
 ```bash
-# Activate virtual environment
-source venv/bin/activate
+# Paper Trading (default - safe testing)
+IS_PAPER_TRADING=True
 
-# Start in background
-nohup python run_autotrader_background.py > /dev/null 2>&1 &
+# Live Trading (⚠️ REAL MONEY)
+IS_PAPER_TRADING=False
+```
 
-# Or start with console visible
+### **Switch Strategies**
+**Via UI (Recommended):** Auto-Trader tab → Configuration → Select strategy → Activate  
+**Manual:** Edit `active_strategy.json` + restart trader
+
+### **Start/Stop Trader**
+```powershell
+# Windows - Start
 python run_autotrader_background.py
-```
 
-#### **Stopping the Background Trader:**
-
-**Windows:**
-```powershell
-# Find and kill the process
-Get-Process | Where-Object {$_.Path -like "*pythonw.exe*"} | Stop-Process -Force
-# Or
-taskkill /F /IM pythonw.exe
-```
-
-**Linux/Mac:**
-```bash
-# Find the process
-ps aux | grep run_autotrader_background.py
-
-# Kill it (replace PID with actual process ID)
-kill -9 <PID>
-```
-
-#### **Viewing Logs:**
-
-Logs are written to `logs/autotrader_background.log`. View them with:
-
-**Windows:**
-```powershell
+# View logs
 Get-Content logs\autotrader_background.log -Tail 50 -Wait
 ```
 
-**Linux/Mac:**
-```bash
-tail -f logs/autotrader_background.log
-```
+## 🔑 Environment Variables
 
-### **Configuration Workflow Example**
-
-**Setting up Warrior Scalping for Paper Trading:**
-
-1. **Set paper trading in `.env`:**
-   ```bash
-   IS_PAPER_TRADING=True
-   PAPER_TRADING_MODE=True
-   ```
-
-2. **Switch to Warrior Scalping:**
-   - Via Streamlit UI: Auto-Trader → Configuration → Select "Warrior Scalping" → Activate
-   - Or manually edit `active_strategy.json`:
-     ```json
-     {
-       "active_strategy": "WARRIOR_SCALPING",
-       "config_file": "config_warrior_scalping.py"
-     }
-     ```
-
-3. **Customize strategy (optional):**
-   - Edit `config_warrior_scalping.py` to adjust capital, risk, filters, etc.
-
-4. **Start background trader:**
-   ```powershell
-   python run_autotrader_background.py
-   ```
-
-5. **Verify it's working:**
-   - Check logs: `logs/autotrader_background.log`
-   - Should see: `🎯 Active Strategy: Warrior Scalping`
-   - Should see: `📁 Config File: config_warrior_scalping.py`
-   - Should see: `📝 Paper Trading: True`
-
-### **Important Notes**
-
-- **Always restart the background trader** after changing `active_strategy.json` or config files
-- **Paper trading is default** - Always test strategies in paper mode first
-- **Config files are independent** - Changing one doesn't affect others
-- **`active_strategy.json` controls which config loads** - The background trader reads this on startup
-- **Both `.env` and `active_strategy.json` must match your intent** - One controls broker connection, the other controls strategy
-
-## 🤖 AI Model Configuration (Google Gemini Integration)
-
-The platform now supports **Google Gemini 2.5 Flash** via OpenRouter for all AI-powered features, providing superior analysis quality compared to free models.
-
-### **Three AI Components:**
-
-| Component | Environment Variable | Purpose |
-|-----------|---------------------|---------|
-| **AI Confidence Scanner** | `AI_CONFIDENCE_MODEL` | High-level stock analysis & confidence scoring |
-| **AI Trading Signals** | `AI_TRADING_MODEL` | Generates specific buy/sell signals with entry/exit points |
-| **Strategy Analyzer** | `AI_ANALYZER_MODEL` | Critiques trading bot configurations & strategies |
-
-### **Configuration in `.env`:**
+Create a `.env` file with your API keys:
 
 ```bash
-# OpenRouter API Key (required)
+# AI Models (Required)
 OPENROUTER_API_KEY=sk-or-v1-...
-
-# AI Model Configuration (via OpenRouter)
-AI_CONFIDENCE_MODEL=google/gemini-2.5-flash
-AI_TRADING_MODEL=google/gemini-2.5-flash
-AI_ANALYZER_MODEL=google/gemini-2.5-flash
-```
-
-### **Available Models:**
-
-**Free Options:**
-- `meta-llama/llama-3.1-8b-instruct:free` - Fast, good for basic analysis
-- `mistralai/mistral-7b-instruct:free` - Balanced performance
-- `huggingfaceh4/zephyr-7b-beta:free` - Lightweight option
-
-**Premium Options (Recommended):**
-- `google/gemini-2.5-flash` - **Best value** - Fast, accurate, cost-effective
-- `google/gemini-flash-1.5` - Previous generation Gemini
-- `openai/gpt-4o` - High quality, higher cost
-- `anthropic/claude-3-haiku` - Fast Claude model
-
-### **Why Gemini 2.5 Flash?**
-
-✅ **Superior reasoning** - Better analysis quality than free models  
-✅ **Fast responses** - 2-3 second generation time  
-✅ **Cost-effective** - Excellent performance-to-cost ratio  
-✅ **Consistent output** - Reliable JSON formatting for signals  
-✅ **Context understanding** - Better at interpreting complex market conditions  
-
-### **Recent Updates (October 2025):**
-
-- ✅ Fixed `AttributeError` in stock analysis (sentiment/social_sentiment attributes)
-- ✅ Integrated Gemini across all three AI components
-- ✅ Updated environment variable handling for consistent model configuration
-- ✅ Improved error handling and module import reliability
-
-**Find more models at:** https://openrouter.ai/models
-
-## 🎯 Advanced Strategy Library with AI Validation
-
-The platform now includes a library of professional-grade option strategies with detailed playbooks and AI-powered viability assessment. These strategies go beyond basic options plays to include sophisticated approaches used by successful professional traders.
-
-### **Available Strategies**
-
-#### **1. Professional Futures Options Selling ("The Chicken Approach")**
-- **Source**: Professional portfolio manager ($8.7M AUM)
-- **Performance**: 27.64% YTD, 12/12 winning trades, Sharpe ratio 2.47
-- **Approach**: Sell strangles/puts on commodity futures (Gold, Silver, Copper, Oil, Gas, Wheat, Soybeans)
-- **Philosophy**: Only trade when odds are overwhelmingly favorable; exit before major unpredictable events
-- **Experience Level**: Professional
-- **Capital Required**: Very High ($100k+ recommended)
-
-**Key Parameters:**
-- DTE: 45-120 days for optimal theta decay
-- Profit Target: 50% of credit collected
-- Stop Loss: 50% of credit (tight risk management)
-- Max Margin: 30% per position
-- Never roll positions - close and re-evaluate
-- Never trade correlated products simultaneously
-
-**4-Step Playbook:**
-1. **Check CVOL**: Ensure 3-month volatility is elevated (high premiums)
-2. **Analyze Technicals**: Determine trend direction (uptrend/downtrend/sideways)
-3. **Fundamental Analysis** (CRITICAL): Distinguish critical vs non-critical news
-   - Critical news (tariffs, war, policy shifts) = DO NOT TRADE
-   - Non-critical news (social media hype, minor reports) = Opportunity
-4. **Position Setup**: Use decision matrix based on fundamentals
-
-**Risk Management:**
-- Preemptive exit before major events ("Chicken Rule")
-- Wide strikes (low delta, far OTM) using historical ranges
-- Active monitoring of geopolitical/fundamental news
-
-#### **2. LEAPS Recovery Strategy ("Blood in the Streets")**
-- **Source**: Professional trader ($30k → $548k in 7 months)
-- **Return**: 1,727% (17.27x) in 7 months
-- **Approach**: Buy LEAPS calls on SPY during major market crashes
-- **Philosophy**: Enter during "blood in the streets" when sentiment is crushed
-- **Experience Level**: Advanced
-- **Capital Required**: Medium to High
-- **Risk Level**: Very High (can lose 100% of capital)
-
-**Key Parameters:**
-- **Expiration**: 1.5-2+ years (LEAPS minimize theta decay)
-- **Strike Selection**: ITM or Near-ATM (Delta 0.70-0.85)
-- **Entry Timing**: Major non-catastrophic sell-off (tariff panic, policy shock)
-- **Exit Timing**: Catalytic FOMO moment (Fed cuts, political clarity, strong earnings)
-- **Optional**: Roll up to higher strikes to compound gains
-
-**5-Step Playbook:**
-1. **Wait for Blood in Streets**: Major panic, crushed sentiment, recovery seems impossible
-2. **Select LEAPS on SPY**: 1.5-2+ years to expiration
-3. **Buy ITM Calls**: Delta 0.70-0.85 for maximum exposure, minimal time decay
-4. **Optional Roll-Up**: As profitable, sell and buy higher strike to compound
-5. **Exit into FOMO**: When positive catalysts converge (Fed cuts, political clarity)
-
-**Risk Management:**
-- Only allocate capital you can afford to lose entirely
-- Requires accurate market timing and strong recovery thesis
-- Emotional discipline to hold through volatility
-- Monitor thesis validity continuously
-
-### **AI Strategy Validation**
-
-Each strategy includes AI-powered validation that analyzes:
-
-✅ **Viability Assessment** - Is the strategy suitable for the current market?  
-✅ **Market Alignment** - Do conditions match strategy requirements?  
-✅ **Red Flag Detection** - Identify dangerous conditions to avoid  
-✅ **Missing Conditions** - What requirements are NOT currently met?  
-✅ **Specific Recommendations** - Tailored advice for implementation  
-✅ **Confidence Scoring** - AI confidence in the viability assessment
-
-### **How to Use Custom Strategies**
-
-**In Strategy Advisor Tab:**
-
-```python
-from analyzers.strategy import StrategyAdvisor
-from services.strategy_validator import StrategyValidator
-
-# Get available strategies for your experience level
-custom_strategies = StrategyAdvisor.get_custom_strategies(user_experience="Advanced")
-
-# Convert to recommendations for display
-for strategy in custom_strategies:
-    recommendation = StrategyAdvisor.convert_custom_to_recommendation(strategy)
-    print(f"{recommendation.strategy_name}: {recommendation.confidence:.1%}")
-
-# Validate a specific strategy for a ticker
-validator = StrategyValidator()
-validation = validator.validate_strategy(
-    strategy=custom_strategies[0],
-    ticker="SPY",
-    analysis=stock_analysis,  # Your StockAnalysis object
-    market_context={"vix": 35.0, "sentiment": "Panic"}
-)
-
-# Check results
-if validation.is_viable:
-    print(f"✅ Strategy viable: {validation.viability_score:.1%}")
-    print(f"Strengths: {validation.strengths}")
-else:
-    print(f"❌ Not viable: {validation.concerns}")
-```
-
-**Strategy Selection Dropdown:**
-
-The Strategy Advisor now includes a dropdown to select between:
-- **Traditional Strategies** (Sell Put, Buy Call, Iron Condor, etc.)
-- **Advanced Strategies** (Futures Options Selling, LEAPS Recovery)
-
-When you select an advanced strategy, the AI automatically:
-1. Analyzes current market conditions
-2. Checks if all requirements are met
-3. Identifies any red flags
-4. Provides specific implementation recommendations
-5. Calculates viability score and confidence
-
-**Example Workflow:**
-
-1. Select "Advanced Strategies" from dropdown
-2. Choose strategy (e.g., "LEAPS Recovery Strategy")
-3. Enter ticker (e.g., "SPY")
-4. Click "Validate Strategy with AI"
-5. Review AI assessment:
-   - Viability score
-   - Market alignment rating
-   - Strengths and concerns
-   - Missing conditions
-   - Red flags detected
-   - Implementation recommendations
-
-### **Integration with Existing Features**
-
-Custom strategies integrate seamlessly with:
-- **Stock Intelligence**: Validate strategies against current analysis
-- **Advanced Scanner**: Batch validate strategies across multiple tickers
-- **AI Signals**: Combine with AI trading signals for comprehensive analysis
-- **Risk Management**: Built-in guardrails and validation checklists
-
-### **Important Warnings**
-
-⚠️ **Futures Options Selling**:
-- Requires futures trading approval and significant capital
-- Needs deep commodity-specific knowledge
-- Must monitor geopolitical news constantly
-- Professional-level strategy - not for beginners
-
-⚠️ **LEAPS Recovery**:
-- EXTREMELY HIGH RISK - can lose 100% of capital
-- Requires accurate market timing
-- Massive leverage = massive potential losses
-- Not suitable for beginners or conservative investors
-- One example ≠ guaranteed future results
-
-### **Files Added**
-
-- `models/reddit_strategies.py` - Strategy definitions with detailed parameters
-- `services/strategy_validator.py` - AI validation service
-- `analyzers/strategy.py` - Updated with custom strategy methods
-
-### **Configuration**
-
-Ensure your `.env` includes:
-```bash
-OPENROUTER_API_KEY=your_key_here
-AI_ANALYZER_MODEL=google/gemini-2.0-flash-exp:free
-```
-
-The AI validator uses the same model configuration as other AI features.
-
-## Environment variables
-
-Some integrations require API keys or credentials. You can put them in a `.env` file (project uses python-dotenv) or export them into your environment.
-
-- Option Alpha webhook — Provided in the Streamlit sidebar when sending signals (no env var required).
-- LLM provider API keys (only required if you use the Strategy Analyzer):
-  - OPENAI_API_KEY — OpenAI API key
-  - ANTHROPIC_API_KEY — Anthropic API key
-  - GOOGLE_API_KEY — Google Generative API key
-  - OPENROUTER_API_KEY — OpenRouter API key
-  - COINMARKETCAP_API_KEY — CoinMarketCap API key (optional, for enhanced crypto data aggregation)
-  - Set `LLM_PROVIDER` to one of `openai`, `anthropic`, `google`, `openrouter` if you want to change the default provider.
-- Tradier (optional, for paper/live order execution):
-  - **Paper Trading:**
-    - TRADIER_PAPER_ACCOUNT_ID (or TRADIER_ACCOUNT_ID for backward compatibility)
-    - TRADIER_PAPER_ACCESS_TOKEN (or TRADIER_ACCESS_TOKEN for backward compatibility)
-    - TRADIER_PAPER_API_URL (optional, defaults to https://sandbox.tradier.com)
-  - **Production Trading:**
-    - TRADIER_PROD_ACCOUNT_ID
-    - TRADIER_PROD_ACCESS_TOKEN
-    - TRADIER_PROD_API_URL (optional, defaults to https://api.tradier.com)
-- Crawl4ai (optional, for social sentiment analysis):
-  - Install with `pip install crawl4ai` and run `crawl4ai-setup`
-  - No API keys required, uses public endpoints
-  - Requires headless browser (Chromium) for JavaScript rendering
-- Microsoft Qlib (optional, for ML-enhanced predictions):
-  - Install with `pip install pyqlib` and download data using `python -m qlib.run.get_data`
-  - No API keys required, uses local data and models
-
-Example `.env` (do not commit your secrets):
-
-```bash
-# OpenRouter API Key (for AI features)
-OPENROUTER_API_KEY=sk-or-v1-...
-
-# AI Model Configuration (via OpenRouter)
 AI_CONFIDENCE_MODEL=google/gemini-2.5-flash
 AI_TRADING_MODEL=google/gemini-2.5-flash
 AI_ANALYZER_MODEL=google/gemini-2.5-flash
 
-# Paper Trading (Sandbox)
+# Broker (Required for trading)
 TRADIER_PAPER_ACCOUNT_ID=ABC123
 TRADIER_PAPER_ACCESS_TOKEN=xxxx_paper_token
-TRADIER_PAPER_API_URL=https://sandbox.tradier.com
+TRADIER_PROD_ACCOUNT_ID=XYZ789  # Live trading only
+TRADIER_PROD_ACCESS_TOKEN=xxxx  # Live trading only
 
-# Production Trading (Live)
-TRADIER_PROD_ACCOUNT_ID=XYZ789
-TRADIER_PROD_ACCESS_TOKEN=xxxx_prod_token
-TRADIER_PROD_API_URL=https://api.tradier.com
+# Crypto (Required for crypto trading)
+KRAKEN_API_KEY=your_kraken_key
+KRAKEN_API_SECRET=your_kraken_secret
 
-# Discord Alerts (REQUIRED for event notifications)
+# Alerts (Optional but recommended)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
-# Optional API Keys for Enhanced Data
-FINNHUB_API_KEY=your_finnhub_key        # For news & economic calendar
-NEWSAPI_KEY=your_newsapi_key            # For additional news sources
-SEC_API_KEY=your_sec_key                # For SEC filing rate limits (optional)
-TRADING_ECONOMICS_API_KEY=your_te_key   # For economic calendar (optional)
-
-# Legacy LLM Keys (optional, for direct API access)
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...
+# Additional Data Sources (Optional)
+FINNHUB_API_KEY=your_key  # News & calendar
+NEWSAPI_KEY=your_key      # Additional news
+COINMARKETCAP_API_KEY=your_key  # Crypto data
 ```
 
 ---
 
-## 🔔 Enhanced Event Alert System
+## 🔔 Event Alerts
 
-Your trading platform now includes a comprehensive event detection and notification system that monitors earnings, news, SEC filings, and economic events - all automatically sent to Discord with rich formatting.
+Monitors earnings, news, SEC filings, and economic events → Discord notifications with rich formatting.
 
 ### **What Gets Monitored**
 
@@ -3254,19 +2652,30 @@ for candidate in merger_candidates:
 - The app uses Streamlit's newer features (data_editor, status, toggle). Compatibility shims exist in `app.py` to gracefully degrade when running older Streamlit versions but features may be limited.
 - **Qlib integration** is optional and requires separate installation (`pip install pyqlib`). If not installed, the app gracefully falls back to standard analysis methods.
 
-## Security & safety
+---
 
-- Never commit API keys or secrets to version control.
-- Keep the app in Paper Trading Mode while configuring and testing.
+## 📚 Detailed Documentation
 
-## Contributing
+For comprehensive guides, see the `/documentation` folder:
+- **Warrior Scanner**: `WARRIOR_MARKET_SCANNER_IMPLEMENTATION.md`
+- **Crypto Trading**: `CRYPTO_TRADING_INTEGRATION_SUMMARY.md`
+- **Event Alerts**: Event detector implementations
+- **Strategy Guides**: Advanced strategy playbooks
 
-Open issues or PRs are welcome. If you make changes to pricing or greeks code, please add or update unit tests in `tests/`.
+---
 
-## License
+## 🔒 Security & Safety
 
-MIT — see LICENSE (if present) for details.
+- Never commit API keys to version control
+- Always test in Paper Trading mode first
+- Use virtual environments for dependency isolation
 
-## Contact
+## 📜 License
+
+MIT License - See LICENSE file for details
+
+---
+
+**Made with ❤️ for traders who want AI-powered edge**
 
 If you want help running the app or extending integrations (e.g., add a new LLM provider or broker adapter), open an issue or reach out via the repository.

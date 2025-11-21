@@ -90,7 +90,7 @@ class SentimentAgent:
                     hours=hours,
                 )
             except Exception as exc:  # pragma: no cover - network edge cases
-                logger.error(f"SentimentAgent failed to fetch news for {symbol}: {exc}", exc_info=True)
+                logger.error("SentimentAgent failed to fetch news for {symbol}: {}", str(exc), exc_info=True)
                 sentiment_data = CryptoNewsSentiment(
                     symbol=symbol,
                     news_count=0,

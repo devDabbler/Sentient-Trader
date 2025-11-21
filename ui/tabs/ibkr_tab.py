@@ -45,16 +45,16 @@ def render_tab():
             logger.info("IBKR client modules imported successfully")
         except ImportError as e:
             ibkr_error_message = f"Missing dependency: {e}. Please install: pip install ib_insync"
-            logger.error(f"IBKR ImportError: {e}", exc_info=True)
+            logger.error("IBKR ImportError: {}", str(e), exc_info=True)
             st.error(f"⚠️ {ibkr_error_message}")
         except RuntimeError as e:
             ibkr_error_message = f"Event loop error: {e}. This is a known issue with asyncio in Streamlit."
-            logger.error(f"IBKR RuntimeError: {e}", exc_info=True)
+            logger.error("IBKR RuntimeError: {}", str(e), exc_info=True)
             st.error(f"⚠️ {ibkr_error_message}")
             st.info("💡 Try restarting the Streamlit app to resolve event loop issues.")
         except Exception as e:
             ibkr_error_message = f"Unexpected error: {e}"
-            logger.error(f"IBKR unexpected error: {e}", exc_info=True)
+            logger.error("IBKR unexpected error: {}", str(e), exc_info=True)
             st.error(f"⚠️ {ibkr_error_message}")
             st.code(str(e))
         
@@ -71,7 +71,7 @@ def render_tab():
                     display_trade_journal()
                 except Exception as e:
                     st.error(f"Failed to load trade journal: {e}")
-                    logger.error(f"Trade journal error: {e}", exc_info=True)
+                    logger.error("Trade journal error: {}", str(e), exc_info=True)
             
             st.divider()
             
@@ -289,7 +289,7 @@ def render_tab():
                         display_fractional_share_config()
                     except Exception as e:
                         st.error(f"Error loading fractional share settings: {e}")
-                        logger.error(f"Fractional share UI error: {e}", exc_info=True)
+                        logger.error("Fractional share UI error: {}", str(e), exc_info=True)
                 
                 st.divider()
             

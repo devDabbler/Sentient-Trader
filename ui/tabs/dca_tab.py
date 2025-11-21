@@ -370,7 +370,7 @@ def render_manual_buy_tab(dca_manager: FractionalDCAManager):
                     st.info("Adjust your minimum confidence or wait for better conditions")
             
             except Exception as e:
-                logger.error(f"Error analyzing {ticker}: {e}", exc_info=True)
+                logger.error("Error analyzing {ticker}: {}", str(e), exc_info=True)
                 st.error(f"Analysis error: {str(e)}")
 
 

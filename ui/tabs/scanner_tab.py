@@ -553,7 +553,7 @@ def render_tab():
             except Exception as e:
                 status.update(label="❌ Scan failed", state="error")
                 st.error(f"Error during scan: {str(e)}")
-                logger.error(f"Advanced scan error: {e}", exc_info=True)
+                logger.error("Advanced scan error: {}", str(e), exc_info=True)
     
     # Display AI+ML results (if available)
     if 'adv_scan_ai_results' in st.session_state and st.session_state.adv_scan_ai_results:

@@ -71,7 +71,7 @@ class RiskAgent:
             try:
                 await self._process_candidate(candidate)
             except Exception as e:
-                logger.error(f"Error processing candidate: {e}", exc_info=True)
+                logger.error("Error processing candidate: {}", str(e), exc_info=True)
     
     async def _process_candidate(self, candidate: TradeCandidate):
         """

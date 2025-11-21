@@ -260,11 +260,11 @@ class TradierClient:
             
             logger.info(f"✅ Retrieved {len(positions)} positions from Tradier")
             if len(positions) > 0:
-                logger.debug(f"Positions: {[p.get('symbol', 'UNKNOWN') for p in positions]}")
+                logger.debug("Positions: {}", str([p.get('symbol', 'UNKNOWN') for p in positions]))
             return True, positions
             
         except AttributeError as e:
-            logger.error(f"Positions error details: {positions_data if 'positions_data' in locals() else 'undefined'}", exc_info=True)
+            logger.error("Positions error details: {}", str(positions_data if 'positions_data' in locals() else 'undefined'), exc_info=True)
             return True, []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error getting positions: {e}")
@@ -304,7 +304,7 @@ class TradierClient:
             return True, orders
             
         except AttributeError as e:
-            logger.error(f"Orders error details: {orders_data}", exc_info=True)
+            logger.error("Orders error details: {}", str(orders_data), exc_info=True)
             return True, []
         except requests.exceptions.HTTPError as e:
             # Let the retry decorator handle 500/504 errors
@@ -596,7 +596,7 @@ class TradierClient:
             return success, result
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error in place_bracket_order: {e}", exc_info=True)
+            logger.error("❌ Unexpected error in place_bracket_order: {}", str(e), exc_info=True)
             return False, {"error": str(e)}
     
     def place_bracket_order_percentage(self,
@@ -652,8 +652,8 @@ class TradierClient:
                 stop_loss_price = round(entry_price * (1 + stop_loss_pct / 100), 2)
             
             logger.info(f"📊 Calculated bracket prices from {entry_price}:")
-            logger.info(f"   Take-Profit: ${take_profit_price} ({'+' if side.lower() == 'buy' else '-'}{take_profit_pct}%)")
-            logger.info(f"   Stop-Loss: ${stop_loss_price} ({'-' if side.lower() == 'buy' else '+'}{stop_loss_pct}%)")
+            logger.info("   Take-Profit: ${} ({'+' if side.lower() == 'buy' else '-'}{take_profit_pct}%)", str(take_profit_price))
+            logger.info("   Stop-Loss: ${} ({'-' if side.lower() == 'buy' else '+'}{stop_loss_pct}%)", str(stop_loss_price))
             
             return self.place_bracket_order(
                 symbol=symbol,
@@ -795,7 +795,7 @@ class TradierClient:
             exp_date = datetime.strptime(expiry, '%Y-%m-%d').strftime('%Y%m%d')
             
             # Construct option symbol (simplified - you may need more sophisticated logic)
-            option_symbol = f"{ticker}{exp_date}C{int(strike*1000):08d}" if 'CALL' in action else f"{ticker}{exp_date}P{int(strike*1000):08d}"
+            option_symbol = f"{ticker}{exp_date}C{int(strike*1000):08d)}" if 'CALL' in action else f"{ticker}{exp_date}P{int(strike*1000):08d)}"
             
             order_data = {
                 'class': order_config['class'],
@@ -828,7 +828,7 @@ class TradierClient:
             success, result = self.place_order(order_data)
             
             if success:
-                logger.info(f"Successfully executed signal: {signal.get('ticker')} {signal.get('action')}")
+                logger.info("Successfully executed signal: {} {signal.get('action')}", str(signal.get('ticker')))
                 return True, {
                     "status": "success",
                     "order_id": result.get('order', {}).get('id'),

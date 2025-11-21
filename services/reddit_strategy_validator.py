@@ -80,7 +80,7 @@ class StrategyValidator:
             StrategyValidation with AI assessment
         """
         try:
-            logger.info(f"Validating strategy '{strategy.name}' for {ticker}")
+            logger.info("Validating strategy '{}' for {ticker}", str(strategy.name))
             
             # Create validation prompt
             prompt = self._create_validation_prompt(strategy, ticker, analysis, market_context)
@@ -98,7 +98,7 @@ class StrategyValidator:
             return validation
             
         except Exception as e:
-            logger.error(f"Error validating strategy: {e}", exc_info=True)
+            logger.error("Error validating strategy: {}", str(e), exc_info=True)
             return self._create_error_validation(strategy, str(e))
     
     
@@ -273,7 +273,7 @@ Be thorough, practical, and honest. If the strategy is not suitable, say so clea
             return content or ""
             
         except Exception as e:
-            logger.error(f"{self.provider} API error: {e}", exc_info=True)
+            logger.error("{self.provider} API error: {}", str(e), exc_info=True)
             return ""
     
     

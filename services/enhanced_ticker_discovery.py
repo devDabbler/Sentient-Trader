@@ -71,7 +71,7 @@ class EnhancedTickerDiscovery:
         Returns:
             List of ticker symbols ranked by confidence
         """
-        logger.info(f"🔍 Enhanced Ticker Discovery: Strategy={strategy}, Sources=Smart+{'Sentiment+' if use_sentiment else ''}{'Screeners+' if use_screeners else ''}{'Social' if use_social else ''}")
+        logger.info("🔍 Enhanced Ticker Discovery: Strategy={}, Sources=Smart+{'Sentiment+' if use_sentiment else ''}{'Screeners+' if use_screeners else ''}{'Social' if use_social else ''}", str(strategy))
         
         all_signals: List[TickerSignal] = []
         
@@ -117,9 +117,9 @@ class EnhancedTickerDiscovery:
         
         ranked_tickers = self._aggregate_and_rank(all_signals, max_tickers)
         
-        logger.info(f"🎯 Enhanced Discovery Result: {len(ranked_tickers)} tickers from {len(all_signals)} signals")
+        logger.info(f"🎯 Enhanced Discovery Result: {len(ranked_tickers)} tickers from {len(all_signals))} signals")
         for i, (ticker, score, sources) in enumerate(ranked_tickers[:10], 1):
-            logger.info(f"  #{i}. {ticker}: {score:.1f} confidence ({', '.join(sources)})")
+            logger.info("  #{}. {ticker}: {score:.1f} confidence ({', '.join(sources)})", str(i))
         
         return [t[0] for t in ranked_tickers]
     

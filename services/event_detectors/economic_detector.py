@@ -333,10 +333,10 @@ class EconomicDetector(BaseEventDetector):
                 if alert:
                     alerts.append(alert)
                     self.trigger_alert(alert)
-                    logger.info(f"Economic alert: {event['event']} in {event.get('days_until', '?')} days")
+                    logger.info("Economic alert: {} in {event.get('days_until', '?')} days", str(event['event']))
             
             except Exception as e:
-                logger.error(f"Error processing economic event {event.get('event', 'Unknown')}: {e}")
+                logger.error("Error processing economic event {event.get('event', 'Unknown')}: {}", str(e))
                 continue
         
         return alerts

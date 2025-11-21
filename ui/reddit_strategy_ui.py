@@ -238,7 +238,7 @@ def render_ai_validation_interface(
                 
             except Exception as e:
                 st.error(f"Validation failed: {str(e)}")
-                logger.error(f"Strategy validation error: {e}", exc_info=True)
+                logger.error("Strategy validation error: {}", str(e), exc_info=True)
                 return None
     
     return None
@@ -384,7 +384,7 @@ def render_strategy_comparison_ui(
                 
             except Exception as e:
                 st.error(f"Comparison failed: {str(e)}")
-                logger.error(f"Strategy comparison error: {e}", exc_info=True)
+                logger.error("Strategy comparison error: {}", str(e), exc_info=True)
 
 
 def render_reddit_strategy_tab():

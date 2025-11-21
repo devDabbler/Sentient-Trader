@@ -22,6 +22,58 @@ from services.ai_crypto_trade_reviewer import AICryptoTradeReviewer
 # Note: Asset pairs are cached in session state in display_trade_setup()
 # to avoid repeated API calls, since KrakenClient is not hashable for @st.cache_data
 
+
+def get_llm_for_bulk_analysis(num_tickers: int):
+    """
+    Get appropriate LLM analyzer based on number of tickers being analyzed.
+    
+    For bulk operations (>1 ticker), forces cloud API (OpenRouter) for speed.
+    Local LLM is too slow for multiple tickers.
+    
+    Args:
+        num_tickers: Number of tickers to analyze
+        
+    Returns:
+        LLM analyzer instance (cloud-forced if >1 ticker, hybrid if 1 ticker)
+    """
+    # Single ticker: use existing analyzer (could be local/hybrid for speed)
+    if num_tickers <= 1:
+        if 'llm_analyzer' in st.session_state:
+            logger.info(f"📊 Single ticker analysis - using existing LLM analyzer (may use local Ollama)")
+            return st.session_state.llm_analyzer
+        return None
+    
+    # Multiple tickers: force cloud API for parallel processing speed
+    logger.info(f"📊 Bulk analysis ({num_tickers} tickers) - forcing cloud API (OpenRouter) for speed")
+    logger.info("   💡 Local LLM too slow for bulk operations, switching to OpenRouter")
+    
+    try:
+        from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+        from utils.config_loader import get_api_key
+        
+        api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
+        if not api_key:
+            logger.warning("⚠️ No OpenRouter API key found for bulk analysis")
+            return st.session_state.get('llm_analyzer')
+        
+        model = os.getenv('AI_ANALYZER_MODEL') or get_api_key('AI_ANALYZER_MODEL', 'models') or 'google/gemini-2.0-flash-exp:free'
+        
+        # Create cloud-only analyzer for bulk speed
+        cloud_analyzer = LLMStrategyAnalyzer(
+            api_key=api_key, 
+            model=model, 
+            provider="openrouter"
+        )
+        
+        logger.success(f"✅ Created cloud-only LLM analyzer for bulk analysis: {model}")
+        return cloud_analyzer
+        
+    except Exception as e:
+        logger.error(f"Failed to create cloud analyzer for bulk: {e}")
+        # Fallback to session state analyzer
+        return st.session_state.get('llm_analyzer')
+
+
 # --- Unified Discovery Workflow ---
 
 def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_instances: Dict, watchlist_manager=None):
@@ -110,7 +162,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
                     
                     elif scan_type == "crypto_opportunity_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_opportunities(top_n=50)
@@ -119,7 +171,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
 
                     elif scan_type == "ai_crypto_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_with_ai_confidence(top_n=50)
@@ -128,7 +180,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
 
                     elif scan_type == "sub_penny_discovery" and scanner_instances.get(scan_type):
                         with st.status("🔬 Discovering sub-penny coins... This may take 1-2 minutes to find enough valid Kraken pairs.", expanded=True) as status:
@@ -141,17 +193,17 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                                 sort_by="runner_potential"
                             ))
                             
-                            status.update(label=f"✅ Found {len(runners)} coins, validating against Kraken...")
+                            status.update(label=f"✅ Found {len(runners))} coins, validating against Kraken...")
                             # Validate all results using validator
                             raw_results = [{"Ticker": r.symbol.upper(), "Price": r.price_usd, "Change": r.change_24h, "Score": r.runner_potential_score} for r in runners]
                             valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                             
-                            status.update(label=f"✅ Validation complete: {len(valid_results)} valid Kraken pairs found")
+                            status.update(label=f"✅ Validation complete: {len(valid_results))} valid Kraken pairs found")
                         
                         st.session_state.scan_results = valid_results
                         
                         if invalid_symbols:
-                            st.warning(f"⚠️ Filtered out {len(invalid_symbols)} coins not available on Kraken (only {len(valid_results)} valid pairs found)")
+                            st.warning(f"⚠️ Filtered out {len(invalid_symbols))} coins not available on Kraken (only {len(valid_results))} valid pairs found)")
                         
                         if len(valid_results) < 5:
                             st.info("💡 **Tip:** Most sub-penny coins aren't available on Kraken. Try the 'Penny Cryptos (<$1)' scanner for more tradable options.")
@@ -178,7 +230,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                                 manager_tickers = [item['symbol'] for item in managed_watchlist]
                                 watchlist_tickers.extend(manager_tickers)
                                 logger.info(f"Loaded {len(manager_tickers)} tickers from watchlist_manager database")
-                                logger.debug(f"Database tickers: {manager_tickers[:10]}..." if len(manager_tickers) > 10 else f"Database tickers: {manager_tickers}")
+                                logger.debug("Database tickers: {}...", str(manager_tickers[:10]) if len(manager_tickers) > 10 else f"Database tickers: {manager_tickers}")
                             except Exception as e:
                                 logger.error(f"Error loading from watchlist_manager: {e}")
                         else:
@@ -192,7 +244,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             st.warning("⚠️ Your watchlist is empty. Add tickers to your watchlist first!")
                             st.session_state.scan_results = []
                         else:
-                            st.info(f"📋 Loading {len(watchlist_tickers)} tickers from your watchlist...")
+                            st.info(f"📋 Loading {len(watchlist_tickers))} tickers from your watchlist...")
                             
                             # Fetch live data for each ticker
                             for ticker in watchlist_tickers:
@@ -247,12 +299,12 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                                     })
                             
                             st.session_state.scan_results = watchlist_results
-                            st.success(f"✅ Loaded {len(watchlist_results)} tickers from watchlist")
+                            st.success(f"✅ Loaded {len(watchlist_results))} tickers from watchlist")
                             
                             # Auto-select all watchlist tickers for convenience
                             if watchlist_results:
                                 st.session_state.selected_tickers = [r['Ticker'] for r in watchlist_results]
-                                st.info(f"💡 Auto-selected all {len(watchlist_results)} watchlist tickers for analysis")
+                                st.info(f"💡 Auto-selected all {len(watchlist_results))} watchlist tickers for analysis")
                                 st.rerun()  # Force page refresh to show Section 2
                     
                     # Ensure tab states are preserved after scan
@@ -260,7 +312,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
 
                 except Exception as e:
                     st.error(f"An error occurred while scanning: {e}")
-                    logger.error(f"Scanner failed: {e}", exc_info=True)
+                    logger.error("Scanner failed: {}", str(e), exc_info=True)
                     # Preserve tab state even on error
                     st.session_state.active_crypto_tab = "⚡ Quick Trade"
 
@@ -353,10 +405,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             st.session_state.scan_results = st.session_state.get('scan_results', []) + new_results
                             st.session_state.selected_tickers = st.session_state.get('selected_tickers', []) + [r['Ticker'] for r in new_results]
                             
-                            st.success(f"✅ Added {len(new_results)} valid coins! (Total: {len(st.session_state.scan_results)} coins)")
+                            st.success(f"✅ Added {len(new_results))} valid coins! (Total: {len(st.session_state.scan_results))} coins)")
                             
                             if invalid_symbols:
-                                st.warning(f"⚠️ Skipped {len(invalid_symbols)} invalid coins: {', '.join(invalid_symbols[:5])}{'...' if len(invalid_symbols) > 5 else ''}")
+                                st.warning(f"⚠️ Skipped {len(invalid_symbols))} invalid coins: {', '.join(invalid_symbols[:5])}{'...' if len(invalid_symbols) > 5 else ''}")
                         else:
                             st.error("❌ No valid coins found. Check your symbols and try again.")
                             if invalid_symbols:
@@ -366,13 +418,13 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         # Show current manually added coins
         if st.session_state.get('scan_results'):
-            st.caption(f"📋 Currently have {len(st.session_state.scan_results)} coins ready to analyze")
+            st.caption(f"📋 Currently have {len(st.session_state.scan_results))} coins ready to analyze")
 
     # --- 2. Select Tickers for Analysis ---
     if 'scan_results' in st.session_state and st.session_state.scan_results:
         st.markdown("---")
         st.markdown("### 2️⃣ SELECT TICKERS FOR ANALYSIS")
-        st.caption(f"📊 {len(st.session_state.scan_results)} tickers loaded from scan. Choose which ones to analyze below:")
+        st.caption(f"📊 {len(st.session_state.scan_results))} tickers loaded from scan. Choose which ones to analyze below:")
         
         results = st.session_state.scan_results
         df = pd.DataFrame(results)
@@ -449,7 +501,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
 
         st.markdown("---")
         st.markdown("### 📌 QUICK SELECTION")
-        st.caption(f"Your watchlist has **{len(df)} tickers**. Choose which ones to analyze:")
+        st.caption(f"Your watchlist has **{len(df))} tickers**. Choose which ones to analyze:")
         
         # Helper functions for button callbacks
         def select_all_tickers():
@@ -469,7 +521,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         with btn_col1:
             st.button("✅ SELECT ALL", use_container_width=True, type="primary", on_click=select_all_tickers, 
-                     help=f"Select all {len(df)} tickers for analysis")
+                     help=f"Select all {len(df))} tickers for analysis")
         with btn_col2:
             st.button("🔝 TOP 10", use_container_width=True, on_click=select_top_n(10), 
                      help="Select top 10 tickers by score")
@@ -485,9 +537,9 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         if selected_count == len(df):
             st.success(f"✅ **ALL {selected_count} tickers selected** - Ready to analyze!")
         elif selected_count > 0:
-            st.info(f"📊 **{selected_count} of {len(df)} tickers selected** - Click 'SELECT ALL' to analyze all tickers")
+            st.info(f"📊 **{selected_count} of {len(df))} tickers selected** - Click 'SELECT ALL' to analyze all tickers")
         else:
-            st.warning(f"⚠️ **No tickers selected** - Click 'SELECT ALL' to select all {len(df)} tickers")
+            st.warning(f"⚠️ **No tickers selected** - Click 'SELECT ALL' to select all {len(df))} tickers")
 
         # Multi-select dropdown for easy ticker selection
         st.markdown("**Quick Selection (Searchable):**")
@@ -520,7 +572,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     st.rerun()
             
             with page_col2:
-                st.markdown(f"**Page {st.session_state.current_page + 1} of {total_pages}** ({len(df)} total tickers)")
+                st.markdown(f"**Page {st.session_state.current_page + 1} of {total_pages}** ({len(df))} total tickers)")
             
             with page_col3:
                 if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages - 1):
@@ -532,7 +584,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             end_idx = min(start_idx + items_per_page, len(df))
             
             # Display current page
-            st.markdown(f"**Showing {start_idx + 1}-{end_idx} of {len(df)} tickers:**")
+            st.markdown(f"**Showing {start_idx + 1}-{end_idx} of {len(df))} tickers:**")
             
             # Helper function for checkbox callbacks
             def make_ticker_toggle(ticker: str):
@@ -566,7 +618,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                 cols[1].markdown(f"**{row['Ticker']}**")
                 cols[2].metric("Price", f"${row['Price']:,.4f}")
                 cols[3].metric("24h Change", f"{row['Change']:.2f}%" if row['Change'] else "N/A")
-                cols[4].metric("Score", f"{int(row['Score'])}" if row['Score'] else "N/A")
+                cols[4].metric("Score", f"{int(row['Score']))}" if row['Score'] else "N/A")
 
     # --- 3. Analyze Selected Tickers ---
     st.markdown("---")
@@ -718,8 +770,8 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             invalid_tickers.append(ticker)
                     
                     if invalid_tickers:
-                        st.warning(f"⚠️ Found {len(invalid_tickers)} invalid Kraken pairs: {', '.join(invalid_tickers[:5])}{'...' if len(invalid_tickers) > 5 else ''}")
-                        st.info(f"✅ Analyzing {len(valid_tickers)} valid pairs only")
+                        st.warning(f"⚠️ Found {len(invalid_tickers))} invalid Kraken pairs: {', '.join(invalid_tickers[:5])}{'...' if len(invalid_tickers) > 5 else ''}")
+                        st.info(f"✅ Analyzing {len(valid_tickers))} valid pairs only")
                     
                     if valid_tickers:
                         logger.info(f"Starting bulk analysis: {len(valid_tickers)} tickers, strategy={strategy_id}, interval={interval_minutes}")
@@ -730,14 +782,14 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         
                         analysis_results = []
                         for i, ticker in enumerate(valid_tickers):
-                            progress_text.text(f"Analyzing {ticker}... ({i+1}/{len(valid_tickers)})")
+                            progress_text.text(f"Analyzing {ticker}... ({i+1}/{len(valid_tickers))})")
                             progress_bar.progress((i + 1) / len(valid_tickers))
                             
                             result = adapter.analyze_crypto(ticker, strategy_id, interval_minutes)
                             if 'error' not in result:
                                 analysis_results.append(result)
                             else:
-                                logger.warning(f"Analysis failed for {ticker}: {result.get('error')}")
+                                logger.warning("Analysis failed for {}: {result.get('error')}", str(ticker))
                         
                         progress_text.empty()
                         progress_bar.empty()
@@ -746,7 +798,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         logger.info(f"Bulk analysis complete: {len(analysis_results)} results returned")
                         
                         if analysis_results:
-                            st.success(f"✅ Successfully analyzed {len(analysis_results)} coins!")
+                            st.success(f"✅ Successfully analyzed {len(analysis_results))} coins!")
                         else:
                             st.error("❌ Analysis completed but no results returned. Check logs for details.")
                     else:
@@ -754,7 +806,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         
                 except Exception as e:
                     st.error(f"Bulk analysis failed: {e}")
-                    logger.error(f"Bulk analysis error: {e}", exc_info=True)
+                    logger.error("Bulk analysis error: {}", str(e), exc_info=True)
         
         # Execute multi-configuration analysis
         if st.session_state.analysis_mode == 'multi_config':
@@ -775,8 +827,8 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     filtered_tickers = [t for t in selected_tickers if any(major in t for major in major_coins)]
                     
                     if filtered_tickers:
-                        st.success(f"✅ Found {len(filtered_tickers)} major coins in your selection: {', '.join(filtered_tickers)}")
-                        st.info(f"💰 With $100 each, you can buy: {len(filtered_tickers)} positions in expensive coins!")
+                        st.success(f"✅ Found {len(filtered_tickers))} major coins in your selection: {', '.join(filtered_tickers)}")
+                        st.info(f"💰 With $100 each, you can buy: {len(filtered_tickers))} positions in expensive coins!")
                         # Don't change selection, just show info
                     else:
                         st.warning("⚠️ No major coins in your selection. Select BTC, ETH, or SOL from your watchlist first!")
@@ -1114,9 +1166,9 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             if show_filter == "🔥 Scalping Opportunities":
                 buy_count = sum(1 for r in sorted_results if r['recommendation'] == 'BUY')
                 near_entry_count = sum(1 for r in sorted_results if r.get('signals', {}).get('near_entry', False))
-                st.success(f"🔥 Found {len(sorted_results)} scalping opportunities: {buy_count} BUY signals + {near_entry_count} Near Entry setups")
+                st.success(f"🔥 Found {len(sorted_results))} scalping opportunities: {buy_count} BUY signals + {near_entry_count} Near Entry setups")
             else:
-                st.info(f"Showing {len(sorted_results)} results")
+                st.info(f"Showing {len(sorted_results))} results")
 
         for i, analysis in enumerate(sorted_results):
             # Build title with more context
@@ -1296,6 +1348,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     st.session_state.crypto_quick_stop_pct = abs((analysis['stop_loss'] - analysis['current_price']) / analysis['current_price'] * 100)
                     if analysis['roi_targets']:
                         st.session_state.crypto_quick_target_pct = analysis['roi_targets'][0]['gain_percent']
+                    
+                    # CRITICAL FIX: Set missing required fields for Execute Trade form
+                    st.session_state.crypto_quick_leverage = 1.0  # Default to spot trading (no leverage)
+                    st.session_state.crypto_quick_position_size = 100.0  # Default position size
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
@@ -1494,9 +1550,11 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         
         with action_col1:
             if st.button("🤖 Run AI Analysis", key="quick_ai_analysis", type="primary", use_container_width=True):
-                # Skip down to AI analysis section
+                logger.info(f"🔘 Quick AI Analysis button clicked for {selected_pair}")
+                # Set flag to trigger analysis in the AI Analysis section below
                 st.session_state.trigger_ai_analysis = True
-                st.info("👇 Scroll down to see AI analysis")
+                st.info("⏳ Triggering AI analysis... scroll down to see results")
+                st.rerun()
         
         with action_col2:
             if st.button("✏️ Modify Setup", key="modify_scanner_setup", use_container_width=True):
@@ -1619,7 +1677,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     st.info("You can still manually enter a trading pair below to place a SELL order")
                 else:
                     # Display positions in a table
-                    st.markdown(f"**Found {len(positions)} open position(s):**")
+                    st.markdown(f"**Found {len(positions))} open position(s):**")
                     
                     position_data = []
                     for pos in positions:
@@ -1676,7 +1734,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                                     
                                 except Exception as e:
                                     st.error(f"AI exit analysis failed: {e}")
-                                    logger.error(f"Exit analysis error: {e}", exc_info=True)
+                                    logger.error("Exit analysis error: {}", str(e), exc_info=True)
                         
                         # Display exit analysis if available
                         if 'crypto_exit_analysis' in st.session_state:
@@ -1768,7 +1826,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
             
             except Exception as e:
                 st.error(f"Failed to fetch positions: {e}")
-                logger.error(f"Position fetch error: {e}", exc_info=True)
+                logger.error("Position fetch error: {}", str(e), exc_info=True)
                 st.info("You can still manually enter a trading pair below to place a SELL order")
     
     # ========================================================================
@@ -2004,8 +2062,8 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         default_position_size = st.session_state.get('crypto_quick_position_size', 100.0)
         
         logger.info(f"📖 Loading from session state: stop={default_risk}%, target={default_tp}%, leverage={default_leverage}x, position=${default_position_size}")
-        logger.info(f"📖 Scanner opportunity symbol: {opp.get('symbol', 'N/A')}")
-        logger.info(f"📖 Session state keys present: crypto_quick_trade_pair={st.session_state.get('crypto_quick_trade_pair', 'NOT SET')}")
+        logger.info(f"📖 Scanner opportunity symbol: {opp.get('symbol', 'N/A'}"))
+        logger.info(f"📖 Session state keys present: crypto_quick_trade_pair={st.session_state.get('crypto_quick_trade_pair', 'NOT SET'}"))
         
         st.info(f"📊 **Scanner Strategy:** {default_risk:.1f}% stop loss, {default_tp:.1f}% take profit, {default_leverage:.0f}x leverage, ${default_position_size:.2f} position (from {opp['strategy'].upper()} strategy)")
     else:
@@ -2082,13 +2140,24 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     
     # AI Analysis section
     st.markdown("#### 🤖 AI Analysis")
+    logger.info(f"📍 Rendering AI Analysis section for {selected_pair}")
+    
+    # Check if analysis was triggered from quick button
+    auto_trigger = st.session_state.get('trigger_ai_analysis', False)
+    if auto_trigger:
+        logger.info(f"🤖 Auto-triggering AI analysis from quick button")
+        # Clear the flag to prevent repeated triggers
+        st.session_state.trigger_ai_analysis = False
     
     analysis_col1, analysis_col2, analysis_col3 = st.columns([2, 1, 1])
     
     with analysis_col1:
-        if st.button("🤖 AI Entry Analysis", width='stretch', type="primary"):
+        button_clicked = st.button("🤖 AI Entry Analysis", key="crypto_ai_entry_analysis_btn", use_container_width=True, type="primary")
+        if button_clicked or auto_trigger:
+            logger.info(f"🔘 AI Entry Analysis button clicked for {selected_pair} ({direction})")
             with st.spinner("🤖 AI analyzing entry timing..."):
                 try:
+                    logger.info(f"📋 Starting AI entry analysis: pair={selected_pair}, side={direction}, position=${position_size}, risk={risk_pct}%, tp={take_profit_pct}%")
                     # Initialize AI Entry Assistant
                     from services.ai_entry_assistant import get_ai_entry_assistant
                     from services.llm_strategy_analyzer import LLMStrategyAnalyzer
@@ -2156,12 +2225,23 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     
                     logger.info(f"🤖 AI Entry Analysis: {entry_analysis.action} (Confidence: {entry_analysis.confidence:.1f}%)")
                     
+                    # Show success message
+                    if entry_analysis.action == "DO_NOT_ENTER" and entry_analysis.confidence == 0.0:
+                        st.warning("⚠️ AI analysis completed but API call failed. Showing fallback analysis based on technical indicators.")
+                    else:
+                        st.success(f"✅ AI analysis complete! Scroll down to see results.")
+                    
+                    # Rerun to display results
+                    st.rerun()
+                    
                 except Exception as e:
                     st.error(f"AI analysis failed: {e}")
-                    logger.error(f"AI entry analysis error: {e}", exc_info=True)
+                    logger.error("❌ AI entry analysis error: {type(e).__name__)}: {}", str(e), exc_info=True)
+                    # Still rerun to show any partial results or error message
+                    st.rerun()
     
     with analysis_col2:
-        if st.button("� Manual Setup", width='stretch'):
+        if st.button("📝 Manual Setup", key="crypto_manual_setup_btn", use_container_width=True):
             # Create manual analysis without AI
             try:
                 ticker = kraken_client.get_ticker_data(selected_pair)
@@ -2198,7 +2278,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                 st.error(f"Failed to create setup: {e}")
     
     with analysis_col3:
-        if st.button("�📊 Get Market Data", width='stretch'):
+        if st.button("📊 Get Market Data", key="crypto_market_data_btn", use_container_width=True):
             with st.spinner("Fetching market data..."):
                 try:
                     ticker_info = kraken_client.get_ticker_info(selected_pair)
@@ -2209,6 +2289,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     # Display AI entry analysis if available
     if 'crypto_entry_analysis' in st.session_state:
         entry_analysis = st.session_state.crypto_entry_analysis
+        logger.info(f"📊 Displaying AI entry analysis: action={entry_analysis.action}, confidence={entry_analysis.confidence:.1f}%")
         
         st.markdown("---")
         st.markdown("#### 🤖 AI Entry Recommendation")
@@ -2370,7 +2451,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                             st.error("AI Entry Assistant not initialized")
                     except Exception as e:
                         st.error(f"Failed to set up monitoring: {e}")
-                        logger.error(f"Monitor setup error: {e}", exc_info=True)
+                        logger.error("Monitor setup error: {}", str(e), exc_info=True)
             
             with exec_col3:
                 def reset_analysis():
@@ -2454,7 +2535,7 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                     else:
                         st.success(f"✅ {order_type_str} order placed! Order ID: {order_id}")
                         st.info("ℹ️ Check your Kraken account for order status.")
-                    logger.info(f"✅ Order {order_id} placed successfully for {analysis['pair']} - {analysis['direction']} {quantity:.6f} @ ${analysis['current_price']:.4f}")
+                    logger.info("✅ Order {} placed successfully for {analysis['pair']} - {analysis['direction']} {quantity:.6f} @ ${analysis['current_price']:.4f}", str(order_id))
                     
                     st.json({
                         'order_id': order_id,
@@ -2577,14 +2658,14 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                     send_discord_alert(alert)
                 except Exception as e:
                     error_msg = str(e) if e else "Unknown error"
-                    logger.error(f"❌ Failed to send Discord alert for {analysis['pair']}: {error_msg}", exc_info=True)
+                    logger.error("❌ Failed to send Discord alert for {analysis['pair']}: {}", str(error_msg), exc_info=True)
                     
             else:
                 st.error(f"❌ Trade failed: Order placement returned None - check logs for details")
                 
     except Exception as e:
         st.error(f"Trade execution error: {e}")
-        logger.error(f"Trade execution error: {e}", exc_info=True)
+        logger.error("Trade execution error: {}", str(e), exc_info=True)
 
 
 def save_trade_setup(analysis: Dict, crypto_config=None):
@@ -2611,7 +2692,7 @@ def save_trade_setup(analysis: Dict, crypto_config=None):
             logger.info(f"Added {ticker} to crypto watchlist")
         
     except Exception as e:
-        logger.error(f"Failed to save trade setup: {e}", exc_info=True)
+        logger.error("Failed to save trade setup: {}", str(e), exc_info=True)
 
 
 def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
@@ -2727,7 +2808,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
                     st.session_state[analysis_key] = backup_data.get('results', [])
                     st.session_state.crypto_bulk_custom_analysis_timestamp = backup_data.get('timestamp', '')
                     st.session_state.crypto_bulk_custom_analysis_complete = True
-                    st.info(f"📂 Restored analysis from backup ({len(backup_data.get('results', []))} pairs)")
+                    st.info(f"📂 Restored analysis from backup ({len(backup_data.get('results', [])))} pairs)")
                     logger.info("Restored analysis from backup file")
             except Exception as e:
                 logger.warning(f"Could not restore analysis from backup: {e}")
@@ -2836,7 +2917,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         
         # Preview trades
         st.divider()
-        st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs)} pairs)")
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs))} pairs)")
         
         # Display selected pairs for confirmation
         st.info(f"**Selected pairs:** {', '.join(selected_pairs)}")
@@ -2848,7 +2929,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_custom_{hash(tuple(sorted(selected_pairs)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_pairs)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_pairs):.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_pairs))} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_pairs):.2f})",
             key=confirm_key
         )
         
@@ -2867,7 +2948,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         
     except Exception as e:
         st.error(f"Error loading trading pairs: {e}")
-        logger.error(f"Bulk custom trade error: {e}", exc_info=True)
+        logger.error("Bulk custom trade error: {}", str(e), exc_info=True)
 
 
 def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, watchlist_manager):
@@ -2891,7 +2972,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             st.warning("No valid symbols found in watchlist")
             return
         
-        st.info(f"📊 Found {len(watchlist_symbols)} symbols in your watchlist")
+        st.info(f"📊 Found {len(watchlist_symbols))} symbols in your watchlist")
         
         # Allow selection of which watchlist items to trade
         selected_symbols = st.multiselect(
@@ -3018,7 +3099,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             
             # Show short selling warning if applicable
             if direction == "SELL" and trading_mode == "Margin Trading" and default_leverage > 1:
-                st.warning(f"⚠️ **SHORT SELLING** {len(selected_symbols)} pairs with {default_leverage}x leverage")
+                st.warning(f"⚠️ **SHORT SELLING** {len(selected_symbols))} pairs with {default_leverage}x leverage")
         
         with param_col2:
             position_size = st.number_input(
@@ -3031,7 +3112,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             )
             
             total_investment = position_size * len(selected_symbols)
-            st.caption(f"💰 Total investment: ${total_investment:,.2f} across {len(selected_symbols)} symbols")
+            st.caption(f"💰 Total investment: ${total_investment:,.2f} across {len(selected_symbols))} symbols")
         
         # Risk and leverage parameters
         param_col3, param_col4, param_col5 = st.columns(3)
@@ -3126,7 +3207,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
                         'ai_recommendation': 'Skipped AI analysis'
                     })
                 st.session_state.crypto_bulk_watchlist_analysis = analysis_results
-                st.success(f"✅ Created manual setup for {len(analysis_results)} symbols")
+                st.success(f"✅ Created manual setup for {len(analysis_results))} symbols")
                 st.rerun()
         
         # Display analysis results if available
@@ -3208,7 +3289,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # EXECUTION SECTION
         # ========================================================================
         st.markdown("---")
-        st.markdown(f"### 🚀 Execute Trades ({len(selected_symbols)} symbols)")
+        st.markdown(f"### 🚀 Execute Trades ({len(selected_symbols))} symbols)")
         
         # Display configuration summary
         config_summary_col1, config_summary_col2, config_summary_col3, config_summary_col4 = st.columns(4)
@@ -3220,7 +3301,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_wl_{hash(tuple(sorted(selected_symbols)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_symbols)} {direction} trades with ${position_size:.2f} each (Total: ${total_investment:.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_symbols))} {direction} trades with ${position_size:.2f} each (Total: ${total_investment:.2f})",
             key=confirm_key
         )
         
@@ -3273,7 +3354,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         
         # Preview trades
         st.divider()
-        st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols)} symbols)")
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols))} symbols)")
         
         # Display selected symbols for confirmation
         st.info(f"**Selected symbols:** {', '.join(selected_symbols)}")
@@ -3285,7 +3366,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_watchlist_{hash(tuple(sorted(selected_symbols)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_symbols)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_symbols):.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_symbols))} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_symbols):.2f})",
             key=confirm_key
         )
         
@@ -3304,7 +3385,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         
     except Exception as e:
         st.error(f"Error loading watchlist: {e}")
-        logger.error(f"Bulk watchlist trade error: {e}", exc_info=True)
+        logger.error("Bulk watchlist trade error: {}", str(e), exc_info=True)
 
 
 def analyze_bulk_pairs(
@@ -3332,16 +3413,22 @@ def analyze_bulk_pairs(
         st.warning("No pairs selected for analysis")
         return
     
+    # Get appropriate LLM analyzer based on number of tickers (cloud for bulk, hybrid for single)
+    llm_analyzer = get_llm_for_bulk_analysis(len(pairs))
+    
     # Initialize AI trade reviewer if available
     ai_reviewer = None
-    if 'llm_analyzer' in st.session_state:
+    if llm_analyzer:
         try:
             ai_reviewer = AICryptoTradeReviewer(
-                llm_analyzer=st.session_state.llm_analyzer,
+                llm_analyzer=llm_analyzer,
                 active_monitors=st.session_state.get('crypto_active_monitors', {}),
                 supabase_client=st.session_state.get('supabase_client')
             )
-            logger.info("🤖 AI Trade Reviewer initialized for bulk analysis")
+            if len(pairs) > 1:
+                logger.info(f"🤖 AI Trade Reviewer initialized for bulk analysis ({len(pairs)} pairs) with cloud API")
+            else:
+                logger.info("🤖 AI Trade Reviewer initialized for single pair analysis")
         except Exception as e:
             logger.warning(f"Could not initialize AI reviewer: {e}")
     
@@ -3353,7 +3440,7 @@ def analyze_bulk_pairs(
         for idx, pair in enumerate(pairs):
             progress = (idx + 1) / len(pairs)
             progress_bar.progress(progress)
-            status_text.text(f"Analyzing {pair} ({idx + 1}/{len(pairs)})...")
+            status_text.text(f"Analyzing {pair} ({idx + 1}/{len(pairs))})...")
             
             try:
                 # Get current price
@@ -3460,15 +3547,15 @@ def analyze_bulk_pairs(
                         ai_risks = recommendations.get('risks', [])
                         
                         # Log detailed results
-                        logger.info(f"  → {ai_recommendation} - Risks: {len(ai_risks)}")
+                        logger.info(f"  → {ai_recommendation} - Risks: {len(ai_risks))}")
                         if ai_risks:
-                            logger.info(f"     Risks: {', '.join(ai_risks[:3])}")
+                            logger.info(f"     Risks: {', '.join(ai_risks[:3]}"))
                         
                     except Exception as e:
                         logger.warning(f"AI review failed for {pair}: {e}")
                         ai_approved = False  # Default to rejection on error
                         ai_confidence = 0
-                        ai_recommendation = f"❌ ERROR: {str(e)[:50]}"
+                        ai_recommendation = f"❌ ERROR: {str(e)[:50])}"
                         ai_risks = [str(e)]
                 
                 results.append({
@@ -3489,7 +3576,7 @@ def analyze_bulk_pairs(
                 })
                 
             except Exception as e:
-                logger.error(f"Error analyzing {pair}: {e}", exc_info=True)
+                logger.error("Error analyzing {pair}: {}", str(e), exc_info=True)
                 results.append({
                     'pair': pair,
                     'status': 'FAILED',
@@ -3559,9 +3646,9 @@ def analyze_bulk_pairs(
             approved_count = sum(1 for r in successful if r.get('ai_approved') == True)
             rejected_count = sum(1 for r in successful if r.get('ai_approved') == False)
             
-            st.success(f"✅ Successfully analyzed {len(successful)} out of {len(pairs)} pairs")
+            st.success(f"✅ Successfully analyzed {len(successful))} out of {len(pairs))} pairs")
             if ai_reviewer:
-                st.info(f"🤖 AI Recommendations: {approved_count} approved, {rejected_count} rejected, {len(successful) - approved_count - rejected_count} no recommendation")
+                st.info(f"🤖 AI Recommendations: {approved_count} approved, {rejected_count} rejected, {len(successful) - approved_count - rejected_count)} no recommendation")
         else:
             st.warning(f"⚠️ Could not analyze any pairs. Please check your selections.")
         
@@ -3570,7 +3657,7 @@ def analyze_bulk_pairs(
         
     except Exception as e:
         st.error(f"Bulk analysis error: {e}")
-        logger.error(f"Bulk analysis error: {e}", exc_info=True)
+        logger.error("Bulk analysis error: {}", str(e), exc_info=True)
 
 
 def execute_bulk_trades(
@@ -3614,7 +3701,7 @@ def execute_bulk_trades(
         execution_timestamp_key in st.session_state and
         current_time - st.session_state[execution_timestamp_key] < 30):
         st.warning("⚠️ **Duplicate execution prevented!** You just executed these trades. Please wait a moment before executing again.")
-        st.info(f"Last execution was {int(current_time - st.session_state[execution_timestamp_key])} seconds ago.")
+        st.info(f"Last execution was {int(current_time - st.session_state[execution_timestamp_key]))} seconds ago.")
         return
     
     # Mark execution in progress
@@ -3631,7 +3718,7 @@ def execute_bulk_trades(
         for idx, pair in enumerate(pairs):
             progress = (idx + 1) / len(pairs)
             progress_bar.progress(progress)
-            status_text.text(f"Processing {pair} ({idx + 1}/{len(pairs)})...")
+            status_text.text(f"Processing {pair} ({idx + 1}/{len(pairs))})...")
             
             try:
                 # Get current price
@@ -3719,7 +3806,7 @@ def execute_bulk_trades(
                         rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
                         
                         trade_entry = UnifiedTradeEntry(
-                            trade_id=f"{pair}_{order_id}_{int(datetime.now().timestamp())}",
+                            trade_id=f"{pair}_{order_id}_{int(datetime.now().timestamp()))}",
                             trade_type=TradeType.CRYPTO.value,
                             symbol=pair,
                             side=direction,
@@ -3815,7 +3902,7 @@ def execute_bulk_trades(
                         send_discord_alert(alert)
                     except Exception as e:
                         error_msg = str(e) if e else "Unknown error"
-                        logger.error(f"❌ Failed to send Discord alert for {pair}: {error_msg}", exc_info=True)
+                        logger.error("❌ Failed to send Discord alert for {pair}: {}", str(error_msg), exc_info=True)
                 else:
                     # Order failed
                     results.append({
@@ -3825,7 +3912,7 @@ def execute_bulk_trades(
                     })
                     
             except Exception as e:
-                logger.error(f"Error executing trade for {pair}: {e}", exc_info=True)
+                logger.error("Error executing trade for {pair}: {}", str(e), exc_info=True)
                 results.append({
                     'pair': pair,
                     'status': 'FAILED',
@@ -3844,8 +3931,8 @@ def execute_bulk_trades(
         
         col1, col2, col3 = st.columns(3)
         col1.metric("Total", len(results))
-        col2.metric("Successful", len(successful), delta=f"{len(successful)/len(results)*100:.1f}%")
-        col3.metric("Failed", len(failed), delta=f"-{len(failed)/len(results)*100:.1f}%")
+        col2.metric("Successful", len(successful), delta=f"{len(successful)/len(results)*100:.1f)}%")
+        col3.metric("Failed", len(failed), delta=f"-{len(failed)/len(results)*100:.1f)}%")
         
         # Detailed results table
         if successful:
@@ -3861,7 +3948,7 @@ def execute_bulk_trades(
         # Summary
         if successful:
             total_invested = sum(r['position_size'] for r in successful)
-            st.success(f"✅ Successfully executed {len(successful)} trades with total position size of ${total_invested:,.2f}")
+            st.success(f"✅ Successfully executed {len(successful))} trades with total position size of ${total_invested:,.2f}")
             st.info("ℹ️ **Note:** Market orders fill immediately. Check your Kraken account's 'Trade History' or 'Closed Orders' section to see filled orders.")
             
             # Add verification section
@@ -3880,7 +3967,7 @@ def execute_bulk_trades(
         
     except Exception as e:
         st.error(f"Bulk trade execution error: {e}")
-        logger.error(f"Bulk trade execution error: {e}", exc_info=True)
+        logger.error("Bulk trade execution error: {}", str(e), exc_info=True)
 
 
 def verify_recent_orders(kraken_client: KrakenClient, order_ids: List[str]):
@@ -3928,12 +4015,12 @@ def verify_recent_orders(kraken_client: KrakenClient, order_ids: List[str]):
             
             # Display results
             if found_orders:
-                st.success(f"✅ Found {len(found_orders)} order(s) in closed orders:")
+                st.success(f"✅ Found {len(found_orders))} order(s) in closed orders:")
                 found_df = pd.DataFrame(found_orders)
                 st.dataframe(found_df, width='stretch', hide_index=True)
             
             if missing_orders:
-                st.warning(f"⚠️ {len(missing_orders)} order(s) not found in closed orders:")
+                st.warning(f"⚠️ {len(missing_orders))} order(s) not found in closed orders:")
                 for order_id in missing_orders:
                     st.text(f"  - {order_id}")
                 st.info("💡 These orders may have failed, been rejected, or are still processing. Check your Kraken account directly.")
@@ -3943,7 +4030,7 @@ def verify_recent_orders(kraken_client: KrakenClient, order_ids: List[str]):
                 
     except Exception as e:
         st.error(f"Error verifying orders: {e}")
-        logger.error(f"Order verification error: {e}", exc_info=True)
+        logger.error("Order verification error: {}", str(e), exc_info=True)
 
 
 def verify_positions(kraken_client: KrakenClient, pairs: List[str]):
@@ -3986,7 +4073,7 @@ def verify_positions(kraken_client: KrakenClient, pairs: List[str]):
             
             # Display results
             if found_positions:
-                st.success(f"✅ Found positions in {len(found_positions)} asset(s):")
+                st.success(f"✅ Found positions in {len(found_positions))} asset(s):")
                 positions_df = pd.DataFrame(found_positions)
                 st.dataframe(positions_df, width='stretch', hide_index=True)
             else:
@@ -4005,7 +4092,7 @@ def verify_positions(kraken_client: KrakenClient, pairs: List[str]):
                 
     except Exception as e:
         st.error(f"Error verifying positions: {e}")
-        logger.error(f"Position verification error: {e}", exc_info=True)
+        logger.error("Position verification error: {}", str(e), exc_info=True)
 
 
 def analyze_multi_config_bulk(
@@ -4065,24 +4152,30 @@ def analyze_multi_config_bulk(
         risk_pct = test_configs.get('risk_pct', 2.0)
         take_profit_pct = test_configs.get('take_profit_pct', 5.0)
     
-    # Initialize AI trade reviewer if available
-    ai_reviewer = None
-    if 'llm_analyzer' in st.session_state:
-        try:
-            ai_reviewer = AICryptoTradeReviewer(
-                llm_analyzer=st.session_state.llm_analyzer,
-                active_monitors=st.session_state.get('crypto_active_monitors', {}),
-                supabase_client=st.session_state.get('supabase_client')
-            )
-            logger.info("🤖 AI Trade Reviewer initialized for multi-config bulk analysis")
-        except Exception as e:
-            logger.warning(f"Could not initialize AI reviewer: {e}")
-    
     # Calculate total combinations
     total_combinations = len(pairs) * len(directions) * len(leverage_levels)
     
-    st.info(f"🔬 Testing **{total_combinations} configurations** across {len(pairs)} pairs...")
-    st.markdown(f"**Test Matrix:** {len(directions)} directions × {len(leverage_levels)} leverage levels = {len(directions) * len(leverage_levels)} configs per pair")
+    st.info(f"🔬 Testing **{total_combinations} configurations** across {len(pairs))} pairs...")
+    st.markdown(f"**Test Matrix:** {len(directions))} directions × {len(leverage_levels))} leverage levels = {len(directions) * len(leverage_levels))} configs per pair")
+    
+    # Get appropriate LLM analyzer based on number of tickers (cloud for bulk, hybrid for single)
+    llm_analyzer = get_llm_for_bulk_analysis(len(pairs))
+    
+    # Initialize AI trade reviewer if available
+    ai_reviewer = None
+    if llm_analyzer:
+        try:
+            ai_reviewer = AICryptoTradeReviewer(
+                llm_analyzer=llm_analyzer,
+                active_monitors=st.session_state.get('crypto_active_monitors', {}),
+                supabase_client=st.session_state.get('supabase_client')
+            )
+            if len(pairs) > 1:
+                logger.info(f"🤖 AI Trade Reviewer initialized for multi-config analysis ({len(pairs)} pairs, {total_combinations} configs) with cloud API")
+            else:
+                logger.info("🤖 AI Trade Reviewer initialized for single pair multi-config analysis")
+        except Exception as e:
+            logger.warning(f"Could not initialize AI reviewer: {e}")
     
     all_results = []
     progress_bar = st.progress(0)
@@ -4249,7 +4342,7 @@ def analyze_multi_config_bulk(
                         })
                         
                     except Exception as e:
-                        logger.error(f"Error analyzing {pair} {trade_type}: {e}", exc_info=True)
+                        logger.error("Error analyzing {pair} {trade_type}: {}", str(e), exc_info=True)
                         continue
         
         # Clear progress indicators
@@ -4276,7 +4369,7 @@ def analyze_multi_config_bulk(
         st.markdown("### 📊 Multi-Configuration Analysis Results")
         
         logger.info(f"📊 DISPLAYING RESULTS: {len(results_df)} total configs")
-        logger.info(f"📊 Results columns: {list(results_df.columns)}")
+        logger.info(f"📊 Results columns: {list(results_df.columns}")
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -4284,7 +4377,7 @@ def analyze_multi_config_bulk(
         avg_confidence = results_df['ai_confidence'].mean()
         best_config = results_df.loc[results_df['ai_score'].idxmax()] if len(results_df) > 0 else None
         
-        logger.info(f"📊 Approved: {approved_count}, Avg conf: {avg_confidence:.1f}%, Best score: {best_config['ai_score'] if best_config is not None else 'N/A'}")
+        logger.info("📊 Approved: {}, Avg conf: {avg_confidence:.1f}%, Best score: {best_config['ai_score'] if best_config is not None else 'N/A'}", str(approved_count))
         
         col1.metric("Total Configs Tested", len(results_df))
         col2.metric("AI Approved", f"{approved_count} ({approved_count/len(results_df)*100:.1f}%)")
@@ -4304,7 +4397,7 @@ def analyze_multi_config_bulk(
         logger.info(f"📊 Rendering {len(best_per_pair)} best-per-pair expanders")
         
         for idx, row in best_per_pair.iterrows():
-            logger.info(f"📊 Rendering expander for {row['pair']} - {row['trade_type']}")
+            logger.info("📊 Rendering expander for {} - {row['trade_type']}", str(row['pair']))
             with st.expander(f"🎯 {row['pair']} - {row['trade_type']} (Score: {row['ai_score']:.1f})"):
                 info_col1, info_col2, info_col3 = st.columns(3)
                 
@@ -4373,11 +4466,11 @@ def analyze_multi_config_bulk(
                 
                 st.info(f"{style}\n\n{reason}")
                 
-                logger.info(f"📊 About to render 'Use This Setup' button for {row['pair']} (key=use_config_{idx})")
+                logger.info("📊 About to render 'Use This Setup' button for {} (key=use_config_{idx})", str(row['pair']))
                 
                 # Action button
                 if st.button(f"✅ Use This Setup for {row['pair']}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
-                    logger.info(f"🔘 BEST CONFIG - Use This Setup clicked for {row['pair']} - {row['trade_type']}")
+                    logger.info("🔘 BEST CONFIG - Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
                     
                     # Store complete setup with REAL market data
                     st.session_state.crypto_scanner_opportunity = {
@@ -4403,10 +4496,11 @@ def analyze_multi_config_bulk(
                     st.session_state.crypto_trading_mode = row['trading_mode']
                     st.session_state.crypto_quick_leverage = row['leverage']
                     st.session_state.crypto_quick_position_size = row['position_size']
-                    st.session_state.crypto_quick_stop_pct = risk_pct
-                    st.session_state.crypto_quick_target_pct = take_profit_pct
+                    # Use session state values from multi-config analysis (stored when analysis ran)
+                    st.session_state.crypto_quick_stop_pct = st.session_state.get('multi_config_risk_pct', 2.0)
+                    st.session_state.crypto_quick_target_pct = st.session_state.get('multi_config_tp_pct', 5.0)
                     
-                    logger.info(f"📝 BEST CONFIG - Session state set: pair={row['pair']}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}")
+                    logger.info("📝 BEST CONFIG - Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
@@ -4485,7 +4579,7 @@ def analyze_multi_config_bulk(
             }
         )
         
-        st.caption(f"Showing {len(filtered_df)} of {len(results_df)} configurations")
+        st.caption(f"Showing {len(filtered_df))} of {len(results_df))} configurations")
         
         # Add interactive selection for all filtered results
         st.markdown("#### 🎯 Select Any Configuration")
@@ -4520,7 +4614,7 @@ def analyze_multi_config_bulk(
                 
                 # Action button for each config
                 if st.button(f"✅ Use This Setup", key=f"use_filtered_{idx}", use_container_width=True, type="primary"):
-                    logger.info(f"🔘 Use This Setup clicked for {row['pair']} - {row['trade_type']}")
+                    logger.info("🔘 Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
                     
                     # Store complete setup with REAL market data
                     st.session_state.crypto_scanner_opportunity = {
@@ -4546,10 +4640,11 @@ def analyze_multi_config_bulk(
                     st.session_state.crypto_trading_mode = row['trading_mode']
                     st.session_state.crypto_quick_leverage = row['leverage']
                     st.session_state.crypto_quick_position_size = row['position_size']
-                    st.session_state.crypto_quick_stop_pct = risk_pct
-                    st.session_state.crypto_quick_target_pct = take_profit_pct
+                    # Use session state values from multi-config analysis (stored when analysis ran)
+                    st.session_state.crypto_quick_stop_pct = st.session_state.get('multi_config_risk_pct', 2.0)
+                    st.session_state.crypto_quick_target_pct = st.session_state.get('multi_config_tp_pct', 5.0)
                     
-                    logger.info(f"📝 Session state set: pair={row['pair']}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}")
+                    logger.info("📝 Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
@@ -4570,7 +4665,7 @@ def analyze_multi_config_bulk(
         
     except Exception as e:
         st.error(f"Error during multi-config analysis: {e}")
-        logger.error(f"Multi-config analysis error: {e}", exc_info=True)
+        logger.error("Multi-config analysis error: {}", str(e), exc_info=True)
 
 
 def analyze_ultimate_all_strategies(
@@ -4626,7 +4721,7 @@ def analyze_ultimate_all_strategies(
                 try:
                     strategy_analysis = adapter.analyze_crypto(pair, strategy_id, interval_minutes)
                     if 'error' in strategy_analysis:
-                        logger.warning(f"Strategy analysis failed for {pair} {strategy_id}: {strategy_analysis.get('error')}")
+                        logger.warning("Strategy analysis failed for {} {strategy_id}: {strategy_analysis.get('error')}", str(pair))
                         continue
                     
                     # Extract strategy metrics
@@ -4738,7 +4833,7 @@ def analyze_ultimate_all_strategies(
         # Display results
         st.markdown("---")
         st.markdown("### 🏆 ULTIMATE ANALYSIS RESULTS")
-        st.success(f"✅ Tested {len(results_df)} configurations successfully!")
+        st.success(f"✅ Tested {len(results_df))} configurations successfully!")
         
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -4822,7 +4917,7 @@ def analyze_ultimate_all_strategies(
                 
                 # Action button
                 if st.button(f"✅ Use This Setup", key=f"use_ultimate_{idx}", use_container_width=True, type="primary"):
-                    logger.info(f"🔘 ULTIMATE - Use This Setup clicked for {row['pair']} - {row['trade_type']}")
+                    logger.info("🔘 ULTIMATE - Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
                     
                     # Store complete setup with REAL market data
                     st.session_state.crypto_scanner_opportunity = {
@@ -4836,7 +4931,7 @@ def analyze_ultimate_all_strategies(
                         'volume_ratio': row.get('volume_24h', 0) / 1000000 if row.get('volume_24h', 0) > 0 else 1.0,  # Normalize volume
                         'volatility': row.get('volatility', 0),  # Use real volatility
                         'reason': f"{row['strategy_name']} {row['trade_type']} - Ultimate Analysis Winner",
-                        'ai_reasoning': f"Best of {len(results_df)} configs tested",
+                        'ai_reasoning': f"Best of {len(results_df))} configs tested",
                         'ai_confidence': row['recommendation'],
                         'ai_rating': row['confidence_score'] / 10,
                         'ai_risks': []
@@ -4851,7 +4946,7 @@ def analyze_ultimate_all_strategies(
                     st.session_state.crypto_quick_stop_pct = row['risk_pct']
                     st.session_state.crypto_quick_target_pct = row['take_profit_pct']
                     
-                    logger.info(f"📝 ULTIMATE - Session state set: pair={row['pair']}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}")
+                    logger.info("📝 ULTIMATE - Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
@@ -4939,7 +5034,7 @@ def analyze_ultimate_all_strategies(
             }
         )
         
-        st.caption(f"Showing {len(filtered_df)} of {len(results_df)} configurations")
+        st.caption(f"Showing {len(filtered_df))} of {len(results_df))} configurations")
         
         # Export option
         if st.button("📥 Export Ultimate Results to CSV", key="export_ultimate"):
@@ -4953,4 +5048,4 @@ def analyze_ultimate_all_strategies(
         
     except Exception as e:
         st.error(f"Error during ultimate analysis: {e}")
-        logger.error(f"Ultimate analysis error: {e}", exc_info=True)
+        logger.error("Ultimate analysis error: {}", str(e), exc_info=True)

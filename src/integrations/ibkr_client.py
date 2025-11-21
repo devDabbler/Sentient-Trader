@@ -67,7 +67,7 @@ def setup_event_loop():
         
         return True
     except Exception as e:
-        logger.error(f"Failed to setup event loop: {e}", exc_info=True)
+        logger.error("Failed to setup event loop: {}", str(e), exc_info=True)
         return False
 
 # Setup event loop before importing ib_insync
@@ -84,7 +84,7 @@ except ImportError as e:
     logger.warning(f"ib_insync not available: {e}")
 except Exception as e:
     IB_INSYNC_AVAILABLE = False
-    logger.error(f"Error importing ib_insync: {e}", exc_info=True)
+    logger.error("Error importing ib_insync: {}", str(e), exc_info=True)
 
 
 class OrderAction(Enum):
@@ -266,7 +266,7 @@ class IBKRClient:
             logger.error("   💡 TIP: TWS may be frozen - try restarting it")
             return None
         except Exception as e:
-            logger.error(f"❌ Error qualifying contract: {e}", exc_info=True)
+            logger.error("❌ Error qualifying contract: {}", str(e), exc_info=True)
             logger.error("   💡 TIP: Verify symbol is valid and TWS is connected")
             return None
     
@@ -303,14 +303,14 @@ class IBKRClient:
                 elapsed = (datetime.now() - start_time).total_seconds()
                 
                 if elapsed > 5.0:
-                    logger.warning(f"⚠️ IBKR connection slow: {elapsed:.1f}s response time")
+                    logger.warning(f"⚠️ IBKR connection slow: {}s response time {elapsed:.1f}")
                     return False
                 
                 if not accounts or len(accounts) == 0:
                     logger.warning("🔴 IBKR connection check failed: No accounts")
                     return False
                 
-                logger.debug(f"✅ IBKR connection healthy ({elapsed:.2f}s)")
+                logger.debug(f"✅ IBKR connection healthy ({}s) {elapsed:.2f}")
                 return True
                 
             except Exception as e:
@@ -680,7 +680,7 @@ class IBKRClient:
                 return None
             
             logger.info(f"🎯 Creating IBKR bracket order for {symbol}: {action} {quantity} shares")
-            logger.info(f"   Take Profit: ${take_profit_price:.2f}, Stop Loss: ${stop_loss_price:.2f}")
+            logger.info(f"   Take Profit: ${}, Stop Loss: ${stop_loss_price:.2f} {take_profit_price:.2f}")
             
             # Create stock contract
             contract = Stock(symbol, 'SMART', 'USD')
@@ -696,10 +696,10 @@ class IBKRClient:
                 # For SELL: use bid price to ensure immediate fill
                 if action.upper() == 'BUY':
                     limit_price = ticker.ask if ticker.ask and ticker.ask > 0 else take_profit_price
-                    logger.info(f"   Using current ASK as limit for immediate fill: ${limit_price:.2f}")
+                    logger.info(f"   Using current ASK as limit for immediate fill: ${} {limit_price:.2f}")
                 else:
                     limit_price = ticker.bid if ticker.bid and ticker.bid > 0 else stop_loss_price
-                    logger.info(f"   Using current BID as limit for immediate fill: ${limit_price:.2f}")
+                    logger.info(f"   Using current BID as limit for immediate fill: ${} {limit_price:.2f}")
             
             # Create bracket order using ib_insync's built-in function
             # This properly links parent and child orders with OCA group
@@ -747,7 +747,7 @@ class IBKRClient:
             }
             
         except Exception as e:
-            logger.error(f"Error placing bracket order: {e}", exc_info=True)
+            logger.error("Error placing bracket order: {}", str(e), exc_info=True)
             return None
     
     def cancel_order(self, order_id: int) -> bool:
@@ -880,7 +880,7 @@ class IBKRClient:
                 use_ibkr = (self.market_data_source == "HYBRID")  # Try IBKR first in hybrid mode
                 quote = self.hybrid_fetcher.get_quote(symbol, use_ibkr=use_ibkr)
                 if quote:
-                    logger.debug(f"📊 {symbol} quote from {quote.get('source', 'unknown')}")
+                    logger.debug("📊 {} quote from {quote.get('source', 'unknown')}", str(symbol))
                     return quote
                 logger.warning(f"Hybrid fetcher failed for {symbol}, falling back to IBKR")
             

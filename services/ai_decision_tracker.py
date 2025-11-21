@@ -204,7 +204,7 @@ class AIDecisionTracker:
             logger.info(f"✅ Logged AI decision: {symbol} - {action} (Confidence: {confidence:.1f}%)")
             
         except Exception as e:
-            logger.error(f"Error logging AI decision: {e}", exc_info=True)
+            logger.error("Error logging AI decision: {}", str(e), exc_info=True)
     
     def update_outcome(
         self,
@@ -265,7 +265,7 @@ class AIDecisionTracker:
             logger.info(f"✅ Updated outcome for {trade_id}: {outcome} ({final_pnl_pct:+.2f}%)")
             
         except Exception as e:
-            logger.error(f"Error updating outcome for {trade_id}: {e}", exc_info=True)
+            logger.error("Error updating outcome for {trade_id}: {}", str(e), exc_info=True)
     
     def _calculate_outcome_quality(self, trade_id: str, final_pnl_pct: float) -> float:
         """
@@ -464,7 +464,7 @@ class AIDecisionTracker:
             return report
             
         except Exception as e:
-            logger.error(f"Error generating performance report: {e}", exc_info=True)
+            logger.error("Error generating performance report: {}", str(e), exc_info=True)
             return {'error': str(e)}
     
     def _get_best_action(self, df: pd.DataFrame) -> str:

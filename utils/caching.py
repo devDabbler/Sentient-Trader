@@ -97,5 +97,5 @@ def get_cached_news(ticker: str) -> List[Dict]:
         return result
         
     except Exception as e:
-        logger.error(f"Error fetching cached news for {ticker}: {e}", exc_info=True)
+        logger.error("Error fetching cached news for {ticker}: {}", str(e), exc_info=True)
         return []

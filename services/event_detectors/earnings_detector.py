@@ -237,7 +237,7 @@ class EarningsDetector(BaseEventDetector):
                     if alert:
                         alerts.append(alert)
                         self.trigger_alert(alert)
-                        logger.info(f"Earnings alert: {ticker} in {earnings_info['days_until']} days")
+                        logger.info("Earnings alert: {} in {earnings_info['days_until']} days", str(ticker))
             
             except Exception as e:
                 logger.error(f"Error processing earnings for {ticker}: {e}")

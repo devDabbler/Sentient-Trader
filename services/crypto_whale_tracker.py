@@ -113,8 +113,8 @@ class CryptoWhaleTracker:
         self.suspicious_patterns = defaultdict(int)  # Count suspicious patterns
         
         logger.info("🐋 Crypto Whale Tracker initialized")
-        logger.info(f"   • Ethereum & BSC: {'Enabled' if self.etherscan_api_key else 'Disabled (no API key)'} (Etherscan API)")
-        logger.info(f"   • Solana: {'Enabled' if self.solscan_api_key else 'Disabled (no API key)'} (Solscan API)")
+        logger.info("   • Ethereum & BSC: {} (Etherscan API)", str('Enabled' if self.etherscan_api_key else 'Disabled (no API key)'))
+        logger.info("   • Solana: {} (Solscan API)", str('Enabled' if self.solscan_api_key else 'Disabled (no API key)'))
     
     async def get_whale_transactions(
         self,

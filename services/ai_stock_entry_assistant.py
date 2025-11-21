@@ -216,7 +216,7 @@ class AIStockEntryAssistant:
                 return self._create_error_analysis(symbol, "Failed to parse AI response")
                 
         except Exception as e:
-            logger.error(f"Error analyzing entry for {symbol}: {e}", exc_info=True)
+            logger.error("Error analyzing entry for {symbol}: {}", str(e), exc_info=True)
             return self._create_error_analysis(symbol, str(e))
     
     def _get_current_price(self, symbol: str) -> Optional[float]:
@@ -261,7 +261,7 @@ class AIStockEntryAssistant:
             
             # Ensure we have required columns
             if 'close' not in df.columns:
-                logger.warning(f"Missing 'close' column for {symbol}")
+                logger.warning("Missing 'close' column for {}", str(symbol))
                 return {}
             
             df['close'] = df['close'].astype(float)
@@ -321,7 +321,7 @@ class AIStockEntryAssistant:
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating indicators for {symbol}: {e}", exc_info=True)
+            logger.error("Error calculating indicators for {symbol}: {}", str(e), exc_info=True)
             return {}
     
     def _get_stock_news_sentiment(self, symbol: str) -> Tuple[List[Dict], Optional[float]]:
@@ -739,7 +739,7 @@ Evaluate these critical factors:
                 self.stop_event.wait(self.check_interval)
                 
             except Exception as e:
-                logger.error(f"Error in stock entry monitoring loop: {e}", exc_info=True)
+                logger.error("Error in stock entry monitoring loop: {}", str(e), exc_info=True)
                 time.sleep(self.check_interval)
     
     def _check_opportunities(self):
@@ -764,7 +764,7 @@ Evaluate these critical factors:
                     logger.info(f"✅ Entry conditions met for {opportunity.symbol}!")
                     logger.info(f"   Price: ${current_price:,.2f}")
                     if technical_data:
-                        logger.info(f"   RSI: {technical_data.get('rsi', 0):.2f}")
+                        logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
                     
                     # Send notification
                     if not opportunity.notification_sent:
@@ -779,7 +779,7 @@ Evaluate these critical factors:
                         self.remove_opportunity(opp_id)
                 
             except Exception as e:
-                logger.error(f"Error checking opportunity {opp_id}: {e}", exc_info=True)
+                logger.error("Error checking opportunity {opp_id}: {}", str(e), exc_info=True)
     
     def _check_entry_conditions(
         self,
@@ -940,7 +940,7 @@ Evaluate these critical factors:
             logger.debug(f"💾 Saved {len(state)} monitored stock opportunities to {self.state_file}")
             
         except Exception as e:
-            logger.error(f"Error saving stock entry assistant state: {e}", exc_info=True)
+            logger.error("Error saving stock entry assistant state: {}", str(e), exc_info=True)
     
     def _load_state(self):
         """Load monitored opportunities from file"""
@@ -1001,7 +1001,7 @@ Evaluate these critical factors:
                     )
                     
                     self.opportunities[opp_id] = opportunity
-                    logger.info(f"📂 Restored stock monitor: {opportunity.symbol} (target: ${opportunity.target_price if opportunity.target_price else 'breakout'})")
+                    logger.info("📂 Restored stock monitor: {} (target: ${opportunity.target_price if opportunity.target_price else 'breakout'})", str(opportunity.symbol))
                     
                 except Exception as e:
                     logger.warning(f"Failed to restore opportunity {opp_id}: {e}")
@@ -1014,7 +1014,7 @@ Evaluate these critical factors:
                     self.start_monitoring()
             
         except Exception as e:
-            logger.error(f"Error loading stock entry assistant state: {e}", exc_info=True)
+            logger.error("Error loading stock entry assistant state: {}", str(e), exc_info=True)
 
 
 # Singleton instance

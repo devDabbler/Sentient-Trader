@@ -77,7 +77,7 @@ class DataAgent:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in fetch loop for {timeframe}: {e}", exc_info=True)
+                logger.error("Error in fetch loop for {timeframe}: {}", str(e), exc_info=True)
                 await asyncio.sleep(5)  # Brief pause on error
     
     async def _fetch_and_publish(self, timeframe: Timeframe):

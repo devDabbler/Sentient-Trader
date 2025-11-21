@@ -69,7 +69,7 @@ class ExecutionAgent:
             try:
                 await self._execute_order(order)
             except Exception as e:
-                logger.error(f"Error executing order: {e}", exc_info=True)
+                logger.error("Error executing order: {}", str(e), exc_info=True)
     
     async def _execute_order(self, order: ApprovedOrder):
         """
@@ -137,7 +137,7 @@ class ExecutionAgent:
             )
             return success, result
         except Exception as e:
-            logger.error(f"Error in place_bracket_order: {e}", exc_info=True)
+            logger.error("Error in place_bracket_order: {}", str(e), exc_info=True)
             return False, {'error': str(e)}
     
     def _sync_place_bracket_order(self, order: ApprovedOrder) -> tuple[bool, dict]:

@@ -147,7 +147,7 @@ class CryptoWatchlistManager:
                 logger.warning(f"⚠️ No opportunity_data provided")
             
             logger.info(f"💾 Final data dict has {len(data)} fields: {list(data.keys())}")
-            logger.info(f"🔍 Data sample: symbol={data.get('symbol')}, price={data.get('current_price')}, strategy={data.get('strategy')}")
+            logger.info("🔍 Data sample: symbol={}, price={data.get('current_price')}, strategy={data.get('strategy')}", str(data.get('symbol')))
             
             # Upsert to database
             logger.info(f"📤 Executing Supabase upsert for {symbol}...")
@@ -161,7 +161,7 @@ class CryptoWatchlistManager:
             return True
                 
         except Exception as e:
-            logger.error(f"❌ EXCEPTION in add_crypto for {symbol}: {e}", exc_info=True)
+            logger.error("❌ EXCEPTION in add_crypto for {symbol}: {}", str(e), exc_info=True)
             return False
     
     def remove_crypto(self, symbol: str) -> bool:

@@ -42,7 +42,7 @@ class LLMResponse:
 class LLMConfig:
     """Configuration for hybrid LLM usage"""
     prefer_local: bool = True  # Prefer local Ollama over cloud
-    local_model: str = "qwen2.5-coder:32b"
+    local_model: str = "qwen2.5:7b"
     cloud_model: str = "google/gemini-2.0-flash-exp:free"
     fallback_enabled: bool = True
     max_local_timeout: int = 120  # Increased for longer prompts
@@ -132,7 +132,7 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('local', generation_time, success=True)
-                        logger.success(f"✅ Local analysis completed in {generation_time:.1f}s")
+                        logger.success(f"✅ Local analysis completed in {}s {generation_time:.1f}")
                         return response
                     else:
                         logger.warning(f"⚠️ Local Ollama returned no response, trying fallback...")
@@ -145,7 +145,7 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('cloud', generation_time, success=True)
-                        logger.success(f"✅ Cloud analysis completed in {generation_time:.1f}s")
+                        logger.success(f"✅ Cloud analysis completed in {}s {generation_time:.1f}")
                         return response
                     else:
                         self._record_performance('cloud', time.time() - start_time, success=False)
@@ -158,7 +158,7 @@ class HybridLLMAnalyzer:
         
         # All providers failed
         total_time = time.time() - start_time
-        logger.error(f"❌ All LLM providers failed after {total_time:.1f}s")
+        logger.error(f"❌ All LLM providers failed after {}s {total_time:.1f}")
         if last_error:
             logger.error(f"Last error: {last_error}")
         
@@ -344,7 +344,7 @@ class HybridLLMAnalyzer:
 # Factory functions for easy integration with existing Sentient Trader code
 def create_hybrid_llm_analyzer(
     prefer_local: bool = True,
-    local_model: str = "qwen2.5-coder:32b",
+    local_model: str = "qwen2.5:7b",
     cloud_model: str = "google/gemini-2.0-flash-exp:free"
 ) -> HybridLLMAnalyzer:
     """Create optimized hybrid LLM analyzer for trading"""

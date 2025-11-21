@@ -256,7 +256,7 @@ class FDACatalystDetector:
                 self.logger.info(f"   Type: {best_catalyst.catalyst_type}")
                 self.logger.info(f"   Score Boost: +{best_catalyst.score_boost}")
                 self.logger.info(f"   Confidence: {best_catalyst.confidence}")
-                self.logger.info(f"   Keywords: {', '.join(best_catalyst.keywords_found[:5])}")
+                self.logger.info(f"   Keywords: {', '.join(best_catalyst.keywords_found[:5]}"))
             
             return best_catalyst
             

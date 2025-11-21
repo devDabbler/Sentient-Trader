@@ -22,11 +22,17 @@ load_dotenv()
 class OllamaConfig:
     """Configuration for Ollama client"""
     base_url: str = "http://localhost:11434"
-    model: str = "qwen2.5-coder:32b"  # Default to best trading model
+    model: str = "qwen2.5:7b"  # Default to best trading model
     timeout: int = 120  # Increased for longer prompts
     temperature: float = 0.3  # Lower for more consistent trading analysis
     max_tokens: int = 2000
     stream: bool = False
+    
+    def __post_init__(self):
+        # Override base_url from environment if set
+        env_base_url = os.getenv('OLLAMA_BASE_URL')
+        if env_base_url:
+            self.base_url = env_base_url
     
     
 class OllamaClient:
@@ -42,7 +48,7 @@ class OllamaClient:
         # Override model from environment if set
         env_model = os.getenv('OLLAMA_MODEL', os.getenv('AI_TRADING_MODEL'))
         if env_model and 'ollama' in env_model.lower():
-            # Extract model name from ollama format (e.g., "ollama/qwen2.5-coder:32b" -> "qwen2.5-coder:32b")
+            # Extract model name from ollama format (e.g., "ollama/qwen2.5:7b" -> "qwen2.5:7b")
             self.config.model = env_model.split('/', 1)[-1] if '/' in env_model else env_model
         
         # Trading-specific system prompts for different use cases
@@ -143,7 +149,7 @@ class OllamaClient:
                 generation_time = time.time() - start_time
                 
                 if generated_text:
-                    logger.success(f"✅ Generated {len(generated_text)} chars in {generation_time:.1f}s")
+                    logger.success(f"✅ Generated {len(generated_text))} chars in {generation_time:.1f}s")
                     return generated_text
                 else:
                     logger.warning(f"⚠️ Ollama returned empty response in {generation_time:.1f}s")
@@ -200,7 +206,7 @@ class OllamaClient:
                         generated_text = result.get('response', '')
                         generation_time = time.time() - start_time
                         
-                        logger.success(f"✅ [Async] Generated {len(generated_text)} chars in {generation_time:.1f}s")
+                        logger.success(f"✅ [Async] Generated {len(generated_text))} chars in {generation_time:.1f}s")
                         return generated_text
                     else:
                         error_text = await response.text()
@@ -309,7 +315,7 @@ def create_ollama_client(model: Optional[str] = None) -> OllamaClient:
 
 
 # Sentient Trader integration functions
-def create_trading_signal_generator(model: str = "qwen2.5-coder:32b") -> OllamaClient:
+def create_trading_signal_generator(model: str = "qwen2.5:7b") -> OllamaClient:
     """Create Ollama client specifically optimized for trading signal generation"""
     config = OllamaConfig(
         model=model,
@@ -319,7 +325,7 @@ def create_trading_signal_generator(model: str = "qwen2.5-coder:32b") -> OllamaC
     return OllamaClient(config)
 
 
-def create_market_analyzer(model: str = "qwen2.5-coder:32b") -> OllamaClient:
+def create_market_analyzer(model: str = "qwen2.5:7b") -> OllamaClient:
     """Create Ollama client for comprehensive market analysis"""
     config = OllamaConfig(
         model=model,

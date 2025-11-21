@@ -12,6 +12,7 @@ import json
 import time
 import pandas as pd
 import threading
+from clients.kraken_client import OrderSide, OrderType
 
 
 class EntryAction(Enum):
@@ -178,7 +179,30 @@ class AIEntryAssistant:
             
             if not response:
                 logger.error("Failed to get AI response")
-                return self._create_error_analysis(pair, "LLM API call failed")
+                # If we have scanner context (any scanner context means it was approved by multi-config), use fallback
+                has_scanner_context = additional_context and (
+                    "SCANNER" in additional_context.upper() or 
+                    "APPROVED" in additional_context.upper() or 
+                    "RECOMMENDED" in additional_context.upper() or 
+                    "SCORE" in additional_context.upper() or
+                    "STRATEGY" in additional_context.upper()
+                )
+                
+                if has_scanner_context:
+                    logger.warning(f"⚠️ AI call failed but scanner context present for {pair} - using technical fallback analysis")
+                    logger.debug(f"Scanner context preview: {additional_context[:200] if additional_context else 'None'}...")
+                    return self._create_scanner_fallback_analysis(
+                        pair=pair,
+                        side=side,
+                        current_price=current_price,
+                        risk_pct=risk_pct,
+                        take_profit_pct=take_profit_pct,
+                        technical_data=technical_data,
+                        scanner_context=additional_context
+                    )
+                else:
+                    logger.warning(f"⚠️ AI call failed for {pair} with no scanner context - returning error analysis")
+                    return self._create_error_analysis(pair, "LLM API call failed (insufficient credits or API error)")
             
             decision_data = self._parse_ai_response(response)
             
@@ -230,7 +254,7 @@ class AIEntryAssistant:
                 return self._create_error_analysis(pair, "Failed to parse AI response")
                 
         except Exception as e:
-            logger.error(f"Error analyzing entry for {pair}: {e}", exc_info=True)
+            logger.error("Error analyzing entry for {pair}: {}", str(e), exc_info=True)
             return self._create_error_analysis(pair, str(e))
     
     def _get_technical_indicators(self, pair: str) -> Dict:
@@ -301,7 +325,7 @@ class AIEntryAssistant:
             return indicators
             
         except Exception as e:
-            logger.error(f"Error calculating indicators for {pair}: {e}", exc_info=True)
+            logger.error("Error calculating indicators for {pair}: {}", str(e), exc_info=True)
             return {}
     
     def _build_entry_analysis_prompt(
@@ -465,6 +489,134 @@ Evaluate these critical factors:
             risk_score=100.0
         )
     
+    def _create_scanner_fallback_analysis(
+        self,
+        pair: str,
+        side: str,
+        current_price: float,
+        risk_pct: float,
+        take_profit_pct: float,
+        technical_data: Dict,
+        scanner_context: str
+    ) -> EntryAnalysis:
+        """
+        Create fallback analysis when AI call fails but scanner approved the trade.
+        Uses technical indicators and scanner context to provide a reasonable recommendation.
+        """
+        # Extract scanner confidence from context if available
+        scanner_confidence = 70.0  # Default moderate confidence
+        if "CONFIDENCE" in scanner_context.upper():
+            import re
+            conf_match = re.search(r'confidence[:\s]+(\d+)', scanner_context, re.IGNORECASE)
+            if conf_match:
+                scanner_confidence = float(conf_match.group(1))
+        
+        # Calculate technical scores from available data
+        technical_score = 50.0  # Neutral default
+        trend_score = 50.0
+        timing_score = 50.0
+        risk_score = 50.0
+        
+        if technical_data:
+            # RSI-based timing score
+            rsi = technical_data.get('rsi', 50)
+            if side == "BUY":
+                if rsi < 30:
+                    timing_score = 80.0  # Oversold = good entry
+                elif rsi < 50:
+                    timing_score = 65.0  # Below neutral = decent
+                elif rsi > 70:
+                    timing_score = 30.0  # Overbought = wait
+                else:
+                    timing_score = 50.0
+            else:  # SELL
+                if rsi > 70:
+                    timing_score = 80.0  # Overbought = good short entry
+                elif rsi > 50:
+                    timing_score = 65.0  # Above neutral = decent
+                elif rsi < 30:
+                    timing_score = 30.0  # Oversold = wait
+                else:
+                    timing_score = 50.0
+            
+            # Trend score
+            trend = technical_data.get('trend', 'NEUTRAL')
+            if (side == "BUY" and trend == "BULLISH") or (side == "SELL" and trend == "BEARISH"):
+                trend_score = 75.0
+            elif trend == "NEUTRAL":
+                trend_score = 50.0
+            else:
+                trend_score = 35.0  # Counter-trend
+            
+            # MACD confirmation
+            macd_hist = technical_data.get('macd_histogram', 0)
+            if (side == "BUY" and macd_hist > 0) or (side == "SELL" and macd_hist < 0):
+                technical_score += 10.0
+            
+            # Volume confirmation
+            volume_change = technical_data.get('volume_change_pct', 0)
+            if volume_change > 20:
+                technical_score += 10.0
+            elif volume_change < -30:
+                technical_score -= 10.0
+            
+            technical_score = max(30.0, min(90.0, technical_score))  # Clamp to reasonable range
+            
+            # Risk score (lower is better)
+            volatility = technical_data.get('volatility_5h', 0)
+            if volatility > 10:
+                risk_score = 70.0  # High volatility = higher risk
+            elif volatility < 3:
+                risk_score = 30.0  # Low volatility = lower risk
+            else:
+                risk_score = 50.0
+        
+        # Determine action based on scores
+        avg_score = (technical_score + trend_score + timing_score) / 3
+        if avg_score >= 65:
+            action = EntryAction.ENTER_NOW.value
+            urgency = "MEDIUM"
+        elif avg_score >= 50:
+            action = EntryAction.WAIT_FOR_PULLBACK.value
+            urgency = "LOW"
+        else:
+            action = EntryAction.WAIT_FOR_PULLBACK.value
+            urgency = "LOW"
+        
+        # Calculate stop and target
+        if side == "BUY":
+            suggested_stop = current_price * (1 - risk_pct / 100)
+            suggested_target = current_price * (1 + take_profit_pct / 100)
+        else:  # SELL
+            suggested_stop = current_price * (1 + risk_pct / 100)
+            suggested_target = current_price * (1 - take_profit_pct / 100)
+        
+        rsi_val = technical_data.get('rsi', 50)
+        trend_val = technical_data.get('trend', 'NEUTRAL')
+        volume_change = technical_data.get('volume_change_pct', 0)
+        
+        reasoning = f"Scanner approved this trade but AI analysis unavailable. "
+        reasoning += f"Technical indicators: RSI={rsi_val:.1f}, "
+        reasoning += f"Trend={trend_val}, "
+        reasoning += f"Volume change={volume_change:+.1f}%. "
+        reasoning += f"Recommendation based on technical analysis only."
+        
+        return EntryAnalysis(
+            pair=pair,
+            action=action,
+            confidence=min(scanner_confidence, avg_score),  # Use scanner confidence or technical score, whichever is lower
+            reasoning=reasoning,
+            urgency=urgency,
+            current_price=current_price,
+            suggested_stop=suggested_stop,
+            suggested_target=suggested_target,
+            risk_reward_ratio=take_profit_pct / risk_pct,
+            technical_score=technical_score,
+            trend_score=trend_score,
+            timing_score=timing_score,
+            risk_score=risk_score
+        )
+    
     def monitor_entry_opportunity(
         self,
         pair: str,
@@ -553,7 +705,7 @@ Evaluate these critical factors:
                 self.stop_event.wait(self.check_interval)
                 
             except Exception as e:
-                logger.error(f"Error in entry monitoring loop: {e}", exc_info=True)
+                logger.error("Error in entry monitoring loop: {}", str(e), exc_info=True)
                 time.sleep(self.check_interval)
     
     def _check_opportunities(self):
@@ -579,7 +731,7 @@ Evaluate these critical factors:
                     logger.info(f"✅ Entry conditions met for {opportunity.pair}!")
                     logger.info(f"   Price: ${current_price:,.6f}")
                     if technical_data:
-                        logger.info(f"   RSI: {technical_data.get('rsi', 0):.2f}")
+                        logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
                     
                     # Send notification
                     if not opportunity.notification_sent:
@@ -594,7 +746,7 @@ Evaluate these critical factors:
                         self.remove_opportunity(opp_id)
                 
             except Exception as e:
-                logger.error(f"Error checking opportunity {opp_id}: {e}", exc_info=True)
+                logger.error("Error checking opportunity {opp_id}: {}", str(e), exc_info=True)
     
     def _check_entry_conditions(
         self,
@@ -632,8 +784,77 @@ Evaluate these critical factors:
         current_price: float,
         technical_data: Dict
     ):
-        """Send notification that entry conditions are met"""
+        """Send notification that entry conditions are met with approval request"""
         try:
+            # Send Discord approval request
+            try:
+                from services.discord_trade_approval import get_discord_approval_manager
+                
+                approval_manager = get_discord_approval_manager(
+                    approval_callback=self._handle_approval_response
+                )
+                
+                if approval_manager and approval_manager.is_running():
+                    # Calculate stop and target prices
+                    if opportunity.side == "BUY":
+                        stop_loss = current_price * (1 - opportunity.risk_pct / 100)
+                        take_profit = current_price * (1 + opportunity.take_profit_pct / 100)
+                    else:  # SELL
+                        stop_loss = current_price * (1 + opportunity.risk_pct / 100)
+                        take_profit = current_price * (1 - opportunity.take_profit_pct / 100)
+                    
+                    # Build additional info
+                    additional_info = ""
+                    if technical_data:
+                        rsi = technical_data.get('rsi', 0)
+                        trend = technical_data.get('trend', 'N/A')
+                        volume_change = technical_data.get('volume_change_pct', 0)
+                        additional_info = (
+                            f"**Technical Indicators:**\n"
+                            f"• RSI: {rsi:.2f}\n"
+                            f"• Trend: {trend}\n"
+                            f"• Volume Change: {volume_change:+.1f}%\n\n"
+                            f"**Original Analysis:**\n"
+                            f"• Action: {opportunity.original_analysis.action}\n"
+                            f"• Technical Score: {opportunity.original_analysis.technical_score:.0f}/100\n"
+                            f"• Timing Score: {opportunity.original_analysis.timing_score:.0f}/100"
+                        )
+                    
+                    # Generate approval ID
+                    import time
+                    approval_id = f"{opportunity.pair}_{int(time.time())}"
+                    
+                    # Store approval ID in opportunity
+                    opportunity.target_conditions['approval_id'] = approval_id
+                    
+                    # Send approval request
+                    success = approval_manager.send_approval_request(
+                        approval_id=approval_id,
+                        pair=opportunity.pair,
+                        side=opportunity.side,
+                        entry_price=current_price,
+                        position_size=opportunity.position_size,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        strategy="AI_ENTRY",
+                        confidence=opportunity.original_analysis.confidence,
+                        reasoning=opportunity.original_analysis.reasoning,
+                        additional_info=additional_info
+                    )
+                    
+                    if success:
+                        logger.info(f"✅ Discord approval request sent for {opportunity.pair}")
+                        logger.info(f"   Approval ID: {approval_id}")
+                        return
+                    else:
+                        logger.warning(f"⚠️ Failed to send Discord approval request for {opportunity.pair}")
+                else:
+                    logger.debug("Discord approval manager not available")
+            
+            except Exception as e:
+                logger.debug(f"Discord approval manager error: {e}")
+            
+            # Fallback: Send simple webhook notification
             try:
                 from src.integrations.discord_webhook import send_discord_alert
                 from models.alerts import TradingAlert, AlertType, AlertPriority
@@ -667,7 +888,114 @@ Evaluate these critical factors:
             # Already handled above, but catch here too for safety
             logger.debug("Discord webhook not available, skipping notification")
         except Exception as e:
-            logger.warning(f"Failed to send entry notification for {opportunity.pair}: {type(e).__name__}: {e}", exc_info=True)
+            logger.warning("Failed to send entry notification for {}: {type(e).__name__)}: {e}", str(opportunity.pair), exc_info=True)
+    
+    def _handle_approval_response(self, approval_id: str, approved: bool):
+        """Handle approval response from Discord"""
+        try:
+            logger.info("📬 Received approval response: {} -> {'APPROVED' if approved else 'REJECTED'}", str(approval_id))
+            
+            # Find the opportunity with this approval ID
+            opportunity_found = None
+            opp_id_found = None
+            
+            for opp_id, opp in self.opportunities.items():
+                if opp.target_conditions.get('approval_id') == approval_id:
+                    opportunity_found = opp
+                    opp_id_found = opp_id
+                    break
+            
+            if not opportunity_found:
+                logger.warning(f"⚠️ Could not find opportunity for approval ID: {approval_id}")
+                return
+            
+            if approved:
+                logger.info(f"✅ User approved trade for {opportunity_found.pair}")
+                logger.info(f"   Side: {opportunity_found.side}")
+                logger.info(f"   Position Size: ${opportunity_found.position_size:,.2f}")
+                
+                # Execute the trade
+                if opp_id_found:
+                    self._execute_approved_trade(opportunity_found, opp_id_found)
+            else:
+                logger.info(f"❌ User rejected trade for {opportunity_found.pair}")
+                # Remove from monitoring
+                if opp_id_found:
+                    self.remove_opportunity(opp_id_found)
+        
+        except Exception as e:
+            logger.error("Error handling approval response: {}", str(e), exc_info=True)
+    
+    def _execute_approved_trade(self, opportunity: MonitoredEntryOpportunity, opp_id: str):
+        """Execute approved trade and add to position manager"""
+        try:
+            logger.info(f"🚀 Executing approved trade: {opportunity.pair}")
+            
+            # Calculate prices
+            if opportunity.side == "BUY":
+                stop_loss = opportunity.current_price * (1 - opportunity.risk_pct / 100)
+                take_profit = opportunity.current_price * (1 + opportunity.take_profit_pct / 100)
+            else:  # SELL
+                stop_loss = opportunity.current_price * (1 + opportunity.risk_pct / 100)
+                take_profit = opportunity.current_price * (1 - opportunity.take_profit_pct / 100)
+            
+            # Execute trade via Kraken - Convert strings to enums
+            # Convert side string to OrderSide enum
+            side_enum = OrderSide.BUY if opportunity.side == "BUY" else OrderSide.SELL
+            
+            executed_order = self.kraken_client.place_order(
+                pair=opportunity.pair,
+                side=side_enum,  # Use enum instead of string
+                order_type=OrderType.MARKET,  # Use enum instead of string
+                volume=opportunity.position_size / opportunity.current_price,
+                price=None  # Market order
+            )
+            
+            if executed_order:
+                order_id = executed_order.order_id
+                logger.info(f"✅ Trade executed successfully!")
+                logger.info(f"   Order ID: {order_id}")
+                logger.info(f"   Pair: {opportunity.pair}")
+                logger.info(f"   Side: {opportunity.side}")
+                logger.info(f"   Price: ${opportunity.current_price:,.6f}")
+                
+                # Add to position manager
+                try:
+                    from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                    
+                    position_manager = get_ai_crypto_position_manager(self.kraken_client, self.llm_analyzer)
+                    
+                    if position_manager:
+                        # Generate trade ID
+                        trade_id = f"{opportunity.pair}_{int(time.time())}"
+                        
+                        # Calculate volume
+                        volume = opportunity.position_size / opportunity.current_price
+                        
+                        # Add to monitoring
+                        position_manager.add_position(
+                            trade_id=trade_id,
+                            pair=opportunity.pair,
+                            side=opportunity.side,
+                            volume=volume,
+                            entry_price=opportunity.current_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            strategy="AI_ENTRY",
+                            entry_order_id=order_id
+                        )
+                        
+                        logger.info(f"✅ Position added to AI monitoring: {trade_id}")
+                except Exception as e:
+                    logger.warning(f"Could not add to position manager: {e}")
+                
+                # Remove from entry monitoring
+                self.remove_opportunity(opp_id)
+            else:
+                logger.error(f"❌ Trade execution failed: {result}")
+        
+        except Exception as e:
+            logger.error("Error executing approved trade: {}", str(e), exc_info=True)
     
     def remove_opportunity(self, opportunity_id: str) -> bool:
         """Remove opportunity from monitoring"""
@@ -715,20 +1043,6 @@ Evaluate these critical factors:
                     'pair': opp.pair,
                     'side': opp.side,
                     'target_price': opp.target_price,
-                    'target_rsi': opp.target_rsi,
-                    'target_conditions': opp.target_conditions,
-                    'position_size': opp.position_size,
-                    'risk_pct': opp.risk_pct,
-                    'take_profit_pct': opp.take_profit_pct,
-                    'created_time': opp.created_time.isoformat(),
-                    'last_check_time': opp.last_check_time.isoformat(),
-                    'current_price': opp.current_price,
-                    'notification_sent': opp.notification_sent,
-                    'auto_execute': opp.auto_execute,
-                    # Save original analysis
-                    'original_analysis': {
-                        'pair': opp.original_analysis.pair,
-                        'action': opp.original_analysis.action,
                         'confidence': opp.original_analysis.confidence,
                         'reasoning': opp.original_analysis.reasoning,
                         'urgency': opp.original_analysis.urgency,
@@ -754,7 +1068,7 @@ Evaluate these critical factors:
             logger.debug(f"💾 Saved {len(state)} monitored opportunities to {self.state_file}")
             
         except Exception as e:
-            logger.error(f"Error saving entry assistant state: {e}", exc_info=True)
+            logger.error("Error saving entry assistant state: {}", str(e), exc_info=True)
     
     def _load_state(self):
         """Load monitored opportunities from file"""
@@ -810,12 +1124,12 @@ Evaluate these critical factors:
                         created_time=datetime.fromisoformat(opp_data['created_time']),
                         last_check_time=datetime.fromisoformat(opp_data['last_check_time']),
                         current_price=opp_data['current_price'],
-                        notification_sent=opp_data['notification_sent'],
-                        auto_execute=opp_data['auto_execute']
+                        notification_sent=opp_data.get('notification_sent', False),
+                        auto_execute=opp_data.get('auto_execute', False)
                     )
                     
                     self.opportunities[opp_id] = opportunity
-                    logger.info(f"📂 Restored monitor: {opportunity.pair} (target: ${opportunity.target_price if opportunity.target_price else 'breakout'})")
+                    logger.info("📂 Restored monitor: {} (target: ${opportunity.target_price if opportunity.target_price else 'breakout'})", str(opportunity.pair))
                     
                 except Exception as e:
                     logger.warning(f"Failed to restore opportunity {opp_id}: {e}")
@@ -828,7 +1142,7 @@ Evaluate these critical factors:
                     self.start_monitoring()
             
         except Exception as e:
-            logger.error(f"Error loading entry assistant state: {e}", exc_info=True)
+            logger.error("Error loading entry assistant state: {}", str(e), exc_info=True)
 
 
 # Singleton instance

@@ -63,7 +63,7 @@ def main():
     tab_files = [f for f in tabs_dir.glob("*.py") 
                  if f.name != "__init__.py" and f.name != "common_imports.py"]
     
-    print(f"\n🔧 Fixing {len(tab_files)} tab files\n")
+    print(f"\n🔧 Fixing {len(tab_files))} tab files\n")
     
     for tab_file in sorted(tab_files):
         fix_tab(tab_file)

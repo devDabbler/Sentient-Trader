@@ -217,7 +217,7 @@ class TradeStateManager:
         # Find positions we think we have but broker doesn't
         orphaned = our_symbols - broker_symbols
         if orphaned:
-            logger.warning(f"⚠️  Found orphaned positions (we think we have but broker doesn't): {orphaned}")
+            logger.warning("⚠️  Found orphaned positions (we think we have but broker doesn't): {}", str(orphaned))
             for symbol in orphaned:
                 # Mark as closed (probably closed while we were offline)
                 trade = self.open_positions[symbol]
@@ -230,7 +230,7 @@ class TradeStateManager:
         # Find positions broker has but we don't know about
         unknown = broker_symbols - our_symbols
         if unknown:
-            logger.warning(f"⚠️  Found unknown positions (broker has but we don't know about): {unknown}")
+            logger.warning("⚠️  Found unknown positions (broker has but we don't know about): {}", str(unknown))
             for symbol in unknown:
                 pos = next(p for p in broker_positions if p['symbol'] == symbol)
                 # Calculate per-share entry price from cost_basis

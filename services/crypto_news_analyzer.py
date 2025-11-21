@@ -120,7 +120,7 @@ class CryptoNewsAnalyzer:
         
         logger.info("   • CoinGecko News API (primary source)")
         logger.info("   • Note: CoinMarketCap API does not provide news endpoints")
-        logger.info(f"   • Sentiment: {'FinBERT (AI-powered)' if self.use_finbert else 'Keyword-based'}")
+        logger.info("   • Sentiment: {}", str('FinBERT (AI-powered)' if self.use_finbert else 'Keyword-based'))
         logger.info("   • Social sentiment integration (Reddit, forums)")
     
     async def get_crypto_news(

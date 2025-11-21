@@ -30,7 +30,7 @@ class EventBus:
         Publish message to topic. Returns number of subscribers notified.
         """
         if topic not in self._subscriptions:
-            logger.debug(f"No subscribers for topic '{topic}'")
+            logger.debug("No subscribers for topic '{}'", str(topic))
             return 0
         
         count = 0
@@ -39,7 +39,7 @@ class EventBus:
                 queue.put_nowait(message)
                 count += 1
             except asyncio.QueueFull:
-                logger.warning(f"Queue full for topic '{topic}', dropping message")
+                logger.warning("Queue full for topic '{}', dropping message", str(topic))
         
         self._stats[f"pub_{topic}"] += 1
         return count
@@ -54,7 +54,7 @@ class EventBus:
         """
         queue: asyncio.Queue = asyncio.Queue(maxsize=self._max_queue_size)
         self._subscriptions[topic].add(queue)
-        logger.info(f"Subscribed to topic '{topic}'")
+        logger.info("Subscribed to topic '{}'", str(topic))
         
         try:
             while True:
@@ -63,7 +63,7 @@ class EventBus:
                 yield message
         finally:
             self._subscriptions[topic].discard(queue)
-            logger.info(f"Unsubscribed from topic '{topic}'")
+            logger.info("Unsubscribed from topic '{}'", str(topic))
     
     def get_stats(self) -> Dict[str, int]:
         """Get event statistics"""

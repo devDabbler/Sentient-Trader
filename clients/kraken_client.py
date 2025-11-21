@@ -159,9 +159,10 @@ class KrakenClient:
         'SOL/USD': 'SOLUSD',
         'XRP/USD': 'XXRPZUSD',
         'ADA/USD': 'ADAUSD',
-        'DOGE/USD': 'XDGZUSD',
+        'DOGE/USD': 'DOGUSD',  # Fixed: was XDGZUSD
         'DOT/USD': 'DOTUSD',
-        'MATIC/USD': 'MATICUSD',
+        'MATIC/USD': 'POLUSD',  # Fixed: MATIC renamed to POL on Kraken
+        'POL/USD': 'POLUSD',    # Add POL as alternative
         'AVAX/USD': 'AVAXUSD',
         'LINK/USD': 'LINKUSD',
         'ATOM/USD': 'ATOMUSD',
@@ -178,7 +179,6 @@ class KrakenClient:
         'SNX/USD': 'SNXUSD',
         
         # Layer 2 / Scaling
-        'MATIC/USD': 'MATICUSD',
         'OP/USD': 'OPUSD',
         'ARB/USD': 'ARBUSD',
         
@@ -446,6 +446,70 @@ class KrakenClient:
         except Exception as e:
             logger.debug(f"Error fetching ticker info for {pair}: {e}")
             return {}
+    
+    def get_ticker_batch(self, pairs: List[str]) -> Tuple[bool, Dict]:
+        """
+        Get ticker information for multiple trading pairs in one request
+        
+        Args:
+            pairs: List of trading pairs in any format (e.g., ['BTC/USD', 'BTCUSD', 'btcusd', 'eth/usd'])
+                   Will be normalized and converted to Kraken format automatically
+            
+        Returns:
+            Tuple of (success: bool, ticker_data: Dict)
+            ticker_data maps normalized pair (e.g., 'BTC/USD') to ticker info
+        """
+        try:
+            # Normalize and convert pairs to Kraken format
+            normalized_pairs = []
+            kraken_pairs = []
+            pair_mapping = {}  # Maps Kraken format -> normalized format
+            
+            for pair in pairs:
+                # Normalize pair (handles BTC/USD, BTCUSD, btcusd, btc/usd)
+                normalized = normalize_crypto_pair(pair)
+                
+                # Get Kraken format from POPULAR_PAIRS or use fallback
+                kraken_pair = self.POPULAR_PAIRS.get(normalized, normalized)
+                
+                # If not in POPULAR_PAIRS, try common format conversions
+                if kraken_pair == normalized:
+                    # Try common formats: ATOM/USD -> ATOMUSD
+                    if '/' in normalized:
+                        kraken_pair = normalized.replace('/', '').upper()
+                    else:
+                        kraken_pair = normalized.upper()
+                
+                normalized_pairs.append(normalized)
+                kraken_pairs.append(kraken_pair)
+                pair_mapping[kraken_pair] = normalized
+            
+            # Kraken accepts comma-separated pairs
+            pair_str = ','.join(kraken_pairs)
+            
+            data = self._public_request('Ticker', {'pair': pair_str})
+            
+            if not data:
+                return False, {}
+            
+            # Map results back to normalized pair names
+            result = {}
+            for kraken_pair, normalized_pair in pair_mapping.items():
+                # Try exact match first
+                if kraken_pair in data:
+                    result[normalized_pair] = data[kraken_pair]
+                else:
+                    # Try to find match with different formatting
+                    for key in data.keys():
+                        if kraken_pair.upper() in key or key in kraken_pair.upper():
+                            result[normalized_pair] = data[key]
+                            break
+            
+            return True, result
+            
+        except Exception as e:
+            logger.debug(f"Error fetching batch ticker data: {e}")
+            return False, {}
     
     def get_ohlc_data(self, pair: str, interval: int = 60, since: Optional[int] = None) -> List[Dict]:
         """
@@ -1066,12 +1130,13 @@ class KrakenClient:
     # POSITION MANAGEMENT METHODS
     # =========================================================================
     
-    def get_open_positions(self, calculate_real_cost: bool = True) -> List[KrakenPosition]:
+    def get_open_positions(self, calculate_real_cost: bool = True, min_value: float = 1.0) -> List[KrakenPosition]:
         """
         Get all open positions with accurate entry prices and P&L
         
         Args:
             calculate_real_cost: If True, fetches trade history to calculate real entry prices and costs
+            min_value: Minimum position value in USD to include (filters out dust). Default $1.
         
         Returns:
             List of KrakenPosition objects
@@ -1103,6 +1168,7 @@ class KrakenClient:
             skipped_assets = []
             
             logger.info(f"Processing {len(balances)} balance(s) from Kraken...")
+            logger.debug(f"Dust filter: Skipping positions < ${min_value:.2f}")
             
             for balance in balances:
                 if balance.balance > 0 and balance.currency != 'USD':
@@ -1149,7 +1215,7 @@ class KrakenClient:
                                 
                                 if total_volume > 0:
                                     entry_price = total_cost / total_volume
-                                    logger.debug(f"{pair}: Calculated entry price ${entry_price:.6f} from {len(trades_by_pair[possible_pair]['buy'])} buy trades")
+                                    logger.debug("{}: Calculated entry price ${entry_price:.6f} from {len(trades_by_pair[possible_pair]['buy'])} buy trades", str(pair))
                                     break
                         
                         # If we couldn't find trade history, use current price as entry (no P&L calculation)
@@ -1162,6 +1228,12 @@ class KrakenClient:
                         current_value = balance.balance * current_price
                         position_cost = entry_price * balance.balance
                         net_pnl = current_value - position_cost - total_fees
+                        
+                        # Filter out dust positions (< min_value threshold)
+                        if current_value < min_value:
+                            logger.debug(f"⏭️ Skipping {pair}: Dust position worth ${current_value:.4f} (balance: {balance.balance:.8f})")
+                            skipped_assets.append((currency, f"Dust (${current_value:.4f})"))
+                            continue
                         
                         # Create position
                         position = KrakenPosition(
@@ -1176,6 +1248,7 @@ class KrakenClient:
                             entry_price=entry_price
                         )
                         
+                        logger.debug(f"✅ {pair}: Balance={balance.balance:.8f}, Value=${current_value:.2f}, Entry=${entry_price:.6f}")
                         positions.append(position)
                         
                     except Exception as e:
@@ -1577,7 +1650,7 @@ class KrakenClient:
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing portfolio: {e}", exc_info=True)
+            logger.error("Error analyzing portfolio: {}", str(e), exc_info=True)
             return {
                 'total_value': 0.0,
                 'total_cost': 0.0,

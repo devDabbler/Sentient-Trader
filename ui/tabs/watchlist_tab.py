@@ -238,7 +238,7 @@ def render_tab():
     
     if cache_valid and 'all_tickers' in st.session_state.ticker_cache:
         all_tickers_full = st.session_state.ticker_cache['all_tickers']
-        logger.debug(f"Using cached ticker data (age: {cache_age:.1f}s)")
+        logger.debug(f"Using cached ticker data (age: {}s) {cache_age:.1f}")
     else:
         # Fetch fresh data and cache it
         all_tickers_full = tm.get_all_tickers(limit=100)
@@ -333,11 +333,11 @@ def render_tab():
                         ai_timestamp = datetime.fromisoformat(ai_timestamp_str.replace('Z', '+00:00'))
                         time_ago = (datetime.now(timezone.utc) - ai_timestamp).total_seconds()
                         if time_ago < 3600:
-                            time_label = f"{int(time_ago / 60)}m ago"
+                            time_label = f"{int(time_ago / 60))}m ago"
                         elif time_ago < 86400:
-                            time_label = f"{int(time_ago / 3600)}h ago"
+                            time_label = f"{int(time_ago / 3600))}h ago"
                         else:
-                            time_label = f"{int(time_ago / 86400)}d ago"
+                            time_label = f"{int(time_ago / 86400))}d ago"
 
                         badge_color = "green" if ai_action == "ENTER_NOW" else "yellow" if "WAIT" in ai_action else "red"
                         
@@ -578,7 +578,7 @@ def render_tab():
                                 with metric_col2:
                                     st.metric("Trend", analysis.trend)
                                 with metric_col3:
-                                    st.metric("Confidence", f"{int(analysis.confidence_score)}%")
+                                    st.metric("Confidence", f"{int(analysis.confidence_score))}%")
                                 with metric_col4:
                                     st.metric("IV Rank", f"{analysis.iv_rank}%")
                                 with metric_col5:
@@ -669,7 +669,7 @@ def render_tab():
                                 st.subheader("📰 Recent News & Sentiment")
                                 
                                 if analysis.recent_news:
-                                    st.success(f"✅ Found {len(analysis.recent_news)} recent news articles")
+                                    st.success(f"✅ Found {len(analysis.recent_news))} recent news articles")
                                 else:
                                     st.warning("⚠️ No recent news found - this may indicate low news volume or connectivity issues")
                                 

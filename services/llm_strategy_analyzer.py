@@ -105,7 +105,7 @@ class LLMStrategyAnalyzer:
         # Auto-detect provider from model name if using default provider
         if provider == "openrouter" and model and (model.lower().startswith("ollama/") or model.lower().startswith("ollama:")):
             provider = "ollama"
-            logger.info(f"🔄 Auto-detected Ollama model from name: {model}, switching provider to 'ollama'")
+            logger.info("🔄 Auto-detected Ollama model from name: {}, switching provider to 'ollama'", str(model))
         
         self.provider = provider
         self.model = model
@@ -149,7 +149,7 @@ class LLMStrategyAnalyzer:
     def analyze_bot_strategy(self, bot_config: Dict) -> StrategyAnalysis:
         """Analyze a bot strategy configuration"""
         try:
-            logger.info(f"Starting strategy analysis for {bot_config.get('name', 'Unknown Bot')}")
+            logger.info(f"Starting strategy analysis for {bot_config.get('name', 'Unknown Bot'}"))
             logger.debug(f"Using model: {self.model}")
             
             # Prepare analysis prompt
@@ -163,13 +163,13 @@ class LLMStrategyAnalyzer:
             
             # Parse response
             analysis = self._parse_analysis_response(response, bot_config)
-            logger.info(f"Strategy analysis completed for {bot_config.get('name', 'Unknown Bot')}")
+            logger.info(f"Strategy analysis completed for {bot_config.get('name', 'Unknown Bot'}"))
             logger.info(f"Analysis result: {analysis.overall_rating}, Risk: {analysis.risk_score:.2f}, Confidence: {analysis.confidence:.2f}")
             
             return analysis
             
         except Exception as e:
-            logger.error(f"Error analyzing strategy: {e}", exc_info=True)
+            logger.error("Error analyzing strategy: {}", str(e), exc_info=True)
             return self._create_error_analysis(bot_config, str(e))
     
     def _create_analysis_prompt(self, bot_config: Dict) -> str:
@@ -275,13 +275,13 @@ Focus on practical, actionable insights for options trading. Consider the specif
                     logger.error("❌ Ollama returned empty response")
                     return ""
             except Exception as e:
-                logger.error(f"❌ Ollama error: {e}", exc_info=True)
+                logger.error("❌ Ollama error: {}", str(e), exc_info=True)
                 return ""
 
         try:
             logger.info(f"🤖 Calling {self.provider} API with model: {self.model}")
             logger.debug(f"Base URL: {self.base_url}")
-            logger.debug(f"API Key present: {bool(self.api_key)}, Length: {len(self.api_key) if self.api_key else 0}")
+            logger.debug(f"API Key present: {bool(self.api_key)}, Length: {len(self.api_key) if self.api_key else 0)}")
             
             import openai
             client = openai.OpenAI(
@@ -305,16 +305,75 @@ Focus on practical, actionable insights for options trading. Consider the specif
                 max_tokens=2000
             )
             
-            content = getattr(response.choices[0].message, 'content', None)
-            logger.info(f"✅ {self.provider} API call successful - received {len(content) if content else 0} characters")
-            logger.debug(f"{self.provider} API response: {str(content)[:200]}...")
-            return content or ""
+            # Convert response to dict if needed for error checking
+            response_dict = None
+            if hasattr(response, 'model_dump'):
+                try:
+                    response_dict = response.model_dump()
+                except Exception:
+                    pass
+            
+            # Check for error in dict format (some API errors)
+            if response_dict and 'error' in response_dict:
+                error_info = response_dict['error']
+                error_msg = error_info.get('message', str(error_info)) if isinstance(error_info, dict) else str(error_info)
+                logger.error(f"❌ {self.provider} API returned error: {error_msg}")
+                logger.debug(f"Full error response: {response_dict}")
+                return ""
+            
+            # Check if response has error field (API error responses)
+            if hasattr(response, 'error'):
+                error_msg = getattr(response.error, 'message', str(response.error))
+                logger.error(f"❌ {self.provider} API returned error: {error_msg}")
+                logger.debug(f"Full error response: {response}")
+                return ""
+            
+            # Check if response has choices (successful responses)
+            if not hasattr(response, 'choices') or not response.choices:
+                logger.error(f"❌ {self.provider} API returned unexpected response structure")
+                logger.debug(f"Response type: {type(response)}, Response: {str(response)[:500])}")
+                logger.debug(f"Response dict: {response_dict}")
+                return ""
+            
+            # Safely access first choice
+            try:
+                first_choice = response.choices[0]
+                content = getattr(first_choice.message, 'content', None)
+            except (KeyError, IndexError, AttributeError, TypeError) as e:
+                logger.error(f"❌ Error accessing response content: {e}")
+                logger.debug(f"Response structure: {dir(response)}")
+                logger.debug(f"Choices type: {type(response.choices)}")
+                return ""
+            
+            if not content:
+                logger.warning(f"⚠️ {self.provider} returned empty content")
+                return ""
+                
+            logger.info(f"✅ {self.provider} API call successful - received {len(content))} characters")
+            logger.debug(f"{self.provider} API response: {str(content)[:200])}...")
+            return content
             
         except Exception as e:
-            logger.error(f"❌ {self.provider} API error: {e}", exc_info=True)
+            error_str = str(e).lower()
+            logger.error("❌ {self.provider} API error: {}", str(e), exc_info=True)
             logger.error(f"API Key configured: {bool(self.api_key)}")
             logger.error(f"Model: {self.model}")
             logger.error(f"Base URL: {self.base_url}")
+            
+            # Provide helpful guidance for common errors
+            if 'insufficient credits' in error_str or 'no credits' in error_str:
+                logger.error("💳 Your OpenRouter account is out of credits. Either:")
+                logger.error("   1. Add credits at https://openrouter.ai/credits")
+                logger.error("   2. Switch to a FREE model in .env (e.g., google/gemini-2.0-flash-exp:free)")
+            elif 'rate limit' in error_str or '429' in error_str:
+                logger.error("⏱️ Rate limited by OpenRouter. Try:")
+                logger.error("   1. Wait 60 seconds before retrying")
+                logger.error("   2. Switch to a different free model provider")
+            elif 'invalid' in error_str and 'model' in error_str:
+                logger.error("❌ Model '{}' may not be valid. Check https://openrouter.ai/models", str(self.model))
+            elif 'unauthorized' in error_str or '401' in error_str:
+                logger.error("🔑 API key issue. Verify OPENROUTER_API_KEY in .env is valid")
+            
             return ""
     
     def _call_openrouter(self, prompt: str, max_retries: int = 3, try_fallbacks: bool = True) -> Optional[str]:
@@ -412,8 +471,8 @@ Focus on practical, actionable insights for options trading. Consider the specif
                         data = response.json()
                         content = data['choices'][0]['message']['content']
                         model_used = model_to_use if model_idx == 0 else f"{model_to_use} (fallback)"
-                        logger.info(f"✅ OpenRouter API call successful with {model_used} - received {len(content)} characters")
-                        logger.debug(f"OpenRouter response: {str(content)[:200]}...")
+                        logger.info(f"✅ OpenRouter API call successful with {model_used} - received {len(content))} characters")
+                        logger.debug("OpenRouter response: {}...", str(content)[:200])
                         # Reset backoff on success
                         LLMStrategyAnalyzer._rate_limit_backoff_until = 0
                         # Remove from blacklist if it was there
@@ -479,7 +538,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
                         else:
                             # All models exhausted
                             logger.error(
-                                f"❌ OpenRouter rate limit (429) after trying {len(models_to_try)} models. "
+                                f"❌ OpenRouter rate limit (429) after trying {len(models_to_try))} models. "
                                 f"Error: {error_msg}"
                             )
                             logger.info(
@@ -540,7 +599,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
                         return None
                 
                 except Exception as e:
-                    logger.error(f"❌ Error calling OpenRouter: {e}", exc_info=True)
+                    logger.error("❌ Error calling OpenRouter: {}", str(e), exc_info=True)
                     logger.error(f"API Key configured: {bool(self.api_key)}")
                     # If we have fallbacks, try next model
                     if model_idx < len(models_to_try) - 1:

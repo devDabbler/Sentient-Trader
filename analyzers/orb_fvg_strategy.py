@@ -348,13 +348,13 @@ class ORBFVGAnalyzer:
             return result
             
         except Exception as e:
-            logger.error(f"Error analyzing {ticker} with ORB+FVG strategy: {e}", exc_info=True)
+            logger.error("Error analyzing {ticker} with ORB+FVG strategy: {}", str(e), exc_info=True)
             return {
                 'ticker': ticker,
                 'strategy': 'ORB+FVG',
                 'signal': 'HOLD',
                 'confidence': 0.0,
-                'reason': f'Analysis error: {str(e)}',
+                'reason': f'Analysis error: {str(e))}',
                 'error': str(e)
             }
     

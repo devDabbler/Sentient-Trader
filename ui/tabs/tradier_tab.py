@@ -116,7 +116,7 @@ def render_tab():
                     del st.session_state.account_summary
                     logger.info("Cleared cached account summary due to mode change")
             except Exception as e:
-                logger.error(f"Failed to initialize Tradier client: {e}", exc_info=True)
+                logger.error("Failed to initialize Tradier client: {}", str(e), exc_info=True)
                 st.session_state.tradier_client = None
         
         # Trade Journal section
@@ -126,7 +126,7 @@ def render_tab():
                 display_trade_journal()
             except Exception as e:
                 st.error(f"Failed to load trade journal: {e}")
-                logger.error(f"Trade journal error: {e}", exc_info=True)
+                logger.error("Trade journal error: {}", str(e), exc_info=True)
         
         st.divider()
         

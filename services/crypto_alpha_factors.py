@@ -213,7 +213,7 @@ class CryptoAlphaCalculator:
             # Liquidity factors (if available in ticker data)
             factors.bid_ask_spread_pct = self._calculate_spread(ticker)
             
-            logger.debug(f"Calculated {len(factors.get_feature_vector())} alpha factors for {symbol}")
+            logger.debug(f"Calculated {len(factors.get_feature_vector()} alpha factors for {symbol}"))
             
             return factors
             

@@ -66,7 +66,7 @@ class SetupAgent:
             try:
                 await self._process_indicator_event(event)
             except Exception as e:
-                logger.error(f"Error processing indicator event: {e}", exc_info=True)
+                logger.error("Error processing indicator event: {}", str(e), exc_info=True)
     
     async def _process_indicator_event(self, event: IndicatorEvent):
         """

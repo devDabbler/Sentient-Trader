@@ -97,7 +97,7 @@ class ORBFVGAlertManager:
             logger.info(f"✅ Discord alert sent for {signal.symbol} ORB+FVG {signal.signal_type} signal")
             
         except Exception as e:
-            logger.error(f"Error sending ORB+FVG alert for {signal.symbol}: {e}", exc_info=True)
+            logger.error("Error sending ORB+FVG alert for {signal.symbol}: {}", str(e), exc_info=True)
     
     def log_trade_entry(self, 
                        signal: ORBFVGSignal,
@@ -163,7 +163,11 @@ class ORBFVGAlertManager:
             )
             
             # Add to journal
-            self.journal.add_entry(trade_entry)
+            success = self.journal.log_trade_entry(trade_entry)
+            
+            if not success:
+                logger.error(f"Failed to log trade entry: {trade_id}")
+                return ""
             
             logger.info(f"📓 Trade entry logged: {trade_id} - {signal.symbol} {signal.signal_type}")
             
@@ -173,7 +177,7 @@ class ORBFVGAlertManager:
             return trade_id
             
         except Exception as e:
-            logger.error(f"Error logging trade entry for {signal.symbol}: {e}", exc_info=True)
+            logger.error("Error logging trade entry for {signal.symbol}: {}", str(e), exc_info=True)
             return ""
     
     def log_trade_exit(self,
@@ -204,7 +208,7 @@ class ORBFVGAlertManager:
             logger.info(f"📓 Trade exit logged: {trade_id} - {exit_reason} at ${exit_price:.2f}")
             
         except Exception as e:
-            logger.error(f"Error logging trade exit for {trade_id}: {e}", exc_info=True)
+            logger.error("Error logging trade exit for {trade_id}: {}", str(e), exc_info=True)
     
     def _build_reasoning(self, signal: ORBFVGSignal) -> str:
         """Build reasoning text for signal"""
@@ -287,7 +291,7 @@ class ORBFVGAlertManager:
             logger.info(f"✅ Trade execution alert sent for {signal.symbol}")
             
         except Exception as e:
-            logger.error(f"Error sending execution alert: {e}", exc_info=True)
+            logger.error("Error sending execution alert: {}", str(e), exc_info=True)
     
     def get_orb_fvg_stats(self) -> dict:
         """
@@ -298,8 +302,8 @@ class ORBFVGAlertManager:
         """
         try:
             # Get all ORB+FVG trades
-            all_trades = self.journal.get_all_entries()
-            orb_fvg_trades = [t for t in all_trades if t.strategy == 'ORB_FVG_15MIN']
+            all_trades = self.journal.get_trades(strategy='ORB_FVG_15MIN')
+            orb_fvg_trades = all_trades
             
             if not orb_fvg_trades:
                 return {
@@ -331,7 +335,7 @@ class ORBFVGAlertManager:
             }
             
         except Exception as e:
-            logger.error(f"Error getting ORB+FVG stats: {e}", exc_info=True)
+            logger.error("Error getting ORB+FVG stats: {}", str(e), exc_info=True)
             return {'error': str(e)}
 
 
@@ -356,6 +360,6 @@ def create_orb_fvg_alert_manager() -> ORBFVGAlertManager:
         return manager
         
     except Exception as e:
-        logger.error(f"Error creating ORB+FVG alert manager: {e}", exc_info=True)
+        logger.error("Error creating ORB+FVG alert manager: {}", str(e), exc_info=True)
         # Return basic manager without dependencies
         return ORBFVGAlertManager()

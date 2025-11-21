@@ -149,7 +149,7 @@ def render_tab():
             strategy_config = load_active_strategy()
             
             if strategy_key not in strategy_config['available_strategies']:
-                logger.error(f"❌ Strategy key '{strategy_key}' not found in available strategies")
+                logger.error("❌ Strategy key '{}' not found in available strategies", str(strategy_key))
                 st.error(f"Strategy '{strategy_key}' not found!")
                 return False
             
@@ -158,7 +158,7 @@ def render_tab():
             strategy_config['config_file'] = strategy_config['available_strategies'][strategy_key]['config_file']
             strategy_config['last_updated'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            logger.info(f"📝 Updating active_strategy.json: strategy={strategy_key}, config_file={strategy_config['config_file']}")
+            logger.info("📝 Updating active_strategy.json: strategy={}, config_file={strategy_config['config_file']}", str(strategy_key))
             
             # Write to file with explicit flush and error handling
             file_path = 'active_strategy.json'
@@ -177,10 +177,10 @@ def render_tab():
                 
                 if verification.get('active_strategy') == strategy_key:
                     logger.info(f"✅ Successfully saved and verified active strategy: {strategy_key}")
-                    logger.info(f"   Config file: {verification.get('config_file')}")
+                    logger.info(f"   Config file: {verification.get('config_file'}"))
                     return True
                 else:
-                    logger.error(f"❌ Verification failed! Saved '{strategy_key}' but file shows '{verification.get('active_strategy')}'")
+                    logger.error("❌ Verification failed! Saved '{strategy_key}' but file shows '{}'", str(verification.get('active_strategy')))
                     st.error(f"⚠️ Saved {strategy_key} but verification failed! File may be locked.")
                     return False
                     
@@ -189,12 +189,12 @@ def render_tab():
                 st.error(f"⚠️ Permission denied! Make sure {file_path} is not open in another program.")
                 return False
             except Exception as write_error:
-                logger.error(f"❌ Error writing to file: {write_error}", exc_info=True)
+                logger.error("❌ Error writing to file: {}", str(write_error), exc_info=True)
                 st.error(f"Error writing to file: {write_error}")
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Error saving active strategy: {e}", exc_info=True)
+            logger.error("❌ Error saving active strategy: {}", str(e), exc_info=True)
             st.error(f"Error saving active strategy: {e}")
         return False
     
@@ -633,7 +633,7 @@ FRACTIONAL_MAX_AMOUNT = {config_dict.get('fractional_max_amount', 1000.0)}  # Ma
                         # Update both session state keys to ensure text area updates
                         st.session_state['synced_watchlist'] = ", ".join(checked_tickers)
                         st.session_state['watchlist_text_area'] = ", ".join(checked_tickers)
-                        st.success(f"✅ Copied {len(checked_tickers)} tickers!")
+                        st.success(f"✅ Copied {len(checked_tickers))} tickers!")
                         st.info(f"📋 **Tickers ready to save:** {', '.join(checked_tickers[:10])}{'...' if len(checked_tickers) > 10 else ''}")
                         st.rerun()
                     else:
@@ -1462,7 +1462,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                     
                 except Exception as e:
                     st.error(f"Failed to start Auto-Trader: {e}")
-                    logger.error(f"Auto-trader start error: {e}", exc_info=True)
+                    logger.error("Auto-trader start error: {}", str(e), exc_info=True)
     
     with col_btn2:
         if st.button("🛑 Stop Auto-Trader", disabled=st.session_state.auto_trader is None):
@@ -1539,7 +1539,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
             display_stock_entry_monitors()
         except Exception as e:
             st.error(f"Error loading entry monitors: {e}")
-            logger.error(f"Stock entry monitors error: {e}", exc_info=True)
+            logger.error("Stock entry monitors error: {}", str(e), exc_info=True)
     
     elif st.session_state.autotrader_tab == "📈 Active Positions":
         st.subheader("📈 Active Positions")
@@ -1549,7 +1549,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
             positions = monitor.get_monitored_positions()
             
             if positions:
-                st.success(f"Monitoring {len(positions)} position(s)")
+                st.success(f"Monitoring {len(positions))} position(s)")
                 for pos in positions:
                     # Check if fractional
                     is_fractional = (pos.quantity % 1 != 0)
@@ -1584,7 +1584,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
             history = st.session_state.auto_trader.get_execution_history()
             
             if history:
-                st.write(f"**Total Executions:** {len(history)}")
+                st.write(f"**Total Executions:** {len(history))}")
                 
                 for idx, execution in enumerate(reversed(history[-10:]), 1):  # Show last 10
                     with st.expander(f"{idx}. {execution['symbol']} - {execution['signal']} ({execution['timestamp']})"):

@@ -89,7 +89,7 @@ class JournalAgent:
             try:
                 await self._process_order_update(update)
             except Exception as e:
-                logger.error(f"Error processing order update: {e}", exc_info=True)
+                logger.error("Error processing order update: {}", str(e), exc_info=True)
     
     async def _process_order_update(self, update: OrderUpdate):
         """

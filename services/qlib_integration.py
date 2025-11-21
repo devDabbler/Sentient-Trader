@@ -35,10 +35,18 @@ try:
     try:
         from qlib.config import REG_CN
         from qlib.contrib.data.handler import Alpha158
-        from qlib.model.gbdt import LGBModel
+        from qlib.contrib.model.gbdt import LGBModel  # Updated path for Qlib 0.9.7
         from qlib.data import D
         from qlib.contrib.strategy import TopkDropoutStrategy
-        from qlib.contrib.evaluate import backtest
+        # Try different backtest import paths for different Qlib versions
+        try:
+            from qlib.contrib.evaluate import backtest_func  # Older versions
+        except ImportError:
+            try:
+                from qlib.contrib.evaluate_portfolio import backtest_func  # Newer versions
+            except ImportError:
+                # backtest not available, but we can still use other features
+                backtest_func = None
         QLIB_SUBMODULES_AVAILABLE = True
         logger.info("✅ Qlib installed and all features available")
     except ImportError as submodule_error:
@@ -59,7 +67,7 @@ class QLIbEnhancedAnalyzer:
     - Rolling model retraining
     """
     
-    def __init__(self, use_qlib: bool = None):
+    def __init__(self, use_qlib: Optional[bool] = None):
         """
         Initialize Qlib analyzer
         
@@ -372,7 +380,7 @@ if __name__ == "__main__":
         
         # Get Alpha158 features
         features = analyzer.get_alpha158_features('AAPL')
-        print(f"Extracted {len(features)} Alpha158 features")
+        print(f"Extracted {len(features))} Alpha158 features")
         
         # Get ML prediction
         prediction = analyzer.get_ml_prediction('AAPL')

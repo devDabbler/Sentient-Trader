@@ -69,7 +69,7 @@ class AIConfidenceScanner:
                         self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
                         logger.info("✅ AI Confidence Scanner initialized with OpenRouter fallback")
                         logger.info(f"   Model: {model}")
-                        logger.info(f"   API Key: {'*' * (len(api_key) - 8) + api_key[-8:]}")
+                        logger.info("   API Key: {}", str('*' * (len(api_key) - 8) + api_key[-8:]))
                 except Exception as e2:
                     logger.error(f"❌ LLM initialization failed completely: {e2}")
                     self.use_llm = False
@@ -191,8 +191,8 @@ Be concise but insightful. Focus on actionable analysis."""
             ticker_str = f" on {ticker}" if ticker else ""
             logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")            # Try hybrid analyzer first
             if self.llm_analyzer and hasattr(self.llm_analyzer, 'analyze_with_llm'):
-                # Call the hybrid analyzer's analyze_with_llm method
-                response = self.llm_analyzer.analyze_with_llm(full_prompt, 'market_analysis')  # type: ignore
+                # Call the analyzer's analyze_with_llm method (works for both Hybrid and Strategy analyzers)
+                response = self.llm_analyzer.analyze_with_llm(full_prompt)  # type: ignore
             elif self.llm_analyzer and hasattr(self.llm_analyzer, '_call_openrouter'):
                 response = self.llm_analyzer._call_openrouter(full_prompt)
             else:
@@ -202,7 +202,7 @@ Be concise but insightful. Focus on actionable analysis."""
                 logger.error(f"❌ Empty LLM response{ticker_str}")
                 raise Exception("Empty LLM response")
 
-            logger.info(f"✅ Received LLM response{ticker_str} ({len(response)} characters)")
+            logger.info(f"✅ Received LLM response{ticker_str} ({len(response))} characters)")
             return response
         except Exception as e:
             logger.error(f"LLM query failed: {e}")
@@ -273,7 +273,7 @@ Be concise but insightful. Focus on actionable analysis."""
             if not result['ai_risks'] or len(result['ai_risks']) < 10:
                 result['ai_risks'] = 'Monitor standard market risks and use appropriate position sizing.'
 
-            logger.debug(f"Parsed: confidence={result['ai_confidence']}, rating={result['ai_rating']}")
+            logger.debug("Parsed: confidence={}, rating={result['ai_rating']}", str(result['ai_confidence']))
         except Exception as e:
             logger.error(f"Error parsing LLM response: {e}")
             logger.debug(f"Response was: {response}")
@@ -320,7 +320,7 @@ Be concise but insightful. Focus on actionable analysis."""
             ai_analysis = self._generate_ai_confidence(trade, 'options')
 
             if ai_analysis['ai_rating'] >= min_ai_rating and trade.score >= min_score:
-                logger.info(f"✓ {trade.ticker}: score={trade.score:.1f}, AI rating={ai_analysis['ai_rating']:.1f}, confidence={ai_analysis['ai_confidence']}")
+                logger.info("✓ {}: score={trade.score:.1f}, AI rating={ai_analysis['ai_rating']:.1f}, confidence={ai_analysis['ai_confidence']}", str(trade.ticker))
                 ai_trade = AIConfidenceTrade(
                     ticker=trade.ticker,
                     score=trade.score,
@@ -340,7 +340,7 @@ Be concise but insightful. Focus on actionable analysis."""
                 ai_trades.append(ai_trade)
             else:
                 skipped_low_ai += 1
-                logger.info(f"✗ {trade.ticker}: AI rating {ai_analysis['ai_rating']:.1f} < min {min_ai_rating} (score was {trade.score:.1f})")
+                logger.info("✗ {}: AI rating {ai_analysis['ai_rating']:.1f} < min {min_ai_rating} (score was {trade.score:.1f})", str(trade.ticker))
 
             if len(ai_trades) >= top_n:
                 break

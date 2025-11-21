@@ -163,7 +163,7 @@ def initialize_session_state():
         logger.info("✅ Session state initialized successfully")
         
     except Exception as e:
-        logger.error(f"Error during session state initialization: {e}", exc_info=True)
+        logger.error("Error during session state initialization: {}", str(e), exc_info=True)
         # Ensure critical variables are still set
         if 'current_analysis' not in st.session_state:
             st.session_state.current_analysis = None
@@ -248,7 +248,7 @@ def main():
             st.error(f"Unknown tab: {selected_tab}")
             
     except Exception as e:
-        logger.error(f"Error rendering tab {selected_tab}: {e}", exc_info=True)
+        logger.error("Error rendering tab {}: {}", selected_tab, str(e), exc_info=True)
         st.error(f"Failed to load {selected_tab}")
         st.exception(e)
 
@@ -256,6 +256,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logger.error(f"Application error: {e}", exc_info=True)
+        logger.error("Application error: {}", str(e), exc_info=True)
         st.error("Application encountered an error. Check logs for details.")
         st.exception(e)

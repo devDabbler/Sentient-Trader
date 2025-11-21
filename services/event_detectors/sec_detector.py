@@ -274,7 +274,7 @@ class SECDetector(BaseEventDetector):
                     if alert:
                         alerts.append(alert)
                         self.trigger_alert(alert)
-                        logger.info(f"SEC alert: {ticker} - {filing['form_type']}")
+                        logger.info("SEC alert: {} - {filing['form_type']}", str(ticker))
             
             except Exception as e:
                 logger.error(f"Error processing SEC filings for {ticker}: {e}")

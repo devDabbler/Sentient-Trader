@@ -199,7 +199,7 @@ class TopTradesScanner:
     
     def _scan_options_trades_parallel(self, top_n: int, max_workers: int = 8) -> List[TopTrade]:
         """Parallel options scanning using ThreadPoolExecutor (4-8x faster)"""
-        logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(self.OPTIONS_UNIVERSE)} options tickers")
+        logger.info(f"\U0001f680 Using parallel processing ({max_workers} workers) for {len(self.OPTIONS_UNIVERSE)} options tickers")
         
         results = []
         start_time = time.time()
@@ -278,7 +278,7 @@ class TopTradesScanner:
     
     def _scan_penny_stocks_parallel(self, top_n: int, max_workers: int = 8) -> List[TopTrade]:
         """Parallel penny stock scanning using ThreadPoolExecutor (4-8x faster)"""
-        logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(self.PENNY_STOCK_UNIVERSE)} penny stocks")
+        logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(self.PENNY_STOCK_UNIVERSE))} penny stocks")
         
         results = []
         start_time = time.time()
@@ -306,7 +306,7 @@ class TopTradesScanner:
                 
                 # Log progress every 10 tickers
                 if completed % 10 == 0:
-                    logger.info(f"Progress: {completed}/{len(self.PENNY_STOCK_UNIVERSE)} tickers analyzed")
+                    logger.info(f"Progress: {completed}/{len(self.PENNY_STOCK_UNIVERSE))} tickers analyzed")
         
         # Sort by score and return top N
         results.sort(key=lambda x: x.score, reverse=True)

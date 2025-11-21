@@ -396,7 +396,7 @@ class IBKRAdapter(BrokerAdapter):
             action = side.upper()
             
             logger.info(f"🎯 IBKR: Starting bracket order for {symbol}: {action} {quantity} shares")
-            logger.info(f"   Entry: market, Stop: ${stop_loss_price:.2f}, Target: ${take_profit_price:.2f}")
+            logger.info(f"   Entry: market, Stop: ${}, Target: ${take_profit_price:.2f} {stop_loss_price:.2f}")
             
             # Health check - ensure TWS is responsive before placing order
             if hasattr(self.client, 'check_connection_health'):
@@ -424,8 +424,8 @@ class IBKRAdapter(BrokerAdapter):
             
             logger.info(f"✅ IBKR bracket order completed successfully")
             logger.info(f"   Parent: {result['parent']['order_id']}")
-            logger.info(f"   Take Profit: {result['take_profit']['order_id']} @ ${result['take_profit']['price']:.2f}")
-            logger.info(f"   Stop Loss: {result['stop_loss']['order_id']} @ ${result['stop_loss']['price']:.2f}")
+            logger.info("   Take Profit: {} @ ${result['take_profit']['price']:.2f}", str(result['take_profit']['order_id']))
+            logger.info("   Stop Loss: {} @ ${result['stop_loss']['price']:.2f}", str(result['stop_loss']['order_id']))
             
             return True, {
                 'order': {
@@ -436,7 +436,7 @@ class IBKRAdapter(BrokerAdapter):
                 }
             }
         except Exception as e:
-            logger.error(f"❌ Error placing IBKR bracket order: {e}", exc_info=True)
+            logger.error("❌ Error placing IBKR bracket order: {}", str(e), exc_info=True)
             return False, {"error": str(e)}
     
     def is_connected(self) -> bool:

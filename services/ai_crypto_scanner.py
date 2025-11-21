@@ -82,7 +82,7 @@ class AICryptoScanner:
                     logger.info(f"✅ AI Crypto Scanner initialized with OpenRouter")
                     logger.info(f"   Model: {model}")
             except Exception as e:
-                logger.error(f"❌ LLM initialization failed: {e}", exc_info=True)
+                logger.error("❌ LLM initialization failed: {}", str(e), exc_info=True)
                 self.use_llm = False
     
     def _check_llm_available(self) -> bool:
@@ -146,7 +146,7 @@ class AICryptoScanner:
             reverse=True
         )
         
-        logger.info(f"✅ Returning top {min(top_n, len(ai_opportunities))} AI-analyzed crypto opportunities")
+        logger.info(f"✅ Returning top {min(top_n, len(ai_opportunities} AI-analyzed crypto opportunities"))
         
         return ai_opportunities[:top_n]
     
@@ -252,7 +252,7 @@ Respond ONLY with valid JSON, no extra text:
                 return ""
               # Try hybrid analyzer first
             if hasattr(self.llm_analyzer, 'analyze_with_llm'):
-                response = self.llm_analyzer.analyze_with_llm(prompt, 'crypto_analysis')  # type: ignore
+                response = self.llm_analyzer.analyze_with_llm(prompt)  # type: ignore
             else:
                 # Fallback to original method
                 response = self.llm_analyzer._call_openrouter(prompt)

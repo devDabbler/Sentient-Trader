@@ -90,7 +90,7 @@ class DynamicStrategySelector:
             key_indicators=strategy_data['indicators']
         )
         
-        logger.info(f"{ticker}: Recommended {strategy.value} (confidence: {strategy_data['score']:.1f}%)")
+        logger.info("{}: Recommended {strategy.value} (confidence: {strategy_data['score']:.1f}%)", str(ticker))
         logger.debug(f"  Reasoning: {strategy_data['reasoning']}")
         
         return recommendation

@@ -209,7 +209,7 @@ class CryptoBreakoutMonitor:
                     self.stats['scans_completed'] += 1
                     
                 except Exception as e:
-                    logger.error(f"❌ Error during scan: {e}", exc_info=True)
+                    logger.error("❌ Error during scan: {}", str(e), exc_info=True)
                     self.stats['errors'] += 1
                 
                 # Calculate sleep time
@@ -221,11 +221,11 @@ class CryptoBreakoutMonitor:
                 logger.info(f"   Scans: {self.stats['scans_completed']}")
                 logger.info(f"   Alerts: {self.stats['alerts_sent']}")
                 logger.info(f"   Errors: {self.stats['errors']}")
-                logger.info(f"   Uptime: {self._get_uptime()}")
+                logger.info(f"   Uptime: {self._get_uptime(}")
                 
                 if sleep_time > 0:
                     next_scan = datetime.now() + timedelta(seconds=sleep_time)
-                    logger.info(f"💤 Sleeping {sleep_time:.1f}s... Next scan at {next_scan.strftime('%H:%M:%S')}\n")
+                    logger.info("💤 Sleeping {}s... Next scan at {next_scan.strftime('%H:%M:%S')}\n", {sleep_time:.1f})
                     time.sleep(sleep_time)
         
         except KeyboardInterrupt:
@@ -233,14 +233,14 @@ class CryptoBreakoutMonitor:
             self._print_final_stats()
         
         except Exception as e:
-            logger.error(f"❌ Fatal error: {e}", exc_info=True)
+            logger.error("❌ Fatal error: {}", str(e), exc_info=True)
             self._print_final_stats()
             raise
     
     def _scan_and_alert(self):
         """Perform a single scan and send alerts for breakouts"""
         logger.info("=" * 80)
-        logger.info(f"🔍 Starting scan at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("🔍 Starting scan at {}", str(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         
         scan_start = time.time()
         
@@ -255,7 +255,7 @@ class CryptoBreakoutMonitor:
         breakouts = self._detect_breakouts()
         scan_duration = time.time() - scan_start
         
-        logger.info(f"✅ Scan complete in {scan_duration:.2f}s - Found {len(breakouts)} potential breakouts")
+        logger.info(f"✅ Scan complete in {}s - Found {len(breakouts))} potential breakouts {scan_duration:.2f}")
         
         if not breakouts:
             logger.info("   No breakouts detected above threshold")
@@ -361,7 +361,7 @@ class CryptoBreakoutMonitor:
                         logger.info(f"      ✓ {alert.symbol}: Score {alert.score:.1f}, {alert.confidence} confidence")
         
         except Exception as e:
-            logger.error(f"Error detecting breakouts: {e}", exc_info=True)
+            logger.error("Error detecting breakouts: {}", str(e), exc_info=True)
         
         # Sort by score
         breakouts.sort(key=lambda x: x.score, reverse=True)
@@ -469,7 +469,7 @@ class CryptoBreakoutMonitor:
         # Log alert
         logger.info(f"\n🚨 BREAKOUT ALERT: {breakout.symbol}")
         logger.info(f"   Type: {breakout.alert_type}")
-        logger.info(f"   Score: {breakout.score:.1f}")
+        logger.info(f"   Score: {} {breakout.score:.1f}")
         logger.info(f"   Confidence: {breakout.confidence}")
         logger.info(f"   Price: ${breakout.price:,.2f}")
         logger.info(f"   24h Change: {breakout.change_24h:+.2f}%")
@@ -736,7 +736,7 @@ class CryptoBreakoutMonitor:
                 # Track that we added it
                 self.watchlist_added.add(breakout.symbol)
                 
-                logger.info(f"   ✅ Added {breakout.symbol} to watchlist with tags: {', '.join(tags)}")
+                logger.info("   ✅ Added {} to watchlist with tags: {', '.join(tags)}", str(breakout.symbol))
                 return True
             
             return False
@@ -775,9 +775,9 @@ class CryptoBreakoutMonitor:
         logger.info(f"Total Scans: {self.stats['scans_completed']}")
         logger.info(f"Alerts Sent: {self.stats['alerts_sent']}")
         logger.info(f"Errors: {self.stats['errors']}")
-        logger.info(f"Uptime: {self._get_uptime()}")
+        logger.info(f"Uptime: {self._get_uptime(}")
         logger.info(f"Started: {self.stats['start_time']}")
-        logger.info(f"Ended: {datetime.now().isoformat()}")
+        logger.info("Ended: {}", str(datetime.now().isoformat()))
         logger.info("=" * 80)
 
 
@@ -813,7 +813,7 @@ def main():
         logger.info("\n👋 Goodbye!")
     
     except Exception as e:
-        logger.error(f"❌ Fatal error: {e}", exc_info=True)
+        logger.error("❌ Fatal error: {}", str(e), exc_info=True)
         sys.exit(1)
 
 

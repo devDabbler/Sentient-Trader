@@ -87,15 +87,16 @@ class SubPennyDiscovery:
             # For sub-penny discovery, we need MANY MORE coins because most won't be valid Kraken pairs
             # Most sub-penny coins are NOT on Kraken, so we need to fetch 5000-10000 to get 15-20 valid pairs
             # This prevents the search from going on forever while ensuring enough valid results
-            max_coins_to_fetch = 10000  # Increased significantly to get more valid Kraken pairs
-            max_pages_to_fetch = 40  # Stop after 40 pages (10,000 coins max from CoinGecko)
+            max_coins_to_fetch = 2000
+            max_pages_to_fetch = 20
             
             aggregated_data = await self.aggregator.fetch_all_coins(
                 max_price=max_price,
                 min_market_cap=min_market_cap,
                 max_market_cap=max_market_cap,
                 max_coins=max_coins_to_fetch,
-                max_pages=max_pages_to_fetch
+                max_pages=max_pages_to_fetch,
+                use_coinmarketcap=False
             )
             
             if not aggregated_data:

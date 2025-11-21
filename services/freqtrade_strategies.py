@@ -93,8 +93,8 @@ class FreqtradeStrategyAdapter:
         try:
             # Validate DataFrame structure
             logger.debug(f"DataFrame type: {type(df)}, shape: {df.shape}")
-            logger.debug(f"DataFrame columns: {df.columns.tolist()}")
-            logger.debug(f"First row dtypes: {df.dtypes.to_dict()}")
+            logger.debug(f"DataFrame columns: {df.columns.tolist(}")
+            logger.debug(f"First row dtypes: {df.dtypes.to_dict(}")
             
             # Ensure we're working with a proper DataFrame, not a list
             if not isinstance(df, pd.DataFrame):
@@ -166,7 +166,7 @@ class FreqtradeStrategyAdapter:
                 df['ha_low'] = df[['low', 'ha_open', 'ha_close']].min(axis=1)
                 logger.debug("Heikin Ashi candles completed")
             except Exception as ha_error:
-                logger.error(f"Error calculating Heikin Ashi: {ha_error}", exc_info=True)
+                logger.error("Error calculating Heikin Ashi: {}", str(ha_error), exc_info=True)
                 # Set default values if HA calculation fails
                 df['ha_close'] = df['close']
                 df['ha_open'] = df['open']
@@ -183,7 +183,7 @@ class FreqtradeStrategyAdapter:
             return df
             
         except Exception as e:
-            logger.error(f"Error calculating indicators: {e}", exc_info=True)
+            logger.error("Error calculating indicators: {}", str(e), exc_info=True)
             return df
     
     def strategy_ema_crossover(self, df: pd.DataFrame) -> Tuple[bool, bool, Dict]:
@@ -531,7 +531,7 @@ class FreqtradeStrategyAdapter:
             return entry_signal, exit_signal, signals
             
         except Exception as e:
-            logger.error(f"Error in ORB+FVG strategy: {e}", exc_info=True)
+            logger.error("Error in ORB+FVG strategy: {}", str(e), exc_info=True)
             return False, False, {'error': str(e)}
     
     def analyze_crypto(self, symbol: str, strategy: str = 'ema_crossover', interval: str = '5') -> Dict:
@@ -586,7 +586,7 @@ class FreqtradeStrategyAdapter:
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             missing_cols = [col for col in required_cols if col not in ohlcv.columns]
             if missing_cols:
-                logger.error(f"Missing columns in OHLC data: {missing_cols}. Available: {ohlcv.columns.tolist()}")
+                logger.error(f"Missing columns in OHLC data: {missing_cols}. Available: {ohlcv.columns.tolist(}")
                 return {'error': f'Invalid OHLC data structure for {symbol}'}
             
             # Convert to numeric types (TA-Lib requires numpy arrays)
@@ -657,11 +657,11 @@ class FreqtradeStrategyAdapter:
                 'recommendation': 'BUY' if entry_signal else ('SELL' if exit_signal else 'HOLD')
             }
             
-            logger.info(f"{symbol} {strategy}: {result['recommendation']} (confidence: {confidence}%)")
+            logger.info("{} {strategy}: {result['recommendation']} (confidence: {confidence}%)", str(symbol))
             return result
             
         except Exception as e:
-            logger.error(f"Error analyzing {symbol} with {strategy}: {e}", exc_info=True)
+            logger.error("Error analyzing {symbol} with {strategy}: {}", str(e), exc_info=True)
             return {'error': str(e)}
     
     def _calculate_dynamic_confidence(self, entry_signal: bool, exit_signal: bool, signals: Dict, strategy: str, df: pd.DataFrame) -> int:
@@ -886,7 +886,7 @@ class FreqtradeStrategyAdapter:
             return int(confidence)
         
         except Exception as e:
-            logger.error(f"Error calculating dynamic confidence: {e}", exc_info=True)
+            logger.error("Error calculating dynamic confidence: {}", str(e), exc_info=True)
             return confidence
     
     def bulk_analyze(self, symbols: List[str], strategy: str = 'ema_crossover', interval: str = '5') -> List[Dict]:
@@ -928,9 +928,9 @@ class FreqtradeStrategyAdapter:
                 if 'error' not in result:
                     results.append(result)
                 else:
-                    logger.warning(f"Skipping {symbol}: {result.get('error')}")
+                    logger.warning("Skipping {}: {result.get('error')}", str(symbol))
             except Exception as e:
-                logger.error(f"Error analyzing {symbol}: {e}", exc_info=True)
+                logger.error("Error analyzing {symbol}: {}", str(e), exc_info=True)
                 continue
         
         # Sort by entry signals first, then confidence

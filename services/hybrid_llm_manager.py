@@ -29,7 +29,7 @@ class HybridLLMManager:
         """Initialize both local and cloud analyzers"""
         try:
             # Try to initialize local Ollama
-            local_model = os.getenv('AI_ANALYZER_MODEL', 'ollama/qwen2.5-coder:32b')
+            local_model = os.getenv('AI_ANALYZER_MODEL', 'ollama/qwen2.5:7b')
             if local_model.startswith('ollama/') or local_model.startswith('ollama:'):
                 try:
                     self.local_analyzer = LLMStrategyAnalyzer(

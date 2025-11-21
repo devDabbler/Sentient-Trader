@@ -39,7 +39,7 @@ class TickerManager:
             return True
         except Exception as e:
             logger.error(f"Supabase connection test failed: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
+            logger.error("Error type: {}", str(type(e).__name__))
             return False
 
     def add_ticker(self, ticker: Optional[str], name: Optional[str] = None, sector: Optional[str] = None, 
@@ -82,8 +82,8 @@ class TickerManager:
             return True
         except Exception as e:
             logger.error(f"Error adding/updating ticker {ticker}: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Error details: {str(e)}")
+            logger.error("Error type: {}", str(type(e).__name__))
+            logger.error(f"Error details: {e}")
             return False
 
     def remove_ticker(self, ticker: str) -> bool:
@@ -205,7 +205,7 @@ class TickerManager:
             ).execute()
             return response.data
         except Exception as e:
-            logger.error(f"Error searching tickers for '{query}': {e}")
+            logger.error("Error searching tickers for '{query}': {}", str(e))
             return []
 
     def create_watchlist(self, name: str, description: Optional[str] = None) -> bool:
@@ -330,12 +330,12 @@ class TickerManager:
                 on_conflict='ticker'
             ).execute()
             
-            logger.info(f"✓ Updated analysis for {ticker}: score={update_data.get('ml_score', 'N/A')}, momentum={update_data.get('momentum', 'N/A')}%")
+            logger.info("✓ Updated analysis for {}: score={update_data.get('ml_score', 'N/A')}, momentum={update_data.get('momentum', 'N/A')}%", str(ticker))
             return True
                 
         except Exception as e:
             logger.error(f"Error updating analysis for {ticker}: {e}")
-            logger.debug(f"Attempted data: {update_data if 'update_data' in locals() else 'N/A'}")
+            logger.debug("Attempted data: {}", str(update_data if 'update_data' in locals() else 'N/A'))
             return False
 
     def update_ai_entry_analysis(self, ticker: str, entry_analysis: Dict) -> bool:
@@ -399,7 +399,7 @@ class TickerManager:
             else:
                 logger.error(f"Error updating AI entry analysis for {ticker}: {e}")
             
-            logger.debug(f"Attempted data for {ticker}: {update_data if 'update_data' in locals() else 'N/A'}")
+            logger.debug("Attempted data for {}: {update_data if 'update_data' in locals() else 'N/A'}", str(ticker))
             return False
 
     def should_update_analysis(self, ticker: str, max_age_hours: float = 1.0) -> bool:

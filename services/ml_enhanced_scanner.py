@@ -145,13 +145,13 @@ class MLEnhancedScanner:
             # Only include if ensemble score meets threshold
             if ml_enhanced.combined_score >= min_ensemble_score:
                 ml_trades.append(ml_enhanced)
-                logger.info(f"✅ PASS {trade.ticker}: Ensemble={ml_enhanced.combined_score:.1f} "
+                logger.info("✅ PASS {}: Ensemble={ml_enhanced.combined_score:.1f} ", str(trade.ticker)
                           f"(ML={ml_enhanced.ml_prediction_score:.1f}, "
                           f"AI={trade.ai_rating*10:.1f}, Quant={trade.score:.1f})")
             else:
                 rejected_trades.append((trade.ticker, ml_enhanced.combined_score, 
                                        ml_enhanced.ml_prediction_score, trade.ai_rating*10, trade.score))
-                logger.info(f"❌ REJECT {trade.ticker}: Ensemble={ml_enhanced.combined_score:.1f} < {min_ensemble_score} "
+                logger.info("❌ REJECT {}: Ensemble={ml_enhanced.combined_score:.1f} < {min_ensemble_score} ", str(trade.ticker)
                           f"(ML={ml_enhanced.ml_prediction_score:.1f}, "
                           f"AI={trade.ai_rating*10:.1f}, Quant={trade.score:.1f})")
         
@@ -439,8 +439,8 @@ class MLEnhancedScanner:
         
         logger.info(f"📊 Confidence Summary:")
         logger.info(f"   VERY HIGH: {very_high}, HIGH: {high}")
-        logger.info(f"   Avg Combined Score: {avg_combined:.1f}")
-        logger.info(f"   Avg ML: {avg_ml:.1f}, Avg LLM: {avg_llm:.1f}")
+        logger.info(f"   Avg Combined Score: {} {avg_combined:.1f}")
+        logger.info(f"   Avg ML: {}, Avg LLM: {avg_llm:.1f} {avg_ml:.1f}")
     
     def backtest_strategy(self,
                           start_date: str,

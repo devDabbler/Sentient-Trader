@@ -87,7 +87,7 @@ def render_tab():
                         st.success(f"✅ Generated {len(recommendations)} strategy recommendations!")
                         
                         for i, rec in enumerate(recommendations[:5], 1):  # Show top 5
-                            with st.expander(f"#{i} {rec.name} (Score: {int(rec.score * 100)}/100)", expanded=i==1):
+                            with st.expander(f"#{i} {rec.name} (Score: {int(rec.score * 100))}/100)", expanded=i==1):
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
                                     st.metric("Risk Level", rec.risk_level)
@@ -504,7 +504,7 @@ def render_tab():
                                 "Risk": scenario["risk"],
                                 "Capital": f"${scenario['cap']:,}",
                                 "Top Strategy": top_rec.strategy_name,
-                                "Confidence": f"{int(top_rec.confidence * 100)}%",
+                                "Confidence": f"{int(top_rec.confidence * 100))}%",
                                 "Risk Level": top_rec.risk_level,
                                 "Max Loss": top_rec.max_loss,
                                 "Max Gain": top_rec.max_gain
@@ -786,7 +786,7 @@ def render_tab():
                     comparison_results.sort(key=lambda x: x['score'], reverse=True)
                     
                     # Display results
-                    st.success(f"✅ Analyzed {len(comparison_results)} strategies")
+                    st.success(f"✅ Analyzed {len(comparison_results))} strategies")
                     
                     # Create a comparison table
                     # pandas already imported at module level

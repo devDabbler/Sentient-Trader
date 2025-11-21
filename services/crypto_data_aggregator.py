@@ -62,7 +62,7 @@ class CryptoDataAggregator:
         
         logger.info("🔗 Crypto Data Aggregator initialized")
         logger.info(f"   • CoinGecko: Enabled (free tier) - used for coin research & scanning")
-        logger.info(f"   • CoinMarketCap: {'✅ Enabled' if self.coinmarketcap_api_key else '❌ Disabled (no API key)'} - used for coin research & scanning")
+        logger.info("   • CoinMarketCap: {} - used for coin research & scanning", str('✅ Enabled' if self.coinmarketcap_api_key else '❌ Disabled (no API key)'))
         if self.coinmarketcap_api_key:
             logger.info(f"     Note: CoinMarketCap provides market data, not news (news uses CoinGecko)")
     
@@ -73,7 +73,8 @@ class CryptoDataAggregator:
         max_market_cap: Optional[float] = None,
         min_volume_24h: Optional[float] = None,
         max_coins: Optional[int] = None,
-        max_pages: Optional[int] = None
+        max_pages: Optional[int] = None,
+        use_coinmarketcap: bool = True
     ) -> List[AggregatedCryptoData]:
         """
         Fetch coins from all available sources with smart limits.
@@ -138,8 +139,8 @@ class CryptoDataAggregator:
         except Exception as e:
             logger.error(f"❌ CoinGecko fetch failed: {e}")
         
-        # Fetch from CoinMarketCap if API key available (only if we need more coins)
-        if self.coinmarketcap_api_key and (not max_coins or len(all_coins) < max_coins):
+        # Fetch from CoinMarketCap if enabled and API key available (only if we need more coins)
+        if use_coinmarketcap and self.coinmarketcap_api_key and (not max_coins or len(all_coins) < max_coins):
             try:
                 cmc_coins = await self._fetch_coinmarketcap_all(
                     max_price, min_market_cap, max_market_cap, min_volume_24h,

@@ -55,7 +55,8 @@ try:
     from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
     from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
     from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
-    from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
+    from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, OpportunityResult
+    from services.advanced_opportunity_scanner import ScanType as AdvancedScanType
 except ImportError as e:
     logger.warning(f"Some service imports not available: {e}")
     # Provide fallback for ScanType if import fails
@@ -90,7 +91,8 @@ try:
     # Note: display_crypto_quick_trade doesn't exist, use render_quick_trade_tab instead
     from ui.crypto_ai_monitor_ui import display_crypto_ai_monitors
     from ui.crypto_entry_monitors_ui import display_crypto_entry_monitors
-    from ui.crypto_signal_ui import display_crypto_signals
+    # Signal generation moved to Daily Scanner
+    # Signal generation moved to Daily Scanner
     from ui.crypto_watchlist_ui import display_crypto_watchlist
 except ImportError as e:
     logger.debug(f"Crypto UI imports not available: {e}")
@@ -139,12 +141,24 @@ def get_base_scanner():
 
 @st.cache_resource
 def get_llm_analyzer():
-    """Cached LLMStrategyAnalyzer"""
+    """Cached Hybrid LLM Analyzer - tries local Ollama first, falls back to OpenRouter"""
+    try:
+        # Try to use HybridLLMAnalyzer for best performance (local + cloud fallback)
+        from services.hybrid_llm_analyzer import get_best_trading_analyzer
+        analyzer = get_best_trading_analyzer()
+        if analyzer:
+            logger.info("✅ Using HybridLLMAnalyzer (local Ollama + OpenRouter fallback)")
+            return analyzer
+    except Exception as e:
+        logger.debug(f"HybridLLMAnalyzer not available, using OpenRouter-only: {e}")
+    
+    # Fallback to OpenRouter-only LLMStrategyAnalyzer
     try:
         from services.llm_strategy_analyzer import LLMStrategyAnalyzer
         from utils.config_loader import get_api_key
         api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
-        model = os.getenv('AI_ANALYZER_MODEL') or get_api_key('AI_ANALYZER_MODEL', 'models') or 'google/gemini-2.5-flash'
+        model = os.getenv('AI_ANALYZER_MODEL') or get_api_key('AI_ANALYZER_MODEL', 'models') or 'google/gemini-2.0-flash-exp:free'
+        logger.info(f"✅ Using OpenRouter-only LLMStrategyAnalyzer with model: {model}")
         return LLMStrategyAnalyzer(api_key=api_key, model=model)
     except Exception as e:
         logger.error(f"Error creating LLM analyzer: {e}")
@@ -269,7 +283,8 @@ try:
     from services.penny_stock_analyzer import PennyStockScorer, PennyStockAnalyzer, StockScores
     from services.unified_penny_stock_analysis import UnifiedPennyStockAnalysis
     from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
-    from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanType, ScanFilters, OpportunityResult
+    from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, OpportunityResult
+    from services.advanced_opportunity_scanner import ScanType as AdvancedScanType
 except ImportError as e:
     logger.warning(f"Some service imports not available: {e}")
     # Provide fallback for ScanType if import fails
@@ -304,7 +319,8 @@ try:
     # Note: display_crypto_quick_trade doesn't exist, use render_quick_trade_tab instead
     from ui.crypto_ai_monitor_ui import display_crypto_ai_monitors
     from ui.crypto_entry_monitors_ui import display_crypto_entry_monitors
-    from ui.crypto_signal_ui import display_crypto_signals
+    # Signal generation moved to Daily Scanner
+    # Signal generation moved to Daily Scanner
     from ui.crypto_watchlist_ui import display_crypto_watchlist
 except ImportError as e:
     logger.debug(f"Crypto UI imports not available: {e}")
@@ -353,7 +369,18 @@ def get_base_scanner():
 
 @st.cache_resource
 def get_llm_analyzer():
-    """Cached LLMStrategyAnalyzer"""
+    """Cached Hybrid LLM Analyzer - tries local Ollama first, falls back to OpenRouter"""
+    try:
+        # Try to use HybridLLMAnalyzer for best performance (local + cloud fallback)
+        from services.hybrid_llm_analyzer import get_best_trading_analyzer
+        analyzer = get_best_trading_analyzer()
+        if analyzer:
+            logger.info("✅ Using HybridLLMAnalyzer (local Ollama + OpenRouter fallback)")
+            return analyzer
+    except Exception as e:
+        logger.debug(f"HybridLLMAnalyzer not available, using single-provider: {e}")
+    
+    # Fallback to single-provider LLMStrategyAnalyzer
     try:
         from services.llm_strategy_analyzer import LLMStrategyAnalyzer
         from utils.config_loader import get_api_key
@@ -369,8 +396,9 @@ def get_llm_analyzer():
         # Default to OpenRouter
         api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
         if not model:
-            model = 'google/gemini-2.5-flash'
-            
+            model = 'google/gemini-2.0-flash-exp:free'
+        
+        logger.info(f"✅ Using OpenRouter-only LLMStrategyAnalyzer with model: {model}")
         return LLMStrategyAnalyzer(api_key=api_key, model=model, provider="openrouter")
     except Exception as e:
         logger.error(f"Error creating LLM analyzer: {e}")

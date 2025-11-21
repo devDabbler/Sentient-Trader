@@ -314,10 +314,10 @@ class OptionsLiquidityChecker:
             is_liquid = len(liquid_strikes) >= OptionsLiquidityChecker.MIN_STRIKES_WITH_LIQUIDITY
             
             if is_liquid:
-                recommendation = f"✅ LIQUID - {len(liquid_strikes)} strikes meet liquidity criteria"
-                reason = f"Sufficient liquidity with {len(liquid_strikes)} liquid strikes"
+                recommendation = f"✅ LIQUID - {len(liquid_strikes))} strikes meet liquidity criteria"
+                reason = f"Sufficient liquidity with {len(liquid_strikes))} liquid strikes"
             else:
-                recommendation = f"❌ ILLIQUID - Only {len(liquid_strikes)} liquid strikes (need {OptionsLiquidityChecker.MIN_STRIKES_WITH_LIQUIDITY}+)"
+                recommendation = f"❌ ILLIQUID - Only {len(liquid_strikes))} liquid strikes (need {OptionsLiquidityChecker.MIN_STRIKES_WITH_LIQUIDITY}+)"
                 reason = "Insufficient options liquidity"
             
             return {

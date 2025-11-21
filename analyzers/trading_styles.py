@@ -82,7 +82,7 @@ class TradingStyleAnalyzer:
             
         except Exception as e:
             logger.error(f"Error in AI analysis: {e}")
-            return {'style': 'AI', 'score': 0, 'signals': [f"❌ Error: {str(e)}"]}
+            return {'style': 'AI', 'score': 0, 'signals': [f"❌ Error: {str(e))}"]}
     
     @staticmethod
     def analyze_scalp_style(analysis: StockAnalysis, hist: pd.DataFrame) -> Dict:
@@ -144,7 +144,7 @@ class TradingStyleAnalyzer:
             
         except Exception as e:
             logger.error(f"Error in scalp analysis: {e}")
-            return {'style': 'SCALP', 'score': 0, 'signals': [f"❌ Error: {str(e)}"]}
+            return {'style': 'SCALP', 'score': 0, 'signals': [f"❌ Error: {str(e))}"]}
     
     @staticmethod
     def analyze_warrior_scalping_style(analysis: StockAnalysis, hist: pd.DataFrame) -> Dict:
@@ -194,7 +194,7 @@ class TradingStyleAnalyzer:
             # News Catalyst
             if len(analysis.recent_news) > 5:
                 warrior_score += 15
-                results['signals'].append(f"✅ HIGH NEWS VOLUME: {len(analysis.recent_news)}")
+                results['signals'].append(f"✅ HIGH NEWS VOLUME: {len(analysis.recent_news))}")
             
             results['score'] = min(100, warrior_score)
             
@@ -221,7 +221,7 @@ class TradingStyleAnalyzer:
             
         except Exception as e:
             logger.error(f"Error in warrior scalping: {e}")
-            return {'style': 'WARRIOR_SCALPING', 'score': 0, 'signals': [f"❌ Error: {str(e)}"]}
+            return {'style': 'WARRIOR_SCALPING', 'score': 0, 'signals': [f"❌ Error: {str(e))}"]}
     
     @staticmethod
     def analyze_buy_and_hold_style(analysis: StockAnalysis, hist: pd.DataFrame) -> Dict:
@@ -327,4 +327,4 @@ class TradingStyleAnalyzer:
             
         except Exception as e:
             logger.error(f"Error in buy & hold analysis: {e}")
-            return {'style': 'BUY_AND_HOLD', 'score': 0, 'signals': [f"❌ Error: {str(e)}"]}
+            return {'style': 'BUY_AND_HOLD', 'score': 0, 'signals': [f"❌ Error: {str(e))}"]}

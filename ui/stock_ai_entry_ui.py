@@ -154,7 +154,7 @@ def display_stock_ai_entry_analysis(broker_client, llm_analyzer=None):
                         
                     except Exception as e:
                         st.error(f"AI analysis failed: {e}")
-                        logger.error(f"Stock AI entry analysis error: {e}", exc_info=True)
+                        logger.error("Stock AI entry analysis error: {}", str(e), exc_info=True)
     
     with analysis_col2:
         def clear_analysis():
@@ -257,7 +257,7 @@ def display_stock_ai_entry_analysis(broker_client, llm_analyzer=None):
                             st.error("AI Entry Assistant not initialized")
                     except Exception as e:
                         st.error(f"Failed to set up monitoring: {e}")
-                        logger.error(f"Monitor setup error: {e}", exc_info=True)
+                        logger.error("Monitor setup error: {}", str(e), exc_info=True)
             
             with monitor_col2:
                 st.info("💡 You can view all monitored stocks in the Auto-Trader → Entry Monitors tab")
@@ -372,4 +372,4 @@ def display_compact_stock_ai_entry(broker_client, llm_analyzer=None, default_tic
                         
                     except Exception as e:
                         st.error(f"Analysis failed: {e}")
-                        logger.error(f"Compact AI analysis error: {e}", exc_info=True)
+                        logger.error("Compact AI analysis error: {}", str(e), exc_info=True)

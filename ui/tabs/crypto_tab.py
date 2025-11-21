@@ -7,13 +7,13 @@ Extracted from app.py for modularization
 import streamlit as st
 from loguru import logger
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from services.ai_crypto_scanner import AICryptoScanner
 import os
 import time
 from datetime import datetime, timedelta
 import pandas as pd
+
+if TYPE_CHECKING:
+    from services.ai_crypto_scanner import AICryptoScanner
 
 # Import Kraken client with fallback
 try:
@@ -148,21 +148,17 @@ def render_tab():
     
     # Use stateful navigation instead of st.tabs() to prevent automatic redirect
     if 'active_crypto_tab' not in st.session_state:
-        st.session_state.active_crypto_tab = "🔍 Crypto Scanner"
+        st.session_state.active_crypto_tab = "📊 Dashboard"
     
-    # Tab selector
+    # Tab selector - STREAMLINED (was 12, now 7)
     tab_options = [
-        "📊 Market Overview",
-        "🔍 Crypto Scanner",
-        "💰 Penny Cryptos (<$1)",
+        "📊 Dashboard",  # Merged: Market Overview + Portfolio
+        "🔍 Daily Scanner",  # Consolidated: All scanners (Penny, Sub-Penny, CoinGecko, Multi-Config)
         "⭐ My Watchlist",
-        "🔥 CoinMarketCap Features",
-        "🎯 Signal Generator",
         "⚡ Quick Trade",
         "🔔 Entry Monitors",
         "🤖 AI Position Monitor",
-        "📓 Trade Journal",
-        "📈 Portfolio & Settings"
+        "📓 Trade Journal"
     ]
     
     # --- New Tab Navigation Logic (using on_change callback) ---
@@ -194,8 +190,8 @@ def render_tab():
     
     # Render only the active tab content
     logger.info(f"🔍 Rendering crypto tab: {active_crypto_tab}")
-    if active_crypto_tab == "📊 Market Overview":
-        st.subheader("📊 Crypto Market Overview")
+    if active_crypto_tab == "📊 Dashboard":
+        st.subheader("📊 Crypto Dashboard - Market Overview & Portfolio")
         
         col1, col2 = st.columns([2, 1])
         
@@ -230,42 +226,35 @@ def render_tab():
             
             with col3:
                 st.metric("Crypto Assets", len(crypto_holdings))
-            
-            # Show crypto holdings
-            if crypto_holdings:
-                st.markdown("### 📊 Your Crypto Holdings")
-                
-                holdings_data = []
-                for balance in crypto_holdings:
-                    try:
-                        # Strip .F suffix (futures) and other suffixes from currency name
-                        currency = balance.currency.replace('.F', '').replace('.S', '').replace('.M', '')
-                        pair = f"{currency}/USD"
-                        ticker = kraken_client.get_ticker_data(pair)
-                        
-                        if ticker:
-                            value_usd = balance.balance * ticker['last_price']
-                            holdings_data.append({
-                                'Asset': balance.currency,
-                                'Balance': f"{balance.balance:.4f}",
-                                'Price': f"${ticker['last_price']:,.2f}",
-                                'Value (USD)': f"${value_usd:,.2f}",
-                                '24h Change': f"{((ticker['high_24h'] - ticker['low_24h']) / ticker['low_24h'] * 100):.2f}%"
-                            })
-                    except:
-                        holdings_data.append({
-                            'Asset': balance.currency,
-                            'Balance': f"{balance.balance:.4f}",
-                            'Price': 'N/A',
-                            'Value (USD)': 'N/A',
-                            '24h Change': 'N/A'
-                        })
-                
-                if holdings_data:
-                    st.dataframe(holdings_data, width="stretch")
-            
+
         except Exception as e:
             st.error(f"Error fetching account data: {e}")
+
+        # Show crypto holdings
+        st.markdown("### 📊 Your Crypto Holdings")
+        # Use the corrected portfolio analysis from the AI monitor tab
+        if 'portfolio_analysis' in st.session_state and st.session_state.portfolio_analysis:
+            analysis = st.session_state.portfolio_analysis
+            positions = analysis.get('positions', [])
+            
+            if positions:
+                import pandas as pd
+                df = pd.DataFrame(positions)
+                df_display = pd.DataFrame({
+                    'Asset': df['pair'],
+                    'Balance': df['volume'].map('{:,.4f}'.format),
+                    'Avg. Entry': df['entry'].map('${:,.2f}'.format),
+                    'Current Price': df['current'].map('${:,.2f}'.format),
+                    'Value (USD)': df['value'].map('${:,.2f}'.format),
+                    'P&L': df['pnl'].map('${:,.2f}'.format),
+                    'P&L %': df['pnl_pct'].map('{:+.2f}%'.format),
+                    'Allocation': df['allocation'].map('{:.2f}%'.format)
+                })
+                st.dataframe(df_display, hide_index=True, use_container_width=True)
+            else:
+                st.info("No tradeable crypto positions found.")
+        else:
+            st.info("Run the analysis in the 'AI Position Monitor' tab to see your holdings here.")
         
         # Show top crypto prices
         st.markdown("### 📈 Top Cryptocurrencies")
@@ -292,6 +281,99 @@ def render_tab():
         
         if price_data:
             st.dataframe(price_data, width="stretch")
+        
+        # Quick navigation section
+        st.markdown("---")
+        st.markdown("### ⚡ Quick Actions")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔍 Start Daily Scan", type="primary", use_container_width=True):
+                st.session_state.active_crypto_tab = "🔍 Daily Scanner"
+                st.rerun()
+        
+        with col2:
+            if st.button("⚡ Quick Trade", use_container_width=True):
+                st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                st.rerun()
+        
+        with col3:
+            if st.button("🤖 AI Monitor", use_container_width=True):
+                st.session_state.active_crypto_tab = "🤖 AI Position Monitor"
+                st.rerun()
+        
+        # Settings section
+        st.markdown("---")
+        with st.expander("⚙️ Trading Preferences"):
+            st.markdown("""
+            **Your Crypto Trading Settings**
+            
+            Configure your preferences for crypto trading:
+            - Default position size
+            - Risk management rules
+            - Notification preferences
+            - Auto-trading settings
+            
+            *(Settings integration coming soon)*
+            """)
+
+    
+    elif active_crypto_tab == "🔍 Daily Scanner":
+        logger.info("🏁 DAILY SCANNER TAB RENDERING")
+        
+        # Import and render Daily Scanner UI
+        try:
+            logger.info("Step 1: Importing display_daily_scanner...")
+            from ui.daily_scanner_ui import display_daily_scanner
+            logger.info("✅ display_daily_scanner imported successfully")
+            
+            logger.info("Step 2: Importing AICryptoTradeReviewer...")
+            from services.ai_crypto_trade_reviewer import AICryptoTradeReviewer
+            logger.info("✅ AICryptoTradeReviewer imported successfully")
+            
+            # Initialize AI trade reviewer if not already
+            logger.info("Step 3: Checking ai_trade_reviewer in session state...")
+            if 'ai_trade_reviewer' not in st.session_state:
+                logger.info("Step 3a: Initializing AICryptoTradeReviewer...")
+                # Get LLM analyzer and supabase client from session state
+                llm_analyzer = st.session_state.get('llm_analyzer')
+                supabase_client = st.session_state.get('supabase_client')
+                
+                st.session_state.ai_trade_reviewer = AICryptoTradeReviewer(
+                    llm_analyzer=llm_analyzer,
+                    active_monitors=st.session_state.get('active_trade_monitors', {}),
+                    supabase_client=supabase_client
+                )
+                logger.info("✅ AICryptoTradeReviewer initialized")
+            else:
+                logger.info("✅ Using existing ai_trade_reviewer from session state")
+            
+            # Restore monitors from session state
+            logger.info("Step 4: Checking active_trade_monitors in session state...")
+            if 'active_trade_monitors' in st.session_state:
+                logger.info(f"Step 4a: Restoring monitors (type: {type(st.session_state.active_trade_monitors)})...")
+                st.session_state.ai_trade_reviewer.active_monitors = st.session_state.active_trade_monitors
+                logger.info("✅ Monitors restored")
+            else:
+                logger.info("✅ No monitors to restore")
+            
+            logger.info("Step 5: Calling display_daily_scanner...")
+            display_daily_scanner(
+                kraken_client=kraken_client,
+                crypto_config=crypto_config,
+                ai_trade_reviewer=st.session_state.ai_trade_reviewer
+            )
+            logger.info("✅ display_daily_scanner completed successfully")
+            
+        except Exception as e:
+            st.error(f"Error loading Daily Scanner: {e}")
+            logger.error("Daily Scanner error: {}", str(e), exc_info=True)
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    
+    elif active_crypto_tab == "🔍 OLD_SCANNER_REMOVED":  # REMOVED - Consolidated into Daily Scanner
+        st.info("⚠️ This scanner has been consolidated into the Daily Scanner tab")
+        st.markdown("Please use **🔍 Daily Scanner** for all scanning needs.")
     
     elif active_crypto_tab == "🔍 Crypto Scanner":
         logger.info("🏁 CRYPTO_TAB2 (Scanner) RENDERING")
@@ -484,7 +566,7 @@ def render_tab():
                     
                 except Exception as e:
                     st.error(f"Scanner error: {e}")
-                    logger.error(f"Crypto scanner error: {e}", exc_info=True)
+                    logger.error("Crypto scanner error: {}", str(e), exc_info=True)
         
         # Display results from session state (persists across button clicks)
         if st.session_state.crypto_scan_results is not None:
@@ -637,7 +719,7 @@ def render_tab():
                                 except Exception as e:
                                     error_msg = f"Error saving {opp.symbol} to watchlist: {e}"
                                     st.error(f"❌ {error_msg}")
-                                    logger.error(f"❌ EXCEPTION in watchlist save: {error_msg}", exc_info=True)
+                                    logger.error("❌ EXCEPTION in watchlist save: {}", str(error_msg), exc_info=True)
                         
                         with bcol2:
                             if st.button(f"📊 Generate Signal", key=f"gen_signal_{i}"):
@@ -740,6 +822,10 @@ def render_tab():
             - **Volatility**: Lower = more predictable, safer
             - **AI Confidence**: HIGH = AI agrees with technical analysis
             """)
+    
+    elif active_crypto_tab == "💰 OLD_PENNY_REMOVED":  # REMOVED - Integrated into Daily Scanner
+        st.info("⚠️ Penny crypto scanning has been integrated into the Daily Scanner")
+        st.markdown("Please use **🔍 Daily Scanner** → Select source: **💰 Penny Cryptos (<$1)**")
     
     elif active_crypto_tab == "💰 Penny Cryptos (<$1)":
         logger.info("🏁 CRYPTO_TAB3 (Penny Cryptos) RENDERING")
@@ -862,7 +948,7 @@ def render_tab():
                     
                 except Exception as e:
                     st.error(f"Sub-penny discovery error: {e}")
-                    logger.error(f"Sub-penny discovery error: {e}", exc_info=True)
+                    logger.error("Sub-penny discovery error: {}", str(e), exc_info=True)
         
         # Handle trending runners scan
         if scan_trending:
@@ -881,7 +967,7 @@ def render_tab():
                     
                 except Exception as e:
                     st.error(f"Trending scanner error: {e}")
-                    logger.error(f"Trending crypto scanner error: {e}", exc_info=True)
+                    logger.error("Trending crypto scanner error: {}", str(e), exc_info=True)
         
         # Scan button
         if scan_penny:
@@ -917,7 +1003,7 @@ def render_tab():
                     
                 except Exception as e:
                     st.error(f"Scanner error: {e}")
-                    logger.error(f"Penny crypto scanner error: {e}", exc_info=True)
+                    logger.error("Penny crypto scanner error: {}", str(e), exc_info=True)
         
         # Display trending runners results
         if st.session_state.trending_runners_results is not None:
@@ -1054,7 +1140,7 @@ def render_tab():
                                             st.warning(f"⚠️ {symbol} might already be in watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {symbol}: {e}")
-                                    logger.error(f"Error saving trending runner to watchlist: {e}", exc_info=True)
+                                    logger.error("Error saving trending runner to watchlist: {}", str(e), exc_info=True)
                         
                         with bcol2:
                             if st.button(f"📊 Generate Signal", key=f"gen_trending_signal_{i}"):
@@ -1192,7 +1278,7 @@ def render_tab():
                                             st.warning(f"⚠️ {coin.symbol} might already be in watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {coin.symbol}: {e}")
-                                    logger.error(f"Error saving sub-penny to watchlist: {e}", exc_info=True)
+                                    logger.error("Error saving sub-penny to watchlist: {}", str(e), exc_info=True)
                         
                         with bcol2:
                             st.info(f"💡 Tip: Research {coin.symbol} on CoinGecko before trading")
@@ -1324,7 +1410,7 @@ def render_tab():
                                             st.warning(f"⚠️ {opp.symbol} might already be in watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {opp.symbol}: {e}")
-                                    logger.error(f"Error saving penny crypto to watchlist: {e}", exc_info=True)
+                                    logger.error("Error saving penny crypto to watchlist: {}", str(e), exc_info=True)
                                     # Preserve tab state even on error
                                     st.session_state.active_crypto_tab = "💰 Penny Cryptos (<$1)"
                         
@@ -1398,30 +1484,23 @@ def render_tab():
             render_crypto_watchlist_tab(crypto_wl_manager, kraken_client, crypto_config)
         except Exception as e:
             st.error(f"Error loading watchlist: {e}")
-            logger.error(f"Crypto watchlist UI error: {e}", exc_info=True)
+            logger.error("Crypto watchlist UI error: {}", str(e), exc_info=True)
+    
+    elif active_crypto_tab == "🔥 OLD_CMC_REMOVED":  # REMOVED - Features available in Daily Scanner
+        st.info("⚠️ CoinMarketCap features have been integrated into the Daily Scanner")
+        st.markdown("Please use **🔍 Daily Scanner** → Select source: **🔥 CoinGecko Trending**")
     
     elif active_crypto_tab == "🔥 CoinMarketCap Features":
-        st.subheader("🔥 CoinMarketCap Features")
-        
-        # Import and render CoinMarketCap features UI
-        try:
-            from ui.coinmarketcap_features_ui import render_coinmarketcap_features_tab
-            render_coinmarketcap_features_tab(crypto_wl_manager)
-        except Exception as e:
-            st.error(f"Error loading CoinMarketCap features: {e}")
-            logger.error(f"CoinMarketCap features UI error: {e}", exc_info=True)
+        st.info("⚠️ CoinMarketCap features have been integrated into the Daily Scanner")
+        st.markdown("Please use **🔍 Daily Scanner** → Select source: **🔥 CoinGecko Trending**")
+    
+    elif active_crypto_tab == "🎯 OLD_SIGNAL_REMOVED":  # REMOVED - Use Daily Scanner Tier 3
+        st.info("⚠️ Signal generation has been integrated into the Daily Scanner workflow")
+        st.markdown("Please use **🔍 Daily Scanner** → Run Tier 1-3 analysis for signals")
     
     elif active_crypto_tab == "🎯 Signal Generator":
-        logger.info("🎯 SIGNAL GENERATOR TAB RENDERING")
-        st.subheader("🎯 Crypto Signal Generator")
-        
-        # Import and render signal generation UI
-        try:
-            from ui.crypto_signal_ui import render_signal_generation_tab
-            render_signal_generation_tab(crypto_wl_manager, kraken_client)
-        except Exception as e:
-            st.error(f"Error loading signal generator: {e}")
-            logger.error(f"Crypto signal UI error: {e}", exc_info=True)
+        st.info("⚠️ Signal generation has been integrated into the Daily Scanner workflow")
+        st.markdown("Please use **🔍 Daily Scanner** → Run Tier 1-3 analysis for signals")
     
     elif active_crypto_tab == "⚡ Quick Trade":
         # Import and render quick trade UI with cached scanners
@@ -1451,20 +1530,36 @@ def render_tab():
             )
         except Exception as e:
             st.error(f"Error loading quick trade: {e}")
-            logger.error(f"Crypto quick trade UI error: {e}", exc_info=True)
+            logger.error("Crypto quick trade UI error: {}", str(e), exc_info=True)
             # Ensure we stay on Quick Trade tab even after error
             st.session_state.active_crypto_tab = "⚡ Quick Trade"
     
     elif active_crypto_tab == "🔔 Entry Monitors":
         st.subheader("🔔 Entry Monitors - Waiting for Optimal Entry Timing")
         
-        # Import entry monitors UI
-        try:
-            from ui.crypto_entry_monitors_ui import display_entry_monitors
-            display_entry_monitors()
-        except Exception as e:
-            st.error(f"Error loading Entry Monitors: {e}")
-            logger.error(f"Entry Monitors error: {e}", exc_info=True)
+        # Create sub-tabs for Entry Monitors and Approvals
+        monitor_subtab1, monitor_subtab2 = st.tabs([
+            "⏳ Monitored Entries",
+            "✅ Pending Approvals"
+        ])
+        
+        with monitor_subtab1:
+            # Import entry monitors UI
+            try:
+                from ui.crypto_entry_monitors_ui import display_entry_monitors
+                display_entry_monitors()
+            except Exception as e:
+                st.error(f"Error loading Entry Monitors: {e}")
+                logger.error("Entry Monitors error: {}", str(e), exc_info=True)
+        
+        with monitor_subtab2:
+            # Import approval UI
+            try:
+                from ui.crypto_approval_ui import display_pending_approvals
+                display_pending_approvals()
+            except Exception as e:
+                st.error(f"Error loading Pending Approvals: {e}")
+                logger.error("Pending Approvals error: {}", str(e), exc_info=True)
     
     elif active_crypto_tab == "🤖 AI Position Monitor":
         st.subheader("🤖 AI Position Monitor - Intelligent Trade Management")
@@ -1475,7 +1570,7 @@ def render_tab():
             display_ai_position_monitor()
         except Exception as e:
             st.error(f"Error loading AI Position Monitor: {e}")
-            logger.error(f"AI Monitor error: {e}", exc_info=True)
+            logger.error("AI Monitor error: {}", str(e), exc_info=True)
     
     elif active_crypto_tab == "📓 Trade Journal":
         st.subheader("📓 Trade Journal - Learn from Every Trade")
@@ -1486,7 +1581,11 @@ def render_tab():
             display_trade_journal()
         except Exception as e:
             st.error(f"Error loading Trade Journal: {e}")
-            logger.error(f"Journal error: {e}", exc_info=True)
+            logger.error("Journal error: {}", str(e), exc_info=True)
+    
+    elif active_crypto_tab == "📈 OLD_PORTFOLIO_REMOVED":  # REMOVED - Merged into Dashboard
+        st.info("⚠️ Portfolio view has been merged into the Dashboard tab")
+        st.markdown("Please use **📊 Dashboard** to view your portfolio")
     
     elif active_crypto_tab == "📈 Portfolio & Settings":
         st.subheader("📈 Crypto Portfolio & Settings")
@@ -1636,7 +1735,7 @@ def render_tab():
                 
         except Exception as e:
             st.error(f"❌ Error fetching portfolio data: {e}")
-            logger.error(f"Portfolio fetch error: {e}", exc_info=True)
+            logger.error("Portfolio fetch error: {}", str(e), exc_info=True)
             st.info("💡 Make sure your Kraken API credentials are configured correctly and have balance read permissions.")
         
         st.divider()

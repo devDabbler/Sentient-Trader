@@ -167,11 +167,11 @@ class PositionMonitor:
                 self.alert_system.trigger_alert(alert)
                 del self.tracked_positions[symbol]
             
-            logger.info(f"Position update: {len(current_symbols)} open, {len(alerts)} alerts generated")
+            logger.info(f"Position update: {len(current_symbols)} open, {len(alerts))} alerts generated")
             return True, alerts
             
         except Exception as e:
-            logger.error(f"Error updating positions: {e}", exc_info=True)
+            logger.error("Error updating positions: {}", str(e), exc_info=True)
             return False, []
     
     def _check_position_alerts(self, position: PositionState) -> List[TradingAlert]:

@@ -225,7 +225,7 @@ def analyze_exit_timing(
         return result
         
     except Exception as e:
-        logger.error(f"Error analyzing exit timing: {e}", exc_info=True)
+        logger.error("Error analyzing exit timing: {}", str(e), exc_info=True)
         return {
             'action': 'HOLD',
             'confidence': 50,
