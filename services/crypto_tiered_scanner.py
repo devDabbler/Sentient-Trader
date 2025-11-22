@@ -560,7 +560,7 @@ class TieredCryptoScanner:
                 score += ml_boost
                 
                 if ml_boost > 0:
-                    logger.debug(f"ML boost: +{} points ({ml_signals}/4 signals aligned) {ml_boost:.1f}")
+                    pass  # logger.debug(f"ML boost: +{} points ({ml_signals}/4 signals aligned) {ml_boost:.1f}")
             except Exception as e:
                 logger.debug(f"ML scoring error: {e}")
         

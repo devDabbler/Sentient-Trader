@@ -174,8 +174,8 @@ class AIEntryAssistant:
                 additional_context=additional_context
             )
             
-            # Get AI recommendation
-            response = self.llm_analyzer._call_openrouter(prompt, max_retries=2, try_fallbacks=True)
+            # Get AI recommendation - use proper routing to handle both Ollama and OpenRouter
+            response = self.llm_analyzer._call_llm_api(prompt)
             
             if not response:
                 logger.error("Failed to get AI response")
@@ -432,19 +432,19 @@ Evaluate these critical factors:
 **Respond ONLY with valid JSON (no other text):**
 {{
     "action": "ENTER_NOW|WAIT_FOR_PULLBACK|WAIT_FOR_BREAKOUT|PLACE_LIMIT_ORDER|DO_NOT_ENTER",
-    "confidence": 0-100,
+    "confidence": 75,
     "reasoning": "2-3 sentence explanation of timing analysis",
     "urgency": "LOW|MEDIUM|HIGH",
-    "suggested_entry": current_or_better_price,
-    "suggested_stop": price_for_stop_loss,
-    "suggested_target": price_for_take_profit,
-    "risk_reward_ratio": calculated_rr_ratio,
-    "wait_for_price": price_to_wait_for_or_null,
-    "wait_for_rsi": rsi_level_to_wait_for_or_null,
-    "technical_score": 0-100,
-    "trend_score": 0-100,
-    "timing_score": 0-100,
-    "risk_score": 0-100
+    "suggested_entry": {current_price},
+    "suggested_stop": "{current_price * (1 - risk_pct/100):.6f}",
+    "suggested_target": "{current_price * (1 + take_profit_pct/100):.6f}",
+    "risk_reward_ratio": {take_profit_pct / risk_pct:.2f},
+    "wait_for_price": null,
+    "wait_for_rsi": null,
+    "technical_score": 75,
+    "trend_score": 70,
+    "timing_score": 80,
+    "risk_score": 60
 }}
 """
         
@@ -458,20 +458,38 @@ Evaluate these critical factors:
             end_idx = response.rfind('}') + 1
             
             if start_idx == -1 or end_idx == 0:
-                logger.error("No JSON found in AI response")
+                logger.error("No JSON found in response")
                 return None
             
             json_str = response[start_idx:end_idx]
+            
+            # Pre-process to fix common LLM mistakes before JSON parsing
+            # Fix bare identifiers like "current_or_better_price" -> null
+            json_str = json_str.replace(': current_or_better_price', ': null')
+            json_str = json_str.replace(': price_for_stop_loss', ': null')
+            json_str = json_str.replace(': price_for_take_profit', ': null')
+            json_str = json_str.replace(': calculated_rr_ratio', ': null')
+            json_str = json_str.replace(': price_to_wait_for_or_null', ': null')
+            json_str = json_str.replace(': rsi_level_to_wait_for_or_null', ': null')
+            
             data = json.loads(json_str)
             
-            return data
+            # Post-process: Clean string prices like "$0.001518" -> 0.001518
+            for field in ['suggested_entry', 'suggested_stop', 'suggested_target', 'wait_for_price']:
+                if field in data and isinstance(data[field], str):
+                    try:
+                        # Remove $ and convert to float
+                        data[field] = float(data[field].replace('$', '').replace(',', ''))
+                    except (ValueError, AttributeError):
+                        data[field] = None
             
+            return data
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI response JSON: {e}")
             logger.debug(f"Response: {response}")
             return None
         except Exception as e:
-            logger.error(f"Error parsing AI response: {e}")
+            logger.error(f"Unexpected error parsing AI response: {e}")
             return None
     
     def _create_error_analysis(self, pair: str, error_msg: str) -> EntryAnalysis:
@@ -731,7 +749,7 @@ Evaluate these critical factors:
                     logger.info(f"✅ Entry conditions met for {opportunity.pair}!")
                     logger.info(f"   Price: ${current_price:,.6f}")
                     if technical_data:
-                        logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
+                        pass  # logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
                     
                     # Send notification
                     if not opportunity.notification_sent:
@@ -1043,6 +1061,19 @@ Evaluate these critical factors:
                     'pair': opp.pair,
                     'side': opp.side,
                     'target_price': opp.target_price,
+                    'target_rsi': opp.target_rsi,
+                    'target_conditions': opp.target_conditions,
+                    'position_size': opp.position_size,
+                    'risk_pct': opp.risk_pct,
+                    'take_profit_pct': opp.take_profit_pct,
+                    'created_time': opp.created_time.isoformat(),
+                    'last_check_time': opp.last_check_time.isoformat(),
+                    'current_price': opp.current_price,
+                    'notification_sent': opp.notification_sent,
+                    'auto_execute': opp.auto_execute,
+                    'original_analysis': {
+                        'pair': opp.original_analysis.pair,
+                        'action': opp.original_analysis.action,
                         'confidence': opp.original_analysis.confidence,
                         'reasoning': opp.original_analysis.reasoning,
                         'urgency': opp.original_analysis.urgency,
@@ -1088,11 +1119,20 @@ Evaluate these critical factors:
             # Restore opportunities
             for opp_id, opp_data in state.items():
                 try:
+                    # Check if this is new format (with nested original_analysis) or old format (flat)
+                    if 'original_analysis' in opp_data:
+                        # New format - properly nested
+                        analysis_data = opp_data['original_analysis']
+                    else:
+                        # Old format - fields are at top level
+                        # Migrate to new structure
+                        logger.info(f"🔄 Migrating old format for {opp_id}")
+                        analysis_data = opp_data  # Use top-level as analysis data
+                    
                     # Reconstruct EntryAnalysis
-                    analysis_data = opp_data['original_analysis']
                     analysis = EntryAnalysis(
-                        pair=analysis_data['pair'],
-                        action=analysis_data['action'],
+                        pair=analysis_data.get('pair', opp_data.get('pair', 'UNKNOWN')),
+                        action=analysis_data.get('action', 'WAIT_FOR_PULLBACK'),  # Default for old format
                         confidence=analysis_data['confidence'],
                         reasoning=analysis_data['reasoning'],
                         urgency=analysis_data['urgency'],
@@ -1110,20 +1150,20 @@ Evaluate these critical factors:
                         analysis_time=datetime.fromisoformat(analysis_data['analysis_time'])
                     )
                     
-                    # Reconstruct MonitoredEntryOpportunity
+                    # Reconstruct MonitoredEntryOpportunity (with defaults for missing fields in old format)
                     opportunity = MonitoredEntryOpportunity(
                         pair=opp_data['pair'],
                         side=opp_data['side'],
                         target_price=opp_data.get('target_price'),
                         target_rsi=opp_data.get('target_rsi'),
-                        target_conditions=opp_data['target_conditions'],
-                        position_size=opp_data['position_size'],
-                        risk_pct=opp_data['risk_pct'],
-                        take_profit_pct=opp_data['take_profit_pct'],
+                        target_conditions=opp_data.get('target_conditions', []),
+                        position_size=opp_data.get('position_size', 100.0),  # Default for old format
+                        risk_pct=opp_data.get('risk_pct', 2.0),  # Default for old format
+                        take_profit_pct=opp_data.get('take_profit_pct', 5.0),  # Default for old format
                         original_analysis=analysis,
-                        created_time=datetime.fromisoformat(opp_data['created_time']),
-                        last_check_time=datetime.fromisoformat(opp_data['last_check_time']),
-                        current_price=opp_data['current_price'],
+                        created_time=datetime.fromisoformat(opp_data['created_time']) if 'created_time' in opp_data else datetime.now(),
+                        last_check_time=datetime.fromisoformat(opp_data['last_check_time']) if 'last_check_time' in opp_data else datetime.now(),
+                        current_price=opp_data.get('current_price', analysis_data['current_price']),
                         notification_sent=opp_data.get('notification_sent', False),
                         auto_execute=opp_data.get('auto_execute', False)
                     )
@@ -1137,6 +1177,11 @@ Evaluate these critical factors:
             
             if self.opportunities:
                 logger.info(f"✅ Loaded {len(self.opportunities)} monitored opportunities from previous session")
+                
+                # Save to convert old format to new format
+                self._save_state()
+                logger.info("💾 Migrated and saved monitors to new format")
+                
                 # Auto-start monitoring if we have opportunities
                 if not self.is_running:
                     self.start_monitoring()

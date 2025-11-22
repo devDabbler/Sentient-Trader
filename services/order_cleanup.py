@@ -85,7 +85,7 @@ class OrderCleanup:
                     })
             
             logger.info("=" * 80)
-            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(rejected_orders))} orders cancelled")
+            pass  # logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(rejected_orders))} orders cancelled")
             logger.info("=" * 80)
             
             return True, {
@@ -183,7 +183,7 @@ class OrderCleanup:
                     })
             
             logger.info("=" * 80)
-            logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(stuck_orders))} stuck orders cancelled")
+            pass  # logger.info(f"🧹 CLEANUP COMPLETE: {cancelled_count}/{len(stuck_orders))} stuck orders cancelled")
             logger.info("=" * 80)
             
             return True, {

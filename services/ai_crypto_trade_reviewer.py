@@ -30,7 +30,8 @@ class AICryptoTradeReviewer:
         else:
             self.active_monitors = self._load_monitors_from_db() if self.supabase else {}
         
-        logger.info("🔧 AI Trade Reviewer initialized with {} monitors (DB: {'enabled' if self.supabase else 'disabled'})", str(len(self.active_monitors)))
+        db_status = 'enabled' if self.supabase else 'disabled'
+        logger.info("🔧 AI Trade Reviewer initialized with {} monitors (DB: {})", str(len(self.active_monitors)), db_status)
         
     def pre_trade_review(
         self,
@@ -61,7 +62,7 @@ class AICryptoTradeReviewer:
         Returns:
             Tuple of (approved: bool, confidence: float, reasoning: str, recommendations: dict)
         """
-        logger.info(f"🤖 AI reviewing {side} trade for {pair} @ ${entry_price:,.2f}")
+        logger.info(f"🤖 AI reviewing {side} trade for {pair} @ ${entry_price:,.8f}")
         
         # Calculate trade metrics
         risk_amount = abs(entry_price - stop_loss_price) / entry_price * position_size_usd
@@ -137,10 +138,10 @@ class AICryptoTradeReviewer:
         - Asset: {pair}
         - Direction: {side}
         - Strategy: {strategy}
-        - Entry Price: ${entry_price:,.2f}
+        - Entry Price: ${entry_price:,.8f}
         - Position Size: ${position_size_usd:,.2f}
-        - Stop Loss: ${stop_loss_price:,.2f} ({abs(entry_price - stop_loss_price) / entry_price * 100:.2f}%)
-        - Take Profit: ${take_profit_price:,.2f} ({abs(take_profit_price - entry_price) / entry_price * 100:.2f}%)
+        - Stop Loss: ${stop_loss_price:,.8f} ({abs(entry_price - stop_loss_price) / entry_price * 100:.2f}%)
+        - Take Profit: ${take_profit_price:,.8f} ({abs(take_profit_price - entry_price) / entry_price * 100:.2f}%)
         - Risk Amount: ${risk_amount:,.2f}
         - Reward Amount: ${reward_amount:,.2f}
         - Risk:Reward Ratio: {risk_reward_ratio:.2f}:1
@@ -459,7 +460,7 @@ class AICryptoTradeReviewer:
         **Trade Status:**
         - Asset: {pair}
         - Side: {side}
-        - Entry: ${entry_price:,.2f}
+        - Entry: ${entry_price:,.8f}
         - Current: ${current_price:,.2f}
         - P&L: {pnl_pct:+.2f}%
         - Time in Trade: {time_in_trade:.1f} minutes
@@ -561,7 +562,7 @@ class AICryptoTradeReviewer:
             'time_in_trade_min': time_in_trade
         }
     
-    def stop_monitoring(self, trade_id: str, reason: str = None) -> Dict:
+    def stop_monitoring(self, trade_id: str, reason: Optional[str] = None) -> Dict:
         """Stop monitoring a trade and return summary"""
         if trade_id in self.active_monitors:
             summary = self.active_monitors[trade_id].copy()
@@ -732,7 +733,7 @@ class AICryptoTradeReviewer:
         except Exception as e:
             logger.error(f"❌ Error updating monitor in database: {e}")
     
-    def _close_monitor_in_db(self, trade_id: str, reason: str = None):
+    def _close_monitor_in_db(self, trade_id: str, reason: Optional[str] = None):
         """Mark a monitor as closed in database"""
         if not self.supabase:
             return

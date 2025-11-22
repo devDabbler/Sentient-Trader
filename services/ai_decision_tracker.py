@@ -450,8 +450,8 @@ class AIDecisionTracker:
                 'decision_accuracy': float((closed_decisions['was_correct'] == 1).sum() / len(closed_decisions) * 100) if len(closed_decisions) > 0 else 0.0,
                 
                 # Sentiment analysis
-                'decisions_with_news': int(df['news_count'] > 0).sum()),
-                'high_impact_news_decisions': int(df['high_impact_news'] == 1).sum()),
+                'decisions_with_news': int((df['news_count'] > 0).sum()),
+                'high_impact_news_decisions': int((df['high_impact_news'] == 1).sum()),
                 
                 # Best/worst actions
                 'best_performing_action': self._get_best_action(df),

@@ -25,6 +25,71 @@ def display_daily_scanner(kraken_client, crypto_config, ai_trade_reviewer=None):
     3. Tier 3: Deep strategy + AI review
     4. Add best to monitoring
     """
+    # ========== CHECK FOR MULTI-CONFIG BUTTON CLICKS (BEFORE RENDERING) ==========
+    # This catches button clicks from previous renders and transfers setup to Quick Trade
+    if 'multi_config_results' in st.session_state and st.session_state.multi_config_results is not None:
+        results_df = st.session_state.multi_config_results
+        
+        # Check if any "Use This Setup" button was clicked (best-per-pair OR filtered results)
+        selected_config_idx = None
+        for idx in results_df.index:
+            # Check both button types: use_config_{idx} and use_filtered_{idx}
+            if st.session_state.get(f'use_config_{idx}_clicked', False):
+                selected_config_idx = idx
+                st.session_state[f'use_config_{idx}_clicked'] = False  # Reset flag
+                logger.info(f"🔘 DAILY SCANNER - Detected button click for config {idx} (best-per-pair)")
+                break
+            elif st.session_state.get(f'use_filtered_{idx}_clicked', False):
+                selected_config_idx = idx
+                st.session_state[f'use_filtered_{idx}_clicked'] = False  # Reset flag
+                logger.info(f"🔘 DAILY SCANNER - Detected button click for filtered {idx} (filtered results)")
+                break
+        
+        # If a config was selected, transfer to Quick Trade
+        if selected_config_idx is not None:
+            row = results_df.loc[selected_config_idx]
+            pair = row.get('pair', 'UNKNOWN')
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            
+            logger.info(f"🔘 DAILY SCANNER - Transferring setup for {pair} - {trade_type}")
+            
+            # Store complete setup with REAL market data
+            st.session_state.crypto_scanner_opportunity = {
+                'symbol': row.get('pair', 'UNKNOWN'),
+                'strategy': row.get('strategy', 'Unknown'),
+                'confidence': row.get('ai_approved', False),
+                'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                'score': row.get('ai_score', 0),
+                'current_price': row.get('current_price', 0),
+                'change_24h': row.get('change_24h', 0),
+                'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                'volatility': row.get('volatility', 0),
+                'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                'ai_reasoning': row.get('ai_recommendation', ''),
+                'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                'ai_rating': row.get('ai_confidence', 0) / 10,
+                'ai_risks': row.get('ai_risks', [])
+            }
+            
+            st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+            st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+            st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+            st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+            st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
+            st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
+            
+            logger.info(f"📝 DAILY SCANNER - Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}, position=${row.get('position_size', 100)}")
+            
+            # Switch to Quick Trade main tab AND Execute Trade subtab
+            st.session_state.active_crypto_tab = "⚡ Quick Trade"
+            st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+            
+            st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
+            st.balloons()
+            st.rerun()
+    
     st.header("🔍 Daily Crypto Scanner")
     st.markdown("""
     **Progressive Scanning Workflow** - Start light, go deep on winners
@@ -1232,9 +1297,17 @@ def display_tier3_deep_analysis(scanner, ai_trade_reviewer):
                     
                     # Combine results
                     if 'multi_config_results' in st.session_state:
-                        config_results = st.session_state.multi_config_results
+                        config_results_df = st.session_state.multi_config_results
+                        # Convert DataFrame to list of dicts if needed
+                        if isinstance(config_results_df, pd.DataFrame):
+                            config_results = config_results_df.to_dict('records')
+                        else:
+                            config_results = config_results_df
+                        
+                        # Add analysis type to each config result
                         for r in config_results:
                             r['analysis_type'] = 'config'
+                        
                         ultimate_results = strategy_results + config_results
                     else:
                         ultimate_results = strategy_results
@@ -1251,34 +1324,47 @@ def display_tier3_deep_analysis(scanner, ai_trade_reviewer):
             return
     
     # Display results
-    if 'tier3_results' in st.session_state and st.session_state.tier3_results:
-        results = st.session_state.tier3_results
-        timestamp = st.session_state.get('tier3_timestamp', datetime.now())
-        mode = st.session_state.get('tier3_analysis_mode', 'quick')  # Changed to avoid widget key conflict
+    tier3_results = st.session_state.get('tier3_results')
+    if tier3_results is not None:
+        # Check if results is empty (works for both list and DataFrame)
+        is_empty = False
+        if isinstance(tier3_results, pd.DataFrame):
+            is_empty = tier3_results.empty
+            results = tier3_results.to_dict('records')  # Convert to list of dicts for consistent handling
+        elif isinstance(tier3_results, list):
+            is_empty = len(tier3_results) == 0
+            results = tier3_results
+        else:
+            is_empty = True
+            results = []
         
-        st.markdown("---")
-        st.markdown(f"**Results from:** {timestamp.strftime('%I:%M %p')} | **Mode:** {mode.upper()}")
-        
-        # Mode-specific summary metrics
-        if mode == "multi_config" or mode == "ultimate":
-            # Multi-config or Ultimate mode - different metrics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                unique_pairs = len(set(r.get('pair', '') for r in results))
-                st.metric("📊 Pairs Analyzed", unique_pairs)
-            with col2:
-                total_configs = len(results)
-                st.metric("🔬 Total Configurations", total_configs)
-            with col3:
-                buy_signals = sum(1 for r in results if r.get('side', r.get('strategy_signal')) == 'BUY')
-                st.metric("🟢 BUY Signals", buy_signals)
-            with col4:
-                if results and any('ai_score' in r or 'strategy_confidence' in r for r in results):
-                    confidences = [r.get('ai_score', r.get('strategy_confidence', 0)) for r in results if r.get('ai_score', r.get('strategy_confidence', 0)) > 0]
-                    avg_confidence = sum(confidences) / len(confidences) if confidences else 0
-                    st.metric("🎯 Avg Score", f"{avg_confidence:.1f}%")
-                else:
-                    st.metric("🎯 Avg Score", "N/A")
+        if not is_empty:
+            timestamp = st.session_state.get('tier3_timestamp', datetime.now())
+            mode = st.session_state.get('tier3_analysis_mode', 'quick')  # Changed to avoid widget key conflict
+            
+            st.markdown("---")
+            st.markdown(f"**Results from:** {timestamp.strftime('%I:%M %p')} | **Mode:** {mode.upper()}")
+            
+            # Mode-specific summary metrics
+            if mode == "multi_config" or mode == "ultimate":
+                # Multi-config or Ultimate mode - different metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    unique_pairs = len(set(r.get('pair', '') for r in results))
+                    st.metric("📊 Pairs Analyzed", unique_pairs)
+                with col2:
+                    total_configs = len(results)
+                    st.metric("🔬 Total Configurations", total_configs)
+                with col3:
+                    buy_signals = sum(1 for r in results if r.get('side', r.get('strategy_signal')) == 'BUY')
+                    st.metric("🟢 BUY Signals", buy_signals)
+                with col4:
+                    if results and any('ai_score' in r or 'strategy_confidence' in r for r in results):
+                        confidences = [r.get('ai_score', r.get('strategy_confidence', 0)) for r in results if r.get('ai_score', r.get('strategy_confidence', 0)) > 0]
+                        avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+                        st.metric("🎯 Avg Score", f"{avg_confidence:.1f}%")
+                    else:
+                        st.metric("🎯 Avg Score", "N/A")
         else:
             # Quick or Standard mode - traditional metrics
             col1, col2, col3, col4 = st.columns(4)
@@ -1381,8 +1467,39 @@ def display_quick_mode_results(results):
             
             with acol1:
                 if st.button(f"� Use This Setup", key=f"use_quick_{i}", type="primary" if is_ready else "secondary"):
-                    st.session_state.prefilled_trade = result
-                    st.success(f"✅ Setup ready! Navigate to Quick Trade to execute")
+                    # Transfer setup to Quick Trade
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': result['pair'],
+                        'strategy': result.get('strategy', 'Unknown'),
+                        'confidence': result.get('strategy_confidence', 0) > 70,
+                        'risk_level': result.get('risk_level', 'Medium'),
+                        'score': result.get('score', 0),
+                        'current_price': result.get('entry_price', result.get('price', 0)),
+                        'change_24h': result.get('change_24h', 0),
+                        'volume_ratio': result.get('volume_ratio', 1.0),
+                        'volatility': result.get('volatility', 0),
+                        'reason': f"{result.get('strategy_signal', 'HOLD')} recommended",
+                        'ai_reasoning': result.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if result.get('ai_confidence', 0) >= 75 else 'Medium',
+                        'ai_rating': result.get('ai_confidence', 0) / 10,
+                        'ai_risks': result.get('ai_risks', [])
+                    }
+                    st.session_state.crypto_quick_pair = result['pair']
+                    st.session_state.crypto_quick_trade_pair = result['pair']
+                    st.session_state.crypto_quick_direction = 'BUY'
+                    st.session_state.crypto_trading_mode = 'Spot Trading'
+                    st.session_state.crypto_quick_leverage = 1
+                    st.session_state.crypto_quick_position_size = 100
+                    st.session_state.crypto_quick_stop_pct = 2.0
+                    st.session_state.crypto_quick_target_pct = 5.0
+                    
+                    # Navigate to Quick Trade
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    st.success(f"✅ Setup ready! Switching to Execute Trade...")
+                    st.balloons()
+                    st.rerun()
             
             with acol2:
                 if st.button(f"🤖 Add to Monitor", key=f"monitor_quick_{i}", type="secondary"):
@@ -1469,8 +1586,39 @@ def display_standard_mode_results(results):
             
             with acol1:
                 if st.button(f"� Use Best Strategy", key=f"use_std_{i}", type="primary" if is_ready else "secondary"):
-                    st.session_state.prefilled_trade = result
-                    st.success(f"✅ {result.get('tested_strategy')} strategy ready!")
+                    # Transfer setup to Quick Trade
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': result['pair'],
+                        'strategy': result.get('tested_strategy', 'Unknown'),
+                        'confidence': result.get('strategy_confidence', 0) > 70,
+                        'risk_level': result.get('risk_level', 'Medium'),
+                        'score': result.get('score', 0),
+                        'current_price': result.get('entry_price', result.get('price', 0)),
+                        'change_24h': result.get('change_24h', 0),
+                        'volume_ratio': result.get('volume_ratio', 1.0),
+                        'volatility': result.get('volatility', 0),
+                        'reason': f"{result.get('strategy_signal', 'HOLD')} - {result.get('tested_strategy')}",
+                        'ai_reasoning': result.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if result.get('ai_confidence', 0) >= 75 else 'Medium',
+                        'ai_rating': result.get('ai_confidence', 0) / 10,
+                        'ai_risks': result.get('ai_risks', [])
+                    }
+                    st.session_state.crypto_quick_pair = result['pair']
+                    st.session_state.crypto_quick_trade_pair = result['pair']
+                    st.session_state.crypto_quick_direction = 'BUY'
+                    st.session_state.crypto_trading_mode = 'Spot Trading'
+                    st.session_state.crypto_quick_leverage = 1
+                    st.session_state.crypto_quick_position_size = 100
+                    st.session_state.crypto_quick_stop_pct = 2.0
+                    st.session_state.crypto_quick_target_pct = 5.0
+                    
+                    # Navigate to Quick Trade
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    st.success(f"✅ {result.get('tested_strategy')} strategy ready! Switching to Execute Trade...")
+                    st.balloons()
+                    st.rerun()
             
             with acol2:
                 if st.button(f"🤖 Add to Monitor", key=f"monitor_std_{i}", type="secondary"):
@@ -1578,8 +1726,39 @@ def display_multi_config_results(results, mode):
             st.dataframe(config_df, hide_index=True, use_container_width=True)
             
             if st.button(f"🚀 Use Best Config", key=f"use_multi_{pair_idx}", type="primary"):
-                st.session_state.prefilled_trade = best_config
-                st.success(f"✅ {best_config.get('trade_type')} configuration ready!")
+                # Transfer setup to Quick Trade
+                st.session_state.crypto_scanner_opportunity = {
+                    'symbol': best_config.get('pair', 'UNKNOWN'),
+                    'strategy': best_config.get('strategy', 'Unknown'),
+                    'confidence': best_config.get('ai_approved', False),
+                    'risk_level': 'Medium' if (best_config.get('leverage', 0) or 0) <= 2 else 'High',
+                    'score': best_config.get('score', 0),
+                    'current_price': best_config.get('current_price', 0),
+                    'change_24h': best_config.get('change_24h', 0),
+                    'volume_ratio': best_config.get('volume_ratio', 1.0),
+                    'volatility': best_config.get('volatility', 0),
+                    'reason': f"{best_config.get('trade_type')} recommended",
+                    'ai_reasoning': best_config.get('ai_recommendation', ''),
+                    'ai_confidence': 'High' if best_config.get('ai_confidence', 0) >= 75 else 'Medium',
+                    'ai_rating': best_config.get('ai_confidence', 0) / 10,
+                    'ai_risks': best_config.get('ai_risks', [])
+                }
+                st.session_state.crypto_quick_pair = best_config.get('pair', 'UNKNOWN')
+                st.session_state.crypto_quick_trade_pair = best_config.get('pair', 'UNKNOWN')
+                st.session_state.crypto_quick_direction = best_config.get('direction', 'BUY')
+                st.session_state.crypto_trading_mode = best_config.get('trading_mode', 'Spot Trading')
+                st.session_state.crypto_quick_leverage = best_config.get('leverage', 1)
+                st.session_state.crypto_quick_position_size = best_config.get('position_size', 100)
+                st.session_state.crypto_quick_stop_pct = best_config.get('stop_pct', 2.0)
+                st.session_state.crypto_quick_target_pct = best_config.get('target_pct', 5.0)
+                
+                # Navigate to Quick Trade
+                st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                
+                st.success(f"✅ {best_config.get('trade_type')} configuration ready! Switching to Execute Trade...")
+                st.balloons()
+                st.rerun()
 
 
 def display_active_monitors(ai_trade_reviewer, kraken_client):

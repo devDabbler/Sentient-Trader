@@ -177,7 +177,7 @@ def render_tab():
                 
                 if verification.get('active_strategy') == strategy_key:
                     logger.info(f"✅ Successfully saved and verified active strategy: {strategy_key}")
-                    logger.info(f"   Config file: {verification.get('config_file'}"))
+                    logger.info(f"   Config file: {verification.get('config_file')}")
                     return True
                 else:
                     logger.error("❌ Verification failed! Saved '{strategy_key}' but file shows '{}'", str(verification.get('active_strategy')))
@@ -366,7 +366,126 @@ FRACTIONAL_MAX_AMOUNT = {config_dict.get('fractional_max_amount', 1000.0)}  # Ma
         except Exception as e:
             st.error(f"Error saving config: {e}")
             return False
+
+    # ========================================================================
+    # TRADING ENVIRONMENT & CONTROLS
+    # ========================================================================
     
+    st.divider()
+    st.subheader("🎮 Control Center")
+    
+    col_env, col_scan, col_bg = st.columns(3)
+    
+    # --- Environment Control ---
+    with col_env:
+        st.markdown("#### 🌍 Environment")
+        is_paper = os.getenv('IS_PAPER_TRADING', 'True').lower() == 'true'
+        
+        if is_paper:
+            st.success("✅ **PAPER TRADING ACTIVE**")
+            st.caption("Safe mode. No real money used.")
+            if st.button("🔴 Switch to LIVE TRADING"):
+                if update_env_file_for_live_trading():
+                    st.success("Switched to LIVE mode! Restarting...")
+                    time.sleep(1)
+                    st.rerun()
+        else:
+            st.error("⚠️ **LIVE TRADING ACTIVE**")
+            st.caption("Real money at risk!")
+            if st.button("🟢 Switch to PAPER TRADING"):
+                if update_env_file_for_paper_trading():
+                    st.success("Switched to PAPER mode! Restarting...")
+                    time.sleep(1)
+                    st.rerun()
+
+    # --- Manual Scanner ---
+    with col_scan:
+        st.markdown("#### 🔍 Manual Scanner")
+        st.caption("Run a quick scan to see current opportunities.")
+        
+        if st.button("🚀 Run Stock Scanner"):
+            with st.spinner("Scanning market..."):
+                try:
+                    # Import here to avoid circular deps
+                    from services.top_trades_scanner import TopTradesScanner
+                    import pandas as pd
+                    
+                    scanner = TopTradesScanner()
+                    # Use a default universe or the one from config
+                    results = scanner.scan_top_options_trades(top_n=10)
+                    
+                    if results:
+                        st.session_state.last_scan_results = results
+                        st.success(f"Found {len(results)} opportunities!")
+                    else:
+                        st.warning("No opportunities found.")
+                except Exception as e:
+                    st.error(f"Scan failed: {e}")
+        
+        if 'last_scan_results' in st.session_state and st.session_state.last_scan_results:
+            if st.button("🗑️ Clear Results"):
+                del st.session_state.last_scan_results
+                st.rerun()
+
+    # --- Background Bot Control ---
+    with col_bg:
+        st.markdown("#### 🤖 Background Bot")
+        
+        # Check if running
+        import psutil
+        bg_pid = None
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                cmdline = proc.info['cmdline']
+                if cmdline and 'python' in proc.info['name'] and 'run_autotrader_background.py' in ' '.join(cmdline):
+                    bg_pid = proc.info['pid']
+                    break
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        
+        if bg_pid:
+            st.success(f"✅ **Running** (PID: {bg_pid})")
+            if st.button("🛑 Stop Background Bot"):
+                try:
+                    import subprocess
+                    subprocess.Popen("stop_autotrader.bat", shell=True)
+                    st.info("Stopping...")
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to stop: {e}")
+        else:
+            st.warning("🔴 **Stopped**")
+            if st.button("🟢 Start Background Bot"):
+                try:
+                    import subprocess
+                    subprocess.Popen("start_autotrader_background.bat", shell=True)
+                    st.success("Starting...")
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to start: {e}")
+
+    # Display Scan Results if available
+    if 'last_scan_results' in st.session_state and st.session_state.last_scan_results:
+        st.divider()
+        st.subheader("📊 Scan Results")
+        
+        # Convert to DataFrame for display
+        import pandas as pd
+        results_data = []
+        for trade in st.session_state.last_scan_results:
+            results_data.append({
+                "Ticker": trade.ticker,
+                "Score": trade.score,
+                "Price": trade.price,
+                "Strategy": trade.strategy if hasattr(trade, 'strategy') else 'N/A',
+                "Confidence": f"{trade.confidence:.1f}%" if isinstance(trade.confidence, float) else str(trade.confidence)
+            })
+        
+        df = pd.DataFrame(results_data)
+        st.dataframe(df, use_container_width=True)
+
     # ========================================================================
     # STRATEGY SELECTOR
     # ========================================================================
@@ -633,7 +752,7 @@ FRACTIONAL_MAX_AMOUNT = {config_dict.get('fractional_max_amount', 1000.0)}  # Ma
                         # Update both session state keys to ensure text area updates
                         st.session_state['synced_watchlist'] = ", ".join(checked_tickers)
                         st.session_state['watchlist_text_area'] = ", ".join(checked_tickers)
-                        st.success(f"✅ Copied {len(checked_tickers))} tickers!")
+                        st.success(f"✅ Copied {len(checked_tickers)} tickers!")
                         st.info(f"📋 **Tickers ready to save:** {', '.join(checked_tickers[:10])}{'...' if len(checked_tickers) > 10 else ''}")
                         st.rerun()
                     else:
@@ -1191,7 +1310,7 @@ FRACTIONAL_MAX_AMOUNT = {config_dict.get('fractional_max_amount', 1000.0)}  # Ma
                 'allow_short_selling': False,
                 'use_settled_funds_only': True,
             }
-            if save_background_config(new_config):
+            if save_config_to_file(new_config, selected_config_file):
                 st.success("✅ Configuration file created!")
                 st.rerun()
     
@@ -1427,6 +1546,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                         min_confidence=min_confidence,
                         max_daily_orders=max_daily_orders,
                         use_bracket_orders=use_bracket_orders,
+                       
                         risk_tolerance=risk_tolerance,
                         paper_trading=paper_trading,
                         trading_mode=trading_mode,
@@ -1441,7 +1561,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
                     
                     # Create and start auto-trader
                     auto_trader = create_auto_trader(
-                        tradier_client=st.session_state.tradier_client,
+                        broker_client=st.session_state.tradier_client,
                         signal_generator=signal_gen,
                         watchlist=selected_tickers,
                         config=config,
@@ -1549,7 +1669,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
             positions = monitor.get_monitored_positions()
             
             if positions:
-                st.success(f"Monitoring {len(positions))} position(s)")
+                st.success(f"Monitoring {len(positions)} position(s)")
                 for pos in positions:
                     # Check if fractional
                     is_fractional = (pos.quantity % 1 != 0)
@@ -1584,7 +1704,7 @@ ADD COLUMN IF NOT EXISTS auto_trade_strategy TEXT;
             history = st.session_state.auto_trader.get_execution_history()
             
             if history:
-                st.write(f"**Total Executions:** {len(history))}")
+                st.write(f"**Total Executions:** {len(history)}")
                 
                 for idx, execution in enumerate(reversed(history[-10:]), 1):  # Show last 10
                     with st.expander(f"{idx}. {execution['symbol']} - {execution['signal']} ({execution['timestamp']})"):
@@ -1816,5 +1936,5 @@ Always start with paper trading and only risk capital you can afford to lose.
             st.write(info)
         
         if not entry_assistant:
-            st.info("💡 Connect a broker (IBKR or Tradier) and configure LLM to enable AI analysis.")
+            st.info("💡 Connect a broker (IBKR or Tradier) and configure LLM to enable AI analysis")
 

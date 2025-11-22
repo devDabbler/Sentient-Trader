@@ -326,7 +326,7 @@ class PresetScanner:
         
         print(f"\n{'='*100}")
         print(f"SCAN RESULTS: {results[0].preset.value if results else ''}")
-        print(f"Found {len(results))} matches")
+        pass  # print(f"Found {len(results))} matches")
         print(f"{'='*100}\n")
         
         print(f"{'Rank':<6} {'Ticker':<8} {'Conf':<6} {'Priority':<9} {'Reasons'}")

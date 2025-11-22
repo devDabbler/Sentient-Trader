@@ -188,6 +188,74 @@ def render_tab():
     
     st.divider()
     
+    # ========== CHECK FOR MULTI-CONFIG BUTTON CLICKS (GLOBAL HANDLER) ==========
+    # This catches button clicks from Daily Scanner and transfers setup to Quick Trade
+    # Runs BEFORE tab rendering so it works regardless of which tab you navigate to
+    if 'multi_config_results' in st.session_state and st.session_state.multi_config_results is not None:
+        results_df = st.session_state.multi_config_results
+        
+        # Check if any "Use This Setup" button was clicked
+        selected_config_idx = None
+        for idx in results_df.index:
+            # Check both button types: use_config_{idx} (best-per-pair) and use_filtered_{idx} (filtered results)
+            if st.session_state.get(f'use_config_{idx}_clicked', False):
+                selected_config_idx = idx
+                st.session_state[f'use_config_{idx}_clicked'] = False  # Reset flag
+                logger.info(f"🔘 CRYPTO TAB - Detected button click for config {idx} (best-per-pair)")
+                break
+            elif st.session_state.get(f'use_filtered_{idx}_clicked', False):
+                selected_config_idx = idx
+                st.session_state[f'use_filtered_{idx}_clicked'] = False  # Reset flag
+                logger.info(f"🔘 CRYPTO TAB - Detected button click for filtered {idx} (filtered results)")
+                break
+        
+        # If a config was selected, transfer to Quick Trade
+        if selected_config_idx is not None:
+            row = results_df.loc[selected_config_idx]
+            pair = row.get('pair', 'UNKNOWN')
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            
+            logger.info(f"🔘 CRYPTO TAB - Transferring setup for {pair} - {trade_type}")
+            
+            # Store complete setup with REAL market data
+            st.session_state.crypto_scanner_opportunity = {
+                'symbol': row.get('pair', 'UNKNOWN'),
+                'strategy': row.get('strategy', 'Unknown'),
+                'confidence': row.get('ai_approved', False),
+                'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                'score': row.get('ai_score', 0),
+                'current_price': row.get('current_price', 0),
+                'change_24h': row.get('change_24h', 0),
+                'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                'volatility': row.get('volatility', 0),
+                'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                'ai_reasoning': row.get('ai_recommendation', ''),
+                'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                'ai_rating': row.get('ai_confidence', 0) / 10,
+                'ai_risks': row.get('ai_risks', [])
+            }
+            
+            st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+            st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+            st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+            st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+            st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
+            st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
+            
+            logger.info(f"📝 CRYPTO TAB - Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}, position=${row.get('position_size', 100)}")
+            
+            # Switch to Quick Trade main tab AND Execute Trade subtab
+            st.session_state.active_crypto_tab = "⚡ Quick Trade"
+            st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+            
+            # Set flag to show success message after rerun
+            st.session_state.show_setup_success = {'pair': pair, 'trade_type': trade_type}
+            
+            logger.info(f"🔄 CRYPTO TAB - About to rerun with quick_trade_subtab set to: {st.session_state.quick_trade_subtab}")
+            st.rerun()
+    
     # Render only the active tab content
     logger.info(f"🔍 Rendering crypto tab: {active_crypto_tab}")
     if active_crypto_tab == "📊 Dashboard":
@@ -1536,6 +1604,33 @@ def render_tab():
     
     elif active_crypto_tab == "🔔 Entry Monitors":
         st.subheader("🔔 Entry Monitors - Waiting for Optimal Entry Timing")
+        
+        # Initialize AI Entry Assistant in session state (loads saved monitors from JSON)
+        if 'ai_entry_assistant' not in st.session_state:
+            try:
+                from services.ai_entry_assistant import get_ai_entry_assistant
+                from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                
+                logger.info("🔧 Initializing AI Entry Assistant for Entry Monitors tab...")
+                llm_analyzer = LLMStrategyAnalyzer()
+                entry_assistant = get_ai_entry_assistant(
+                    kraken_client=kraken_client,
+                    llm_analyzer=llm_analyzer,
+                    check_interval_seconds=60,
+                    enable_auto_entry=False
+                )
+                st.session_state.ai_entry_assistant = entry_assistant
+                
+                # Start monitoring if not running
+                if not entry_assistant.is_running:
+                    entry_assistant.start_monitoring()
+                
+                num_monitors = len(entry_assistant.opportunities)
+                logger.info(f"✅ AI Entry Assistant initialized with {num_monitors} saved monitors")
+            except Exception as e:
+                logger.error(f"Failed to initialize AI Entry Assistant: {e}", exc_info=True)
+        else:
+            logger.debug("AI Entry Assistant already in session state")
         
         # Create sub-tabs for Entry Monitors and Approvals
         monitor_subtab1, monitor_subtab2 = st.tabs([

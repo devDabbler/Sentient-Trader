@@ -214,11 +214,11 @@ class PositionExitMonitor:
             logger.info(f"🎯 MONITORING STARTED: {symbol}")
             logger.info("=" * 80)
             logger.info(f"   Position: {side} {quantity} shares @ ${entry_price:.2f}")
-            logger.info(f"   Stop Loss: ${} ({-risk_pct:.2f}%) {stop_loss:.2f}")
-            logger.info(f"   Take Profit: ${} (+{reward_pct:.2f}%) {take_profit:.2f}")
-            logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
+            pass  # logger.info(f"   Stop Loss: ${} ({-risk_pct:.2f}%) {stop_loss:.2f}")
+            pass  # logger.info(f"   Take Profit: ${} (+{reward_pct:.2f}%) {take_profit:.2f}")
+            pass  # logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
             if trailing_stop_pct:
-                logger.info(f"   Trailing Stop: {}% {trailing_stop_pct:.1f}")
+                pass  # logger.info(f"   Trailing Stop: {}% {trailing_stop_pct:.1f}")
             if max_hold_minutes:
                 logger.info(f"   Max Hold Time: {max_hold_minutes} minutes")
             if bracket_order_ids:
@@ -371,7 +371,7 @@ class PositionExitMonitor:
                     self.tradier_circuit_breaker_active = False
                     self.consecutive_tradier_errors = 0
                 else:
-                    logger.debug(f"⚠️ Circuit breaker active: Tradier backend issues ({} min ago) {time_since_error:.1f}")
+                    pass  # logger.debug(f"⚠️ Circuit breaker active: Tradier backend issues ({} min ago) {time_since_error:.1f}")
         
         logger.debug(f"🔍 Checking {len(self.monitored_positions)} positions...")
         
@@ -506,8 +506,8 @@ class PositionExitMonitor:
             logger.info("=" * 80)
             logger.info(f"   Reason: {exit_reason.value}")
             logger.info(f"   Quantity: {position.quantity}")
-            logger.info(f"   Entry: ${} {position.entry_price:.2f}")
-            logger.info(f"   Current: ${} {current_price:.2f}")
+            pass  # logger.info(f"   Entry: ${} {position.entry_price:.2f}")
+            pass  # logger.info(f"   Current: ${} {current_price:.2f}")
             
             # Calculate P&L
             if position.side == 'BUY':
@@ -560,7 +560,7 @@ class PositionExitMonitor:
                 # Release capital
                 if self.capital_manager:
                     self.capital_manager.release_capital(symbol, pnl=pnl)
-                    logger.info("💰 Capital released: ${} available", str(self.capital_manager.get_available_capital():,.2f))
+                    pass  # logger.info("💰 Capital released: ${} available", str(self.capital_manager.get_available_capital():,.2f))
                 
                 # Update statistics
                 self.total_exits_executed += 1
@@ -799,7 +799,7 @@ class PositionExitMonitor:
             except Exception as e:
                 logger.error(f"Error closing {symbol}: {e}")
         
-        logger.warning(f"⚠️ Closed {closed_count}/{len(self.monitored_positions))} positions")
+        pass  # logger.warning(f"⚠️ Closed {closed_count}/{len(self.monitored_positions))} positions")
         return closed_count
     
     def get_status(self) -> Dict:

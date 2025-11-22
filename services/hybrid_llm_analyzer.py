@@ -132,7 +132,7 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('local', generation_time, success=True)
-                        logger.success(f"✅ Local analysis completed in {}s {generation_time:.1f}")
+                        pass  # logger.success(f"✅ Local analysis completed in {}s {generation_time:.1f}")
                         return response
                     else:
                         logger.warning(f"⚠️ Local Ollama returned no response, trying fallback...")
@@ -145,7 +145,7 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('cloud', generation_time, success=True)
-                        logger.success(f"✅ Cloud analysis completed in {}s {generation_time:.1f}")
+                        pass  # logger.success(f"✅ Cloud analysis completed in {}s {generation_time:.1f}")
                         return response
                     else:
                         self._record_performance('cloud', time.time() - start_time, success=False)
@@ -158,7 +158,7 @@ class HybridLLMAnalyzer:
         
         # All providers failed
         total_time = time.time() - start_time
-        logger.error(f"❌ All LLM providers failed after {}s {total_time:.1f}")
+        pass  # logger.error(f"❌ All LLM providers failed after {}s {total_time:.1f}")
         if last_error:
             logger.error(f"Last error: {last_error}")
         

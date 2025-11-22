@@ -396,7 +396,7 @@ class IBKRAdapter(BrokerAdapter):
             action = side.upper()
             
             logger.info(f"🎯 IBKR: Starting bracket order for {symbol}: {action} {quantity} shares")
-            logger.info(f"   Entry: market, Stop: ${}, Target: ${take_profit_price:.2f} {stop_loss_price:.2f}")
+            pass  # logger.info(f"   Entry: market, Stop: ${}, Target: ${take_profit_price:.2f} {stop_loss_price:.2f}")
             
             # Health check - ensure TWS is responsive before placing order
             if hasattr(self.client, 'check_connection_health'):

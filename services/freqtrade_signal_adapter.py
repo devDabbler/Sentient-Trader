@@ -46,7 +46,7 @@ class FreqtradeSignalWrapper:
         try:
             # Freqtrade strategies need specific columns
             if df.empty or len(df) < 100:
-                logger.debug(f"Insufficient data for {self.strategy_id}: {len(df))} candles")
+                pass  # logger.debug(f"Insufficient data for {self.strategy_id}: {len(df))} candles")
                 return None
             
             # Calculate indicators

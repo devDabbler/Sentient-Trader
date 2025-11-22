@@ -117,7 +117,7 @@ class EnhancedTickerDiscovery:
         
         ranked_tickers = self._aggregate_and_rank(all_signals, max_tickers)
         
-        logger.info(f"🎯 Enhanced Discovery Result: {len(ranked_tickers)} tickers from {len(all_signals))} signals")
+        pass  # logger.info(f"🎯 Enhanced Discovery Result: {len(ranked_tickers)} tickers from {len(all_signals))} signals")
         for i, (ticker, score, sources) in enumerate(ranked_tickers[:10], 1):
             logger.info("  #{}. {ticker}: {score:.1f} confidence ({', '.join(sources)})", str(i))
         

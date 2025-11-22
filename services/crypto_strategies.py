@@ -906,12 +906,12 @@ class CryptoStrategyManager:
             # Consensus is BUY
             # Use the highest confidence BUY signal
             best_signal = max(buy_signals, key=lambda s: s.confidence)
-            best_signal.reasoning = f"CONSENSUS BUY ({len(buy_signals))}/{len(signals))} strategies) | " + best_signal.reasoning
+            best_signal.reasoning = f"CONSENSUS BUY ({len(buy_signals)}/{len(signals)} strategies) | " + best_signal.reasoning
             return best_signal
         elif len(sell_signals) > len(buy_signals):
             # Consensus is SELL
             best_signal = max(sell_signals, key=lambda s: s.confidence)
-            best_signal.reasoning = f"CONSENSUS SELL ({len(sell_signals))}/{len(signals))} strategies) | " + best_signal.reasoning
+            best_signal.reasoning = f"CONSENSUS SELL ({len(sell_signals)}/{len(signals)} strategies) | " + best_signal.reasoning
             return best_signal
         
         return None  # No consensus

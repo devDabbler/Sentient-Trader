@@ -443,7 +443,7 @@ class DiscordApprovalManager:
             logger.debug("Discord approval manager not enabled")
             return False
         
-        if not self.bot.is_ready:
+        if not self.bot.is_ready():
             logger.warning("Discord bot not ready")
             return False
         

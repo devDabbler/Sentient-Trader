@@ -26,7 +26,7 @@ def _to_float(x: Any) -> float:
         try:
             return float(np.asarray(x).astype(float).reshape(-1)[0])
         except Exception:
-            raise TypeError(f"Cannot convert value to float: {type(x))}")
+            raise TypeError(f"Cannot convert value to float: {type(x)}")
 
 
 def black_scholes_price(S: float, K: float, T: float, r: float, sigma: float, is_call: bool = True) -> float:

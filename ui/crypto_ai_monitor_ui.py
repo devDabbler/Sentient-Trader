@@ -11,6 +11,13 @@ import pandas as pd
 import os
 
 
+def display_crypto_ai_monitors():
+    """
+    Alias function for backward compatibility
+    """
+    return display_ai_position_monitor()
+
+
 def display_ai_position_monitor():
     """
     Display AI Position Monitor dashboard
@@ -190,7 +197,7 @@ def display_ai_position_monitor():
     # 🚨 SAFETY: Show pending approvals first
     if hasattr(ai_manager, 'pending_approvals') and ai_manager.pending_approvals:
         st.markdown("#### 🚨 Pending Trade Approvals")
-        st.warning(f"⚠️ **{len(ai_manager.pending_approvals))} trade(s) awaiting your approval!** AI will NOT execute without your explicit confirmation.")
+        st.warning(f"⚠️ **{len(ai_manager.pending_approvals)} trade(s) awaiting your approval!** AI will NOT execute without your explicit confirmation.")
         
         for approval_id, approval_data in list(ai_manager.pending_approvals.items()):
             decision = approval_data['decision']
@@ -256,11 +263,11 @@ def display_ai_position_monitor():
                 positions_data.append({
                     'Pair': pos['pair'],
                     'Side': pos['side'],
-                    'Entry': f"${pos['entry_price']:,.2f}",
-                    'Current': f"${pos['current_price']:,.2f}",
+                    'Entry': f"${pos['entry_price']:,.6f}",
+                    'Current': f"${pos['current_price']:,.6f}",
                     'P&L%': f"{pnl_color} {pnl:+.2f}%",
-                    'Stop': f"${pos['stop_loss']:,.2f}",
-                    'Target': f"${pos['take_profit']:,.2f}",
+                    'Stop': f"${pos['stop_loss']:,.6f}",
+                    'Target': f"${pos['take_profit']:,.6f}",
                     'Hold Time': time_str,
                     'AI Action': pos['last_ai_action'],
                     'AI Confidence': f"{pos['last_ai_confidence']:.0f}%",
@@ -284,15 +291,15 @@ def display_ai_position_monitor():
                     
                     with detail_col1:
                         st.markdown("**Position Info:**")
-                        st.write(f"- Entry: ${pos['entry_price']:,.2f}")
-                        st.write(f"- Current: ${pos['current_price']:,.2f}")
+                        st.write(f"- Entry: ${pos['entry_price']:,.6f}")
+                        st.write(f"- Current: ${pos['current_price']:,.6f}")
                         st.write(f"- P&L: {pos['pnl_pct']:+.2f}%")
                         st.write(f"- Hold Time: {pos['hold_time_minutes']:.1f} min")
                     
                     with detail_col2:
                         st.markdown("**Risk Management:**")
-                        st.write(f"- Stop Loss: ${pos['stop_loss']:,.2f}")
-                        st.write(f"- Take Profit: ${pos['take_profit']:,.2f}")
+                        st.write(f"- Stop Loss: ${pos['stop_loss']:,.6f}")
+                        st.write(f"- Take Profit: ${pos['take_profit']:,.6f}")
                         st.write(f"- Breakeven: {'✅ Yes' if pos['moved_to_breakeven'] else '❌ No'}")
                         st.write(f"- Partial Exit: {'✅ Yes' if pos['partial_exit_taken'] else '❌ No'}")
                     
@@ -576,7 +583,7 @@ def display_portfolio_analysis():
         st.metric(
             "Staked Value",
             f"${analysis.get('total_staked_value', 0):,.2f}",
-            delta=f"{len(analysis.get('staked_assets', [])))} asset(s)"
+            delta=f"{len(analysis.get('staked_assets', []))} asset(s)"
         )
 
     with col4:
@@ -623,9 +630,9 @@ def display_portfolio_analysis():
         # Format columns
         display_df = pd.DataFrame({
             'Pair': positions_df['pair'],
-            'Volume': positions_df['volume'].apply(lambda x: f"{x:,.4f}"),
-            'Entry': positions_df['entry_price'].apply(lambda x: f"${x:,.4f}"),
-            'Current': positions_df['current_price'].apply(lambda x: f"${x:,.4f}"),
+            'Volume': positions_df['volume'].apply(lambda x: f"{x:,.6f}"),
+            'Entry': positions_df['entry_price'].apply(lambda x: f"${x:,.6f}"),
+            'Current': positions_df['current_price'].apply(lambda x: f"${x:,.6f}"),
             'P&L %': positions_df['pnl_pct'].apply(lambda x: f"{x:+.2f}%"),
             'P&L $': positions_df['pnl'].apply(lambda x: f"${x:+,.2f}"),
             'Value': positions_df['current_value'].apply(lambda x: f"${x:,.2f}"),
@@ -664,7 +671,7 @@ def display_portfolio_analysis():
                 'Asset': staked_df['currency'],
                 'Amount': staked_df['balance'].apply(lambda x: f"{x:,.6f}"),
                 'Type': staked_df['type'],
-                'Price': staked_df['current_price'].apply(lambda x: f"${x:,.4f}" if x > 0 else "N/A"),
+                'Price': staked_df['current_price'].apply(lambda x: f"${x:,.6f}" if x > 0 else "N/A"),
                 'Value': staked_df['value_usd'].apply(lambda x: f"${x:,.2f}" if x > 0 else "N/A")
             })
             

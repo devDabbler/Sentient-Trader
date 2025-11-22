@@ -202,7 +202,7 @@ Be concise but insightful. Focus on actionable analysis."""
                 logger.error(f"❌ Empty LLM response{ticker_str}")
                 raise Exception("Empty LLM response")
 
-            logger.info(f"✅ Received LLM response{ticker_str} ({len(response))} characters)")
+            logger.info(f"✅ Received LLM response{ticker_str} ({len(response)} characters)")
             return response
         except Exception as e:
             logger.error(f"LLM query failed: {e}")

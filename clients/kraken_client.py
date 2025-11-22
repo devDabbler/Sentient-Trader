@@ -688,6 +688,33 @@ class KrakenClient:
     # ACCOUNT & BALANCE METHODS
     # =========================================================================
     
+    def _normalize_kraken_currency(self, currency_code: str) -> str:
+        """
+        Normalize Kraken currency code to standard format.
+        Handles special cases like XXBT -> BTC, XXRP -> XRP.
+        """
+        # Specific mappings for Kraken weirdness
+        MAPPINGS = {
+            'XXBT': 'BTC',
+            'XBT': 'BTC',
+            'XXRP': 'XRP',
+            'XDG': 'DOGE',
+            'XXDG': 'DOGE',
+            'XREP': 'REP',
+            'XXMR': 'XMR',
+            'XXLM': 'XLM',
+            'XMLN': 'MLN',
+        }
+        
+        if currency_code in MAPPINGS:
+            return MAPPINGS[currency_code]
+        
+        # Standard ISO 4217 handling (remove leading X or Z for 4-letter codes)
+        if len(currency_code) == 4 and (currency_code.startswith('X') or currency_code.startswith('Z')):
+            return currency_code[1:]
+            
+        return currency_code
+
     def get_account_balance(self) -> List[KrakenBalance]:
         """
         Get account balances for all currencies
@@ -700,8 +727,8 @@ class KrakenClient:
             
             balances = []
             for currency, balance in data.items():
-                # Remove 'Z' or 'X' prefix from currency codes
-                clean_currency = currency.lstrip('ZX')
+                # Use robust normalization instead of naive lstrip
+                clean_currency = self._normalize_kraken_currency(currency)
                 
                 balances.append(KrakenBalance(
                     currency=clean_currency,
@@ -714,7 +741,7 @@ class KrakenClient:
             try:
                 extended_data = self._private_request('BalanceEx')
                 for currency, details in extended_data.items():
-                    clean_currency = currency.lstrip('ZX')
+                    clean_currency = self._normalize_kraken_currency(currency)
                     for bal in balances:
                         if bal.currency == clean_currency:
                             bal.balance = float(details.get('balance', bal.balance))
@@ -1202,20 +1229,54 @@ class KrakenClient:
                         
                         for possible_pair in possible_pairs:
                             if possible_pair in trades_by_pair:
-                                # Calculate weighted average entry price from buy trades
+                                # Sort all trades by timestamp (FIFO matching)
+                                all_trades = []
                                 for trade in trades_by_pair[possible_pair]['buy']:
-                                    total_cost += trade['cost'] + trade['fee']
-                                    total_volume += trade['volume']
-                                    total_fees += trade['fee']
-                                
-                                # Calculate weighted average for sells (if any partial exits)
+                                    all_trades.append({**trade, 'type': 'buy'})
                                 for trade in trades_by_pair[possible_pair]['sell']:
-                                    # Subtract sold volume from total
-                                    total_volume -= trade['volume']
+                                    all_trades.append({**trade, 'type': 'sell'})
+                                all_trades.sort(key=lambda t: t['timestamp'])
                                 
-                                if total_volume > 0:
+                                # FIFO matching: Track remaining position
+                                position_lots = []  # List of (volume, cost_per_unit) tuples
+                                
+                                for trade in all_trades:
+                                    if trade['type'] == 'buy':
+                                        # Add to position
+                                        cost_with_fee = trade['cost'] + trade['fee']
+                                        cost_per_unit = cost_with_fee / trade['volume']
+                                        position_lots.append((trade['volume'], cost_per_unit, trade['fee']))
+                                    else:  # sell
+                                        # Remove from position (FIFO)
+                                        remaining_to_sell = trade['volume']
+                                        while remaining_to_sell > 0 and position_lots:
+                                            lot_volume, lot_cost_per_unit, lot_fee = position_lots[0]
+                                            if lot_volume <= remaining_to_sell:
+                                                # Sell entire lot
+                                                position_lots.pop(0)
+                                                remaining_to_sell -= lot_volume
+                                            else:
+                                                # Partial sell
+                                                position_lots[0] = (lot_volume - remaining_to_sell, lot_cost_per_unit, lot_fee)
+                                                remaining_to_sell = 0
+                                
+                                # Calculate entry price from remaining lots
+                                if position_lots:
+                                    total_cost = sum(vol * cost for vol, cost, _ in position_lots)
+                                    total_volume = sum(vol for vol, _, _ in position_lots)
+                                    total_fees = sum(fee for _, _, fee in position_lots)
+                                    
+                                    # Verify volume matches balance (within 0.01% tolerance)
+                                    volume_diff = abs(total_volume - balance.balance)
+                                    if volume_diff / balance.balance > 0.0001:  # More than 0.01% difference
+                                        logger.warning(f"{pair}: Volume mismatch! Calculated {total_volume:.8f} vs Balance {balance.balance:.8f} (diff: {volume_diff:.8f})")
+                                        logger.warning(f"{pair}: Using balance volume and proportional cost adjustment")
+                                        # Adjust cost proportionally to match actual balance
+                                        total_cost = total_cost * (balance.balance / total_volume)
+                                        total_volume = balance.balance
+                                    
                                     entry_price = total_cost / total_volume
-                                    logger.debug("{}: Calculated entry price ${entry_price:.6f} from {len(trades_by_pair[possible_pair]['buy'])} buy trades", str(pair))
+                                    logger.debug("{}: Calculated entry price ${:.6f} from {} remaining lots (FIFO matched)", pair, entry_price, len(position_lots))
                                     break
                         
                         # If we couldn't find trade history, use current price as entry (no P&L calculation)

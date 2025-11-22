@@ -221,11 +221,11 @@ class CryptoBreakoutMonitor:
                 logger.info(f"   Scans: {self.stats['scans_completed']}")
                 logger.info(f"   Alerts: {self.stats['alerts_sent']}")
                 logger.info(f"   Errors: {self.stats['errors']}")
-                logger.info(f"   Uptime: {self._get_uptime(}")
+                pass  # logger.info(f"   Uptime: {self._get_uptime(}")
                 
                 if sleep_time > 0:
                     next_scan = datetime.now() + timedelta(seconds=sleep_time)
-                    logger.info("💤 Sleeping {}s... Next scan at {next_scan.strftime('%H:%M:%S')}\n", {sleep_time:.1f})
+                    pass  # logger.info("💤 Sleeping {}s... Next scan at {next_scan.strftime('%H:%M:%S')}\n", {sleep_time:.1f})
                     time.sleep(sleep_time)
         
         except KeyboardInterrupt:
@@ -255,7 +255,7 @@ class CryptoBreakoutMonitor:
         breakouts = self._detect_breakouts()
         scan_duration = time.time() - scan_start
         
-        logger.info(f"✅ Scan complete in {}s - Found {len(breakouts))} potential breakouts {scan_duration:.2f}")
+        pass  # logger.info(f"✅ Scan complete in {}s - Found {len(breakouts))} potential breakouts {scan_duration:.2f}")
         
         if not breakouts:
             logger.info("   No breakouts detected above threshold")
@@ -469,7 +469,7 @@ class CryptoBreakoutMonitor:
         # Log alert
         logger.info(f"\n🚨 BREAKOUT ALERT: {breakout.symbol}")
         logger.info(f"   Type: {breakout.alert_type}")
-        logger.info(f"   Score: {} {breakout.score:.1f}")
+        pass  # logger.info(f"   Score: {} {breakout.score:.1f}")
         logger.info(f"   Confidence: {breakout.confidence}")
         logger.info(f"   Price: ${breakout.price:,.2f}")
         logger.info(f"   24h Change: {breakout.change_24h:+.2f}%")
@@ -775,7 +775,7 @@ class CryptoBreakoutMonitor:
         logger.info(f"Total Scans: {self.stats['scans_completed']}")
         logger.info(f"Alerts Sent: {self.stats['alerts_sent']}")
         logger.info(f"Errors: {self.stats['errors']}")
-        logger.info(f"Uptime: {self._get_uptime(}")
+        pass  # logger.info(f"Uptime: {self._get_uptime(}")
         logger.info(f"Started: {self.stats['start_time']}")
         logger.info("Ended: {}", str(datetime.now().isoformat()))
         logger.info("=" * 80)

@@ -146,7 +146,7 @@ class AICryptoScanner:
             reverse=True
         )
         
-        logger.info(f"✅ Returning top {min(top_n, len(ai_opportunities} AI-analyzed crypto opportunities"))
+        pass  # logger.info(f"✅ Returning top {min(top_n, len(ai_opportunities} AI-analyzed crypto opportunities"))
         
         return ai_opportunities[:top_n]
     

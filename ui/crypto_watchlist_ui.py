@@ -395,7 +395,7 @@ def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManage
                             
                             # Display results inline
                             if signals:
-                                st.success(f"✅ Generated {len(signals))} signal(s)")
+                                st.success(f"✅ Generated {len(signals)} signal(s)")
                                 
                                 # Sort by confidence
                                 signals.sort(key=lambda x: x.confidence, reverse=True)
@@ -944,7 +944,7 @@ def bulk_refresh_cryptos(
                         
                         # Add confidence reasoning if multiple signals align
                         if len(confidence_signals) >= 3:
-                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals))} signals aligned - {', '.join(confidence_signals[:3])}"
+                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals)} signals aligned - {', '.join(confidence_signals[:3])}"
                         
                         # Update confidence level with AI confidence if available
                         if hasattr(ai_opportunity, 'ai_confidence') and ai_opportunity.ai_confidence:
@@ -1055,7 +1055,7 @@ def bulk_refresh_cryptos(
                         
                         # Add confidence reasoning if multiple signals align
                         if len(confidence_signals) >= 3:
-                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals))} signals aligned - {', '.join(confidence_signals[:3])}"
+                            update_data['reasoning'] = f"{update_data['reasoning']}\n\n✅ **Hybrid Validation**: {len(confidence_signals)} signals aligned - {', '.join(confidence_signals[:3])}"
                     
                     # Add technical indicators if available
                     if rsi is not None:
@@ -1222,7 +1222,7 @@ def render_crypto_watchlist_tab(
             st.session_state.crypto_refresh_selected = False
         else:
             try:
-                with st.spinner(f"Refreshing {len(selected_symbols))} selected cryptos..."):
+                with st.spinner(f"Refreshing {len(selected_symbols)} selected cryptos..."):
                     results = bulk_refresh_cryptos(
                         manager,
                         kraken_client,
@@ -1237,7 +1237,7 @@ def render_crypto_watchlist_tab(
                     failed = len(results) - successful
                     
                     if successful > 0:
-                        st.success(f"✅ Successfully refreshed {successful} of {len(selected_symbols))} cryptos")
+                        st.success(f"✅ Successfully refreshed {successful} of {len(selected_symbols)} cryptos")
                     if failed > 0:
                         failed_symbols = [s for s, v in results.items() if not v]
                         st.warning(f"⚠️ Failed to refresh {failed} cryptos: {', '.join(failed_symbols)}")

@@ -83,19 +83,19 @@ def display_bulk_ai_entry_analysis(tickers: List[str], entry_assistant: AIStockE
                 else:
                     st.warning("⚠️ Fast mode unavailable, using local Ollama")
             except Exception as e:
-                logger.warning(f"Could not initialize fast mode: {e}")
+                pass  # pass  # pass  # pass  # pass  # pass  # pass  # pass  # pass  # pass  # logger.warning(f"Could not initialize fast mode: {e}")
                 st.warning(f"⚠️ Fast mode failed: {e}. Using local Ollama.")
     
     # Use fast assistant if available, otherwise use default
     active_assistant = fast_assistant if fast_assistant else entry_assistant
     
-    if st.button(f"🤖 Analyze {len(selected_tickers))} Selected Tickers", type="primary", disabled=not selected_tickers):
+    if st.button(f"🤖 Analyze {len(selected_tickers)} Selected Tickers", type="primary", disabled=not selected_tickers):
         st.session_state.bulk_ai_analysis_results = []
         progress_bar = st.progress(0, text="Starting bulk analysis...")
         results = []
 
         for i, ticker in enumerate(selected_tickers):
-            progress_text = f"Analyzing {ticker} ({i + 1}/{len(selected_tickers))})..."
+            progress_text = f"Analyzing {ticker} ({i + 1}/{len(selected_tickers)})..."
             progress_bar.progress((i + 1) / len(selected_tickers), text=progress_text)
             
             try:
@@ -267,8 +267,8 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
         st.warning("⚠️ No configurations to test. Select at least one trading style.")
         return
     
-    st.info(f"🔬 Ready to test **{total_configs} configurations** across **{len(selected_tickers))} tickers**")
-    st.caption(f"Test Matrix: {len(position_sizes))} positions × {len(risk_levels))} risks × {len(selected_styles))} styles = {len(position_sizes) * len(risk_levels) * len(selected_styles))} configs per ticker")
+    st.info(f"🔬 Ready to test **{total_configs} configurations** across **{len(selected_tickers)} tickers**")
+    st.caption(f"Test Matrix: {len(position_sizes)} positions × {len(risk_levels)} risks × {len(selected_styles)} styles = {len(position_sizes) * len(risk_levels) * len(selected_styles)} configs per ticker")
     
     # --- Analysis Execution ---
     st.write("**3. Run Analysis**")
@@ -355,14 +355,24 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
                                 
                             except Exception as e:
                                 logger.error(f"Multi-config analysis for {ticker} failed: {e}")
+                                import traceback
+                                logger.error(f"Traceback: {traceback.format_exc()}")
                                 all_results.append({
                                     "Ticker": ticker,
                                     "Position Size": position_size,
                                     "Risk %": risk_pct,
+                                    "Take Profit %": take_profit_pct,
                                     "Style": style,
                                     "Action": "ERROR",
                                     "Confidence": 0,
-                                    "Reasoning": str(e)
+                                    "Reasoning": str(e),
+                                    "Urgency": "LOW",
+                                    "Technical": 0,
+                                    "Timing": 0,
+                                    "Risk Score": 0,
+                                    "Entry Price": 0,
+                                    "Stop Price": 0,
+                                    "Target Price": 0
                                 })
             
             progress_bar.empty()

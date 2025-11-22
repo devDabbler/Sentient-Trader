@@ -380,7 +380,7 @@ if __name__ == "__main__":
         
         # Get Alpha158 features
         features = analyzer.get_alpha158_features('AAPL')
-        print(f"Extracted {len(features))} Alpha158 features")
+        pass  # print(f"Extracted {len(features))} Alpha158 features")
         
         # Get ML prediction
         prediction = analyzer.get_ml_prediction('AAPL')

@@ -46,7 +46,7 @@ def get_default_tab():
         return "📈 IBKR Trading"
     elif broker == 'KRAKEN':
         return "₿ Crypto Trading"
-    return "🏠 Dashboard"
+    return "🔍 Stock Intelligence"
 
 def initialize_session_state():
     """Initialize all session state variables with graceful error handling"""
@@ -182,7 +182,7 @@ def main():
     
     # Tab names
     tab_names = [
-        "🏠 Dashboard",
+        "🔍 Stock Intelligence",
         "🚀 Advanced Scanner",
         "⭐ My Tickers",
         "💰 Fractional DCA",
@@ -214,7 +214,7 @@ def main():
     
     # Render selected tab
     try:
-        if selected_tab == "🏠 Dashboard":
+        if selected_tab == "🔍 Stock Intelligence":
             dashboard_tab.render_tab()
         elif selected_tab == "🚀 Advanced Scanner":
             scanner_tab.render_tab()

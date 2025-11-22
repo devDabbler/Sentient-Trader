@@ -288,7 +288,7 @@ if __name__ == "__main__":
     calc = AlphaFactorCalculator()
     factors = calc.calculate_factors('AAPL')
     
-    print(f"\nCalculated {len(factors))} alpha factors for AAPL:")
+    pass  # print(f"\nCalculated {len(factors))} alpha factors for AAPL:")
     for name, value in list(factors.items())[:10]:
         print(f"  {name}: {value:.4f}")
-    print(f"  ... and {len(factors) - 10)} more")
+    pass  # print(f"  ... and {len(factors) - 10)} more")

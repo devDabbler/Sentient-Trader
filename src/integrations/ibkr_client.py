@@ -303,14 +303,14 @@ class IBKRClient:
                 elapsed = (datetime.now() - start_time).total_seconds()
                 
                 if elapsed > 5.0:
-                    logger.warning(f"⚠️ IBKR connection slow: {}s response time {elapsed:.1f}")
+                    pass  # logger.warning(f"⚠️ IBKR connection slow: {}s response time {elapsed:.1f}")
                     return False
                 
                 if not accounts or len(accounts) == 0:
                     logger.warning("🔴 IBKR connection check failed: No accounts")
                     return False
                 
-                logger.debug(f"✅ IBKR connection healthy ({}s) {elapsed:.2f}")
+                pass  # logger.debug(f"✅ IBKR connection healthy ({}s) {elapsed:.2f}")
                 return True
                 
             except Exception as e:
@@ -680,7 +680,7 @@ class IBKRClient:
                 return None
             
             logger.info(f"🎯 Creating IBKR bracket order for {symbol}: {action} {quantity} shares")
-            logger.info(f"   Take Profit: ${}, Stop Loss: ${stop_loss_price:.2f} {take_profit_price:.2f}")
+            pass  # logger.info(f"   Take Profit: ${}, Stop Loss: ${stop_loss_price:.2f} {take_profit_price:.2f}")
             
             # Create stock contract
             contract = Stock(symbol, 'SMART', 'USD')
@@ -696,10 +696,10 @@ class IBKRClient:
                 # For SELL: use bid price to ensure immediate fill
                 if action.upper() == 'BUY':
                     limit_price = ticker.ask if ticker.ask and ticker.ask > 0 else take_profit_price
-                    logger.info(f"   Using current ASK as limit for immediate fill: ${} {limit_price:.2f}")
+                    pass  # logger.info(f"   Using current ASK as limit for immediate fill: ${} {limit_price:.2f}")
                 else:
                     limit_price = ticker.bid if ticker.bid and ticker.bid > 0 else stop_loss_price
-                    logger.info(f"   Using current BID as limit for immediate fill: ${} {limit_price:.2f}")
+                    pass  # logger.info(f"   Using current BID as limit for immediate fill: ${} {limit_price:.2f}")
             
             # Create bracket order using ib_insync's built-in function
             # This properly links parent and child orders with OCA group

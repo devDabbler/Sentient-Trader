@@ -313,10 +313,10 @@ def render_tab():
                             risk_tolerance=ai_risk
                         )
                         
-                        status.update(label=f"✅ AI analysis complete! Found {len(signals))} signals", state="complete")
+                        status.update(label=f"✅ AI analysis complete! Found {len(signals)} signals", state="complete")
                         
                         if signals:
-                            st.success(f"🎯 AI found {len(signals))} high-confidence trading opportunities!")
+                            st.success(f"🎯 AI found {len(signals)} high-confidence trading opportunities!")
                             
                             # Display signals
                             for idx, signal in enumerate(signals, 1):

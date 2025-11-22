@@ -93,8 +93,8 @@ class FreqtradeStrategyAdapter:
         try:
             # Validate DataFrame structure
             logger.debug(f"DataFrame type: {type(df)}, shape: {df.shape}")
-            logger.debug(f"DataFrame columns: {df.columns.tolist(}")
-            logger.debug(f"First row dtypes: {df.dtypes.to_dict(}")
+            pass  # logger.debug(f"DataFrame columns: {df.columns.tolist(}")
+            pass  # logger.debug(f"First row dtypes: {df.dtypes.to_dict(}")
             
             # Ensure we're working with a proper DataFrame, not a list
             if not isinstance(df, pd.DataFrame):
@@ -586,7 +586,7 @@ class FreqtradeStrategyAdapter:
             required_cols = ['open', 'high', 'low', 'close', 'volume']
             missing_cols = [col for col in required_cols if col not in ohlcv.columns]
             if missing_cols:
-                logger.error(f"Missing columns in OHLC data: {missing_cols}. Available: {ohlcv.columns.tolist(}")
+                pass  # logger.error(f"Missing columns in OHLC data: {missing_cols}. Available: {ohlcv.columns.tolist(}")
                 return {'error': f'Invalid OHLC data structure for {symbol}'}
             
             # Convert to numeric types (TA-Lib requires numpy arrays)

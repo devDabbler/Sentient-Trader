@@ -742,7 +742,10 @@ def render_tab():
                 acol1, acol2 = st.columns(2)
                 with acol1:
                     if st.button(f"📊 Full Analysis", key=f"analyze_{opp.ticker}_{i}"):
-                        st.info(f"Switch to '🔍 Stock Intelligence' tab and analyze {opp.ticker}")
+                        st.session_state.active_main_tab = "🔍 Stock Intelligence"
+                        st.session_state.analyze_ticker = opp.ticker
+                        st.session_state.trigger_analysis = True
+                        st.rerun()
                 with acol2:
                     if st.button(f"⭐ Add to My Tickers", key=f"add_{opp.ticker}_{i}"):
                         # Use cached ticker manager from session state

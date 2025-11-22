@@ -44,45 +44,42 @@ class PennyCryptoOpportunity:
 class PennyCryptoScanner:
     """Scans cryptocurrency markets for sub-$1 coins with monster runner potential"""
     
-    # Popular penny cryptos to scan - expanded list for better coverage
+    # Popular penny cryptos to scan - Kraken supported pairs only
     PENNY_WATCHLIST = [
-        # Meme coins (high volatility runners)
+        # Meme coins (high volatility runners) - Kraken supported
         'SHIB/USD', 'DOGE/USD', 'PEPE/USD', 'FLOKI/USD', 'BONK/USD', 'WIF/USD',
-        'MEME/USD', 'KISHU/USD', 'ELON/USD', 'DOGE/USD',
+        'MEME/USD',
         
-        # Layer 2 & Scaling
-        'MATIC/USD', 'ARB/USD', 'OP/USD', 'LINEA/USD', 'SCROLL/USD',
+        # Layer 2 & Scaling - Kraken supported
+        'MATIC/USD', 'ARB/USD', 'OP/USD',
         
-        # Altcoins under $1
+        # Altcoins under $1 - Kraken supported
         'XRP/USD', 'ADA/USD', 'ATOM/USD', 'ALGO/USD', 'VET/USD', 'TRX/USD',
-        'NEAR/USD', 'APT/USD', 'HBAR/USD', 'AVAX/USD',
+        'NEAR/USD', 'HBAR/USD',
         
-        # Gaming & Metaverse
+        # Gaming & Metaverse - Kraken supported
         'GALA/USD', 'SAND/USD', 'MANA/USD', 'ENJ/USD', 'THETA/USD',
-        'AXIE/USD', 'FLOW/USD', 'ILV/USD',
         
-        # DeFi & Infrastructure
-        'LINK/USD', 'UNI/USD', 'AAVE/USD', 'CURVE/USD', 'LIDO/USD',
-        'COMPOUND/USD', 'MAKER/USD', 'SNX/USD',
+        # DeFi & Infrastructure - Kraken supported
+        'LINK/USD', 'UNI/USD', 'AAVE/USD', 'LIDO/USD',
         
-        # Emerging & Low-cap runners
-        'RENDER/USD', 'FET/USD', 'AGIX/USD', 'OCEAN/USD', 'ARKM/USD',
-        'JTO/USD', 'PYTH/USD', 'ONDO/USD', 'STRK/USD', 'BLUR/USD',
+        # Emerging & Low-cap runners - Kraken supported
+        'RENDER/USD', 'FET/USD', 'AGIX/USD', 'PYTH/USD', 'ONDO/USD', 'STRK/USD',
         
-        # Privacy & Security
-        'MONERO/USD', 'ZCASH/USD', 'DASH/USD',
+        # Privacy & Security - Kraken supported (Monero is XMR)
+        'XMR/USD', 'ZEC/USD', 'DASH/USD',
         
-        # Solana ecosystem (high runner potential)
-        'SOL/USD', 'MARINADE/USD', 'MAGIC/USD', 'COPE/USD',
+        # Solana ecosystem - Kraken supported
+        'SOL/USD',
         
-        # Bitcoin layer 2
-        'STX/USD', 'RSK/USD',
+        # Bitcoin layer 2 - Kraken supported
+        'STX/USD',
         
-        # Cosmos ecosystem
-        'OSMO/USD', 'JUNO/USD', 'STARS/USD', 'EVMOS/USD',
+        # Cosmos ecosystem - Kraken supported
+        'OSMO/USD',
         
-        # Additional emerging coins
-        'DYDX/USD', 'GMX/USD', 'PERP/USD', 'GNS/USD', 'GAINS/USD'
+        # Additional emerging coins - Kraken supported
+        'DYDX/USD', 'PERP/USD'
     ]
     
     def __init__(self, kraken_client: KrakenClient, config=None):

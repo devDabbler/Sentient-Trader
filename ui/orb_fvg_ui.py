@@ -136,12 +136,12 @@ def render_orb_fvg_scanner():
                 signals = strategy.scan_multiple_tickers(selected_tickers)
                 
                 status.update(
-                    label=f"✅ Scan complete! Found {len(signals))} signal(s)",
+                    label=f"✅ Scan complete! Found {len(signals)} signal(s)",
                     state="complete"
                 )
                 
                 if signals:
-                    st.success(f"🎯 Found {len(signals))} ORB+FVG trading opportunity(s)!")
+                    st.success(f"🎯 Found {len(signals)} ORB+FVG trading opportunity(s)!")
                     
                     # Initialize alert manager for Discord + journaling
                     try:
@@ -155,7 +155,7 @@ def render_orb_fvg_scanner():
                             except Exception as e:
                                 logger.error(f"Error sending alert for {signal.symbol}: {e}")
                         
-                        st.info(f"📢 Discord alerts sent for all {len(signals))} signal(s)!")
+                        st.info(f"📢 Discord alerts sent for all {len(signals)} signal(s)!")
                         
                     except Exception as e:
                         logger.error(f"Error with alert manager: {e}")

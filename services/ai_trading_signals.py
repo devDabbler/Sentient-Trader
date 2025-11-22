@@ -171,8 +171,8 @@ class AITradingSignalGenerator:
         sentiment_summary = f"""
 **Sentiment Analysis:**
 - Overall Sentiment: {sentiment_data.get('score', 0):.2f} (-1=Bearish, +1=Bullish)
-- Positive Signals: {len([s for s in sentiment_data.get('signals', []) if '✅' in s]))}
-- Negative Signals: {len([s for s in sentiment_data.get('signals', []) if '⚠️' in s]))}
+- Positive Signals: {len([s for s in sentiment_data.get('signals', []) if '✅' in s])}
+- Negative Signals: {len([s for s in sentiment_data.get('signals', []) if '⚠️' in s])}
 """
         
         # Format social sentiment
@@ -194,7 +194,7 @@ class AITradingSignalGenerator:
             if alerts:
                 discord_summary = f"""
 **Discord Trading Alerts (Professional Traders):**
-- Total Alerts (24h): {len(alerts))}
+- Total Alerts (24h): {len(alerts)}
 - Recent Alerts:"""
                 for idx, alert in enumerate(alerts[:5], 1):
                     alert_type = alert.get('alert_type', 'ALERT')
@@ -309,7 +309,7 @@ Analyze all the data above and provide a trading recommendation. Consider:
                 return None
             
             logger.info(f"☁️ Fallback to OpenRouter API with model: {model}")
-            logger.debug(f"API Key present: {bool(api_key)}, Length: {len(api_key))}")
+            logger.debug(f"API Key present: {bool(api_key)}, Length: {len(api_key)}")
             
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",

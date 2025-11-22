@@ -162,7 +162,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
                     
                     elif scan_type == "crypto_opportunity_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_opportunities(top_n=50)
@@ -171,7 +171,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
 
                     elif scan_type == "ai_crypto_scanner" and scanner_instances.get(scan_type):
                         opps = scanner_instances[scan_type].scan_with_ai_confidence(top_n=50)
@@ -180,7 +180,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                         st.session_state.scan_results = valid_results
                         if invalid_symbols:
-                            st.info(f"ℹ️ Filtered out {len(invalid_symbols))} invalid Kraken pairs")
+                            st.info(f"ℹ️ Filtered out {len(invalid_symbols)} invalid Kraken pairs")
 
                     elif scan_type == "sub_penny_discovery" and scanner_instances.get(scan_type):
                         with st.status("🔬 Discovering sub-penny coins... This may take 1-2 minutes to find enough valid Kraken pairs.", expanded=True) as status:
@@ -193,17 +193,17 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                                 sort_by="runner_potential"
                             ))
                             
-                            status.update(label=f"✅ Found {len(runners))} coins, validating against Kraken...")
+                            status.update(label=f"✅ Found {len(runners)} coins, validating against Kraken...")
                             # Validate all results using validator
                             raw_results = [{"Ticker": r.symbol.upper(), "Price": r.price_usd, "Change": r.change_24h, "Score": r.runner_potential_score} for r in runners]
                             valid_results, invalid_symbols = validator.filter_valid_pairs(raw_results, symbol_key='Ticker')
                             
-                            status.update(label=f"✅ Validation complete: {len(valid_results))} valid Kraken pairs found")
+                            status.update(label=f"✅ Validation complete: {len(valid_results)} valid Kraken pairs found")
                         
                         st.session_state.scan_results = valid_results
                         
                         if invalid_symbols:
-                            st.warning(f"⚠️ Filtered out {len(invalid_symbols))} coins not available on Kraken (only {len(valid_results))} valid pairs found)")
+                            st.warning(f"⚠️ Filtered out {len(invalid_symbols)} coins not available on Kraken (only {len(valid_results)} valid pairs found)")
                         
                         if len(valid_results) < 5:
                             st.info("💡 **Tip:** Most sub-penny coins aren't available on Kraken. Try the 'Penny Cryptos (<$1)' scanner for more tradable options.")
@@ -244,7 +244,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             st.warning("⚠️ Your watchlist is empty. Add tickers to your watchlist first!")
                             st.session_state.scan_results = []
                         else:
-                            st.info(f"📋 Loading {len(watchlist_tickers))} tickers from your watchlist...")
+                            st.info(f"📋 Loading {len(watchlist_tickers)} tickers from your watchlist...")
                             
                             # Fetch live data for each ticker
                             for ticker in watchlist_tickers:
@@ -299,12 +299,12 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                                     })
                             
                             st.session_state.scan_results = watchlist_results
-                            st.success(f"✅ Loaded {len(watchlist_results))} tickers from watchlist")
+                            st.success(f"✅ Loaded {len(watchlist_results)} tickers from watchlist")
                             
                             # Auto-select all watchlist tickers for convenience
                             if watchlist_results:
                                 st.session_state.selected_tickers = [r['Ticker'] for r in watchlist_results]
-                                st.info(f"💡 Auto-selected all {len(watchlist_results))} watchlist tickers for analysis")
+                                st.info(f"💡 Auto-selected all {len(watchlist_results)} watchlist tickers for analysis")
                                 st.rerun()  # Force page refresh to show Section 2
                     
                     # Ensure tab states are preserved after scan
@@ -405,10 +405,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             st.session_state.scan_results = st.session_state.get('scan_results', []) + new_results
                             st.session_state.selected_tickers = st.session_state.get('selected_tickers', []) + [r['Ticker'] for r in new_results]
                             
-                            st.success(f"✅ Added {len(new_results))} valid coins! (Total: {len(st.session_state.scan_results))} coins)")
+                            st.success(f"✅ Added {len(new_results)} valid coins! (Total: {len(st.session_state.scan_results)} coins)")
                             
                             if invalid_symbols:
-                                st.warning(f"⚠️ Skipped {len(invalid_symbols))} invalid coins: {', '.join(invalid_symbols[:5])}{'...' if len(invalid_symbols) > 5 else ''}")
+                                st.warning(f"⚠️ Skipped {len(invalid_symbols)} invalid coins: {', '.join(invalid_symbols[:5])}{'...' if len(invalid_symbols) > 5 else ''}")
                         else:
                             st.error("❌ No valid coins found. Check your symbols and try again.")
                             if invalid_symbols:
@@ -418,13 +418,13 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         # Show current manually added coins
         if st.session_state.get('scan_results'):
-            st.caption(f"📋 Currently have {len(st.session_state.scan_results))} coins ready to analyze")
+            st.caption(f"📋 Currently have {len(st.session_state.scan_results)} coins ready to analyze")
 
     # --- 2. Select Tickers for Analysis ---
     if 'scan_results' in st.session_state and st.session_state.scan_results:
         st.markdown("---")
         st.markdown("### 2️⃣ SELECT TICKERS FOR ANALYSIS")
-        st.caption(f"📊 {len(st.session_state.scan_results))} tickers loaded from scan. Choose which ones to analyze below:")
+        st.caption(f"📊 {len(st.session_state.scan_results)} tickers loaded from scan. Choose which ones to analyze below:")
         
         results = st.session_state.scan_results
         df = pd.DataFrame(results)
@@ -478,19 +478,19 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         # Apply sorting
         if sort_by == "Score (High→Low)":
-            filtered_df = filtered_df.sort_values('Score', ascending=False)
+            filtered_df = filtered_df.sort_values(by='Score', ascending=False)
         elif sort_by == "Score (Low→High)":
-            filtered_df = filtered_df.sort_values('Score', ascending=True)
+            filtered_df = filtered_df.sort_values(by='Score', ascending=True)
         elif sort_by == "Price (High→Low)":
-            filtered_df = filtered_df.sort_values('Price', ascending=False)
+            filtered_df = filtered_df.sort_values(by='Price', ascending=False)
         elif sort_by == "Price (Low→High)":
-            filtered_df = filtered_df.sort_values('Price', ascending=True)
+            filtered_df = filtered_df.sort_values(by='Price', ascending=True)
         elif sort_by == "Change % (High→Low)":
-            filtered_df = filtered_df.sort_values('Change', ascending=False)
+            filtered_df = filtered_df.sort_values(by='Change', ascending=False)
         elif sort_by == "Change % (Low→High)":
-            filtered_df = filtered_df.sort_values('Change', ascending=True)
+            filtered_df = filtered_df.sort_values(by='Change', ascending=True)
         elif sort_by == "Ticker (A→Z)":
-            filtered_df = filtered_df.sort_values('Ticker', ascending=True)
+            filtered_df = filtered_df.sort_values(by='Ticker', ascending=True)
         
         # Show filter results
         if len(filtered_df) < len(df):
@@ -501,7 +501,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
 
         st.markdown("---")
         st.markdown("### 📌 QUICK SELECTION")
-        st.caption(f"Your watchlist has **{len(df))} tickers**. Choose which ones to analyze:")
+        st.caption(f"Your watchlist has **{len(df)} tickers**. Choose which ones to analyze:")
         
         # Helper functions for button callbacks
         def select_all_tickers():
@@ -513,7 +513,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         def select_top_n(n: int):
             """Select top N tickers by score"""
             def selector():
-                st.session_state.selected_tickers = df.nlargest(min(n, len(df)), 'Score')['Ticker'].tolist()
+                if 'Score' in df.columns:
+                    st.session_state.selected_tickers = df.nlargest(min(n, len(df)), 'Score')['Ticker'].tolist()
+                else:
+                    st.session_state.selected_tickers = []
             return selector
         
         # Big prominent buttons for selection
@@ -521,7 +524,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         with btn_col1:
             st.button("✅ SELECT ALL", use_container_width=True, type="primary", on_click=select_all_tickers, 
-                     help=f"Select all {len(df))} tickers for analysis")
+                     help=f"Select all {len(df)} tickers for analysis")
         with btn_col2:
             st.button("🔝 TOP 10", use_container_width=True, on_click=select_top_n(10), 
                      help="Select top 10 tickers by score")
@@ -537,9 +540,9 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         if selected_count == len(df):
             st.success(f"✅ **ALL {selected_count} tickers selected** - Ready to analyze!")
         elif selected_count > 0:
-            st.info(f"📊 **{selected_count} of {len(df))} tickers selected** - Click 'SELECT ALL' to analyze all tickers")
+            st.info(f"📊 **{selected_count} of {len(df)} tickers selected** - Click 'SELECT ALL' to analyze all tickers")
         else:
-            st.warning(f"⚠️ **No tickers selected** - Click 'SELECT ALL' to select all {len(df))} tickers")
+            st.warning(f"⚠️ **No tickers selected** - Click 'SELECT ALL' to select all {len(df)} tickers")
 
         # Multi-select dropdown for easy ticker selection
         st.markdown("**Quick Selection (Searchable):**")
@@ -572,7 +575,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     st.rerun()
             
             with page_col2:
-                st.markdown(f"**Page {st.session_state.current_page + 1} of {total_pages}** ({len(df))} total tickers)")
+                st.markdown(f"**Page {st.session_state.current_page + 1} of {total_pages}** ({len(df)} total tickers)")
             
             with page_col3:
                 if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages - 1):
@@ -584,7 +587,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             end_idx = min(start_idx + items_per_page, len(df))
             
             # Display current page
-            st.markdown(f"**Showing {start_idx + 1}-{end_idx} of {len(df))} tickers:**")
+            st.markdown(f"**Showing {start_idx + 1}-{end_idx} of {len(df)} tickers:**")
             
             # Helper function for checkbox callbacks
             def make_ticker_toggle(ticker: str):
@@ -615,10 +618,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     label_visibility="hidden"
                 )
 
-                cols[1].markdown(f"**{row['Ticker']}**")
-                cols[2].metric("Price", f"${row['Price']:,.4f}")
-                cols[3].metric("24h Change", f"{row['Change']:.2f}%" if row['Change'] else "N/A")
-                cols[4].metric("Score", f"{int(row['Score']))}" if row['Score'] else "N/A")
+                cols[1].markdown(f"**{row.get('Ticker', 'N/A')}**")
+                cols[2].metric("Price", f"${row.get('Price', 0):,.4f}")
+                cols[3].metric("24h Change", f"{row.get('Change', 0):.2f}%" if row.get('Change') else "N/A")
+                cols[4].metric("Score", f"{int(row.get('Score', 0))}" if row.get('Score') else "N/A")
 
     # --- 3. Analyze Selected Tickers ---
     st.markdown("---")
@@ -770,8 +773,8 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             invalid_tickers.append(ticker)
                     
                     if invalid_tickers:
-                        st.warning(f"⚠️ Found {len(invalid_tickers))} invalid Kraken pairs: {', '.join(invalid_tickers[:5])}{'...' if len(invalid_tickers) > 5 else ''}")
-                        st.info(f"✅ Analyzing {len(valid_tickers))} valid pairs only")
+                        st.warning(f"⚠️ Found {len(invalid_tickers)} invalid Kraken pairs: {', '.join(invalid_tickers[:5])}{'...' if len(invalid_tickers) > 5 else ''}")
+                        st.info(f"✅ Analyzing {len(valid_tickers)} valid pairs only")
                     
                     if valid_tickers:
                         logger.info(f"Starting bulk analysis: {len(valid_tickers)} tickers, strategy={strategy_id}, interval={interval_minutes}")
@@ -782,10 +785,10 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         
                         analysis_results = []
                         for i, ticker in enumerate(valid_tickers):
-                            progress_text.text(f"Analyzing {ticker}... ({i+1}/{len(valid_tickers))})")
+                            progress_text.text(f"Analyzing {ticker}... ({i+1}/{len(valid_tickers)})")
                             progress_bar.progress((i + 1) / len(valid_tickers))
                             
-                            result = adapter.analyze_crypto(ticker, strategy_id, interval_minutes)
+                            result = adapter.analyze_crypto(ticker, strategy_id or "default", interval_minutes)
                             if 'error' not in result:
                                 analysis_results.append(result)
                             else:
@@ -798,7 +801,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         logger.info(f"Bulk analysis complete: {len(analysis_results)} results returned")
                         
                         if analysis_results:
-                            st.success(f"✅ Successfully analyzed {len(analysis_results))} coins!")
+                            st.success(f"✅ Successfully analyzed {len(analysis_results)} coins!")
                         else:
                             st.error("❌ Analysis completed but no results returned. Check logs for details.")
                     else:
@@ -827,8 +830,8 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     filtered_tickers = [t for t in selected_tickers if any(major in t for major in major_coins)]
                     
                     if filtered_tickers:
-                        st.success(f"✅ Found {len(filtered_tickers))} major coins in your selection: {', '.join(filtered_tickers)}")
-                        st.info(f"💰 With $100 each, you can buy: {len(filtered_tickers))} positions in expensive coins!")
+                        st.success(f"✅ Found {len(filtered_tickers)} major coins in your selection: {', '.join(filtered_tickers)}")
+                        st.info(f"💰 With $100 each, you can buy: {len(filtered_tickers)} positions in expensive coins!")
                         # Don't change selection, just show info
                     else:
                         st.warning("⚠️ No major coins in your selection. Select BTC, ETH, or SOL from your watchlist first!")
@@ -1001,7 +1004,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                             "fisher_rsi_multi": "🎯 Fisher RSI Multi-Indicator",
                             "macd_volume": "📉 MACD + Volume + RSI",
                             "aggressive_scalp": "🔥 Aggressive Scalping"
-                        }.get(x, x),
+                        }.get(x, str(x)),
                         help="Select which trading strategies to test. Default = ALL for complete analysis"
                     )
                     
@@ -1166,9 +1169,9 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             if show_filter == "🔥 Scalping Opportunities":
                 buy_count = sum(1 for r in sorted_results if r['recommendation'] == 'BUY')
                 near_entry_count = sum(1 for r in sorted_results if r.get('signals', {}).get('near_entry', False))
-                st.success(f"🔥 Found {len(sorted_results))} scalping opportunities: {buy_count} BUY signals + {near_entry_count} Near Entry setups")
+                st.success(f"🔥 Found {len(sorted_results)} scalping opportunities: {buy_count} BUY signals + {near_entry_count} Near Entry setups")
             else:
-                st.info(f"Showing {len(sorted_results))} results")
+                st.info(f"Showing {len(sorted_results)} results")
 
         for i, analysis in enumerate(sorted_results):
             # Build title with more context
@@ -1427,9 +1430,10 @@ def render_quick_trade_tab(
     subtab = st.radio(
         "Navigation",
         options=tab_options,
+        index=current_index,
         horizontal=True,
-        index=current_index,  # Set current tab based on session state
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="quick_trade_subtab_selector"
     )
     
     # Update session state when user clicks a tab
@@ -1449,6 +1453,13 @@ def display_trade_setup(kraken_client: KrakenClient, crypto_config, watchlist_ma
     Supports single trade, bulk custom selection, and bulk watchlist trading
     """
     st.markdown("### ⚡ Execute Trade")
+    
+    # Show success message if we just switched here from a button click
+    if 'show_setup_success' in st.session_state:
+        setup_info = st.session_state.show_setup_success
+        st.success(f"✅ Trade setup loaded for {setup_info['pair']} ({setup_info['trade_type']})!")
+        st.balloons()
+        del st.session_state.show_setup_success
     
     # Trade mode selector
     trade_mode = st.radio(
@@ -1677,7 +1688,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     st.info("You can still manually enter a trading pair below to place a SELL order")
                 else:
                     # Display positions in a table
-                    st.markdown(f"**Found {len(positions))} open position(s):**")
+                    st.markdown(f"**Found {len(positions)} open position(s):**")
                     
                     position_data = []
                     for pos in positions:
@@ -1948,7 +1959,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         with price_col2:
             # Show current market price for reference
             try:
-                ticker = kraken_client.get_ticker_data(selected_pair)
+                ticker = kraken_client.get_ticker_data(selected_pair or "")
                 if ticker:
                     current_price = ticker.get('last_price', 0)
                     st.metric("Current Market Price", f"${current_price:,.6f}")
@@ -2062,8 +2073,8 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         default_position_size = st.session_state.get('crypto_quick_position_size', 100.0)
         
         logger.info(f"📖 Loading from session state: stop={default_risk}%, target={default_tp}%, leverage={default_leverage}x, position=${default_position_size}")
-        logger.info(f"📖 Scanner opportunity symbol: {opp.get('symbol', 'N/A'}"))
-        logger.info(f"📖 Session state keys present: crypto_quick_trade_pair={st.session_state.get('crypto_quick_trade_pair', 'NOT SET'}"))
+        pass  # logger.info(f"📖 Scanner opportunity symbol: {opp.get('symbol', 'N/A'}"))
+        pass  # logger.info(f"📖 Session state keys present: crypto_quick_trade_pair={st.session_state.get('crypto_quick_trade_pair', 'NOT SET'}"))
         
         st.info(f"📊 **Scanner Strategy:** {default_risk:.1f}% stop loss, {default_tp:.1f}% take profit, {default_leverage:.0f}x leverage, ${default_position_size:.2f} position (from {opp['strategy'].upper()} strategy)")
     else:
@@ -2199,12 +2210,12 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                         scanner_context = None
                     
                     entry_analysis = entry_assistant.analyze_entry(
-                        pair=selected_pair,
+                        pair=selected_pair or "",
                         side=direction,
                         position_size=position_size,
                         risk_pct=risk_pct,
                         take_profit_pct=take_profit_pct,
-                        additional_context=scanner_context
+                        additional_context=scanner_context or ""
                     )
                     
                     # Store in session state
@@ -2244,7 +2255,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         if st.button("📝 Manual Setup", key="crypto_manual_setup_btn", use_container_width=True):
             # Create manual analysis without AI
             try:
-                ticker = kraken_client.get_ticker_data(selected_pair)
+                ticker = kraken_client.get_ticker_data(selected_pair) if selected_pair else None
                 current_price = ticker.get('last_price', 0) if ticker else 0
                 
                 if current_price == 0:
@@ -2281,7 +2292,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         if st.button("📊 Get Market Data", key="crypto_market_data_btn", use_container_width=True):
             with st.spinner("Fetching market data..."):
                 try:
-                    ticker_info = kraken_client.get_ticker_info(selected_pair)
+                    ticker_info = kraken_client.get_ticker_info(selected_pair) if selected_pair else None
                     st.json(ticker_info)
                 except Exception as e:
                     st.error(f"Failed to fetch market data: {e}")
@@ -2386,7 +2397,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         entry_analysis = st.session_state.get('crypto_entry_analysis')
         
         # Determine button layout based on AI recommendation
-        if has_entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+        if has_entry_analysis and entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
             exec_col1, exec_col2, exec_col3 = st.columns([1, 1, 1])
         else:
             exec_col1, exec_col2, exec_col3 = st.columns([2, 1, 1])
@@ -2405,7 +2416,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                         current_time - st.session_state[execution_timestamp_key] < 30)
             
             # Determine button label and type based on AI confidence
-            if has_entry_analysis:
+            if has_entry_analysis and entry_analysis:
                 if entry_analysis.confidence >= 85:
                     button_label = "🚀 Execute Now (AI Approved)"
                     button_type = "primary"
@@ -2429,7 +2440,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     execute_crypto_trade(kraken_client, analysis)
         
         # Add "Monitor & Alert" button if AI says to wait
-        if has_entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+        if has_entry_analysis and entry_analysis and entry_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
             with exec_col2:
                 if st.button("🔔 Monitor & Alert", width='stretch', type="primary"):
                     try:
@@ -2535,7 +2546,7 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                     else:
                         st.success(f"✅ {order_type_str} order placed! Order ID: {order_id}")
                         st.info("ℹ️ Check your Kraken account for order status.")
-                    logger.info("✅ Order {} placed successfully for {analysis['pair']} - {analysis['direction']} {quantity:.6f} @ ${analysis['current_price']:.4f}", str(order_id))
+                    logger.info("✅ Order {} placed successfully for {} - {} {:.6f} @ ${:.4f}", str(order_id), analysis['pair'], analysis['direction'], quantity, analysis['current_price'])
                     
                     st.json({
                         'order_id': order_id,
@@ -2585,15 +2596,15 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                             side=analysis['direction'],
                             volume=quantity,
                             entry_price=analysis['current_price'],
-                            stop_loss=analysis.get('stop_loss'),
-                            take_profit=analysis.get('take_profit'),
+                            stop_loss=analysis.get('stop_loss') or 0.0,
+                            take_profit=analysis.get('take_profit') or 0.0,
                             strategy=analysis.get('strategy', 'Manual'),
                             entry_order_id=order_id
                         )
                         
                         if success:
                             st.success("🤖 AI monitoring activated - Position will be intelligently managed!")
-                            logger.info(f"🤖 Added {analysis['pair']} to AI position manager (ID: {trade_id})")
+                            logger.info("🤖 Added {} to AI position manager (ID: {})", analysis['pair'], trade_id)
                         
                     except Exception as ai_err:
                         logger.warning(f"Could not add to AI position manager: {ai_err}")
@@ -2658,7 +2669,7 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                     send_discord_alert(alert)
                 except Exception as e:
                     error_msg = str(e) if e else "Unknown error"
-                    logger.error("❌ Failed to send Discord alert for {analysis['pair']}: {}", str(error_msg), exc_info=True)
+                    logger.error("❌ Failed to send Discord alert for {}: {}", analysis['pair'], str(error_msg), exc_info=True)
                     
             else:
                 st.error(f"❌ Trade failed: Order placement returned None - check logs for details")
@@ -2808,7 +2819,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
                     st.session_state[analysis_key] = backup_data.get('results', [])
                     st.session_state.crypto_bulk_custom_analysis_timestamp = backup_data.get('timestamp', '')
                     st.session_state.crypto_bulk_custom_analysis_complete = True
-                    st.info(f"📂 Restored analysis from backup ({len(backup_data.get('results', [])))} pairs)")
+                    st.info(f"📂 Restored analysis from backup ({len(backup_data.get('results', []))} pairs)")
                     logger.info("Restored analysis from backup file")
             except Exception as e:
                 logger.warning(f"Could not restore analysis from backup: {e}")
@@ -2917,7 +2928,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         
         # Preview trades
         st.divider()
-        st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs))} pairs)")
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_pairs)} pairs)")
         
         # Display selected pairs for confirmation
         st.info(f"**Selected pairs:** {', '.join(selected_pairs)}")
@@ -2929,7 +2940,7 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_custom_{hash(tuple(sorted(selected_pairs)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_pairs))} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_pairs):.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_pairs)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_pairs):.2f})",
             key=confirm_key
         )
         
@@ -2972,7 +2983,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             st.warning("No valid symbols found in watchlist")
             return
         
-        st.info(f"📊 Found {len(watchlist_symbols))} symbols in your watchlist")
+        st.info(f"📊 Found {len(watchlist_symbols)} symbols in your watchlist")
         
         # Allow selection of which watchlist items to trade
         selected_symbols = st.multiselect(
@@ -3099,7 +3110,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             
             # Show short selling warning if applicable
             if direction == "SELL" and trading_mode == "Margin Trading" and default_leverage > 1:
-                st.warning(f"⚠️ **SHORT SELLING** {len(selected_symbols))} pairs with {default_leverage}x leverage")
+                st.warning(f"⚠️ **SHORT SELLING** {len(selected_symbols)} pairs with {default_leverage}x leverage")
         
         with param_col2:
             position_size = st.number_input(
@@ -3112,7 +3123,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             )
             
             total_investment = position_size * len(selected_symbols)
-            st.caption(f"💰 Total investment: ${total_investment:,.2f} across {len(selected_symbols))} symbols")
+            st.caption(f"💰 Total investment: ${total_investment:,.2f} across {len(selected_symbols)} symbols")
         
         # Risk and leverage parameters
         param_col3, param_col4, param_col5 = st.columns(3)
@@ -3207,7 +3218,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
                         'ai_recommendation': 'Skipped AI analysis'
                     })
                 st.session_state.crypto_bulk_watchlist_analysis = analysis_results
-                st.success(f"✅ Created manual setup for {len(analysis_results))} symbols")
+                st.success(f"✅ Created manual setup for {len(analysis_results)} symbols")
                 st.rerun()
         
         # Display analysis results if available
@@ -3289,7 +3300,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # EXECUTION SECTION
         # ========================================================================
         st.markdown("---")
-        st.markdown(f"### 🚀 Execute Trades ({len(selected_symbols))} symbols)")
+        st.markdown(f"### 🚀 Execute Trades ({len(selected_symbols)} symbols)")
         
         # Display configuration summary
         config_summary_col1, config_summary_col2, config_summary_col3, config_summary_col4 = st.columns(4)
@@ -3301,7 +3312,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_wl_{hash(tuple(sorted(selected_symbols)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_symbols))} {direction} trades with ${position_size:.2f} each (Total: ${total_investment:.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_symbols)} {direction} trades with ${position_size:.2f} each (Total: ${total_investment:.2f})",
             key=confirm_key
         )
         
@@ -3325,7 +3336,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
                     take_profit_pct,
                     order_type=order_type,
                     trading_mode=trading_mode,
-                    leverage=leverage if trading_mode == "Margin Trading" else None
+                    leverage=int(leverage) if trading_mode == "Margin Trading" else None
                 )
             
             if analysis_results:
@@ -3354,7 +3365,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         
         # Preview trades
         st.divider()
-        st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols))} symbols)")
+        st.markdown(f"#### 📋 Trade Preview ({len(selected_symbols)} symbols)")
         
         # Display selected symbols for confirmation
         st.info(f"**Selected symbols:** {', '.join(selected_symbols)}")
@@ -3366,7 +3377,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         # Confirmation checkbox
         confirm_key = f"confirm_bulk_watchlist_{hash(tuple(sorted(selected_symbols)))}"
         confirm = st.checkbox(
-            f"⚠️ I confirm I want to execute {len(selected_symbols))} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_symbols):.2f})",
+            f"⚠️ I confirm I want to execute {len(selected_symbols)} trades ({direction}) with ${position_size:.2f} each (Total: ${position_size * len(selected_symbols):.2f})",
             key=confirm_key
         )
         
@@ -3440,7 +3451,7 @@ def analyze_bulk_pairs(
         for idx, pair in enumerate(pairs):
             progress = (idx + 1) / len(pairs)
             progress_bar.progress(progress)
-            status_text.text(f"Analyzing {pair} ({idx + 1}/{len(pairs))})...")
+            status_text.text(f"Analyzing {pair} ({idx + 1}/{len(pairs)})...")
             
             try:
                 # Get current price
@@ -3547,15 +3558,15 @@ def analyze_bulk_pairs(
                         ai_risks = recommendations.get('risks', [])
                         
                         # Log detailed results
-                        logger.info(f"  → {ai_recommendation} - Risks: {len(ai_risks))}")
+                        logger.info(f"  → {ai_recommendation} - Risks: {len(ai_risks)}")
                         if ai_risks:
-                            logger.info(f"     Risks: {', '.join(ai_risks[:3]}"))
+                            pass  # logger.info(f"     Risks: {', '.join(ai_risks[:3]}"))
                         
                     except Exception as e:
                         logger.warning(f"AI review failed for {pair}: {e}")
                         ai_approved = False  # Default to rejection on error
                         ai_confidence = 0
-                        ai_recommendation = f"❌ ERROR: {str(e)[:50])}"
+                        ai_recommendation = f"❌ ERROR: {str(e)[:50]}"
                         ai_risks = [str(e)]
                 
                 results.append({
@@ -3646,9 +3657,9 @@ def analyze_bulk_pairs(
             approved_count = sum(1 for r in successful if r.get('ai_approved') == True)
             rejected_count = sum(1 for r in successful if r.get('ai_approved') == False)
             
-            st.success(f"✅ Successfully analyzed {len(successful))} out of {len(pairs))} pairs")
+            st.success(f"✅ Successfully analyzed {len(successful)} out of {len(pairs)} pairs")
             if ai_reviewer:
-                st.info(f"🤖 AI Recommendations: {approved_count} approved, {rejected_count} rejected, {len(successful) - approved_count - rejected_count)} no recommendation")
+                st.info(f"🤖 AI Recommendations: {approved_count} approved, {rejected_count} rejected, {len(successful) - approved_count - rejected_count} no recommendation")
         else:
             st.warning(f"⚠️ Could not analyze any pairs. Please check your selections.")
         
@@ -3701,7 +3712,7 @@ def execute_bulk_trades(
         execution_timestamp_key in st.session_state and
         current_time - st.session_state[execution_timestamp_key] < 30):
         st.warning("⚠️ **Duplicate execution prevented!** You just executed these trades. Please wait a moment before executing again.")
-        st.info(f"Last execution was {int(current_time - st.session_state[execution_timestamp_key]))} seconds ago.")
+        st.info(f"Last execution was {int(current_time - st.session_state[execution_timestamp_key])} seconds ago.")
         return
     
     # Mark execution in progress
@@ -3718,7 +3729,7 @@ def execute_bulk_trades(
         for idx, pair in enumerate(pairs):
             progress = (idx + 1) / len(pairs)
             progress_bar.progress(progress)
-            status_text.text(f"Processing {pair} ({idx + 1}/{len(pairs))})...")
+            status_text.text(f"Processing {pair} ({idx + 1}/{len(pairs)})...")
             
             try:
                 # Get current price
@@ -3806,7 +3817,7 @@ def execute_bulk_trades(
                         rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
                         
                         trade_entry = UnifiedTradeEntry(
-                            trade_id=f"{pair}_{order_id}_{int(datetime.now().timestamp()))}",
+                            trade_id=f"{pair}_{order_id}_{int(datetime.now().timestamp())}",
                             trade_type=TradeType.CRYPTO.value,
                             symbol=pair,
                             side=direction,
@@ -3948,7 +3959,7 @@ def execute_bulk_trades(
         # Summary
         if successful:
             total_invested = sum(r['position_size'] for r in successful)
-            st.success(f"✅ Successfully executed {len(successful))} trades with total position size of ${total_invested:,.2f}")
+            st.success(f"✅ Successfully executed {len(successful)} trades with total position size of ${total_invested:,.2f}")
             st.info("ℹ️ **Note:** Market orders fill immediately. Check your Kraken account's 'Trade History' or 'Closed Orders' section to see filled orders.")
             
             # Add verification section
@@ -4015,12 +4026,12 @@ def verify_recent_orders(kraken_client: KrakenClient, order_ids: List[str]):
             
             # Display results
             if found_orders:
-                st.success(f"✅ Found {len(found_orders))} order(s) in closed orders:")
+                st.success(f"✅ Found {len(found_orders)} order(s) in closed orders:")
                 found_df = pd.DataFrame(found_orders)
                 st.dataframe(found_df, width='stretch', hide_index=True)
             
             if missing_orders:
-                st.warning(f"⚠️ {len(missing_orders))} order(s) not found in closed orders:")
+                st.warning(f"⚠️ {len(missing_orders)} order(s) not found in closed orders:")
                 for order_id in missing_orders:
                     st.text(f"  - {order_id}")
                 st.info("💡 These orders may have failed, been rejected, or are still processing. Check your Kraken account directly.")
@@ -4073,7 +4084,7 @@ def verify_positions(kraken_client: KrakenClient, pairs: List[str]):
             
             # Display results
             if found_positions:
-                st.success(f"✅ Found positions in {len(found_positions))} asset(s):")
+                st.success(f"✅ Found positions in {len(found_positions)} asset(s):")
                 positions_df = pd.DataFrame(found_positions)
                 st.dataframe(positions_df, width='stretch', hide_index=True)
             else:
@@ -4099,7 +4110,7 @@ def analyze_multi_config_bulk(
     kraken_client: KrakenClient,
     pairs: List[str],
     position_size: float,
-    test_configs: Dict = None
+    test_configs: Optional[Dict] = None
 ):
     """
     Analyze multiple trading configurations in bulk
@@ -4155,8 +4166,8 @@ def analyze_multi_config_bulk(
     # Calculate total combinations
     total_combinations = len(pairs) * len(directions) * len(leverage_levels)
     
-    st.info(f"🔬 Testing **{total_combinations} configurations** across {len(pairs))} pairs...")
-    st.markdown(f"**Test Matrix:** {len(directions))} directions × {len(leverage_levels))} leverage levels = {len(directions) * len(leverage_levels))} configs per pair")
+    st.info(f"🔬 Testing **{total_combinations} configurations** across {len(pairs)} pairs...")
+    st.markdown(f"**Test Matrix:** {len(directions)} directions × {len(leverage_levels)} leverage levels = {len(directions) * len(leverage_levels)} configs per pair")
     
     # Get appropriate LLM analyzer based on number of tickers (cloud for bulk, hybrid for single)
     llm_analyzer = get_llm_for_bulk_analysis(len(pairs))
@@ -4323,6 +4334,8 @@ def analyze_multi_config_bulk(
                             'current_price': current_price,
                             'stop_loss': stop_loss,
                             'take_profit': take_profit,
+                            'stop_pct': risk_pct,  # FIXED: Add percentage values
+                            'target_pct': take_profit_pct,  # FIXED: Add percentage values
                             'position_size': position_size,
                             'effective_position': effective_position,
                             'quantity': quantity,
@@ -4369,15 +4382,16 @@ def analyze_multi_config_bulk(
         st.markdown("### 📊 Multi-Configuration Analysis Results")
         
         logger.info(f"📊 DISPLAYING RESULTS: {len(results_df)} total configs")
-        logger.info(f"📊 Results columns: {list(results_df.columns}")
+        logger.info(f"📊 Results columns: {list(results_df.columns)}")
         
         col1, col2, col3, col4 = st.columns(4)
         
         approved_count = len(results_df[results_df['ai_approved'] == True])
-        avg_confidence = results_df['ai_confidence'].mean()
-        best_config = results_df.loc[results_df['ai_score'].idxmax()] if len(results_df) > 0 else None
+        avg_confidence = results_df['ai_confidence'].mean() if 'ai_confidence' in results_df.columns and len(results_df) > 0 else 0
+        best_config = results_df.loc[results_df['ai_score'].idxmax()] if len(results_df) > 0 and 'ai_score' in results_df.columns else None
+        best_score = best_config['ai_score'] if best_config is not None else 0
         
-        logger.info("📊 Approved: {}, Avg conf: {avg_confidence:.1f}%, Best score: {best_config['ai_score'] if best_config is not None else 'N/A'}", str(approved_count))
+        logger.info("📊 Approved: {}, Avg conf: {:.1f}%, Best score: {:.1f}", approved_count, avg_confidence, best_score)
         
         col1.metric("Total Configs Tested", len(results_df))
         col2.metric("AI Approved", f"{approved_count} ({approved_count/len(results_df)*100:.1f}%)")
@@ -4396,52 +4410,113 @@ def analyze_multi_config_bulk(
         
         logger.info(f"📊 Rendering {len(best_per_pair)} best-per-pair expanders")
         
-        for idx, row in best_per_pair.iterrows():
-            logger.info("📊 Rendering expander for {} - {row['trade_type']}", str(row['pair']))
-            with st.expander(f"🎯 {row['pair']} - {row['trade_type']} (Score: {row['ai_score']:.1f})"):
+        # Check if any button was clicked BEFORE rendering (Streamlit button state fix)
+        selected_config_idx = None
+        for idx in best_per_pair.index:
+            if st.session_state.get(f'use_config_{idx}_clicked', False):
+                selected_config_idx = idx
+                st.session_state[f'use_config_{idx}_clicked'] = False  # Reset flag
+                break
+        
+        # If a config was selected, load it and navigate
+        if selected_config_idx is not None:
+            row = best_per_pair.loc[selected_config_idx].to_dict()
+            pair = row.get('pair', 'UNKNOWN')
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            
+            logger.info("🔘 BEST CONFIG - Use This Setup clicked for {} - {}", str(pair), str(trade_type))
+            
+            # Store complete setup with REAL market data
+            st.session_state.crypto_scanner_opportunity = {
+                'symbol': row.get('pair', 'UNKNOWN'),
+                'strategy': row.get('strategy', 'Unknown'),
+                'confidence': row.get('ai_approved', False),
+                'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                'score': row.get('ai_score', 0),
+                'current_price': row.get('current_price', 0),
+                'change_24h': row.get('change_24h', 0),
+                'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                'volatility': row.get('volatility', 0),
+                'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                'ai_reasoning': row.get('ai_recommendation', ''),
+                'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                'ai_rating': row.get('ai_confidence', 0) / 10,
+                'ai_risks': row.get('ai_risks', [])
+            }
+            
+            st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+            st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+            st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+            st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+            st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+            st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)  # FIXED: Use actual percentage from row
+            st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)  # FIXED: Use actual percentage from row
+            
+            logger.info("📝 BEST CONFIG - Session state set: pair={}, direction={}, leverage={}, position=${}", str(pair), str(row.get('direction', 'BUY')), str(row.get('leverage', 1)), str(row.get('position_size', 100)))
+            
+            # Switch to Quick Trade main tab AND Execute Trade subtab
+            st.session_state.active_crypto_tab = "⚡ Quick Trade"
+            st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+            
+            st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
+            st.balloons()
+            st.rerun()
+        
+        # Render the expanders with buttons
+        for idx, row_series in best_per_pair.iterrows():
+            row = row_series.to_dict()  # Convert Series to dict so .get() works
+            pair = row.get('pair', 'UNKNOWN')
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            ai_score = row.get('ai_score', 0)
+            logger.info("📊 Rendering expander for {} - {}", str(pair), str(trade_type))
+            with st.expander(f"🎯 {pair} - {trade_type} (Score: {ai_score:.1f})"):
                 info_col1, info_col2, info_col3 = st.columns(3)
                 
                 info_col1.markdown(f"""
                 **Trade Details:**
-                - Direction: **{row['direction']}**
-                - Mode: **{row['trading_mode']}**
-                - Leverage: **{row['leverage']:.1f}x**
-                - Strategy: {row['strategy']}
+                - Direction: **{row.get('direction', 'BUY')}**
+                - Mode: **{row.get('trading_mode', 'Spot Trading')}**
+                - Leverage: **{row.get('leverage', 0):.1f}x**
+                - Strategy: {row.get('strategy', 'Unknown')}
                 """)
                 
                 info_col2.markdown(f"""
                 **Pricing:**
-                - Current: ${row['current_price']:,.6f}
-                - Stop Loss: ${row['stop_loss']:,.6f}
-                - Take Profit: ${row['take_profit']:,.6f}
-                - R:R Ratio: {row['risk_reward_ratio']:.2f}
+                - Current: ${row.get('current_price', 0):,.6f}
+                - Stop Loss: ${row.get('stop_loss', 0):,.6f}
+                - Take Profit: ${row.get('take_profit', 0):,.6f}
+                - R:R Ratio: {row.get('risk_reward_ratio', 0):.2f}
                 """)
                 
                 info_col3.markdown(f"""
-                **Position:**
-                - Size: ${row['position_size']:,.2f}
-                - Effective: ${row['effective_position']:,.2f}
-                - Quantity: {row['quantity']:.8f}
+                **Position & Risk:**
+                - Base Size: ${row.get('position_size', 0):,.2f}
+                - Effective Size: ${row.get('effective_position', 0):,.2f}
+                - Quantity: {row.get('quantity', 0):.8f}
+                - Stop %: {row.get('stop_pct', 0):.2f}%
+                - Target %: {row.get('target_pct', 0):.2f}%
                 """)
                 
                 # AI Analysis
                 st.markdown("**🤖 AI Analysis:**")
-                st.markdown(f"- **Recommendation:** {row['ai_recommendation']}")
-                st.markdown(f"- **Confidence:** {row['ai_confidence']:.0f}%")
-                st.markdown(f"- **Composite Score:** {row['ai_score']:.1f}")
+                st.markdown(f"- **Recommendation:** {row.get('ai_recommendation', 'N/A')}")
+                st.markdown(f"- **Confidence:** {row.get('ai_confidence', 0):.0f}%")
+                st.markdown(f"- **Composite Score:** {row.get('ai_score', 0):.1f}")
                 
-                if row['ai_risks']:
+                ai_risks = row.get('ai_risks', [])
+                if ai_risks:
                     st.markdown("**⚠️ Key Risks:**")
-                    for risk in row['ai_risks']:
+                    for risk in ai_risks:
                         st.markdown(f"- {risk}")
                 
                 # AI Trade Style Recommendation
                 st.markdown("#### 🤖 AI Trade Style Recommendation")
                 
                 # Determine best trade style based on config
-                leverage = row['leverage']
-                direction = row['direction']
-                confidence = row['ai_confidence']
+                leverage = row.get('leverage', 0)
+                direction = row.get('direction', 'BUY')
+                confidence = row.get('ai_confidence', 0)
                 
                 if leverage == 1:
                     if confidence >= 75:
@@ -4466,47 +4541,12 @@ def analyze_multi_config_bulk(
                 
                 st.info(f"{style}\n\n{reason}")
                 
-                logger.info("📊 About to render 'Use This Setup' button for {} (key=use_config_{idx})", str(row['pair']))
+                logger.info("📊 About to render 'Use This Setup' button for {} (key=use_config_{})", str(pair), idx)
                 
-                # Action button
-                if st.button(f"✅ Use This Setup for {row['pair']}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
-                    logger.info("🔘 BEST CONFIG - Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
-                    
-                    # Store complete setup with REAL market data
-                    st.session_state.crypto_scanner_opportunity = {
-                        'symbol': row['pair'],
-                        'strategy': 'multi_config',
-                        'confidence': row['ai_approval'],
-                        'risk_level': 'Medium' if leverage <= 2 else 'High',
-                        'score': row['ai_score'],
-                        'current_price': row['current_price'],
-                        'change_24h': row.get('change_24h', 0),  # Use real value from analysis
-                        'volume_ratio': row.get('volume_24h', 0) / 1000000 if row.get('volume_24h', 0) > 0 else 1.0,  # Normalize volume
-                        'volatility': row.get('volatility', 0),  # Use real volatility
-                        'reason': f"{row['trade_type']} recommended",
-                        'ai_reasoning': row['ai_recommendation'],
-                        'ai_confidence': 'High' if row['ai_confidence'] >= 75 else 'Medium' if row['ai_confidence'] >= 50 else 'Low',
-                        'ai_rating': row['ai_confidence'] / 10,
-                        'ai_risks': row['ai_risks'] if row['ai_risks'] else []
-                    }
-                    
-                    st.session_state.crypto_quick_pair = row['pair']
-                    st.session_state.crypto_quick_trade_pair = row['pair']  # Fixed: Also set the key that Execute Trade reads
-                    st.session_state.crypto_quick_direction = row['direction']
-                    st.session_state.crypto_trading_mode = row['trading_mode']
-                    st.session_state.crypto_quick_leverage = row['leverage']
-                    st.session_state.crypto_quick_position_size = row['position_size']
-                    # Use session state values from multi-config analysis (stored when analysis ran)
-                    st.session_state.crypto_quick_stop_pct = st.session_state.get('multi_config_risk_pct', 2.0)
-                    st.session_state.crypto_quick_target_pct = st.session_state.get('multi_config_tp_pct', 5.0)
-                    
-                    logger.info("📝 BEST CONFIG - Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
-                    
-                    # Switch to Execute Trade tab
-                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Trade setup loaded for {row['pair']} ({row['trade_type']})! Switching to Execute Trade tab...")
-                    st.balloons()
+                # Action button - just sets a flag, actual handling is at top of function
+                if st.button(f"✅ Use This Setup for {pair}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
+                    # Set flag to be picked up on next rerun
+                    st.session_state[f'use_config_{idx}_clicked'] = True
                     st.rerun()
         
         # Show comparison table
@@ -4551,10 +4591,11 @@ def analyze_multi_config_bulk(
         elif filter_approved == 'Rejected Only':
             filtered_df = filtered_df[filtered_df['ai_approved'] == False]
         
-        filtered_df = filtered_df[filtered_df['ai_confidence'] >= min_confidence]
+        if min_confidence is not None:
+            filtered_df = filtered_df[filtered_df['ai_confidence'] >= min_confidence]
         
         # Sort by AI score
-        filtered_df = filtered_df.sort_values('ai_score', ascending=False)
+        filtered_df = filtered_df.sort_values(by='ai_score', ascending=False)
         
         # Display table
         display_df = filtered_df[[
@@ -4579,7 +4620,7 @@ def analyze_multi_config_bulk(
             }
         )
         
-        st.caption(f"Showing {len(filtered_df))} of {len(results_df))} configurations")
+        st.caption(f"Showing {len(filtered_df)} of {len(results_df)} configurations")
         
         # Add interactive selection for all filtered results
         st.markdown("#### 🎯 Select Any Configuration")
@@ -4587,70 +4628,43 @@ def analyze_multi_config_bulk(
         
         # Display filtered results with action buttons
         for idx, row in filtered_df.iterrows():
-            with st.expander(f"{'✅ APPROVED' if row['ai_approved'] else '❌ REJECTED'} | {row['pair']} - {row['trade_type']} (Score: {row['ai_score']:.1f})"):
+            ai_score = row.get('ai_score', 0)
+            ai_approved = row.get('ai_approved', False)
+            current_price = row.get('current_price', 0)
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            pair = row.get('pair', 'UNKNOWN')
+            
+            with st.expander(f"{'✅ APPROVED' if ai_approved else '❌ REJECTED'} | {pair} - {trade_type} (Score: {ai_score:.1f})"):
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.metric("Current Price", f"${row['current_price']:.6f}")
-                    st.metric("Stop Loss", f"${row['stop_loss']:.6f}")
+                    st.metric("Current Price", f"${current_price:.6f}")
+                    st.metric("Stop Loss", f"${row.get('stop_loss', 0):.6f}")
                 
                 with col2:
-                    st.metric("Position Size", f"${row['position_size']:.2f}")
-                    st.metric("Effective Size", f"${row['effective_position']:.2f}")
+                    st.metric("Position Size", f"${row.get('position_size', 0):.2f}")
+                    st.metric("Effective Size", f"${row.get('effective_position', 0):.2f}")
                 
                 with col3:
-                    st.metric("Take Profit", f"${row['take_profit']:.6f}")
-                    st.metric("R:R Ratio", f"{row['risk_reward_ratio']:.2f}")
+                    st.metric("Take Profit", f"${row.get('take_profit', 0):.6f}")
+                    st.metric("R:R Ratio", f"{row.get('risk_reward_ratio', 0):.2f}")
                 
-                st.markdown(f"**AI Confidence:** {row['ai_confidence']:.0f}%")
-                st.markdown(f"**Recommendation:** {row['ai_recommendation']}")
-                st.markdown(f"**Strategy:** {row['strategy']}")
-                st.markdown(f"**Leverage:** {row['leverage']:.1f}x ({row['trading_mode']})")
+                st.markdown(f"**AI Confidence:** {row.get('ai_confidence', 0):.0f}%")
+                st.markdown(f"**Recommendation:** {row.get('ai_recommendation', 'N/A')}")
+                st.markdown(f"**Strategy:** {row.get('strategy', 'N/A')}")
+                st.markdown(f"**Leverage:** {row.get('leverage', 0):.1f}x ({row.get('trading_mode', 'Unknown')})")
                 
-                if row['ai_risks']:
+                ai_risks = row.get('ai_risks', [])
+                if ai_risks:
                     with st.expander("⚠️ Risk Analysis"):
-                        for risk in row['ai_risks']:
+                        for risk in ai_risks:
                             st.warning(risk)
                 
-                # Action button for each config
+                # Action button for each config - uses flag approach for consistency
                 if st.button(f"✅ Use This Setup", key=f"use_filtered_{idx}", use_container_width=True, type="primary"):
-                    logger.info("🔘 Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
-                    
-                    # Store complete setup with REAL market data
-                    st.session_state.crypto_scanner_opportunity = {
-                        'symbol': row['pair'],
-                        'strategy': row['strategy'],
-                        'confidence': 'High' if row['ai_confidence'] >= 75 else 'Medium' if row['ai_confidence'] >= 50 else 'Low',
-                        'risk_level': 'Medium' if row['leverage'] <= 2 else 'High',
-                        'score': row['ai_score'],
-                        'current_price': row['current_price'],
-                        'change_24h': row.get('change_24h', 0),  # Use real value from analysis
-                        'volume_ratio': row.get('volume_24h', 0) / 1000000 if row.get('volume_24h', 0) > 0 else 1.0,  # Normalize volume
-                        'volatility': row.get('volatility', 0),  # Use real volatility
-                        'reason': f"{row['trade_type']} recommended",
-                        'ai_reasoning': row['ai_recommendation'],
-                        'ai_confidence': 'High' if row['ai_confidence'] >= 75 else 'Medium' if row['ai_confidence'] >= 50 else 'Low',
-                        'ai_rating': row['ai_confidence'] / 10,
-                        'ai_risks': row['ai_risks'] if row['ai_risks'] else []
-                    }
-                    
-                    st.session_state.crypto_quick_pair = row['pair']
-                    st.session_state.crypto_quick_trade_pair = row['pair']
-                    st.session_state.crypto_quick_direction = row['direction']
-                    st.session_state.crypto_trading_mode = row['trading_mode']
-                    st.session_state.crypto_quick_leverage = row['leverage']
-                    st.session_state.crypto_quick_position_size = row['position_size']
-                    # Use session state values from multi-config analysis (stored when analysis ran)
-                    st.session_state.crypto_quick_stop_pct = st.session_state.get('multi_config_risk_pct', 2.0)
-                    st.session_state.crypto_quick_target_pct = st.session_state.get('multi_config_tp_pct', 5.0)
-                    
-                    logger.info("📝 Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
-                    
-                    # Switch to Execute Trade tab
-                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Trade setup loaded for {row['pair']} ({row['trade_type']})! Switching to Execute Trade tab...")
-                    st.balloons()
+                    logger.info("🔘 Use This Setup clicked for {} - {}", str(pair), str(trade_type))
+                    # Set flag to be picked up by global handler
+                    st.session_state[f'use_filtered_{idx}_clicked'] = True
                     st.rerun()
         
         # Export option
@@ -4753,9 +4767,35 @@ def analyze_ultimate_all_strategies(
                         
                         status_text.text(f"Analyzing {pair} - {strategy_id} - {trade_type} ({config_idx}/{total_configs})...")
                         
-                        # Calculate stop loss and take profit based on strategy
-                        stop_pct = strategy_analysis.get('stop_loss_pct', 2.0)
-                        target_pct = strategy_analysis.get('target_pct', 5.0)
+                        # FIXED: Extract or calculate stop loss and take profit percentages from strategy
+                        # Try multiple methods to get the percentages:
+                        # 1. Check if strategy already provides percentage fields
+                        stop_pct = strategy_analysis.get('stop_loss_pct')
+                        target_pct = strategy_analysis.get('target_pct')
+                        
+                        # 2. If not, reverse-calculate from provided prices
+                        if stop_pct is None and 'stop_loss' in strategy_analysis:
+                            stop_loss_price = strategy_analysis['stop_loss']
+                            if stop_loss_price != current_price and current_price > 0:
+                                stop_pct = abs((stop_loss_price - current_price) / current_price * 100)
+                        
+                        if target_pct is None and 'roi_targets' in strategy_analysis:
+                            roi_targets = strategy_analysis['roi_targets']
+                            if roi_targets and len(roi_targets) > 0:
+                                # Use the first (most aggressive) ROI target
+                                target_pct = roi_targets[0].get('gain_percent', 5.0)
+                        
+                        # 3. Fall back to reasonable defaults based on strategy type
+                        if stop_pct is None:
+                            stop_pct = 2.0  # Conservative default
+                        if target_pct is None:
+                            target_pct = 5.0  # Conservative default
+                        
+                        # Ensure percentages are positive
+                        stop_pct = abs(stop_pct)
+                        target_pct = abs(target_pct)
+                        
+                        logger.debug(f"📊 {pair} {trade_type}: stop_pct={stop_pct:.2f}%, target_pct={target_pct:.2f}%, current_price=${current_price:.6f}")
                         
                         if direction == "BUY":
                             stop_loss = current_price * (1 - stop_pct / 100)
@@ -4763,6 +4803,10 @@ def analyze_ultimate_all_strategies(
                         else:  # SELL
                             stop_loss = current_price * (1 + stop_pct / 100)
                             take_profit = current_price * (1 - target_pct / 100)
+                        
+                        # Sanity check: Ensure stop/target are different from current price
+                        if stop_loss == current_price or take_profit == current_price:
+                            logger.error(f"⚠️ CALCULATION ERROR for {pair} {trade_type}: stop_loss=${stop_loss:.6f}, take_profit=${take_profit:.6f}, current=${current_price:.6f}, stop%={stop_pct}, target%={target_pct}")
                         
                         # Calculate position details
                         effective_position = position_size * leverage
@@ -4804,6 +4848,8 @@ def analyze_ultimate_all_strategies(
                             'current_price': current_price,
                             'stop_loss': stop_loss,
                             'take_profit': take_profit,
+                            'stop_pct': stop_pct,  # FIXED: Add percentage values
+                            'target_pct': target_pct,  # FIXED: Add percentage values
                             'position_size': position_size,
                             'effective_position': effective_position,
                             'quantity': quantity,
@@ -4833,7 +4879,7 @@ def analyze_ultimate_all_strategies(
         # Display results
         st.markdown("---")
         st.markdown("### 🏆 ULTIMATE ANALYSIS RESULTS")
-        st.success(f"✅ Tested {len(results_df))} configurations successfully!")
+        st.success(f"✅ Tested {len(results_df)} configurations successfully!")
         
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -4856,41 +4902,47 @@ def analyze_ultimate_all_strategies(
         best_per_pair = best_per_pair.sort_values('composite_score', ascending=False)
         
         for idx, row in best_per_pair.head(10).iterrows():
-            with st.expander(f"🏆 {row['pair']} - {row['strategy_name']} {row['trade_type']} (Score: {row['composite_score']:.1f})"):
+            pair = row.get('pair', 'UNKNOWN')
+            strategy_name = row.get('strategy_name', 'Unknown')
+            trade_type = row.get('trade_type', 'UNKNOWN')
+            composite_score = row.get('composite_score', 0)
+            with st.expander(f"🏆 {pair} - {strategy_name} {trade_type} (Score: {composite_score:.1f})"):
                 result_col1, result_col2, result_col3 = st.columns(3)
                 
                 result_col1.markdown(f"""
                 **Strategy & Direction:**
-                - Strategy: **{row['strategy_name']}**
-                - Direction: **{row['direction']}**
-                - Mode: **{row['trading_mode']}**
-                - Leverage: **{row['leverage']:.1f}x**
-                - Recommendation: **{row['recommendation']}**
+                - Strategy: **{strategy_name}**
+                - Direction: **{row.get('direction', 'BUY')}**
+                - Mode: **{row.get('trading_mode', 'Spot Trading')}**
+                - Leverage: **{row.get('leverage', 0):.1f}x**
+                - Recommendation: **{row.get('recommendation', 'N/A')}**
                 """)
                 
                 result_col2.markdown(f"""
                 **Pricing:**
-                - Current: ${row['current_price']:,.6f}
-                - Stop Loss: ${row['stop_loss']:,.6f}
-                - Take Profit: ${row['take_profit']:,.6f}
-                - R:R Ratio: {row['risk_reward_ratio']:.2f}
+                - Current: ${row.get('current_price', 0):,.6f}
+                - Stop Loss: ${row.get('stop_loss', 0):,.6f}
+                - Take Profit: ${row.get('take_profit', 0):,.6f}
+                - R:R Ratio: {row.get('risk_reward_ratio', 0):.2f}
                 """)
                 
                 result_col3.markdown(f"""
                 **Position & Scoring:**
-                - Size: ${row['position_size']:,.2f}
-                - Effective: ${row['effective_position']:,.2f}
-                - Quantity: {row['quantity']:.8f}
-                - Confidence: {row['confidence_score']:.0f}%
-                - **Score: {row['composite_score']:.1f}**
-                - Risk: {row['risk_level']}
+                - Base Size: ${row.get('position_size', 0):,.2f}
+                - Effective Size: ${row.get('effective_position', 0):,.2f}
+                - Quantity: {row.get('quantity', 0):.8f}
+                - Stop %: {row.get('stop_pct', 0):.2f}%
+                - Target %: {row.get('target_pct', 0):.2f}%
+                - Confidence: {row.get('confidence_score', 0):.0f}%
+                - **Score: {row.get('composite_score', 0):.1f}**
+                - Risk: {row.get('risk_level', 'Unknown')}
                 """)
                 
                 # AI Trade Style Recommendation
                 st.markdown("#### 🤖 AI Trade Style Recommendation")
-                leverage = row['leverage']
-                direction = row['direction']
-                confidence = row['confidence_score']
+                leverage = row.get('leverage', 0)
+                direction = row.get('direction', 'BUY')
+                confidence = row.get('confidence_score', 0)
                 
                 if leverage == 1:
                     if confidence >= 75:
@@ -4931,7 +4983,7 @@ def analyze_ultimate_all_strategies(
                         'volume_ratio': row.get('volume_24h', 0) / 1000000 if row.get('volume_24h', 0) > 0 else 1.0,  # Normalize volume
                         'volatility': row.get('volatility', 0),  # Use real volatility
                         'reason': f"{row['strategy_name']} {row['trade_type']} - Ultimate Analysis Winner",
-                        'ai_reasoning': f"Best of {len(results_df))} configs tested",
+                        'ai_reasoning': f"Best of {len(results_df)} configs tested",
                         'ai_confidence': row['recommendation'],
                         'ai_rating': row['confidence_score'] / 10,
                         'ai_risks': []
@@ -4943,8 +4995,8 @@ def analyze_ultimate_all_strategies(
                     st.session_state.crypto_trading_mode = row['trading_mode']
                     st.session_state.crypto_quick_leverage = row['leverage']
                     st.session_state.crypto_quick_position_size = row['position_size']
-                    st.session_state.crypto_quick_stop_pct = row['risk_pct']
-                    st.session_state.crypto_quick_target_pct = row['take_profit_pct']
+                    st.session_state.crypto_quick_stop_pct = row['stop_pct']  # FIXED: Use correct field name
+                    st.session_state.crypto_quick_target_pct = row['target_pct']  # FIXED: Use correct field name
                     
                     logger.info("📝 ULTIMATE - Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
                     
@@ -5007,10 +5059,11 @@ def analyze_ultimate_all_strategies(
         elif filter_approved_result == 'Rejected Only':
             filtered_df = filtered_df[filtered_df['approved'] == False]
         
-        filtered_df = filtered_df[filtered_df['composite_score'] >= min_score]
+        if min_score is not None:
+            filtered_df = filtered_df[filtered_df['composite_score'] >= min_score]
         
         # Sort and display
-        filtered_df = filtered_df.sort_values('composite_score', ascending=False)
+        filtered_df = filtered_df.sort_values(by='composite_score', ascending=False)
         
         display_df = filtered_df[[
             'pair', 'strategy_name', 'trade_type', 'current_price', 
@@ -5034,7 +5087,7 @@ def analyze_ultimate_all_strategies(
             }
         )
         
-        st.caption(f"Showing {len(filtered_df))} of {len(results_df))} configurations")
+        st.caption(f"Showing {len(filtered_df)} of {len(results_df)} configurations")
         
         # Export option
         if st.button("📥 Export Ultimate Results to CSV", key="export_ultimate"):

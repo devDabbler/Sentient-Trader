@@ -271,7 +271,7 @@ class AICryptoPositionManager:
             logger.info(f"   Position: {side} {volume:.6f} @ ${entry_price:,.2f}")
             logger.info(f"   Stop Loss: ${stop_loss:,.2f} ({-risk_pct:.2f}%)")
             logger.info(f"   Take Profit: ${take_profit:,.2f} (+{reward_pct:.2f}%)")
-            logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
+            pass  # logger.info(f"   Risk/Reward: {}:1 {rr_ratio:.2f}")
             logger.info(f"   Strategy: {strategy}")
             logger.info(f"   Trailing Stop: {trailing_stop_pct}%")
             logger.info(f"   Breakeven Trigger: {breakeven_trigger_pct}%")
@@ -465,11 +465,10 @@ class AICryptoPositionManager:
                 
                 # Log status periodically
                 hold_time = (datetime.now() - position.entry_time).total_seconds() / 60
-                logger.debug("✓ {}: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%), ", str(position.pair)
-                           f"Hold: {hold_time:.0f}min, AI: {position.last_ai_action}")
+                # logger.debug(f"✓ {position.pair}: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%), Hold: {hold_time:.0f}min, AI: {position.last_ai_action}")
                 
             except Exception as e:
-                logger.error("Error monitoring position {trade_id}: {}", str(e), exc_info=True)
+                logger.error(f"Error monitoring position {trade_id}: {str(e)}")
                 continue
         
         # Save state after check
@@ -667,7 +666,7 @@ class AICryptoPositionManager:
                 
                 if recent_news:
                     logger.info(
-                        f"📰 Fetched {len(recent_news))} recent news articles for {base_asset} "
+                        f"📰 Fetched {len(recent_news)} recent news articles for {base_asset} "
                         f"(sentiment: {sentiment_score:.1f}/100)"
                     )
                 
@@ -982,7 +981,7 @@ Analyze the position using these factors:
             
             # Send Discord notification for pending approval
             position = self.positions[trade_id]
-            current_price = position.last_price or position.entry_price
+            current_price = position.current_price or position.entry_price
             pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
             
             action_emoji = {
@@ -1013,7 +1012,7 @@ Analyze the position using these factors:
             logger.info(f"🤖 EXECUTING AI DECISION: {position.pair}")
             logger.info("=" * 80)
             logger.info(f"   Action: {decision.action}")
-            logger.info(f"   Confidence: {}% {decision.confidence:.1f}")
+            logger.info(f"   Confidence: {decision.confidence:.1f}%")
             logger.info(f"   Reasoning: {decision.reasoning}")
             logger.info("=" * 80)
             

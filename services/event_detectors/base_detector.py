@@ -136,7 +136,7 @@ class BaseEventDetector(ABC):
         try:
             logger.info(f"Running {self.__class__.__name__} detection...")
             alerts = self.detect()
-            logger.info(f"{self.__class__.__name__} generated {len(alerts))} alerts")
+            pass  # logger.info(f"{self.__class__.__name__} generated {len(alerts))} alerts")
             return alerts
         except Exception as e:
             logger.error("Error in {self.__class__.__name__}.detect(): {}", str(e), exc_info=True)

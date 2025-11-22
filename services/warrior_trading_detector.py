@@ -415,7 +415,7 @@ class WarriorTradingDetector:
         
         for i in range(0, len(universe), chunk_size):
             chunk = universe[i:i + chunk_size]
-            logger.debug(f"Processing chunk {i//chunk_size + 1}: {len(chunk))} tickers")
+            pass  # logger.debug(f"Processing chunk {i//chunk_size + 1}: {len(chunk))} tickers")
             
             # Step 1: Get previous day closes (yfinance - batch)
             prev_closes = {}

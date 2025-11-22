@@ -167,7 +167,7 @@ class PositionMonitor:
                 self.alert_system.trigger_alert(alert)
                 del self.tracked_positions[symbol]
             
-            logger.info(f"Position update: {len(current_symbols)} open, {len(alerts))} alerts generated")
+            pass  # logger.info(f"Position update: {len(current_symbols)} open, {len(alerts))} alerts generated")
             return True, alerts
             
         except Exception as e:

@@ -149,7 +149,7 @@ class OllamaClient:
                 generation_time = time.time() - start_time
                 
                 if generated_text:
-                    logger.success(f"✅ Generated {len(generated_text))} chars in {generation_time:.1f}s")
+                    pass  # logger.success(f"✅ Generated {len(generated_text))} chars in {generation_time:.1f}s")
                     return generated_text
                 else:
                     logger.warning(f"⚠️ Ollama returned empty response in {generation_time:.1f}s")
@@ -206,7 +206,7 @@ class OllamaClient:
                         generated_text = result.get('response', '')
                         generation_time = time.time() - start_time
                         
-                        logger.success(f"✅ [Async] Generated {len(generated_text))} chars in {generation_time:.1f}s")
+                        pass  # logger.success(f"✅ [Async] Generated {len(generated_text))} chars in {generation_time:.1f}s")
                         return generated_text
                     else:
                         error_text = await response.text()

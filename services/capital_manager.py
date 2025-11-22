@@ -57,7 +57,7 @@ class CapitalManager:
         logger.info(f"   Total Capital: ${total_capital:,.2f}")
         logger.info(f"   Usable Capital: ${self.usable_capital:,.2f}")
         logger.info(f"   Reserve Cash: ${self.reserve_cash:,.2f} ({reserve_cash_pct}%)")
-        logger.info("   Max Per Position: ${} ({max_position_pct}%)", str(self.get_max_position_size():,.2f))
+        pass  # logger.info("   Max Per Position: ${} ({max_position_pct}%)", str(self.get_max_position_size():,.2f))
     
     def get_available_capital(self) -> float:
         """Get currently available capital for new trades"""
@@ -159,7 +159,7 @@ class CapitalManager:
         
         logger.info(f"✅ Allocated ${requested_capital:,.2f} for {ticker} ({strategy})")
         logger.info(f"   Available Capital: ${available:,.2f} ({100 - utilization:.1f}% free)")
-        logger.info(f"   Total Positions: {len([p for p in self.positions if p.status == 'OPEN'])}"))
+        pass  # logger.info(f"   Total Positions: {len([p for p in self.positions if p.status == 'OPEN'])}"))
         
         return allocation
     

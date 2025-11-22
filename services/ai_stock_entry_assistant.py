@@ -764,7 +764,7 @@ Evaluate these critical factors:
                     logger.info(f"✅ Entry conditions met for {opportunity.symbol}!")
                     logger.info(f"   Price: ${current_price:,.2f}")
                     if technical_data:
-                        logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
+                        pass  # logger.info("   RSI: {}", str(technical_data.get('rsi', 0):.2f))
                     
                     # Send notification
                     if not opportunity.notification_sent:

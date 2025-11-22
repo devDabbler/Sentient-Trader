@@ -171,7 +171,7 @@ class AutoTrader:
                     max_dollar_amount=getattr(config, 'fractional_max_amount', 1000.0)
                 )
                 self._fractional_manager = get_fractional_share_manager(frac_config)
-                logger.info(f"📊 Fractional Share Manager ENABLED: Auto-use for stocks >${} {frac_config.min_price_threshold:.2f}")
+                pass  # logger.info(f"📊 Fractional Share Manager ENABLED: Auto-use for stocks >${} {frac_config.min_price_threshold:.2f}")
             except Exception as e:
                 logger.warning(f"⚠️ Fractional Share Manager initialization failed: {e}")
                 config.use_fractional_shares = False
@@ -210,7 +210,7 @@ class AutoTrader:
                 )
                 
                 if long_term_holdings:
-                    logger.info(f"🔒 Long-Term Holdings Protected: {', '.join(long_term_holdings} - WILL NEVER BE AUTO-SOLD"))
+                    pass  # logger.info(f"🔒 Long-Term Holdings Protected: {', '.join(long_term_holdings} - WILL NEVER BE AUTO-SOLD"))
                 
                 logger.info("🛡️ Position Exit Monitor ENABLED: Active position management")
             except Exception as e:
@@ -425,7 +425,7 @@ class AutoTrader:
                                 buy_signals.sort(key=lambda x: x.confidence, reverse=True)
                                 best_signal = buy_signals[0]
                                 
-                                logger.info(f"💎 BEST-PICK-ONLY MODE: Limited capital (${}, {utilization:.1f}% utilized) {available:.2f}")
+                                pass  # logger.info(f"💎 BEST-PICK-ONLY MODE: Limited capital (${}, {utilization:.1f}% utilized) {available:.2f}")
                                 logger.info(f"   Focusing on highest confidence trade: {best_signal.symbol} ({best_signal.confidence:.1f}%)")
                                 logger.info("   Skipping {} other opportunities to maximize best setup", str(len(buy_signals)-1))
                                 
@@ -486,7 +486,7 @@ class AutoTrader:
             
             # Log timezone info for debugging
             tz_name = now_et.strftime('%Z')  # EST or EDT
-            logger.debug(f"🕐 Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z'} (Timezone: {tz_name})"))
+            pass  # logger.debug(f"🕐 Current time: {now_et.strftime('%Y-%m-%d %H:%M:%S %Z'} (Timezone: {tz_name})"))
         except Exception as e:
             # Fallback to manual calculation if pytz fails
             logger.warning(f"⚠️ pytz timezone conversion failed: {e}, using fallback")
@@ -545,9 +545,9 @@ class AutoTrader:
         if not in_hours:
             logger.info("❌ Outside trading hours: ET time is {}, market hours are {start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')}", str(current_time_et.strftime('%H:%M')))
         elif in_premarket:
-            logger.info(f"🌅 Pre-market hours: {current_time_et.strftime('%H:%M'} ET"))
+            pass  # logger.info(f"🌅 Pre-market hours: {current_time_et.strftime('%H:%M'} ET"))
         elif in_afterhours:
-            logger.info(f"🌙 After-hours: {current_time_et.strftime('%H:%M'} ET"))
+            pass  # logger.info(f"🌙 After-hours: {current_time_et.strftime('%H:%M'} ET"))
         
         return in_hours
     
@@ -706,9 +706,8 @@ class AutoTrader:
                 if ml_trades:
                     logger.info(f"📈 TOP OPPORTUNITIES (Ensemble ≥ {self.config.min_ensemble_score}):")
                     for i, trade in enumerate(ml_trades[:5], 1):
-                        logger.info("   #{}. {trade.ticker}: Ensemble={trade.combined_score:.1f} ", str(i)
-                                  f"(ML:{trade.ml_prediction_score:.1f} AI:{trade.ai_rating*10:.1f} Q:{trade.score:.1f}) "
-                                  f"Price=${trade.price:.2f}")
+                        # logger.info(f"   #{i}. {trade.ticker}: Ensemble={trade.combined_score:.1f} (ML:{trade.ml_prediction_score:.1f} AI:{trade.ai_rating*10:.1f} Q:{trade.score:.1f}) Price=${trade.price:.2f}")
+                        pass
                 
                 # Convert ML trades to TradingSignals
                 from services.ai_trading_signals import TradingSignal
@@ -735,7 +734,7 @@ class AutoTrader:
                     )
                     signals.append(signal)
                     
-                    logger.info("  🎯 {}: Combined Score {trade.combined_score:.1f}% ", str(trade.ticker)
+                    logger.info(f"  🎯 {trade.ticker}: Combined Score {trade.combined_score:.1f}% "
                               f"(ML:{trade.ml_prediction_score:.1f} + LLM:{trade.ai_rating*10:.1f} + Quant:{trade.score:.1f})")
                 
                 return signals
@@ -839,15 +838,15 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             
             # Log validation result
             decision_icon = "✅" if decision else "🚫"
-            logger.info("{} AI Validation: {'APPROVED' if decision else 'REJECTED'} ", str(decision_icon)
+            logger.info(f"{decision_icon} AI Validation: {'APPROVED' if decision else 'REJECTED'} "
                        f"(confidence: {confidence:.2f}) - {reasoning[:100]}")
             
             return decision, reasoning, confidence
             
         except Exception as e:
-            logger.error("Error in AI validation: {}", str(e), exc_info=True)
+            logger.error(f"Error in AI validation: {e}", exc_info=True)
             # On error, be cautious but don't block trade completely
-            return True, f"AI validation error: {str(e)[:100])}", 0.6
+            return True, f"AI validation error: {str(e)[:100]}", 0.6
     
     def _scan_for_signals(self) -> List:
         """Scan watchlist for trading signals"""
@@ -1023,7 +1022,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 if gappers:
                     logger.info(f"✅ Market scan found {len(gappers)} qualified gappers")
                     for g in gappers[:5]:  # Show top 5
-                        logger.info("  {}: {g['gap_pct']:+.2f}% gap, ", str(g['ticker'])
+                        logger.info(f"  {g['ticker']}: {g['gap_pct']:+.2f}% gap, "
                                   f"{g['volume_ratio']:.1f}x volume, ${g['current_price']:.2f}")
                 else:
                     logger.info("No gappers found in market scan")
@@ -1055,7 +1054,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                         try:
                             checked_count += 1
                             if checked_count % 5 == 0:  # Log progress every 5 tickers
-                                logger.info(f"   🔍 Progress: {checked_count}/{len(tickers_to_scan))} tickers checked...")
+                                logger.info(f"   🔍 Progress: {checked_count}/{len(tickers_to_scan)} tickers checked...")
                             
                             # Use yfinance for fast price check
                             try:
@@ -1092,11 +1091,11 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             # Skip tickers with errors (don't include)
                             continue
                     
-                    logger.info(f"   ✅ Price check complete: {checked_count} checked, {len(filtered_tickers))} passed, {error_count} errors")
+                    logger.info(f"   ✅ Price check complete: {checked_count} checked, {len(filtered_tickers)} passed, {error_count} errors")
                     
                     if filtered_tickers:
                         tickers_to_scan = filtered_tickers
-                        logger.info("✅ Filtered to {} tickers in price range ${min_price}-${max_price}: {', '.join(filtered_tickers)}", str(len(filtered_tickers)))
+                        logger.info(f"✅ Filtered to {len(filtered_tickers)} tickers in price range ${min_price}-${max_price}: {', '.join(filtered_tickers)}")
                     else:
                         logger.warning(f"⚠️ No tickers in price range ${min_price}-${max_price}, will scan original watchlist")
                         # Don't replace tickers_to_scan if nothing passed filter
@@ -1222,7 +1221,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 ]
                 
                 if len(enhanced_signals) < before_count:
-                    logger.info(f"  📉 Filtered {before_count - len(enhanced_signals} signals below ML ensemble threshold ({self.config.min_ensemble_score}%)")
+                    logger.info(f"  📉 Filtered {before_count - len(enhanced_signals)} signals below ML ensemble threshold ({self.config.min_ensemble_score}%)")
                 
                 logger.info(f"✅ ML-Enhanced Scanner: {len(enhanced_signals)} signals passed triple validation")
                 
@@ -1348,7 +1347,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                 return None
             
             # Log the enhancement
-            logger.info("  🎯 {}: ML Enhanced - ", str(ticker)
+            logger.info(f"  🎯 {ticker}: ML Enhanced - "
                       f"Combined: {ml_enhanced.combined_score:.1f}% "
                       f"(ML:{ml_enhanced.ml_prediction_score:.1f} + "
                       f"LLM:{ml_enhanced.ai_rating*10:.1f} + "
@@ -1402,7 +1401,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             b = bal_data.get('balances', {})
             raw_cash = float(b.get('cash_available', b.get('total_cash', 10000.0)))
             total_equity = float(b.get('total_equity', raw_cash or 10000.0))
-            logger.info(f"💵 Account balance: raw_cash=${}, total_equity=${total_equity:.2f} {raw_cash:.2f}")
+            logger.info(f"💵 Account balance: raw_cash=${raw_cash:.2f}, total_equity=${total_equity:.2f}")
             
             # Use actual broker cash for settlement tracking, but respect config.total_capital limit
             settled_cash = self._cash_manager.get_settled_cash(raw_cash)
@@ -1410,7 +1409,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             
             # Limit to configured total capital (e.g., only use $800 of $10k account)
             if settled_cash > self.config.total_capital:
-                logger.info(f"💵 Limiting to configured capital: ${} (broker has ${settled_cash:.2f}) {self.config.total_capital:.2f}")
+                logger.info(f"💵 Limiting to configured capital: ${self.config.total_capital:.2f} (broker has ${settled_cash:.2f})")
                 settled_cash = self.config.total_capital
 
             bucket_idx = self._cash_manager.select_active_bucket()
@@ -1621,10 +1620,10 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                     # Optional: Update signal with AI suggestions
                     if entry_analysis.suggested_stop:
                         signal.stop_loss = entry_analysis.suggested_stop
-                        logger.debug(f"   Updated stop loss to AI suggestion: ${} {signal.stop_loss:.2f}")
+                        logger.debug(f"   Updated stop loss to AI suggestion: ${signal.stop_loss:.2f}")
                     if entry_analysis.suggested_target:
                         signal.target_price = entry_analysis.suggested_target
-                        logger.debug(f"   Updated target to AI suggestion: ${} {signal.target_price:.2f}")
+                        logger.debug(f"   Updated target to AI suggestion: ${signal.target_price:.2f}")
             
             # ==========================================
             # EXISTING EXECUTION CODE CONTINUES BELOW
@@ -1686,11 +1685,11 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                         utilization = self._capital_manager.get_utilization_pct()
                         
                         if utilization >= self.config.max_capital_utilization_pct:
-                            logger.warning(f"⚠️ Capital utilization too high ({}% >= {self.config.max_capital_utilization_pct}%), skipping {signal.symbol} {utilization:.1f}")
+                            logger.warning(f"⚠️ Capital utilization too high ({utilization:.1f}% >= {self.config.max_capital_utilization_pct}%), skipping {signal.symbol}")
                             return
                         
                         if available_capital <= 0:
-                            logger.warning(f"⚠️ No capital available (${}), skipping {signal.symbol} {available_capital:.2f}")
+                            logger.warning(f"⚠️ No capital available (${available_capital:.2f}), skipping {signal.symbol}")
                             return
                         
                         logger.info(f"💰 Capital check: ${available_capital:,.2f} available ({utilization:.1f}% utilization)")
@@ -1717,7 +1716,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                     logger.warning(f"   Reason: {validation_reasoning}")
                     return  # Block the trade
                 elif validation_confidence < self.config.min_ai_validation_confidence:
-                    logger.warning(f"⚠️ AI validation confidence too low ({} < {self.config.min_ai_validation_confidence}), skipping {signal.symbol} {validation_confidence:.2f}")
+                    logger.warning(f"⚠️ AI validation confidence too low ({validation_confidence:.2f} < {self.config.min_ai_validation_confidence}), skipping {signal.symbol}")
                     logger.warning(f"   Reason: {validation_reasoning}")
                     return  # Block the trade
                 else:
@@ -1746,7 +1745,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             # Set targets to None so bracket order won't be used
                             signal.target_price = None
                             signal.stop_loss = None
-                            logger.info(f"📊 Scalping mode (SELL/CLOSING LONG): Entry=${} - Using simple SELL order (no bracket) {signal.entry_price:.2f}")
+                            logger.info(f"📊 Scalping mode (SELL/CLOSING LONG): Entry=${signal.entry_price:.2f} - Using simple SELL order (no bracket)")
                         else:
                             # Opening a SHORT position - target is LOWER (profit when price drops), stop is HIGHER (stop when price rises)
                             signal.target_price = signal.entry_price * (1 - self.config.scalping_take_profit_pct / 100)
@@ -1762,13 +1761,13 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                         # For BUY (LONG): 2% profit target, 1% stop loss
                         signal.target_price = signal.entry_price * 1.02  # 2% target
                         signal.stop_loss = signal.entry_price * 0.99  # 1% stop
-                        logger.info(f"⚔️ Warrior Trading (BUY): Entry=${}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f} {signal.entry_price:.2f}")
+                        logger.info(f"⚔️ Warrior Trading (BUY): Entry=${signal.entry_price:.2f}, Target=${signal.target_price:.2f}, Stop=${signal.stop_loss:.2f}")
                     else:  # SELL
                         if has_position:
                             # Closing a LONG position
                             signal.target_price = None
                             signal.stop_loss = None
-                            logger.info(f"⚔️ Warrior Trading (SELL/CLOSING): Entry=${} - Using simple SELL order {signal.entry_price:.2f}")
+                            logger.info(f"⚔️ Warrior Trading (SELL/CLOSING): Entry=${signal.entry_price:.2f} - Using simple SELL order")
             
             # Position sizing for closing orders (use existing position quantity)
             if signal.signal == 'SELL' and has_position:
@@ -1899,7 +1898,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             self._last_pnl[signal.symbol] = pnl
                             
                             logger.info(f"💰 Released capital for {signal.symbol} (P&L: ${pnl:+,.2f})")
-                            logger.info("📊 Capital status: ${} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)", str(self._capital_manager.get_available_capital():,.2f))
+                            pass  # logger.info("📊 Capital status: ${} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)", str(self._capital_manager.get_available_capital():,.2f))
                     else:
                         # Opening a position
                         # Extract order IDs from result
@@ -1940,7 +1939,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
                             
                             trade_entry = UnifiedTradeEntry(
-                                trade_id=f"{signal.symbol}_{order_id}_{int(datetime.now().timestamp()))}",
+                                trade_id=f"{signal.symbol}_{order_id}_{int(datetime.now().timestamp())}",
                                 trade_type=TradeType.STOCK.value,
                                 symbol=signal.symbol,
                                 side=signal.signal,
@@ -1995,7 +1994,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             )
                             if allocation:
                                 logger.info(f"💰 Allocated ${allocation.capital_allocated:,.2f} for {signal.symbol} ({strategy})")
-                                logger.info("📊 Capital status: ${} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)", str(self._capital_manager.get_available_capital():,.2f))
+                                pass  # logger.info("📊 Capital status: ${} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)", str(self._capital_manager.get_available_capital():,.2f))
                 except Exception as e:
                     logger.error(f"❌ Error recording trade in state manager: {e}")
                 
@@ -2241,7 +2240,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             # Found signals - send alert
             color = 15158332  # Orange/Red
             title = f"⚔️ {signals_found} Warrior Setup{'s' if signals_found > 1 else ''} Found!"
-            description = f"Smart Scanner detected **{len(tickers_found))} qualified tickers** and found **{signals_found} tradeable setup{'s' if signals_found > 1 else ''}**"
+            description = f"Smart Scanner detected **{len(tickers_found)} qualified tickers** and found **{signals_found} tradeable setup{'s' if signals_found > 1 else ''}**"
         else:
             # No signals - only send every 5 scans to avoid spam
             if not hasattr(self, '_scan_count'):
@@ -2253,7 +2252,7 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
             
             color = 3447003  # Blue
             title = "🔍 Scan Complete - No Setups"
-            description = f"Scanned {len(tickers_found))} tickers, no qualified Gap & Go setups found"
+            description = f"Scanned {len(tickers_found)} tickers, no qualified Gap & Go setups found"
         
         embed = {
             'title': title,

@@ -77,7 +77,7 @@ class UnifiedPennyStockAnalysis:
                 volume=base_analysis['volume'],
                 avg_volume=base_analysis['avg_volume']
             )
-            logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A'}"))
+            pass  # logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A'}"))
             
             # 4. ATR-based stops (already in base_analysis)
             logger.info(f"🎯 Step 4: Extracting ATR stops from base analysis...")
@@ -144,7 +144,7 @@ class UnifiedPennyStockAnalysis:
             }
             
             logger.info(f"✅ UnifiedPennyStockAnalysis.analyze_comprehensive completed for {ticker}")
-            logger.info(f"   Result keys: {list(result.keys(}... (total: {len(result))} keys)")[:10]))
+            pass  # logger.info(f"   Result keys: {list(result.keys(}... (total: {len(result))} keys)")[:10]))
             logger.info("   Final recommendation: {}", str(final_recommendation.get('decision', 'N/A') if final_recommendation else 'N/A'))
             
             return result

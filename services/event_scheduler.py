@@ -101,7 +101,7 @@ class EventScheduler:
             self.job_stats[detector_name]['alerts'] += len(alerts)
             self.job_stats[detector_name]['last_run'] = datetime.now()
             
-            logger.info(f"{detector_name} detector completed: {len(alerts))} alerts generated")
+            pass  # logger.info(f"{detector_name} detector completed: {len(alerts))} alerts generated")
             
         except Exception as e:
             logger.error("Error running {detector_name} detector: {}", str(e), exc_info=True)

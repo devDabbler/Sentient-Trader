@@ -149,7 +149,7 @@ class LLMStrategyAnalyzer:
     def analyze_bot_strategy(self, bot_config: Dict) -> StrategyAnalysis:
         """Analyze a bot strategy configuration"""
         try:
-            logger.info(f"Starting strategy analysis for {bot_config.get('name', 'Unknown Bot'}"))
+            pass  # logger.info(f"Starting strategy analysis for {bot_config.get('name', 'Unknown Bot'}"))
             logger.debug(f"Using model: {self.model}")
             
             # Prepare analysis prompt
@@ -163,7 +163,7 @@ class LLMStrategyAnalyzer:
             
             # Parse response
             analysis = self._parse_analysis_response(response, bot_config)
-            logger.info(f"Strategy analysis completed for {bot_config.get('name', 'Unknown Bot'}"))
+            pass  # logger.info(f"Strategy analysis completed for {bot_config.get('name', 'Unknown Bot'}"))
             logger.info(f"Analysis result: {analysis.overall_rating}, Risk: {analysis.risk_score:.2f}, Confidence: {analysis.confidence:.2f}")
             
             return analysis
@@ -281,7 +281,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
         try:
             logger.info(f"🤖 Calling {self.provider} API with model: {self.model}")
             logger.debug(f"Base URL: {self.base_url}")
-            logger.debug(f"API Key present: {bool(self.api_key)}, Length: {len(self.api_key) if self.api_key else 0)}")
+            pass  # logger.debug(f"API Key present: {bool(self.api_key)}, Length: {len(self.api_key) if self.api_key else 0)}")
             
             import openai
             client = openai.OpenAI(
@@ -331,7 +331,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
             # Check if response has choices (successful responses)
             if not hasattr(response, 'choices') or not response.choices:
                 logger.error(f"❌ {self.provider} API returned unexpected response structure")
-                logger.debug(f"Response type: {type(response)}, Response: {str(response)[:500])}")
+                pass  # logger.debug(f"Response type: {type(response)}, Response: {str(response)[:500])}")
                 logger.debug(f"Response dict: {response_dict}")
                 return ""
             
@@ -349,8 +349,8 @@ Focus on practical, actionable insights for options trading. Consider the specif
                 logger.warning(f"⚠️ {self.provider} returned empty content")
                 return ""
                 
-            logger.info(f"✅ {self.provider} API call successful - received {len(content))} characters")
-            logger.debug(f"{self.provider} API response: {str(content)[:200])}...")
+            pass  # logger.info(f"✅ {self.provider} API call successful - received {len(content))} characters")
+            pass  # logger.debug(f"{self.provider} API response: {str(content)[:200])}...")
             return content
             
         except Exception as e:
@@ -471,7 +471,7 @@ Focus on practical, actionable insights for options trading. Consider the specif
                         data = response.json()
                         content = data['choices'][0]['message']['content']
                         model_used = model_to_use if model_idx == 0 else f"{model_to_use} (fallback)"
-                        logger.info(f"✅ OpenRouter API call successful with {model_used} - received {len(content))} characters")
+                        pass  # logger.info(f"✅ OpenRouter API call successful with {model_used} - received {len(content))} characters")
                         logger.debug("OpenRouter response: {}...", str(content)[:200])
                         # Reset backoff on success
                         LLMStrategyAnalyzer._rate_limit_backoff_until = 0
@@ -537,10 +537,11 @@ Focus on practical, actionable insights for options trading. Consider the specif
                             break  # Break to try next model
                         else:
                             # All models exhausted
-                            logger.error(
-                                f"❌ OpenRouter rate limit (429) after trying {len(models_to_try))} models. "
-                                f"Error: {error_msg}"
-                            )
+                            # logger.error(
+                            #    f"❌ OpenRouter rate limit (429) after trying {len(models_to_try)} models. "
+                            #    f"Error: {error_msg}"
+                            # )
+                            pass
                             logger.info(
                                 "💡 Tips to resolve rate limits:\n"
                                 "   1. Add your own provider API keys to OpenRouter: https://openrouter.ai/settings/integrations\n"

@@ -112,13 +112,104 @@ def display_entry_monitors():
             
             with btn_col1:
                 if st.button(f"🔄 Re-Analyze {opp.pair}", key=f"reanalyze_{opp.pair}", width='stretch'):
-                    st.info(f"Navigate to Quick Trade tab and analyze {opp.pair} again to get updated recommendation")
+                    # Re-analyze in place without navigating away
+                    logger.info(f"🔄 Re-analyzing {opp.pair} in Entry Monitor")
+                    
+                    with st.spinner(f"🔄 Re-analyzing {opp.pair}..."):
+                        try:
+                            # Get fresh AI analysis
+                            new_analysis = entry_assistant.analyze_entry(
+                                pair=opp.pair,
+                                side=opp.side,
+                                position_size=opp.position_size,
+                                risk_pct=opp.risk_pct,
+                                take_profit_pct=opp.take_profit_pct
+                            )
+                            
+                            # Check if analysis failed (error action)
+                            if new_analysis.action == "ERROR":
+                                st.error(f"❌ Failed to re-analyze {opp.pair}: {new_analysis.reasoning}")
+                                logger.error(f"Re-analysis failed for {opp.pair}: {new_analysis.reasoning}")
+                                # Don't remove, keep monitoring
+                                continue
+                            
+                            # Find the opportunity ID and update it
+                            opp_id = None
+                            for oid, opportunity in entry_assistant.opportunities.items():
+                                if opportunity.pair == opp.pair:
+                                    opp_id = oid
+                                    break
+                            
+                            if opp_id and new_analysis.action in ["WAIT_FOR_PULLBACK", "WAIT_FOR_BREAKOUT"]:
+                                # Update the existing monitor with fresh analysis
+                                entry_assistant.opportunities[opp_id].original_analysis = new_analysis
+                                entry_assistant.opportunities[opp_id].last_check_time = datetime.now()
+                                entry_assistant._save_state()
+                                
+                                logger.info(f"✅ Updated monitor for {opp.pair}: {new_analysis.action} (confidence: {new_analysis.confidence}%)")
+                                st.success(f"✅ Re-analyzed {opp.pair}! Still waiting: {new_analysis.action}")
+                                st.rerun()
+                            elif opp_id and new_analysis.action == "ENTER_NOW":
+                                # AI now says to enter - remove from monitors and show message
+                                entry_assistant.remove_opportunity(opp_id)
+                                logger.info(f"✅ {opp.pair} ready to enter! Removed from monitors")
+                                st.success(f"🚀 {opp.pair} is NOW READY TO ENTER! (Confidence: {new_analysis.confidence}%)\n\nRemoving from monitors. Use Quick Trade to execute!")
+                                st.balloons()
+                                st.rerun()
+                            elif opp_id:
+                                # Unknown action - update monitor but don't remove
+                                entry_assistant.opportunities[opp_id].original_analysis = new_analysis
+                                entry_assistant.opportunities[opp_id].last_check_time = datetime.now()
+                                entry_assistant._save_state()
+                                
+                                logger.info(f"✅ Updated monitor for {opp.pair}: {new_analysis.action} (confidence: {new_analysis.confidence}%)")
+                                st.info(f"✅ Re-analyzed {opp.pair}! Action: {new_analysis.action}")
+                                st.rerun()
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to re-analyze {opp.pair}: {e}", exc_info=True)
+                            st.error(f"❌ Failed to re-analyze {opp.pair}: {e}")
+                    
             
             with btn_col2:
                 if st.button("📊 Quick Trade", key=f"goto_qt_{opp.pair}", width='stretch'):
-                    # Store pair for quick access
-                    st.session_state['crypto_custom_pair'] = opp.pair
-                    st.info(f"Switch to 'Quick Trade' tab to execute {opp.pair}")
+                    # Transfer complete setup to Quick Trade
+                    current_price = opp.current_price if opp.current_price > 0 else opp.original_analysis.current_price
+                    
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': opp.pair,
+                        'strategy': 'AI Entry Monitor',
+                        'confidence': opp.original_analysis.confidence > 70,
+                        'risk_level': 'Medium',
+                        'score': opp.original_analysis.confidence,
+                        'current_price': current_price,
+                        'change_24h': 0,
+                        'volume_ratio': 1.0,
+                        'volatility': 0,
+                        'reason': f"{opp.original_analysis.action} - Entry Monitor",
+                        'ai_reasoning': opp.original_analysis.reasoning,
+                        'ai_confidence': 'High' if opp.original_analysis.confidence >= 75 else 'Medium',
+                        'ai_rating': opp.original_analysis.confidence / 10,
+                        'ai_risks': []
+                    }
+                    
+                    st.session_state.crypto_quick_pair = opp.pair
+                    st.session_state.crypto_quick_trade_pair = opp.pair
+                    st.session_state.crypto_quick_direction = opp.side
+                    st.session_state.crypto_trading_mode = 'Spot Trading'
+                    st.session_state.crypto_quick_leverage = 1
+                    st.session_state.crypto_quick_position_size = opp.position_size
+                    st.session_state.crypto_quick_stop_pct = opp.risk_pct
+                    st.session_state.crypto_quick_target_pct = opp.take_profit_pct
+                    
+                    # Navigate to Quick Trade
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    logger.info(f"📊 Entry Monitor → Quick Trade: {opp.pair} ({opp.side})")
+                    st.success(f"✅ Loading {opp.pair} in Quick Trade...")
+                    st.balloons()
+                    st.rerun()
             
             with btn_col3:
                 if st.button("🗑️ Remove", key=f"remove_{opp.pair}", width='stretch', type="secondary"):
