@@ -10,9 +10,454 @@ from typing import Dict, List, Optional, Tuple
 import os
 import time
 from datetime import datetime
+import pandas as pd
+import json
+
+from ui.tabs.common_imports import (
+    get_advanced_scanner,
+    get_ai_scanner,
+    get_ml_scanner,
+    get_ticker_manager,
+    ComprehensiveAnalyzer,
+    get_trading_mode_manager
+)
+
+# Import the exact types needed by scan_opportunities method
+from services.advanced_opportunity_scanner import ScanFilters, ScanType
+
+
+
+def _run_stock_analysis(tickers: List[str], styles: List[str]):
+    with st.spinner(f"Analyzing {len(tickers)} tickers across {len(styles)} strategies..."):
+        analysis_results = []
+        total_steps = len(tickers) * len(styles)
+        current_step = 0
+        progress_bar = st.progress(0)
+        
+        for ticker in tickers:
+            for style in styles:
+                current_step += 1
+                progress_bar.progress(current_step / total_steps)
+                
+                try:
+                    result = ComprehensiveAnalyzer.analyze_stock(ticker, style)
+                    if result:
+                        # Logic to map result to UI format
+                        signal = "HOLD"
+                        if result.confidence_score >= 70: signal = "BUY"
+                        elif result.confidence_score <= 30: signal = "SELL"
+                        
+                        analysis_results.append({
+                            "Ticker": ticker,
+                            "Style": style,
+                            "Price": result.price,
+                            "Signal": signal,
+                            "Confidence": result.confidence_score,
+                            "RSI": result.rsi,
+                            "Trend": result.trend,
+                            "Target": result.price * 1.04, # Mockup target
+                            "IV_Rank": result.iv_rank,
+                            "Recommendation": result.recommendation
+                        })
+                except Exception as e:
+                    logger.error(f"Analysis error for {ticker} ({style}): {e}")
+        
+        st.session_state.stock_analysis_results = analysis_results
+        st.success(f"Analysis Complete! Generated {len(analysis_results)} insights.")
+
 
 def render_tab():
     """Main render function called from app.py"""
+    st.header("🤖 Auto-Trader & Smart Scanner")
+    
+    # Navigation Tabs
+    tab_smart, tab_bot = st.tabs(["🔍 Smart Scanner & Trade", "⚙️ Background Bot Config"])
+    
+    with tab_smart:
+        render_smart_scanner_ui()
+        
+    with tab_bot:
+        render_background_bot_ui()
+
+def render_smart_scanner_ui():
+    st.markdown("### 🔍 Smart Stock Scanner & Analyzer")
+    st.markdown("**Workflow:** Scan → Bulk Select → Analyze All → Pick Best → Execute")
+
+    # --- 1. Scan for Opportunities ---
+    st.markdown("### 1️⃣ SCAN FOR OPPORTUNITIES")
+    st.caption("Choose a scanner or manually enter tickers to get started")
+    
+    scanner_map = {
+        "✍️ Manual Selection": "manual",
+        "⭐ My Watchlist": "watchlist",
+        "🚀 Top Gainers": "top_gainers",
+        "📈 Options Plays": "options",
+        "💰 Penny Stocks (<$5)": "penny_stocks",
+        "🔥 Buzzing Stocks": "buzzing",
+        "💥 Breakouts": "breakouts"
+    }
+
+    scanner_col1, scanner_col2 = st.columns([2, 1])
+    with scanner_col1:
+        if 'stock_scanner_type' not in st.session_state:
+            st.session_state.stock_scanner_type = list(scanner_map.keys())[0]
+        
+        scan_type_display = st.selectbox(
+            "Scanner Type",
+            options=list(scanner_map.keys()),
+            index=list(scanner_map.keys()).index(st.session_state.stock_scanner_type) if st.session_state.stock_scanner_type in scanner_map.keys() else 0,
+            key='stock_scanner_type_selectbox'
+        )
+        st.session_state.stock_scanner_type = scan_type_display
+        scan_type = scanner_map[scan_type_display]
+
+    with scanner_col2:
+        st.write("")
+        st.write("")
+        
+        if scan_type == "manual":
+            button_label = "✍️ Add Manually"
+            button_type = "secondary"
+        else:
+            button_label = "🚀 Scan"
+            button_type = "primary"
+        
+        if st.button(button_label, width='stretch', type=button_type, key="stock_scan_btn"):
+            if scan_type == "manual":
+                st.session_state.stock_manual_mode = True
+                st.info("💡 Use the text input below to manually add tickers")
+            else:
+                st.session_state.stock_manual_mode = False
+                st.session_state.stock_scan_results = []
+                st.session_state.stock_selected_tickers = []
+                
+                with st.spinner(f"Scanning for {scan_type_display}..."):
+                    try:
+                        scanner = get_advanced_scanner()
+                        results = []
+                        
+                        if scan_type == "watchlist":
+                            tm = get_ticker_manager()
+                            if tm:
+                                watchlist = tm.get_all_tickers()
+                                tickers = [item['ticker'] for item in watchlist]
+                                for ticker in tickers:
+                                    # Simple fetch for watchlist
+                                    try:
+                                        analysis = ComprehensiveAnalyzer.analyze_stock(ticker)
+                                        if analysis:
+                                            results.append({
+                                                "Ticker": ticker,
+                                                "Price": analysis.price,
+                                                "Change": analysis.change_pct,
+                                                "Score": 50  # Default score
+                                            })
+                                    except Exception:
+                                        pass
+                        else:
+                            # Map to AdvancedOpportunityScanner types
+                            adv_scan_type = {
+                                "top_gainers": ScanType.MOMENTUM, # Approximate
+                                "options": ScanType.OPTIONS,
+                                "penny_stocks": ScanType.PENNY_STOCKS,
+                                "buzzing": ScanType.BUZZING,
+                                "breakouts": ScanType.BREAKOUTS
+                            }.get(scan_type, ScanType.ALL)
+                            
+                            # Run scanner
+                            filters = ScanFilters() # Default filters
+                            if scan_type == "top_gainers":
+                                filters.min_change_pct = 3.0
+                            
+                            if scanner:
+                                opps = scanner.scan_opportunities(scan_type=adv_scan_type, filters=filters, top_n=20)
+                                
+                                for opp in opps:
+                                    results.append({
+                                        "Ticker": opp.ticker,
+                                        "Price": opp.price,
+                                        "Change": opp.change_pct,
+                                        "Score": opp.score
+                                    })
+                        
+                        st.session_state.stock_scan_results = results
+                        if results:
+                            st.success(f"Found {len(results)} tickers!")
+                        else:
+                            st.warning("No results found.")
+                            
+                    except Exception as e:
+                        st.error(f"Scan failed: {e}")
+                        logger.error(f"Stock scan error: {e}")
+
+    # --- Manual Selection ---
+    if st.session_state.get('stock_manual_mode', False) or scan_type == "manual":
+        st.markdown("---")
+        st.markdown("#### ✍️ Manual Selection")
+        
+        manual_col1, manual_col2 = st.columns([3, 1])
+        with manual_col1:
+            manual_input = st.text_area(
+                "Enter symbols (comma separated)",
+                value="",
+                height=100,
+                key='stock_manual_input'
+            )
+        with manual_col2:
+            st.write("")
+            st.write("")
+            if st.button("✅ Add", width='stretch'):
+                tickers = [t.strip().upper() for t in manual_input.split(',') if t.strip()]
+                current_results = st.session_state.get('stock_scan_results', [])
+                
+                for ticker in tickers:
+                    # Fetch basic data
+                    try:
+                        analysis = ComprehensiveAnalyzer.analyze_stock(ticker)
+                        if analysis:
+                            # Check if already exists
+                            if not any(r['Ticker'] == ticker for r in current_results):
+                                current_results.append({
+                                    "Ticker": ticker,
+                                    "Price": analysis.price,
+                                    "Change": analysis.change_pct,
+                                    "Score": 50
+                                })
+                    except:
+                        pass
+                
+                st.session_state.stock_scan_results = current_results
+                st.success(f"Added {len(tickers)} tickers")
+
+    # --- 2. Select Tickers ---
+    if st.session_state.get('stock_scan_results'):
+        st.markdown("---")
+        st.markdown("### 2️⃣ SELECT TICKERS FOR ANALYSIS")
+        
+        df = pd.DataFrame(st.session_state.stock_scan_results)
+        
+        # Selection buttons
+        btn_col1, btn_col2, btn_col3 = st.columns(3)
+        with btn_col1:
+            if st.button("✅ SELECT ALL", use_container_width=True, key="sel_all_stock"):
+                st.session_state.stock_selected_tickers = df['Ticker'].tolist()
+        with btn_col2:
+            if st.button("❌ CLEAR ALL", use_container_width=True, key="clear_all_stock"):
+                st.session_state.stock_selected_tickers = []
+        with btn_col3:
+            st.metric("Selected", len(st.session_state.get('stock_selected_tickers', [])))
+
+        # Display DataFrame with selection
+        if 'stock_selected_tickers' not in st.session_state:
+            st.session_state.stock_selected_tickers = []
+
+        selected = st.multiselect(
+            "Select tickers to analyze",
+            options=df['Ticker'].tolist(),
+            default=st.session_state.stock_selected_tickers,
+            key='stock_ticker_multiselect'
+        )
+        # Sync multiselect with session state
+        if selected != st.session_state.stock_selected_tickers:
+            st.session_state.stock_selected_tickers = selected
+        
+        st.dataframe(df, use_container_width=True)
+
+    # --- 3. Analyze Selected ---
+    selected_tickers = st.session_state.get('stock_selected_tickers', [])
+    if selected_tickers:
+        st.markdown("---")
+        st.markdown("### 3️⃣ ANALYZE SELECTED TICKERS")
+        
+        st.info(f"Ready to analyze **{len(selected_tickers)}** tickers")
+        
+        # Analysis Mode Selection
+        if 'stock_analysis_mode' not in st.session_state:
+            st.session_state.stock_analysis_mode = 'standard'
+
+        mode_col1, mode_col2, mode_col3 = st.columns(3)
+        with mode_col1:
+            if st.button("🔬 STANDARD", type="primary" if st.session_state.stock_analysis_mode == 'standard' else "secondary", use_container_width=True, key="mode_std"):
+                st.session_state.stock_analysis_mode = 'standard'
+                st.rerun()
+        with mode_col2:
+            if st.button("🎯 MULTI-CONFIG", type="primary" if st.session_state.stock_analysis_mode == 'multi' else "secondary", use_container_width=True, key="mode_multi"):
+                st.session_state.stock_analysis_mode = 'multi'
+                st.rerun()
+        with mode_col3:
+            if st.button("🚀 ULTIMATE", type="primary" if st.session_state.stock_analysis_mode == 'ultimate' else "secondary", use_container_width=True, key="mode_ult"):
+                st.session_state.stock_analysis_mode = 'ultimate'
+                st.rerun()
+
+        # Configuration & Execution
+        if st.session_state.stock_analysis_mode == 'standard':
+            col_style, col_btn = st.columns([2, 1])
+            with col_style:
+                trading_style = st.selectbox(
+                    "Trading Style",
+                    options=["SCALP", "DAY_TRADE", "SWING_TRADE", "OPTIONS", "BUY_HOLD"],
+                    format_func=lambda x: x.replace('_', ' ').title(),
+                    key="std_trading_style"
+                )
+            
+            with col_btn:
+                st.write("")
+                st.write("")
+                if st.button("🚀 Analyze All", type="primary", width='stretch', key="analyze_stock_btn"):
+                    _run_stock_analysis(selected_tickers, [trading_style])
+
+        elif st.session_state.stock_analysis_mode == 'multi':
+            st.caption("Test multiple trading styles simultaneously")
+            styles = st.multiselect(
+                "Styles to Test",
+                options=["SCALP", "DAY_TRADE", "SWING_TRADE", "OPTIONS", "BUY_HOLD"],
+                default=["DAY_TRADE", "SWING_TRADE"],
+                format_func=lambda x: x.replace('_', ' ').title(),
+                key="multi_styles"
+            )
+            
+            if st.button("🚀 Run Multi-Config Analysis", type="primary", key="analyze_multi_btn"):
+                if styles:
+                    _run_stock_analysis(selected_tickers, styles)
+                else:
+                    st.error("Select at least one style")
+
+        elif st.session_state.stock_analysis_mode == 'ultimate':
+            st.caption("Run ALL analysis types + AI Validation")
+            st.info("🔥 Will analyze: Scalp, Day Trade, Swing, Options, Buy & Hold for ALL tickers")
+            
+            if st.button("🔥 START ULTIMATE ANALYSIS", type="primary", key="analyze_ult_btn"):
+                all_styles = ["SCALP", "DAY_TRADE", "SWING_TRADE", "OPTIONS", "BUY_HOLD"]
+                _run_stock_analysis(selected_tickers, all_styles)
+        
+    # --- 4. Results & Execute ---
+    if st.session_state.get('stock_analysis_results'):
+        st.markdown("---")
+        st.markdown("### 4️⃣ RANKED OPPORTUNITIES")
+        
+        results = st.session_state.stock_analysis_results
+        # Sort by confidence
+        results.sort(key=lambda x: x['Confidence'], reverse=True)
+        
+        for res in results:
+            with st.container():
+                c1, c2, c3, c4, c5 = st.columns([1, 2, 2, 2, 2])
+                
+                c1.markdown(f"### {res['Ticker']}")
+                c1.caption(f"Strategy: {res['Style']}")
+                
+                signal_color = "green" if res['Signal'] == "BUY" else "red" if res['Signal'] == "SELL" else "grey"
+                c2.markdown(f"**Signal:** :{signal_color}[{res['Signal']}]")
+                c2.metric("Confidence", f"{res['Confidence']}%")
+                
+                c3.metric("Price", f"${res['Price']:.2f}")
+                
+                # Show Style-specific metrics
+                if res['Style'] == "OPTIONS":
+                     c4.metric("IV Rank", f"{res.get('IV_Rank', 'N/A')}")
+                else:
+                     c4.metric("Target", f"${res['Target']:.2f}")
+                
+                with c5:
+                    st.write("")
+                    if st.button("⚡ Use Setup", key=f"use_setup_{res['Ticker']}_{res['Style']}"):
+                        st.session_state['stock_prefill_symbol'] = res['Ticker']
+                        st.session_state['ex_symbol'] = res['Ticker']
+                        
+                        # Determine correct action based on strategy and recommendation
+                        action_val = "buy"
+                        
+                        if res['Style'] == "OPTIONS":
+                            # Check recommendation for "Sell" or "Credit" or "Write"
+                            rec_text = res.get('Recommendation', '').lower()
+                            if any(x in rec_text for x in ['sell', 'write', 'credit', 'short']):
+                                action_val = "sell_to_open"
+                            else:
+                                action_val = "buy_to_open"
+                        elif res['Style'] == "BUY_HOLD":
+                            # Buy & Hold usually implies long-only or exit
+                            if res['Signal'] == "BUY":
+                                action_val = "buy"
+                            elif res['Signal'] == "SELL":
+                                action_val = "sell"
+                        else:
+                            # Active Trading (Scalp, Day, Swing, Warrior, etc.)
+                            # SELL signal implies Short Entry
+                            if res['Signal'] == "BUY":
+                                action_val = "buy"
+                            elif res['Signal'] == "SELL":
+                                action_val = "sell_short"
+                        
+                        st.session_state['stock_prefill_action'] = action_val
+                        st.session_state['ex_action'] = action_val
+                        
+                        st.session_state['stock_prefill_qty'] = 10
+                        st.session_state['ex_qty'] = 10
+                        
+                        st.success(f"Populated Order Form with {action_val}!")
+                
+                # Show Recommendation text in expander
+                with st.expander("📋 Analysis Details"):
+                    st.text(res.get('Recommendation', 'No details available'))
+                
+                st.divider()
+
+
+
+    # --- 5. Execution (Simple Form) ---
+    st.markdown("### ⚡ EXECUTE TRADE")
+    
+    ex_col1, ex_col2, ex_col3 = st.columns(3)
+    with ex_col1:
+        # Initialize session state default if not present
+        if 'ex_symbol' not in st.session_state:
+            st.session_state.ex_symbol = st.session_state.get('stock_prefill_symbol', '')
+        symbol = st.text_input("Symbol", key="ex_symbol")
+        
+    with ex_col2:
+        action_options = ["buy", "sell", "sell_short", "buy_to_cover", "buy_to_open", "buy_to_close", "sell_to_open", "sell_to_close"]
+        # Initialize session state default if not present
+        if 'ex_action' not in st.session_state:
+             # Check prefill or default to 'buy'
+             prefill = st.session_state.get('stock_prefill_action', 'buy')
+             if prefill in action_options:
+                 st.session_state.ex_action = prefill
+             else:
+                 # Fallback if prefill is not in options (e.g. sell_short in paper?)
+                 st.session_state.ex_action = 'buy'
+        
+        action = st.selectbox("Action", action_options, key="ex_action")
+        
+    with ex_col3:
+        if 'ex_qty' not in st.session_state:
+            st.session_state.ex_qty = st.session_state.get('stock_prefill_qty', 10)
+        qty = st.number_input("Quantity", min_value=1, key="ex_qty")
+    
+    if st.button("🚀 Submit Order", type="primary", key="ex_submit"):
+        if 'tradier_client' in st.session_state and st.session_state.tradier_client:
+            with st.spinner("Placing order..."):
+                try:
+                    # Use tradier client to place order
+                    client = st.session_state.tradier_client
+                    side = action
+                    
+                    # Map detailed actions to simple side if needed, or use as is if client supports it
+                    # Tradier client usually expects 'buy', 'sell', 'buy_to_open', etc.
+                    
+                    order_response = client.place_equity_order(symbol, side, qty, "market") # Market order for simplicity
+                    if order_response:
+                        st.success(f"Order Submitted: {order_response}")
+                    else:
+                        st.error("Order failed")
+                except Exception as e:
+                    st.error(f"Order failed: {e}")
+        else:
+            st.warning("Tradier client not connected. Please connect in Tradier tab.")
+            st.info(f"Simulated Order: {action.upper()} {qty} {symbol}")
+
+
+def render_background_bot_ui():
+    """Background Bot Configuration"""
     st.header("Auto-Trader")
     
     # TODO: Review and fix imports
@@ -199,12 +644,12 @@ def render_tab():
         return False
     
     # Helper functions for config file management
-    def load_config_file(config_filename):
+    def load_config_file(config_filename, force_reload=True):
         """Load settings from any config file dynamically (with broker-specific support)"""
         try:
             # Use broker-specific config loader
             from utils.config_loader import load_config_module
-            cfg = load_config_module(config_filename)
+            cfg = load_config_module(config_filename, force_reload=force_reload)
             
             return {
                 'trading_mode': getattr(cfg, 'TRADING_MODE', 'SCALPING'),

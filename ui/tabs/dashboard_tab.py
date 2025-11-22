@@ -49,7 +49,7 @@ def render_tab():
 
     _render_header()
 
-    search_ticker, trading_style = _render_input_section()
+    search_ticker, trading_style, analyze_btn = _render_input_section()
 
     
 
@@ -62,7 +62,6 @@ def render_tab():
     
 
     # Handle analysis
-    analyze_btn = st.session_state.get('analyze_btn_clicked', False)
     trigger_analysis = st.session_state.get('trigger_analysis', False)
 
     if (analyze_btn or trigger_analysis) and search_ticker:
@@ -100,7 +99,7 @@ def _render_header():
 
 
 
-def _render_input_section() -> Tuple[str, str]:
+def _render_input_section() -> Tuple[str, str, bool]:
 
     """Render the input section for ticker and trading style"""
 
@@ -141,10 +140,6 @@ def _render_input_section() -> Tuple[str, str]:
 
         analyze_btn = st.button("🔍 Analyze Stock", type="primary", width="stretch")
 
-        st.session_state.analyze_btn_clicked = analyze_btn
-
-    
-
     # Quick examples with style descriptions
 
     st.caption("**Examples:** AAPL (blue chip) | SNDL (penny stock) | SPY (ETF) | TSLA (volatile) | Any OTC stock")
@@ -157,7 +152,7 @@ def _render_input_section() -> Tuple[str, str]:
 
     
 
-    return search_ticker, trading_style
+    return search_ticker, trading_style, analyze_btn
 
 
 
@@ -1078,19 +1073,14 @@ def _handle_analysis(search_ticker: str, trading_style: str):
     # Use new st.status for better progress indication
     with st.status(f"🔍 Analyzing {search_ticker}...", expanded=True) as status:
         st.write("📊 Fetching market data...")
-        time.sleep(0.5)  # Simulate processing time
         
         st.write("📈 Calculating technical indicators...")
-        time.sleep(0.5)
         
         st.write("📰 Analyzing news sentiment...")
-        time.sleep(0.5)
         
         st.write("🎯 Identifying catalysts...")
-        time.sleep(0.5)
         
         st.write("📄 Fetching SEC filings (8-K, 10-Q, 10-K)...")
-        time.sleep(0.3)
         
         st.write(f"🤖 Generating {trading_style} recommendations...")
         analysis = ComprehensiveAnalyzer.analyze_stock(search_ticker, trading_style)
