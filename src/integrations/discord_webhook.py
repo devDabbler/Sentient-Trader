@@ -1,11 +1,17 @@
 """
 Discord Webhook for Trading Alerts
+
+IMPORTANT: Uses lazy import of requests to prevent Task Scheduler hangs
 """
 
 import os
-import requests
 from loguru import logger
 from models.alerts import TradingAlert, AlertType
+
+# Lazy import - only load when actually sending webhook
+def _get_requests():
+    import requests
+    return requests
 
 
 
@@ -331,16 +337,17 @@ def send_discord_alert(alert: TradingAlert):
     }
 
     try:
+        requests = _get_requests()  # Lazy import
         response = requests.post(webhook_url, json=payload, timeout=10)
         response.raise_for_status()
         logger.info(f'✅ Successfully sent alert for {alert.ticker} to Discord.')
-    except requests.exceptions.Timeout:
-        logger.error(f'❌ Discord webhook timeout for {alert.ticker}. Webhook may be slow or unreachable.')
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f'❌ Discord webhook connection error for {alert.ticker}: {e}')
-    except requests.exceptions.HTTPError as e:
-        logger.error(f'❌ Discord webhook HTTP error for {alert.ticker}: {e} - Status: {response.status_code}, Response: {response.text[:200]}')
-    except requests.exceptions.RequestException as e:
-        logger.error(f'❌ Failed to send Discord alert for {alert.ticker}: {e}', exc_info=True)
     except Exception as e:
-        logger.error(f'❌ Unexpected error sending Discord alert for {alert.ticker}: {e}', exc_info=True)
+        # Simplified error handling - requests.exceptions may not be loaded yet
+        if 'Timeout' in str(type(e).__name__):
+            logger.error(f'❌ Discord webhook timeout for {alert.ticker}. Webhook may be slow or unreachable.')
+        elif 'ConnectionError' in str(type(e).__name__):
+            logger.error(f'❌ Discord webhook connection error for {alert.ticker}: {e}')
+        elif 'HTTPError' in str(type(e).__name__):
+            logger.error(f'❌ Discord webhook HTTP error for {alert.ticker}: {e}')
+        else:
+            logger.error(f'❌ Failed to send Discord alert for {alert.ticker}: {e}', exc_info=True)

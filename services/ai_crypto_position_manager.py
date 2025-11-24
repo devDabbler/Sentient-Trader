@@ -1525,6 +1525,92 @@ Analyze the position using these factors:
             'recommendations': recommendations
         }
 
+<<<<<<< HEAD
+=======
+    def sync_with_kraken(self) -> Dict[str, int]:
+        """
+        Sync AI monitor positions with current Kraken positions
+        Removes positions not in Kraken, adds missing positions
+        
+        Returns:
+            Dict with 'removed', 'added', 'kept' counts
+        """
+        try:
+            # Fetch current Kraken positions
+            kraken_positions = self.kraken_client.get_open_positions(calculate_real_cost=True)
+            
+            # Create a map of Kraken positions by pair
+            kraken_pairs = {}
+            for pos in kraken_positions:
+                if pos.pair not in kraken_pairs:
+                    kraken_pairs[pos.pair] = []
+                kraken_pairs[pos.pair].append(pos)
+            
+            removed_count = 0
+            kept_count = 0
+            
+            # Remove AI positions that no longer exist in Kraken
+            positions_to_remove = []
+            for trade_id, ai_pos in self.positions.items():
+                # Check if this pair still exists in Kraken
+                if ai_pos.pair not in kraken_pairs:
+                    positions_to_remove.append(trade_id)
+                    logger.info(f"📤 Removing {ai_pos.pair} - No longer in Kraken portfolio")
+                else:
+                    kept_count += 1
+            
+            # Actually remove the positions
+            for trade_id in positions_to_remove:
+                self.remove_position(trade_id, reason="Not in Kraken portfolio")
+                removed_count += 1
+            
+            # Add new positions from Kraken that aren't being monitored
+            added_count = 0
+            import time
+            for pair, kraken_pos_list in kraken_pairs.items():
+                # Check if we're already monitoring this pair
+                already_monitored = any(p.pair == pair for p in self.positions.values())
+                
+                if not already_monitored and kraken_pos_list:
+                    # Add the first position for this pair
+                    pos = kraken_pos_list[0]
+                    trade_id = f"{pos.pair}_synced_{int(time.time())}_{added_count}"
+                    
+                    # Calculate stop loss and take profit (5% and 10% from current)
+                    stop_loss = pos.current_price * 0.95
+                    take_profit = pos.current_price * 1.10
+                    
+                    success = self.add_position(
+                        trade_id=trade_id,
+                        pair=pos.pair,
+                        side='BUY',
+                        volume=pos.volume,
+                        entry_price=pos.entry_price if pos.entry_price > 0 else pos.current_price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        strategy='Synced',
+                        entry_order_id=f"synced_{added_count}"
+                    )
+                    
+                    if success:
+                        added_count += 1
+                        logger.info(f"📥 Added {pos.pair} - Found in Kraken portfolio")
+            
+            self._save_state()
+            
+            logger.info(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
+            
+            return {
+                'added': added_count,
+                'removed': removed_count,
+                'kept': kept_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error syncing with Kraken: {e}", exc_info=True)
+            return {'added': 0, 'removed': 0, 'kept': 0, 'error': str(e)}
+    
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
     def get_status(self) -> Dict:
         """Get current manager status"""
         return {

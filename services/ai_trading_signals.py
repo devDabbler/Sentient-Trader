@@ -9,7 +9,9 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import time
 from dotenv import load_dotenv
+from .llm_helper import get_llm_helper
 
 # Load environment variables
 load_dotenv()
@@ -41,26 +43,24 @@ class AITradingSignalGenerator:
     
     def __init__(self, api_key: Optional[str] = None, use_local_llm: bool = True):
         """
-        Initialize AI signal generator with hybrid LLM support
+        Initialize AI signal generator with LLM Request Manager
         
         Args:
-            api_key: API key for cloud fallback (optional if in env)
-            use_local_llm: Whether to prefer local Ollama models
+            api_key: Deprecated - API keys are now managed centrally
+            use_local_llm: Deprecated - provider selection is now automatic
         """
-        self.api_key = api_key
-        self.use_local_llm = use_local_llm
+        if api_key:
+            logger.warning("⚠️ api_key parameter is deprecated, keys are managed centrally")
+        if not use_local_llm:
+            logger.warning("⚠️ use_local_llm parameter is deprecated, provider selection is automatic")
         
-        # Initialize hybrid LLM analyzer
+        # Initialize LLM Request Manager helper (HIGH priority for trading signals)
         try:
-            from .hybrid_llm_analyzer import get_best_trading_analyzer
-            self.llm_analyzer = get_best_trading_analyzer()
-            logger.success("🚀 Hybrid LLM analyzer initialized successfully")
+            self.llm_helper = get_llm_helper("ai_trading_signals", default_priority="HIGH")
+            logger.success("🚀 AI Trading Signal Generator using LLM Request Manager")
         except Exception as e:
-            logger.error(f"Failed to initialize hybrid LLM: {e}")
-            # Fallback to original OpenRouter implementation
-            self.llm_analyzer = None
-            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-            logger.info(f"AI Trading Signal Generator fallback to OpenRouter using model: {model}")
+            logger.error(f"Failed to initialize LLM helper: {e}")
+            raise
     
     def generate_signal(
         self,
@@ -106,14 +106,17 @@ class AITradingSignalGenerator:
                 current_positions=current_positions or []
             )
             
-            # Get AI analysis using hybrid LLM (local Ollama or cloud fallback)
+            # Get AI analysis using LLM Request Manager
             logger.info(f"🧠 Requesting LLM analysis for {symbol}...")
-            if self.llm_analyzer:
-                logger.debug("Using hybrid LLM analyzer")
-                response = self.llm_analyzer.analyze_with_llm(prompt, 'trading_signals')
-            else:
-                logger.debug("Using OpenRouter fallback")
-                response = self._call_openrouter(prompt)
+            
+            # Use HIGH priority for trading signals with symbol-based caching (2 min TTL)
+            cache_key = f"signal_{symbol}_{int(time.time() // 120)}"  # Cache per 2-min window
+            response = self.llm_helper.high_request(
+                prompt,
+                cache_key=cache_key,
+                ttl=120,  # 2 minutes cache for trading signals
+                temperature=0.3  # Lower temperature for consistent signals
+            )
             
             if response:
                 logger.info(f"✅ Received response ({len(response)} chars), parsing signal...")
@@ -287,72 +290,6 @@ Analyze all the data above and provide a trading recommendation. Consider:
 """
         
         return prompt
-    
-    def _call_openrouter(self, prompt: str) -> Optional[str]:
-        """Call LLM (hybrid local/cloud support)"""
-        try:
-            # Use hybrid LLM analyzer if available
-            if hasattr(self, 'llm_analyzer') and self.llm_analyzer:
-                logger.info("🚀 Using hybrid LLM analyzer for trading signal")
-                return self.llm_analyzer.analyze_with_llm(prompt, 'trading_signals')
-            
-            # Fallback to original OpenRouter implementation
-            import os
-            import requests
-            
-            api_key = self.api_key or os.getenv('OPENROUTER_API_KEY')
-            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-            
-            if not api_key:
-                logger.error("❌ No OpenRouter API key found - cannot make API calls")
-                logger.error("Set OPENROUTER_API_KEY in your .env file")
-                return None
-            
-            logger.info(f"☁️ Fallback to OpenRouter API with model: {model}")
-            logger.debug(f"API Key present: {bool(api_key)}, Length: {len(api_key)}")
-            
-            response = requests.post(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/sentient-trader",
-                    "X-Title": "Sentient Trader"
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are an expert day trader. Always respond with valid JSON only. CRITICAL: All string values must be on a single line with no newline characters. Keep text concise."
-                        },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
-                    ]
-                },
-                timeout=30
-            )
-            
-            logger.info(f"OpenRouter response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                content = data['choices'][0]['message']['content']
-                logger.info(f"✅ OpenRouter API call successful - received {len(content)} characters")
-                return content
-            else:
-                logger.error(f"❌ OpenRouter API error: {response.status_code}")
-                logger.error(f"Response: {response.text[:500]}")
-                return None
-        
-        except Exception as e:
-            logger.error(f"❌ Error calling OpenRouter: {e}")
-            logger.error(f"API Key configured: {bool(api_key)}")
-            return None
-    
-    
     
     def _clean_json_string(self, json_str: str) -> str:
         """Clean JSON string to handle malformed responses from LLM"""

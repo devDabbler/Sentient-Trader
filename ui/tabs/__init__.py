@@ -69,6 +69,16 @@ try:
 except ImportError:
     crypto_tab = None
 
+try:
+    from . import dca_tab
+except ImportError:
+    dca_tab = None
+
+try:
+    from . import llm_usage_tab
+except ImportError:
+    llm_usage_tab = None
+
 __all__ = [
     'dashboard_tab',
     'scanner_tab',
@@ -82,5 +92,7 @@ __all__ = [
     'scalping_tab',
     'strategy_analyzer_tab',
     'autotrader_tab',
-    'crypto_tab'
+    'crypto_tab',
+    'dca_tab',
+    'llm_usage_tab'
 ]

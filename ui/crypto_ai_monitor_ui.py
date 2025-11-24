@@ -40,7 +40,7 @@ def display_ai_position_monitor():
         st.markdown("#### 🔄 Load Existing Positions")
         st.info("💡 **Tip:** You can load your existing Kraken positions into AI monitoring")
         
-        if st.button("🔍 Scan & Load Kraken Positions", width='stretch', type="primary"):
+        if st.button("🔍 Scan & Load Kraken Positions", use_container_width=True, type="primary"):
             with st.spinner("Scanning your Kraken account for open positions..."):
                 try:
                     # Get Kraken client from environment variables
@@ -156,6 +156,61 @@ def display_ai_position_monitor():
         st.error(f"Error getting AI manager status: {e}")
         logger.error("AI manager status error: {}", str(e), exc_info=True)
         return
+    
+    # 🔍 CHECK FOR SYNC ISSUES: Compare AI monitor with actual Kraken positions
+    try:
+        # Get Kraken client
+        kraken_key = os.getenv('KRAKEN_API_KEY')
+        kraken_secret = os.getenv('KRAKEN_API_SECRET')
+        
+        if kraken_key and kraken_secret:
+            from clients.kraken_client import KrakenClient
+            
+            # Use cached Kraken client if available
+            if 'kraken_client' in st.session_state:
+                kraken_client = st.session_state.kraken_client
+            else:
+                kraken_client = KrakenClient(api_key=kraken_key, api_secret=kraken_secret)
+                st.session_state.kraken_client = kraken_client
+            
+            # Get actual Kraken positions
+            kraken_positions = kraken_client.get_open_positions(calculate_real_cost=True)
+            kraken_pairs = set(pos.pair for pos in kraken_positions)
+            ai_pairs = set(pos.pair for pos in ai_manager.positions.values())
+            
+            # Check for mismatches
+            missing_in_ai = kraken_pairs - ai_pairs
+            extra_in_ai = ai_pairs - kraken_pairs
+            
+            if missing_in_ai or extra_in_ai:
+                st.warning("⚠️ **Sync Issue Detected:** AI monitor positions don't match your Kraken portfolio!")
+                
+                with st.expander("🔍 View Sync Issues", expanded=True):
+                    sync_col1, sync_col2 = st.columns(2)
+                    
+                    with sync_col1:
+                        st.markdown(f"**🤖 AI Monitor:** {len(ai_pairs)} positions")
+                        if ai_pairs:
+                            for pair in sorted(ai_pairs):
+                                if pair in extra_in_ai:
+                                    st.error(f"❌ {pair} (not in Kraken)")
+                                else:
+                                    st.success(f"✅ {pair}")
+                    
+                    with sync_col2:
+                        st.markdown(f"**📊 Kraken Portfolio:** {len(kraken_pairs)} positions")
+                        if kraken_pairs:
+                            for pair in sorted(kraken_pairs):
+                                if pair in missing_in_ai:
+                                    st.warning(f"⚠️ {pair} (not monitored)")
+                                else:
+                                    st.success(f"✅ {pair}")
+                    
+                    st.info("💡 **Solution:** Click the **'🔗 Sync with Kraken'** button below to fix this automatically.")
+                
+                st.markdown("---")
+    except Exception as e:
+        logger.debug(f"Sync check failed: {e}")
     
     # Status header
     col1, col2, col3, col4 = st.columns(4)
@@ -408,26 +463,46 @@ def display_ai_position_monitor():
     
     # Control buttons
     st.markdown("---")
-    control_col1, control_col2, control_col3 = st.columns(3)
+    control_col1, control_col2, control_col3, control_col4 = st.columns(4)
     
     with control_col1:
-        if st.button("🔄 Refresh Status", width='stretch'):
+        if st.button("🔄 Refresh Status", use_container_width=True):
             st.rerun()
     
     with control_col2:
+        if st.button("🔗 Sync with Kraken", use_container_width=True, type="primary", 
+                   help="Reconcile AI monitor with your actual Kraken positions"):
+            with st.spinner("Syncing with Kraken..."):
+                try:
+                    result = ai_manager.sync_with_kraken()
+                    
+                    if 'error' in result:
+                        st.error(f"❌ Sync failed: {result['error']}")
+                    else:
+                        added = result.get('added', 0)
+                        removed = result.get('removed', 0)
+                        kept = result.get('kept', 0)
+                        
+                        st.success(f"✅ Sync complete!")
+                        st.info(f"📊 **Results:** {added} added, {removed} removed, {kept} kept")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+    
+    with control_col3:
         if status['is_running']:
-            if st.button("⏸️ Stop Monitoring", width='stretch'):
+            if st.button("⏸️ Stop Monitoring", use_container_width=True):
                 ai_manager.stop()
                 st.success("AI monitoring stopped")
                 st.rerun()
         else:
-            if st.button("▶️ Start Monitoring", width='stretch'):
+            if st.button("▶️ Start Monitoring", use_container_width=True):
                 ai_manager.start_monitoring_loop()
                 st.success("AI monitoring started")
                 st.rerun()
     
-    with control_col3:
-        if st.button("🗑️ Clear All", width='stretch'):
+    with control_col4:
+        if st.button("🗑️ Clear All", use_container_width=True):
             if st.session_state.get('confirm_clear', False):
                 # Stop monitoring
                 ai_manager.stop()
@@ -511,13 +586,13 @@ def display_portfolio_analysis():
     # Fetch portfolio analysis button
     col1, col2 = st.columns([3, 1])
     with col2:
-        if st.button("🔄 Refresh Analysis", width='stretch'):
+        if st.button("🔄 Refresh Analysis", use_container_width=True):
             # Clear cached data
             if 'portfolio_analysis' in st.session_state:
                 del st.session_state.portfolio_analysis
     
     # Get portfolio analysis (cached in session state)
-    if 'portfolio_analysis' not in st.session_state or st.button("📈 Analyze Portfolio", width='stretch', type="primary"):
+    if 'portfolio_analysis' not in st.session_state or st.button("📈 Analyze Portfolio", use_container_width=True, type="primary"):
         with st.spinner("Analyzing your Kraken portfolio..."):
             try:
                 # 1. Fetch raw positions from client

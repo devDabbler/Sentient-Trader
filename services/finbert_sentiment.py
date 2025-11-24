@@ -87,22 +87,15 @@ class FinBERTSentimentAnalyzer:
                 self._init_llm_fallback()
     
     def _init_llm_fallback(self):
-        """Initialize LLM-based sentiment fallback"""
+        """Initialize LLM-based sentiment fallback using LLM Request Manager"""
         try:
-            from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-            from utils.config_loader import get_api_key
+            from services.llm_helper import get_llm_helper
             
-            api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
-            
-            if api_key:
-                self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", api_key=api_key)
-                logger.info("✅ LLM sentiment fallback initialized")
-            else:
-                logger.warning("⚠️ OPENROUTER_API_KEY not found, LLM fallback disabled")
-                self.llm_analyzer = None
+            self.llm_helper = get_llm_helper("finbert_sentiment", default_priority="LOW")
+            logger.info("✅ LLM sentiment fallback initialized with LLM Request Manager")
         except Exception as e:
             logger.warning(f"⚠️ Could not initialize LLM fallback: {e}")
-            self.llm_analyzer = None
+            self.llm_helper = None
     
     def analyze_sentiment(
         self,
@@ -131,7 +124,7 @@ class FinBERTSentimentAnalyzer:
                 # Fall through to LLM fallback
         
         # Fallback to LLM-based sentiment
-        if self.fallback_to_llm and hasattr(self, 'llm_analyzer') and self.llm_analyzer:
+        if self.fallback_to_llm and hasattr(self, 'llm_helper') and self.llm_helper:
             try:
                 return self._analyze_with_llm(text)
             except Exception as e:
@@ -180,31 +173,33 @@ class FinBERTSentimentAnalyzer:
         )
     
     def _analyze_with_llm(self, text: str) -> FinBERTSentiment:
-        """Fallback: Analyze using LLM"""
+        """Fallback: Analyze using LLM Request Manager"""
         
         prompt = f"""Analyze the financial sentiment of this text.
 
-Text: "{text}"
+Text: \"\"\"{text}\"\"\"
 
-Consider:
-- Market impact (positive/negative/neutral)
-- Tone and context
-- Financial implications
-- Urgency and strength of sentiment
-
-Respond ONLY with valid JSON (no other text):
+Respond in JSON format:
 {{
-    "sentiment": "positive|negative|neutral",
-    "confidence": 0.85,
-    "reasoning": "Brief explanation"
+    "label": "positive", "negative", or "neutral",
+    "score": confidence score 0.0-1.0,
+    "positive": positive score 0.0-1.0,
+    "negative": negative score 0.0-1.0,
+    "neutral": neutral score 0.0-1.0
 }}
+
+Be precise and consider financial context.
 """
         
         try:
-            response = self.llm_analyzer._call_openrouter(
+            # Use LOW priority with caching (1 min TTL for sentiment analysis)
+            import hashlib
+            cache_key = f"sentiment_{hashlib.md5(text.encode()).hexdigest()[:16]}"
+            response = self.llm_helper.low_request(
                 prompt,
-                max_retries=1,
-                try_fallbacks=True
+                cache_key=cache_key,
+                ttl=60,  # 1 minute cache
+                temperature=0.2  # Low temperature for consistent sentiment
             )
             
             if not response:

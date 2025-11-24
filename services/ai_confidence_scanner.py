@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from loguru import logger
 from dotenv import load_dotenv
 from .top_trades_scanner import TopTradesScanner, TopTrade
+from .llm_helper import get_llm_helper
 
 # Load environment variables
 load_dotenv()
@@ -43,16 +44,13 @@ class AIConfidenceScanner:
         else:
             self.use_llm = use_llm
 
-        # Use provided LLM analyzer or create new one
-        if llm_analyzer is not None:
-            self.llm_analyzer = llm_analyzer
-            self.use_llm = True
-        elif self.use_llm:
+        # Initialize LLM Request Manager helper (MEDIUM priority for informational analysis)
+        if self.use_llm:
             try:
-                from .hybrid_llm_analyzer import get_best_trading_analyzer
-                self.llm_analyzer = get_best_trading_analyzer()
-                logger.success("🚀 AI Confidence Scanner using hybrid LLM analyzer")
+                self.llm_helper = get_llm_helper("ai_confidence_scanner", default_priority="MEDIUM")
+                logger.success("🚀 AI Confidence Scanner using LLM Request Manager")
             except Exception as e:
+<<<<<<< HEAD
                 logger.warning(f"Hybrid LLM failed, trying original: {e}")
                 try:
                     from .llm_strategy_analyzer import LLMStrategyAnalyzer
@@ -74,8 +72,18 @@ class AIConfidenceScanner:
                     logger.error(f"❌ LLM initialization failed completely: {e2}")
                     self.use_llm = False
                     self.llm_analyzer = None
+=======
+                logger.error(f"❌ Failed to initialize LLM helper: {e}")
+                self.use_llm = False
+                self.llm_helper = None
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
         else:
-            self.llm_analyzer = None
+            self.llm_helper = None
+
+        # Keep backward compatibility with legacy llm_analyzer parameter
+        if llm_analyzer is not None:
+            logger.warning("⚠️ llm_analyzer parameter is deprecated, using LLM Request Manager instead")
+            self.use_llm = True
 
     def _check_llm_available(self) -> bool:
         """Check if OpenRouter LLM API key is available"""
@@ -176,7 +184,10 @@ Be concise but insightful. Focus on actionable analysis.
 """
 
     def _query_llm(self, prompt: str, ticker: Optional[str] = None) -> str:
-        """Query LLM for analysis"""
+        """Query LLM for analysis using centralized request manager"""
+        if not self.llm_helper:
+            raise Exception("LLM helper not initialized")
+        
         try:
             system_prompt = """You are a professional trading analyst. Provide concise, actionable insights in this exact format:
 
@@ -189,6 +200,7 @@ Be concise but insightful. Focus on actionable analysis."""
 
             full_prompt = f"{system_prompt}\n\n{prompt}"
             ticker_str = f" on {ticker}" if ticker else ""
+<<<<<<< HEAD
             logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")            # Try hybrid analyzer first
             if self.llm_analyzer and hasattr(self.llm_analyzer, 'analyze_with_llm'):
                 # Call the analyzer's analyze_with_llm method (works for both Hybrid and Strategy analyzers)
@@ -197,6 +209,18 @@ Be concise but insightful. Focus on actionable analysis."""
                 response = self.llm_analyzer._call_openrouter(full_prompt)
             else:
                 raise Exception("No valid LLM analyzer available")
+=======
+            logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")
+
+            # Use LLM helper with caching (5 min TTL for confidence analysis)
+            cache_key = f"confidence_{ticker}" if ticker else None
+            response = self.llm_helper.request(
+                prompt=full_prompt,
+                cache_key=cache_key,
+                ttl=300,  # 5 minutes cache
+                temperature=0.3  # Lower temperature for consistent analysis
+            )
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
 
             if not response:
                 logger.error(f"❌ Empty LLM response{ticker_str}")
@@ -393,6 +417,58 @@ Be concise but insightful. Focus on actionable analysis."""
         logger.info(f"Found {len(filtered_trades)} quality AI-analyzed penny stocks (from {len(trades)} scanned)")
         return filtered_trades
 
+    def analyze_ticker(self, ticker: str) -> Optional[Dict]:
+        """
+        Analyze a single ticker and return ensemble analysis
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with ensemble_score, technical_setup, ml_confidence, etc.
+        """
+        try:
+            # Use TopTradesScanner to get basic trade info
+            trades = self.scanner.scan_top_options_trades(top_n=100)
+            
+            # Find the ticker in the results
+            trade = next((t for t in trades if t.ticker.upper() == ticker.upper()), None)
+            
+            if not trade:
+                # Try penny stock universe
+                trades = self.scanner.scan_top_penny_stocks(top_n=100)
+                trade = next((t for t in trades if t.ticker.upper() == ticker.upper()), None)
+            
+            if not trade:
+                logger.debug(f"Ticker {ticker} not found in scanner results")
+                return None
+            
+            # Get AI confidence analysis
+            trade_type = 'options' if trade.price > 1 else 'penny_stock'
+            ai_analysis = self._generate_ai_confidence(trade, trade_type)
+            
+            # Convert string confidence to float (0-1)
+            conf_map = {'VERY HIGH': 0.9, 'HIGH': 0.8, 'MEDIUM-HIGH': 0.7, 'MEDIUM': 0.6, 'LOW': 0.4}
+            ml_confidence_float = conf_map.get(trade.confidence, 0.5)
+            
+            # Build ensemble analysis matching expected format
+            return {
+                'ensemble_score': int(trade.score),
+                'technical_setup': trade.reason,
+                'ml_confidence': ml_confidence_float,  # Float not string
+                'sentiment_score': min(100, int(trade.score * 0.8 + trade.volume_ratio * 5)),
+                'setup_type': 'BREAKOUT' if trade.change_pct > 3 else 'SETUP',
+                'confidence': float(ai_analysis['ai_rating']) / 10.0,  # Ensure float 0-1
+                'current_price': float(trade.price),
+                'volume_surge': trade.volume_ratio > 2.0,
+                'volatility': abs(trade.change_pct),
+                'timeframes_aligned': 2 if trade.confidence in ['HIGH', 'VERY HIGH'] else 1,
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing ticker {ticker}: {e}")
+            return None
+    
     def get_ai_insights(self, trades: List[AIConfidenceTrade]) -> Dict:
         """Generate AI insights summary"""
         if not trades:

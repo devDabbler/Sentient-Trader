@@ -11,35 +11,63 @@
 
 ## 🆕 Latest Updates (November 2025)
 
-### **₿ Crypto Trading UX Overhaul** 🔥 **NEW!**
+### **₿ Cryptocurrency Trading Integration** 🔥 **BRAND NEW!**
+- ✅ **Kraken Exchange Integration** - Full API support for crypto trading
+- ✅ **24/7 Markets** - Trade Bitcoin, Ethereum, and 20+ cryptos anytime
+- ✅ **AI-Powered Crypto Signals** - Crypto-specific analysis and strategies
+- ✅ **Crypto Scanner** - Find opportunities across all major pairs
+- ✅ **Adaptive Strategies** - Scalping, swing, and momentum trading for crypto
+- ✅ **Volatility Management** - Position sizing adapted for crypto volatility
+- ✅ **Fear & Greed Index** - Sentiment-driven trading signals
+- ✅ **Social Sentiment** - Twitter/Reddit/Discord integration
+- ✅ **Paper Trading** - Test crypto strategies risk-free
+- ✅ **All Safety Features** - Your stock trading safeguards adapted for crypto
 
-**Streamlined Interface: 12 tabs → 7 tabs (42% reduction)**
+**See:** `documentation/CRYPTO_TRADING_INTEGRATION_SUMMARY.md` for complete details
 
-- 📊 **Dashboard** (NEW) - Market overview + portfolio + quick actions (merged 3 tabs)
-- 🔍 **Daily Scanner** (ENHANCED) - All-in-one progressive scanning workflow
-  - Tier 1: 7 scan sources (Penny, Sub-Penny, CoinGecko, Watchlist, Top Gainers, Volume Surge, All Coins)
-  - Tier 2: Technical analysis (RSI, MACD, EMAs, volume)
-  - Tier 3: Deep analysis (Full strategy + AI review)
-  - Tier 4: Active monitoring (Real-time P&L tracking)
-- ⭐ **My Watchlist** - Curated coin lists
-- ⚡ **Quick Trade** - Fast execution workflow  
-- 🔔 **Entry Monitors** - Optimal entry timing
-- 🤖 **AI Position Monitor** - Intelligent trade management
-- 📓 **Trade Journal** - Performance tracking
+### **⚔️ Warrior Trading Scalping System**
+- ✅ **Gap & Go Strategy** - Trade premarket gappers with momentum continuation
+- ✅ **1-Minute Entry Triggers** - Breakout, micro pullback, red-to-green detection
+- ✅ **Market-Wide Scanner** 🔥 - Scan entire S&P 500/NASDAQ 100 for gappers automatically
+- ✅ **Automated Discovery** - No manual screening needed, finds best setups for you
+- ✅ **Tight Risk Management** - 1% stop, 2% profit, scale-out exits
+- ✅ **Morning Momentum Window** - Focus on 9:30 AM - 10:00 AM for best setups
+- ✅ **Hybrid Data Approach** - yfinance (free) + Tradier (real-time) for cost-effective scanning
 
-**Consolidated Features:**
-- ❌ Removed: Old Crypto Scanner, Penny Cryptos tab, CoinMarketCap tab, Signal Generator
-- ✅ All features now in Daily Scanner with unified workflow
-- ✅ 70+ coins across 11 categories
-- ✅ Kraken API integration (24/7 trading)
-- ✅ Freqtrade battle-tested strategies
-- ✅ AI pre-trade review + monitoring
+**Market-Wide Scanning Features:** 🔥 **NEW!**
+- Scan 500+ stocks (S&P 500) or 100+ stocks (NASDAQ 100) in < 60 seconds
+- Automatic gapper discovery: 2-20% gap, 1.5-10x volume
+- Parallel processing with ThreadPoolExecutor for speed
+- Configurable universes: SP500, NASDAQ100, ALL, CUSTOM, WATCHLIST
+- Batch processing to avoid API rate limits
+- Intelligent fallback: Tradier → yfinance if needed
 
-### **⚔️ Warrior Scalping System**
-- Gap & Go strategy (9:30-10:00 AM, $2-$20 stocks, 2-20% gaps)
-- Market-wide scanner (500+ stocks in <60s)
-- 1% stop, 2% profit, PDT-safe
-- Config: `config_warrior_scalping.py`
+**Core Filters:**
+- Price filter: $2-$20
+- Gap filter: 2-20% premarket gap (adjustable)
+- Volume filter: 1.5-10x average volume (adjustable)
+- Trading window: 9:30 AM - 10:00 AM ET
+- Profit target: 2% (scale out)
+- Stop loss: 1% (low of breakout candle)
+
+**Supported Setups:**
+- **Gap & Go**: Breakout above premarket high after 9:30 AM
+- **Micro Pullback**: 0.2-0.5% pullback in uptrend, bounce off 9 EMA
+- **Red-to-Green**: Reversal after red candles, above premarket low
+- **Bull Flag**: Breakout above flag high with volume confirmation
+
+**Integration:**
+- Fully integrated with dynamic strategy selector
+- Auto-Trader mode: `WARRIOR_SCALPING`
+- Config file: `config_warrior_scalping.py`
+- Toggle: `USE_MARKET_WIDE_SCAN = True/False`
+- PDT-safe (cash account compatible)
+- Paper trading mode only (for now)
+
+**Documentation:**
+- 📚 Implementation Guide: `documentation/WARRIOR_MARKET_SCANNER_IMPLEMENTATION.md`
+- ⚡ Quick Start: `documentation/WARRIOR_SCANNER_QUICK_START.md`
+- 🧪 Test Suite: `tests/test_warrior_market_scanner.py`
 
 ### **🎯 Dynamic Multi-Strategy System**
 - Intelligent per-ticker strategy selection (Scalping, Swing, Mean Reversion, Breakout, Wheel, Buy & Hold)
@@ -186,10 +214,16 @@ KRAKEN_API_SECRET=your_kraken_secret
 # Alerts (Optional but recommended)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 
-# Additional Data Sources (Optional)
-FINNHUB_API_KEY=your_key  # News & calendar
-NEWSAPI_KEY=your_key      # Additional news
-COINMARKETCAP_API_KEY=your_key  # Crypto data
+# Optional API Keys for Enhanced Data
+FINNHUB_API_KEY=your_finnhub_key        # For news & economic calendar
+NEWSAPI_KEY=your_newsapi_key            # For additional news sources
+SEC_API_KEY=your_sec_key                # For SEC filing rate limits (optional)
+TRADING_ECONOMICS_API_KEY=your_te_key   # For economic calendar (optional)
+
+# Legacy LLM Keys (optional, for direct API access)
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_API_KEY=...
 ```
 
 ---
@@ -2652,30 +2686,19 @@ for candidate in merger_candidates:
 - The app uses Streamlit's newer features (data_editor, status, toggle). Compatibility shims exist in `app.py` to gracefully degrade when running older Streamlit versions but features may be limited.
 - **Qlib integration** is optional and requires separate installation (`pip install pyqlib`). If not installed, the app gracefully falls back to standard analysis methods.
 
----
+## Security & safety
 
-## 📚 Detailed Documentation
+- Never commit API keys or secrets to version control.
+- Keep the app in Paper Trading Mode while configuring and testing.
 
-For comprehensive guides, see the `/documentation` folder:
-- **Warrior Scanner**: `WARRIOR_MARKET_SCANNER_IMPLEMENTATION.md`
-- **Crypto Trading**: `CRYPTO_TRADING_INTEGRATION_SUMMARY.md`
-- **Event Alerts**: Event detector implementations
-- **Strategy Guides**: Advanced strategy playbooks
+## Contributing
 
----
+Open issues or PRs are welcome. If you make changes to pricing or greeks code, please add or update unit tests in `tests/`.
 
-## 🔒 Security & Safety
+## License
 
-- Never commit API keys to version control
-- Always test in Paper Trading mode first
-- Use virtual environments for dependency isolation
+MIT — see LICENSE (if present) for details.
 
-## 📜 License
-
-MIT License - See LICENSE file for details
-
----
-
-**Made with ❤️ for traders who want AI-powered edge**
+## Contact
 
 If you want help running the app or extending integrations (e.g., add a new LLM provider or broker adapter), open an issue or reach out via the repository.

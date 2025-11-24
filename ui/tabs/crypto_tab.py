@@ -150,7 +150,11 @@ def render_tab():
     if 'active_crypto_tab' not in st.session_state:
         st.session_state.active_crypto_tab = "📊 Dashboard"
     
+<<<<<<< HEAD
     # Tab selector - STREAMLINED (was 12, now 7)
+=======
+    # Tab selector - STREAMLINED (was 12, now 8)
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
     tab_options = [
         "📊 Dashboard",  # Merged: Market Overview + Portfolio
         "🔍 Daily Scanner",  # Consolidated: All scanners (Penny, Sub-Penny, CoinGecko, Multi-Config)
@@ -158,7 +162,12 @@ def render_tab():
         "⚡ Quick Trade",
         "🔔 Entry Monitors",
         "🤖 AI Position Monitor",
+<<<<<<< HEAD
         "📓 Trade Journal"
+=======
+        "📓 Trade Journal",
+        "🎯 DEX Launch Hunter"  # NEW: Early DEX token discovery (high risk)
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
     ]
     
     # --- New Tab Navigation Logic (using on_change callback) ---
@@ -1678,6 +1687,19 @@ def render_tab():
             st.error(f"Error loading Trade Journal: {e}")
             logger.error("Journal error: {}", str(e), exc_info=True)
     
+<<<<<<< HEAD
+=======
+    elif active_crypto_tab == "🎯 DEX Launch Hunter":
+        # Import and render DEX Hunter tab
+        try:
+            from ui.tabs.dex_hunter_tab import render_dex_hunter_tab
+            render_dex_hunter_tab()
+        except Exception as e:
+            st.error(f"Error loading DEX Launch Hunter: {e}")
+            logger.error("DEX Hunter error: {}", str(e), exc_info=True)
+            st.info("💡 DEX Launch Hunter requires additional configuration. See Resources tab for setup guide.")
+    
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
     elif active_crypto_tab == "📈 OLD_PORTFOLIO_REMOVED":  # REMOVED - Merged into Dashboard
         st.info("⚠️ Portfolio view has been merged into the Dashboard tab")
         st.markdown("Please use **📊 Dashboard** to view your portfolio")

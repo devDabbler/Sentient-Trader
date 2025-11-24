@@ -30,7 +30,7 @@ try:
         dashboard_tab, scanner_tab, watchlist_tab, strategy_advisor_tab,
         generate_signal_tab, signal_history_tab, strategy_guide_tab,
         tradier_tab, ibkr_tab, scalping_tab, strategy_analyzer_tab,
-        autotrader_tab, crypto_tab, dca_tab
+        autotrader_tab, crypto_tab, dca_tab, llm_usage_tab
     )
 except ImportError as e:
     st.error(f"Failed to import tab modules: {e}")
@@ -195,7 +195,8 @@ def main():
         "⚡ Scalping/Day Trade",
         "🤖 Strategy Analyzer",
         "🤖 Auto-Trader",
-        "₿ Crypto Trading"
+        "₿ Crypto Trading",
+        "🤖 LLM Usage"
     ]
     
     # Initialize active tab
@@ -244,6 +245,8 @@ def main():
             autotrader_tab.render_tab()
         elif selected_tab == "₿ Crypto Trading":
             crypto_tab.render_tab()
+        elif selected_tab == "🤖 LLM Usage":
+            llm_usage_tab.render_llm_usage_tab()
         else:
             st.error(f"Unknown tab: {selected_tab}")
             

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from models.reddit_strategies import CustomStrategy, MarketCondition
 from models.analysis import StockAnalysis
+from services.llm_helper import get_llm_helper
 
 
 
@@ -37,27 +38,17 @@ class StrategyValidator:
     """
     
     def __init__(self, provider: str = "openrouter", model: Optional[str] = None, api_key: Optional[str] = None):
-        self.provider = provider
-        self.model = model
-        self.api_key = api_key
-
-        if provider == "openrouter":
-            self.base_url = "https://openrouter.ai/api/v1"
-            self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-            if not self.model:
-                self.model = os.getenv("AI_ANALYZER_MODEL", "google/gemini-2.0-flash-exp:free")
-        elif provider == "openai":
-            self.base_url = "https://api.openai.com/v1"
-            self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-            if not self.model:
-                self.model = "gpt-4-turbo"
-        else:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
-
-        if not self.api_key:
-            raise ValueError(f"API key for {provider} not found. Please set the appropriate environment variable.")
+        """Initialize strategy validator with LLM Request Manager"""
+        if provider != "openrouter" or model or api_key:
+            logger.warning("⚠️ provider, model, and api_key parameters are deprecated")
         
-        logger.info(f"Strategy Validator initialized with {provider} using model: {self.model}")
+        # Initialize LLM Request Manager helper (LOW priority for informational analysis)
+        try:
+            self.llm_helper = get_llm_helper("reddit_strategy_validator", default_priority="LOW")
+            logger.success("🚀 Strategy Validator using LLM Request Manager")
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM helper: {e}")
+            raise
     
     
     def validate_strategy(
@@ -86,9 +77,20 @@ class StrategyValidator:
             prompt = self._create_validation_prompt(strategy, ticker, analysis, market_context)
             logger.debug(f"Created validation prompt (length: {len(prompt)} chars)")
             
-            # Get LLM response
-            logger.info(f"Calling LLM API via {self.provider}...")
-            response = self._call_llm_api(prompt)
+            # Get LLM response using centralized manager
+            logger.info("Calling LLM API for strategy validation...")
+            # Use LOW priority with caching (10 min TTL for strategy validation)
+            cache_key = f"strategy_val_{strategy.name}_{ticker}"
+            response = self.llm_helper.low_request(
+                prompt,
+                cache_key=cache_key,
+                ttl=600,  # 10 minutes cache
+                temperature=0.4
+            )
+            
+            if not response:
+                raise Exception("No response from LLM")
+            
             logger.debug(f"Received LLM response (length: {len(response)} chars)")
             
             # Parse response
@@ -240,6 +242,7 @@ Be thorough, practical, and honest. If the strategy is not suitable, say so clea
         
         return prompt
     
+<<<<<<< HEAD
     
     def _call_llm_api(self, prompt: str) -> str:
         """Call the selected LLM API"""
@@ -277,6 +280,8 @@ Be thorough, practical, and honest. If the strategy is not suitable, say so clea
             return ""
     
     
+=======
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
     def _parse_validation_response(self, response: str, strategy: CustomStrategy) -> StrategyValidation:
         """Parse LLM response into StrategyValidation object"""
         try:

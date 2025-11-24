@@ -2,6 +2,13 @@
 Hybrid LLM Analyzer for Sentient Trader
 Supports both local Ollama models (GPU-accelerated) and cloud OpenRouter models
 Automatically switches between local and cloud based on availability and performance
+
+NOTE: For new code, use the centralized LLM Request Manager instead:
+    from services.llm_helper import get_llm_helper
+    llm = get_llm_helper("my_service", default_priority="MEDIUM")
+    response = llm.request("Your prompt here")
+
+This class remains for backward compatibility with existing code.
 """
 
 import os

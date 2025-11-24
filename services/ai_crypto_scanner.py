@@ -20,6 +20,7 @@ from .crypto_scanner import CryptoOpportunityScanner, CryptoOpportunity
 from clients.kraken_client import KrakenClient
 from dotenv import load_dotenv
 import json
+from .llm_helper import get_llm_helper
 
 # Load environment variables
 load_dotenv()
@@ -63,27 +64,21 @@ class AICryptoScanner:
         else:
             self.use_llm = use_llm
         
+        # Initialize LLM Request Manager helper (MEDIUM priority for crypto analysis)
         if self.use_llm:
             try:
-                from .llm_strategy_analyzer import LLMStrategyAnalyzer
-                api_key = os.getenv('OPENROUTER_API_KEY')
-                model = os.getenv('AI_CRYPTO_MODEL', 'google/gemini-2.0-flash-exp:free')
-                
-                if not api_key:
-                    from utils.config_loader import get_api_key as get_key_helper
-                    api_key = get_key_helper('OPENROUTER_API_KEY', 'openrouter')
-                
-                if not api_key:
-                    logger.error("❌ OPENROUTER_API_KEY not found - AI crypto analysis disabled")
-                    self.use_llm = False
-                    self.llm_analyzer = None
-                else:
-                    self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
-                    logger.info(f"✅ AI Crypto Scanner initialized with OpenRouter")
-                    logger.info(f"   Model: {model}")
+                self.llm_helper = get_llm_helper("ai_crypto_scanner", default_priority="MEDIUM")
+                logger.success("🚀 AI Crypto Scanner using LLM Request Manager")
             except Exception as e:
+<<<<<<< HEAD
                 logger.error("❌ LLM initialization failed: {}", str(e), exc_info=True)
+=======
+                logger.error(f"❌ Failed to initialize LLM helper: {e}")
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
                 self.use_llm = False
+                self.llm_helper = None
+        else:
+            self.llm_helper = None
     
     def _check_llm_available(self) -> bool:
         """Check if OpenRouter LLM API key is available"""
@@ -246,8 +241,12 @@ Respond ONLY with valid JSON, no extra text:
         return prompt
     
     def _query_llm(self, prompt: str, symbol: str) -> str:
-        """Query LLM with the analysis prompt"""
+        """Query LLM with the analysis prompt using centralized request manager"""
+        if not self.llm_helper:
+            return ""
+        
         try:
+<<<<<<< HEAD
             if not self.llm_analyzer:
                 return ""
               # Try hybrid analyzer first
@@ -256,6 +255,16 @@ Respond ONLY with valid JSON, no extra text:
             else:
                 # Fallback to original method
                 response = self.llm_analyzer._call_openrouter(prompt)
+=======
+            # Use MEDIUM priority with caching for crypto analysis (5 min TTL)
+            cache_key = f"crypto_ai_{symbol}"
+            response = self.llm_helper.request(
+                prompt=prompt,
+                cache_key=cache_key,
+                ttl=300,  # 5 minutes cache
+                temperature=0.3  # Lower temperature for consistent analysis
+            )
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
             
             return response if response else ""
             

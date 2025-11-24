@@ -13,11 +13,13 @@ Key Differences from Stock Trading:
 
 from loguru import logger
 import os
+import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 import requests
+from .llm_helper import get_llm_helper
 
 
 
@@ -80,28 +82,27 @@ class CryptoTradingSignalGenerator:
     
     def __init__(self, api_key: Optional[str] = None, config=None, use_local_llm: bool = True):
         """
-        Initialize crypto signal generator with hybrid LLM support
+        Initialize crypto signal generator with LLM Request Manager
         
         Args:
-            api_key: OpenRouter API key (optional if in env)
+            api_key: Deprecated - API keys are now managed centrally
             config: Trading configuration object
-            use_local_llm: Whether to prefer local Ollama models
+            use_local_llm: Deprecated - provider selection is now automatic
         """
-        self.api_key = api_key or os.getenv('OPENROUTER_API_KEY')
-        self.config = config
-        self.use_local_llm = use_local_llm
+        if api_key:
+            logger.warning("⚠️ api_key parameter is deprecated, keys are managed centrally")
+        if not use_local_llm:
+            logger.warning("⚠️ use_local_llm parameter is deprecated, provider selection is automatic")
         
-        # Initialize hybrid LLM analyzer
+        self.config = config
+        
+        # Initialize LLM Request Manager helper (HIGH priority for crypto trading signals)
         try:
-            from .hybrid_llm_analyzer import get_best_trading_analyzer
-            self.llm_analyzer = get_best_trading_analyzer()
-            logger.success("🚀 Crypto hybrid LLM analyzer initialized successfully")
+            self.llm_helper = get_llm_helper("crypto_trading_signals", default_priority="HIGH")
+            logger.success("🚀 Crypto Trading Signal Generator using LLM Request Manager")
         except Exception as e:
-            logger.error(f"Failed to initialize hybrid LLM: {e}")
-            # Fallback to original implementation
-            self.llm_analyzer = None
-            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-            logger.info(f"Crypto Trading Signal Generator fallback to direct API using model: {model}")
+            logger.error(f"Failed to initialize LLM helper: {e}")
+            raise
         
         # Crypto-specific parameters
         self.high_volatility_threshold = 5.0  # 5% daily volatility
@@ -164,12 +165,15 @@ class CryptoTradingSignalGenerator:
                 current_positions=current_positions or [],
                 time_horizon=time_horizon
             )
-              # Get AI analysis using hybrid LLM (local Ollama or cloud fallback)
-            if self.llm_analyzer:
-                response = self.llm_analyzer.analyze_with_llm(prompt, 'crypto_analysis')
-            else:
-                # Fallback to original implementation
-                response = self._call_ai_model(prompt)
+            # Get AI analysis using LLM Request Manager
+            # Use HIGH priority for crypto trading signals with symbol-based caching (2 min TTL)
+            cache_key = f"crypto_signal_{symbol}_{int(time.time() // 120)}"  # Cache per 2-min window
+            response = self.llm_helper.high_request(
+                prompt,
+                cache_key=cache_key,
+                ttl=120,  # 2 minutes cache for crypto signals
+                temperature=0.3  # Lower temperature for consistent signals
+            )
             
             if response:
                 # Parse AI response into crypto trading signal
@@ -392,51 +396,7 @@ IMPORTANT:
         
         return prompt
     
-    def _call_ai_model(self, prompt: str) -> Optional[str]:
-        """
-        Call AI model for analysis
-        
-        Args:
-            prompt: Analysis prompt
-            
-        Returns:
-            AI response string
-        """
-        try:
-            # Use OpenRouter or similar AI API
-            model = os.getenv('AI_TRADING_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')
-            
-            headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json'
-            }
-            
-            data = {
-                'model': model,
-                'messages': [
-                    {'role': 'system', 'content': 'You are an expert cryptocurrency trading AI.'},
-                    {'role': 'user', 'content': prompt}
-                ]
-            }
-            
-            response = requests.post(
-                'https://openrouter.ai/api/v1/chat/completions',
-                headers=headers,
-                json=data,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result['choices'][0]['message']['content']
-                return content
-            else:
-                logger.error(f"AI API error: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Error calling AI model: {e}")
-            return None
+    # Removed _call_ai_model - now using LLM Request Manager
     
     def _parse_crypto_signal(
         self,

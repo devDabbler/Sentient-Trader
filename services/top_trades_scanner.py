@@ -1,11 +1,17 @@
 """
 Top Trades Scanner
 
-Scans and ranks top trading opportunities for options and penny stocks
+Scans and filters stocks across multiple watchlists
 based on multiple criteria including volume, momentum, and scoring.
+
+IMPORTANT: Uses lazy import of yfinance to prevent Task Scheduler hangs
 """
 
-import yfinance as yf
+# Lazy import - only load when actually fetching data
+def _get_yf():
+    import yfinance as yf
+    return yf
+
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple
@@ -319,6 +325,7 @@ class TopTradesScanner:
     def _analyze_options_opportunity(self, ticker: str) -> TopTrade:
         """Analyze a stock for options trading potential"""
         try:
+            yf = _get_yf()  # Lazy import
             stock = yf.Ticker(ticker)
             
             # Get recent data (extended for better breakout detection)
@@ -521,6 +528,7 @@ class TopTradesScanner:
     def _analyze_penny_stock_opportunity(self, ticker: str) -> TopTrade:
         """Analyze a penny stock for trading potential with breakout detection"""
         try:
+            yf = _get_yf()  # Lazy import
             stock = yf.Ticker(ticker)
             
             # Get recent data

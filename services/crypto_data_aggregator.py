@@ -49,20 +49,33 @@ class CryptoDataAggregator:
         """Initialize the aggregator"""
         self.coingecko_api = "https://api.coingecko.com/api/v3"
         self.coinmarketcap_api = "https://pro-api.coinmarketcap.com/v1"
+        self.coingecko_api_key = os.getenv('COINGECKO_API_KEY')
         self.coinmarketcap_api_key = os.getenv('COINMARKETCAP_API_KEY')
         
         self.last_coingecko_call = 0
         self.last_coinmarketcap_call = 0
         
         # Rate limits
-        self.coingecko_rate_limit = 7.0  # 10 calls/min = 1 call every 6s, use 7s to be safe
+        # CoinGecko: With API key = 500 calls/min, without = 10-50 calls/min
+        if self.coingecko_api_key:
+            self.coingecko_rate_limit = 0.15  # 500 calls/min = 1 call every 0.12s, use 0.15s to be safe
+        else:
+            self.coingecko_rate_limit = 7.0  # 10 calls/min = 1 call every 6s, use 7s to be safe
+        
         # CoinMarketCap free tier: 333 calls/day = ~1 call every 4.3 minutes = 258 seconds
         # Use 260 seconds (4.33 minutes) to be safe and avoid rate limits
         self.coinmarketcap_rate_limit = 260.0  # Free tier: 333 calls/day
         
         logger.info("🔗 Crypto Data Aggregator initialized")
+<<<<<<< HEAD
         logger.info(f"   • CoinGecko: Enabled (free tier) - used for coin research & scanning")
         logger.info("   • CoinMarketCap: {} - used for coin research & scanning", str('✅ Enabled' if self.coinmarketcap_api_key else '❌ Disabled (no API key)'))
+=======
+        coingecko_status = '✅ Enabled with API key (500 calls/min)' if self.coingecko_api_key else '✅ Enabled (free tier 10-50 calls/min)'
+        logger.info(f"   • CoinGecko: {coingecko_status} - used for coin research & scanning")
+        coinmarketcap_status = '✅ Enabled' if self.coinmarketcap_api_key else '❌ Disabled (no API key)'
+        logger.info(f"   • CoinMarketCap: {coinmarketcap_status} - used for coin research & scanning")
+>>>>>>> 9653b474 (WIP: saving changes before rebase)
         if self.coinmarketcap_api_key:
             logger.info(f"     Note: CoinMarketCap provides market data, not news (news uses CoinGecko)")
     
@@ -231,6 +244,11 @@ class CryptoDataAggregator:
                 await asyncio.sleep(self.coingecko_rate_limit - elapsed)
             
             try:
+                # Build headers with optional API key
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                if self.coingecko_api_key:
+                    headers['x-cg-demo-api-key'] = self.coingecko_api_key
+                
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(
                         f"{self.coingecko_api}/coins/markets",
@@ -242,7 +260,7 @@ class CryptoDataAggregator:
                             'sparkline': False,
                             'locale': 'en'
                         },
-                        headers={'User-Agent': 'Mozilla/5.0'}
+                        headers=headers
                     )
                     
                     self.last_coingecko_call = time.time()
