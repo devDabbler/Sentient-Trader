@@ -242,8 +242,6 @@ Be thorough, practical, and honest. If the strategy is not suitable, say so clea
         
         return prompt
     
-<<<<<<< HEAD
-    
     def _call_llm_api(self, prompt: str) -> str:
         """Call the selected LLM API"""
         try:
@@ -279,9 +277,6 @@ Be thorough, practical, and honest. If the strategy is not suitable, say so clea
             logger.error("{self.provider} API error: {}", str(e), exc_info=True)
             return ""
     
-    
-=======
->>>>>>> 9653b474 (WIP: saving changes before rebase)
     def _parse_validation_response(self, response: str, strategy: CustomStrategy) -> StrategyValidation:
         """Parse LLM response into StrategyValidation object"""
         try:

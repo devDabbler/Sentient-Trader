@@ -50,7 +50,6 @@ class AIConfidenceScanner:
                 self.llm_helper = get_llm_helper("ai_confidence_scanner", default_priority="MEDIUM")
                 logger.success("🚀 AI Confidence Scanner using LLM Request Manager")
             except Exception as e:
-<<<<<<< HEAD
                 logger.warning(f"Hybrid LLM failed, trying original: {e}")
                 try:
                     from .llm_strategy_analyzer import LLMStrategyAnalyzer
@@ -72,11 +71,6 @@ class AIConfidenceScanner:
                     logger.error(f"❌ LLM initialization failed completely: {e2}")
                     self.use_llm = False
                     self.llm_analyzer = None
-=======
-                logger.error(f"❌ Failed to initialize LLM helper: {e}")
-                self.use_llm = False
-                self.llm_helper = None
->>>>>>> 9653b474 (WIP: saving changes before rebase)
         else:
             self.llm_helper = None
 
@@ -200,16 +194,6 @@ Be concise but insightful. Focus on actionable analysis."""
 
             full_prompt = f"{system_prompt}\n\n{prompt}"
             ticker_str = f" on {ticker}" if ticker else ""
-<<<<<<< HEAD
-            logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")            # Try hybrid analyzer first
-            if self.llm_analyzer and hasattr(self.llm_analyzer, 'analyze_with_llm'):
-                # Call the analyzer's analyze_with_llm method (works for both Hybrid and Strategy analyzers)
-                response = self.llm_analyzer.analyze_with_llm(full_prompt)  # type: ignore
-            elif self.llm_analyzer and hasattr(self.llm_analyzer, '_call_openrouter'):
-                response = self.llm_analyzer._call_openrouter(full_prompt)
-            else:
-                raise Exception("No valid LLM analyzer available")
-=======
             logger.info(f"🤖 Querying LLM for AI confidence analysis{ticker_str}...")
 
             # Use LLM helper with caching (5 min TTL for confidence analysis)
@@ -220,7 +204,6 @@ Be concise but insightful. Focus on actionable analysis."""
                 ttl=300,  # 5 minutes cache
                 temperature=0.3  # Lower temperature for consistent analysis
             )
->>>>>>> 9653b474 (WIP: saving changes before rebase)
 
             if not response:
                 logger.error(f"❌ Empty LLM response{ticker_str}")

@@ -70,11 +70,7 @@ class AICryptoScanner:
                 self.llm_helper = get_llm_helper("ai_crypto_scanner", default_priority="MEDIUM")
                 logger.success("🚀 AI Crypto Scanner using LLM Request Manager")
             except Exception as e:
-<<<<<<< HEAD
-                logger.error("❌ LLM initialization failed: {}", str(e), exc_info=True)
-=======
                 logger.error(f"❌ Failed to initialize LLM helper: {e}")
->>>>>>> 9653b474 (WIP: saving changes before rebase)
                 self.use_llm = False
                 self.llm_helper = None
         else:
@@ -246,16 +242,6 @@ Respond ONLY with valid JSON, no extra text:
             return ""
         
         try:
-<<<<<<< HEAD
-            if not self.llm_analyzer:
-                return ""
-              # Try hybrid analyzer first
-            if hasattr(self.llm_analyzer, 'analyze_with_llm'):
-                response = self.llm_analyzer.analyze_with_llm(prompt)  # type: ignore
-            else:
-                # Fallback to original method
-                response = self.llm_analyzer._call_openrouter(prompt)
-=======
             # Use MEDIUM priority with caching for crypto analysis (5 min TTL)
             cache_key = f"crypto_ai_{symbol}"
             response = self.llm_helper.request(
@@ -264,7 +250,6 @@ Respond ONLY with valid JSON, no extra text:
                 ttl=300,  # 5 minutes cache
                 temperature=0.3  # Lower temperature for consistent analysis
             )
->>>>>>> 9653b474 (WIP: saving changes before rebase)
             
             return response if response else ""
             

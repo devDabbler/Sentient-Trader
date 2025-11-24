@@ -61,7 +61,7 @@ class MonitoredCryptoPosition:
     current_price: float = 0.0
     highest_price: float = 0.0
     lowest_price: float = 0.0
-    last_check_time: datetime = None
+    last_check_time: Optional[datetime] = None
     
     # AI management
     trailing_stop_pct: float = 2.0  # 2% trailing stop
@@ -720,6 +720,9 @@ class AICryptoPositionManager:
             )
             
             # Get AI response
+            if self.llm_analyzer is None:
+                logger.warning("LLM analyzer not available")
+                return None
             response = self.llm_analyzer.analyze_with_llm(prompt)
             
             # Parse JSON response
@@ -754,7 +757,7 @@ class AICryptoPositionManager:
                 return {}
             
             # Convert to DataFrame
-            df = pd.DataFrame(ohlc_data, columns=['time', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count'])
+            df = pd.DataFrame(ohlc_data, columns=pd.Index(['timestamp', 'open', 'high', 'low', 'close', 'vwap', 'volume', 'count']))
             df['close'] = df['close'].astype(float)
             df['high'] = df['high'].astype(float)
             df['low'] = df['low'].astype(float)
@@ -813,8 +816,8 @@ class AICryptoPositionManager:
         pnl_pct: float,
         hold_time: float,
         technical_data: Dict,
-        recent_news: List[Dict] = None,
-        sentiment_score: float = None
+        recent_news: Optional[List[Dict]] = None,
+        sentiment_score: Optional[float] = None
     ) -> str:
         """
         Build prompt for AI analysis (ENHANCED with real-time news/sentiment)
@@ -1525,8 +1528,6 @@ Analyze the position using these factors:
             'recommendations': recommendations
         }
 
-<<<<<<< HEAD
-=======
     def sync_with_kraken(self) -> Dict[str, int]:
         """
         Sync AI monitor positions with current Kraken positions
@@ -1608,9 +1609,8 @@ Analyze the position using these factors:
             
         except Exception as e:
             logger.error(f"Error syncing with Kraken: {e}", exc_info=True)
-            return {'added': 0, 'removed': 0, 'kept': 0, 'error': str(e)}
+            return {'added': 0, 'removed': 0, 'kept': 0}
     
->>>>>>> 9653b474 (WIP: saving changes before rebase)
     def get_status(self) -> Dict:
         """Get current manager status"""
         return {
