@@ -57,18 +57,20 @@ try:
     from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock, PENNY_STOCK_FILTER_PRESETS
     from services.advanced_opportunity_scanner import AdvancedOpportunityScanner, ScanFilters, OpportunityResult
     from services.advanced_opportunity_scanner import ScanType as AdvancedScanType
-    ScanType = AdvancedScanType
+    # Make ScanType available as common import
+    globals()['ScanType'] = AdvancedScanType
 except ImportError as e:
     logger.warning(f"Some service imports not available: {e}")
     # Provide fallback for ScanType if import fails
     class ScanType:
-        ALL = "ALL"
-        OPTIONS = "OPTIONS"
-        PENNY_STOCKS = "PENNY_STOCKS"
-        BREAKOUTS = "BREAKOUTS"
-        MOMENTUM = "MOMENTUM"
-        BUZZING = "BUZZING"
-        HOTTEST_STOCKS = "HOTTEST_STOCKS"
+        OPTIONS = "options"
+        STOCKS = "stocks"
+        PENNY_STOCKS = "penny_stocks"
+        BREAKOUTS = "breakouts"
+        MOMENTUM = "momentum"
+        BUZZING = "buzzing"
+        HOTTEST_STOCKS = "hottest_stocks"
+        ALL = "all"
 
 # Analyzer imports
 try:
@@ -189,12 +191,12 @@ def get_social_analyzer():
 
 @st.cache_resource
 def get_ai_scanner():
-    """Cached AIConfidenceScanner - reuses shared base scanner and LLM analyzer"""
+    """Cached AIConfidenceScanner - reuses shared base scanner"""
     try:
         from services.ai_confidence_scanner import AIConfidenceScanner
         base = get_base_scanner()
-        llm = get_llm_analyzer()
-        return AIConfidenceScanner(base_scanner=base, llm_analyzer=llm)
+        # Note: llm_analyzer parameter is deprecated, AIConfidenceScanner uses LLM Request Manager
+        return AIConfidenceScanner(base_scanner=base)
     except Exception as e:
         logger.error(f"Error creating AI scanner: {e}")
         return None

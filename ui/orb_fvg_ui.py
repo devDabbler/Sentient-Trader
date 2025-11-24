@@ -13,18 +13,55 @@ from datetime import datetime
 
 from services.orb_fvg_strategy import ORBFVGStrategy, ORBFVGSignal
 from services.orb_fvg_alerts import create_orb_fvg_alert_manager
+import pytz
 
 
 def render_orb_fvg_scanner():
     """Render the ORB+FVG strategy scanner UI"""
     
+    # Display current Eastern Time and market status
+    eastern = pytz.timezone('US/Eastern')
+    current_et = datetime.now(eastern)
+    current_time = current_et.time()
+    
+    # Determine market status
+    if current_time < datetime.strptime("09:30", "%H:%M").time():
+        status_emoji = "⏰"
+        status_text = "PRE-MARKET"
+        status_color = "orange"
+    elif current_time < datetime.strptime("09:45", "%H:%M").time():
+        status_emoji = "📊"
+        status_text = "ORB ESTABLISHING"
+        status_color = "blue"
+    elif current_time < datetime.strptime("12:30", "%H:%M").time():
+        status_emoji = "🟢"
+        status_text = "ACTIVE TRADING WINDOW"
+        status_color = "green"
+    elif current_time < datetime.strptime("16:00", "%H:%M").time():
+        status_emoji = "🟡"
+        status_text = "MARKET OPEN (Extended)"
+        status_color = "orange"
+    else:
+        status_emoji = "🔴"
+        status_text = "MARKET CLOSED"
+        status_color = "red"
+    
+    # Display time and status
+    col_time1, col_time2 = st.columns([1, 2])
+    with col_time1:
+        st.metric("Current Eastern Time", current_et.strftime("%I:%M %p ET"))
+    with col_time2:
+        st.markdown(f"### {status_emoji} {status_text}")
+    
+    st.markdown("---")
+    
     st.markdown("### 📊 15-Min ORB + FVG Strategy Scanner")
     st.markdown("""
     **Strategy Overview** (Based on r/tradingmillionaires $2K payout):
-    - ✅ **Opening Range**: First 15 minutes (9:30-9:45 AM)
+    - ✅ **Opening Range**: First 15 minutes (9:30-9:45 AM ET)
     - ✅ **Fair Value Gaps**: Price inefficiencies for entry confirmation
     - ✅ **Risk/Reward**: 1.5-2R targets with tight stops
-    - ✅ **Trading Window**: 9:45 AM - 11:00 AM (best results)
+    - ✅ **Trading Window**: 9:45 AM - 12:30 PM ET (extended for more opportunities)
     - ✅ **Once Per Day**: Maximum one trade per ticker per day
     
     **Why This Works:**
@@ -62,61 +99,97 @@ def render_orb_fvg_scanner():
         with col3:
             min_volume = st.number_input(
                 "Min Volume Ratio",
-                min_value=1.0,
+                min_value=0.5,
                 max_value=5.0,
-                value=1.5,
-                step=0.5,
-                help="Minimum volume vs average (default: 1.5x)"
+                value=1.0,
+                step=0.1,
+                help="Minimum volume vs median (default: 1.0x, uses outlier-resistant median)"
             )
     
     # Ticker input section
     st.subheader("🎯 Scan for Signals")
     
-    col_input1, col_input2 = st.columns([3, 1])
+    # Custom ticker input
+    custom_input = st.text_input(
+        "➕ Add Custom Tickers (comma-separated)",
+        placeholder="e.g., SMCI, RDDT, COIN, MSTR",
+        help="Add any tickers you want to scan. Separate with commas."
+    )
     
-    with col_input1:
-        # Use multiselect with 'Select All' button (per user preference)
-        if 'watchlist_tickers' in st.session_state and st.session_state.watchlist_tickers:
-            default_tickers = st.session_state.watchlist_tickers[:10]  # First 10
-        else:
-            default_tickers = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT']
-        
-        # Get available tickers for multiselect
-        if 'watchlist_tickers' in st.session_state and st.session_state.watchlist_tickers:
-            available_tickers = st.session_state.watchlist_tickers
-        else:
-            available_tickers = [
-                'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT', 'GOOGL', 
-                'AMZN', 'META', 'PLTR', 'SOFI', 'RIVN', 'MARA', 'RIOT'
-            ]
-        
-        selected_tickers = st.multiselect(
-            "Select Tickers to Scan",
-            options=available_tickers,
-            default=default_tickers,
-            help="Choose tickers from your watchlist or popular stocks"
-        )
-        
-        # Select All / Clear All buttons
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("✅ Select All", key="orb_select_all"):
-                st.session_state.orb_selected_tickers = available_tickers
-                st.rerun()
-        with col_btn2:
-            if st.button("❌ Clear All", key="orb_clear_all"):
-                st.session_state.orb_selected_tickers = []
-                st.rerun()
+    # Parse custom tickers
+    custom_tickers = [t.strip().upper() for t in custom_input.split(',') if t.strip()] if custom_input else []
     
-    with col_input2:
-        st.write("")
-        st.write("")
-        scan_button = st.button("🔍 Scan for Setups", type="primary", use_container_width=True)
+    # Get available tickers for multiselect
+    if 'watchlist_tickers' in st.session_state and st.session_state.watchlist_tickers:
+        available_tickers = st.session_state.watchlist_tickers
+    else:
+        # Expanded default ticker list with popular stocks for ORB trading
+        available_tickers = [
+            # Indices
+            'SPY', 'QQQ', 'IWM', 'DIA',
+            # Mega caps
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
+            # Popular tech
+            'AMD', 'INTC', 'NFLX', 'AVGO', 'ORCL', 'CRM', 'ADBE',
+            # High volatility / momentum
+            'PLTR', 'SOFI', 'RIVN', 'LCID', 'NIO',
+            # Crypto-related
+            'COIN', 'MARA', 'RIOT', 'MSTR', 'CLSK',
+            # Meme stocks
+            'GME', 'AMC', 'BBBY',
+            # Other popular
+            'BA', 'DIS', 'BABA', 'PFE', 'KO', 'WMT', 'JPM'
+        ]
+    
+    # Add custom tickers to available list
+    for ticker in custom_tickers:
+        if ticker not in available_tickers:
+            available_tickers.append(ticker)
+    
+    # Initialize session state for selected tickers
+    if 'orb_selected_tickers' not in st.session_state:
+        # Default to indices + mega caps
+        st.session_state.orb_selected_tickers = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT']
+    
+    # Multiselect with session state sync
+    selected_tickers = st.multiselect(
+        "📋 Select Tickers to Scan",
+        options=available_tickers,
+        default=st.session_state.orb_selected_tickers,
+        key="orb_ticker_multiselect",
+        help="Choose tickers from your watchlist or popular stocks. Add custom tickers above."
+    )
+    
+    # Update session state
+    st.session_state.orb_selected_tickers = selected_tickers
+    
+    # Select All / Clear All buttons
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
+    with col_btn1:
+        if st.button("✅ Select All", key="orb_select_all", use_container_width=True):
+            st.session_state.orb_selected_tickers = available_tickers.copy()
+            st.rerun()
+    with col_btn2:
+        if st.button("❌ Clear All", key="orb_clear_all", use_container_width=True):
+            st.session_state.orb_selected_tickers = []
+            st.rerun()
+    with col_btn3:
+        if st.button("🎯 Top 10", key="orb_select_top", use_container_width=True,
+                    help="Select most popular day trading stocks"):
+            st.session_state.orb_selected_tickers = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA', 'AMD', 'MSFT', 'META', 'GOOGL', 'AMZN']
+            st.rerun()
+    
+    # Scan button
+    st.write("")
+    scan_button = st.button("🔍 Scan for Setups", type="primary", use_container_width=True)
     
     # Scan button action
     if scan_button:
-        if not selected_tickers:
-            st.error("⚠️ Please select at least one ticker to scan")
+        # Combine selected tickers with custom tickers
+        all_tickers = list(set(selected_tickers + custom_tickers))
+        
+        if not all_tickers:
+            st.error("⚠️ Please select at least one ticker to scan or add custom tickers")
             return
         
         with st.status(f"🔍 Scanning {len(selected_tickers)} tickers for ORB+FVG setups...", expanded=True) as status:
@@ -132,11 +205,12 @@ def render_orb_fvg_scanner():
                 
                 st.write(f"Scanning {len(selected_tickers)} tickers...")
                 
-                # Scan all tickers
-                signals = strategy.scan_multiple_tickers(selected_tickers)
+                # Scan all tickers (including custom)
+                st.write(f"Tickers to scan: {', '.join(all_tickers[:10])}{'...' if len(all_tickers) > 10 else ''}")
+                signals = strategy.scan_multiple_tickers(all_tickers)
                 
                 status.update(
-                    label=f"✅ Scan complete! Found {len(signals)} signal(s)",
+                    label=f"✅ Scan complete! Scanned {len(all_tickers)} tickers, found {len(signals)} signal(s)",
                     state="complete"
                 )
                 
@@ -168,13 +242,14 @@ def render_orb_fvg_scanner():
                     st.info("📭 No ORB+FVG setups found at this time")
                     st.markdown("""
                     **Why no signals?**
-                    - ⏰ Market may not be in optimal trading window (9:45-11:00 AM)
+                    - ⏰ Market may not be in active trading window (9:45 AM - 12:30 PM ET)
                     - 📊 No breakouts above/below opening range yet
-                    - 📉 Volume requirements not met
+                    - 📉 Volume requirements not met (need 1.5x+ average)
                     - ✅ Already traded these tickers today (one per day limit)
                     
                     **Tips:**
-                    - Run this scan between 9:45 AM - 11:00 AM ET for best results
+                    - Best results between 9:45 AM - 11:00 AM ET (optimal window)
+                    - Extended window until 12:30 PM for additional opportunities
                     - Make sure you're scanning liquid stocks with good volume
                     - Check back every 15-30 minutes for new setups
                     """)
