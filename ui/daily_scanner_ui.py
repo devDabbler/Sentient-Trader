@@ -1326,12 +1326,8 @@ def display_tier3_deep_analysis(scanner, ai_trade_reviewer):
     # Display results
     tier3_results = st.session_state.get('tier3_results')
     if tier3_results is not None:
-<<<<<<< HEAD
-=======
         # Get mode from session state early to ensure it's always available
         mode = st.session_state.get('tier3_analysis_mode', 'quick')
-        
->>>>>>> 9653b474 (WIP: saving changes before rebase)
         # Check if results is empty (works for both list and DataFrame)
         is_empty = False
         if isinstance(tier3_results, pd.DataFrame):
@@ -1346,10 +1342,6 @@ def display_tier3_deep_analysis(scanner, ai_trade_reviewer):
         
         if not is_empty:
             timestamp = st.session_state.get('tier3_timestamp', datetime.now())
-<<<<<<< HEAD
-            mode = st.session_state.get('tier3_analysis_mode', 'quick')  # Changed to avoid widget key conflict
-=======
->>>>>>> 9653b474 (WIP: saving changes before rebase)
             
             st.markdown("---")
             st.markdown(f"**Results from:** {timestamp.strftime('%I:%M %p')} | **Mode:** {mode.upper()}")
