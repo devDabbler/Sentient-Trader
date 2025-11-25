@@ -86,14 +86,14 @@ class DiscordTradeApprovalBot(commands.Bot):
         self.channel_id = int(channel_id)
         self.approval_callback = approval_callback
         self.pending_approvals: Dict[str, PendingTradeApproval] = {}
-        self.is_ready = False
+        self.bot_ready = False  # Renamed from is_ready to avoid shadowing inherited method
         
         logger.info(f"🤖 Discord Trade Approval Bot initialized")
         logger.info(f"   Channel ID: {channel_id}")
     
     async def on_ready(self):
         """Called when bot is ready"""
-        self.is_ready = True
+        self.bot_ready = True
         logger.info(f'✅ Discord bot logged in as {self.user}')
         
         channel = self.get_channel(self.channel_id)
@@ -419,7 +419,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             True if sent successfully
         """
         try:
-            if not self.is_ready:
+            if not self.bot_ready:
                 logger.warning("Discord bot not ready, cannot send approval request")
                 return False
             
@@ -659,7 +659,7 @@ class DiscordApprovalManager:
             # Wait for bot to be ready
             import time as time_module
             for i in range(30):
-                if self.bot.is_ready():
+                if self.bot.bot_ready:
                     logger.info("✅ Discord approval bot connected and ready!")
                     return True
                 time_module.sleep(0.5)
@@ -690,7 +690,7 @@ class DiscordApprovalManager:
             logger.debug("Discord approval manager not enabled")
             return False
         
-        if not self.bot.is_ready():
+        if not self.bot.bot_ready:
             logger.warning("Discord bot not ready")
             return False
         
@@ -740,7 +740,7 @@ class DiscordApprovalManager:
     
     def is_running(self) -> bool:
         """Check if bot is running"""
-        return bool(self.enabled and self.bot and getattr(self.bot, 'is_ready', False))
+        return bool(self.enabled and self.bot and getattr(self.bot, 'bot_ready', False))
 
 
 # Global singleton instance
