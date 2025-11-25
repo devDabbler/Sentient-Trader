@@ -441,10 +441,12 @@ class CryptoBreakoutMonitor:
         if breakout.symbol in self.recent_alerts:
             last_alert = self.recent_alerts[breakout.symbol]
             if datetime.now() - last_alert < self.alert_cooldown:
+                logger.debug(f"   ⏳ {breakout.symbol} skipped - cooldown active (last alert: {last_alert})")
                 return False
         
         # Check score threshold
         if breakout.score < self.min_score:
+            logger.debug(f"   📊 {breakout.symbol} skipped - score {breakout.score:.1f} < min {self.min_score}")
             return False
         
         # Check confidence threshold
@@ -453,14 +455,18 @@ class CryptoBreakoutMonitor:
         breakout_level = confidence_levels.get(breakout.confidence, 0)
         
         if breakout_level < min_level:
+            logger.debug(f"   🎯 {breakout.symbol} skipped - confidence {breakout.confidence} < min {self.min_confidence}")
             return False
         
-        # Check AI confidence if available
+        # Check AI confidence if available - only filter if AI analysis was actually done
         if breakout.ai_confidence and self.use_ai:
             ai_level = confidence_levels.get(breakout.ai_confidence, 0)
-            if ai_level < min_level:
+            # If AI timed out and returned empty, ai_confidence might be None - don't filter in that case
+            if breakout.ai_confidence and ai_level < min_level:
+                logger.debug(f"   🤖 {breakout.symbol} skipped - AI confidence {breakout.ai_confidence} < min {self.min_confidence}")
                 return False
         
+        logger.info(f"   ✅ {breakout.symbol} PASSED all filters (score={breakout.score:.1f}, conf={breakout.confidence}, ai_conf={breakout.ai_confidence})")
         return True
     
     def _send_alert(self, breakout: BreakoutAlert):
@@ -469,13 +475,14 @@ class CryptoBreakoutMonitor:
         # Log alert
         logger.info(f"\n🚨 BREAKOUT ALERT: {breakout.symbol}")
         logger.info(f"   Type: {breakout.alert_type}")
-        pass  # logger.info(f"   Score: {} {breakout.score:.1f}")
-        logger.info(f"   Confidence: {breakout.confidence}")
-        logger.info(f"   Price: ${breakout.price:,.2f}")
+        logger.info(f"   Score: {breakout.score:.1f}")
+        logger.info(f"   Confidence: {breakout.confidence} (AI: {breakout.ai_confidence or 'N/A'})")
+        logger.info(f"   Price: ${breakout.price:,.4f}")
         logger.info(f"   24h Change: {breakout.change_24h:+.2f}%")
         
         if not self.discord_webhook:
-            logger.info("   ℹ️ Discord webhook not configured - alert logged only\n")
+            logger.warning("   ⚠️ Discord webhook not configured - alert logged only\n")
+            logger.warning("   Set DISCORD_WEBHOOK_URL environment variable to enable Discord alerts")
             return
         
         try:
@@ -488,13 +495,20 @@ class CryptoBreakoutMonitor:
                 'avatar_url': 'https://cdn-icons-png.flaticon.com/512/6001/6001368.png'
             }
             
-            response = requests.post(self.discord_webhook, json=payload, timeout=10)
+            logger.debug(f"   📤 Sending Discord webhook to: {self.discord_webhook[:50]}...")
+            response = requests.post(self.discord_webhook, json=payload, timeout=15)
             response.raise_for_status()
             
-            logger.info(f"   ✅ Discord alert sent successfully\n")
+            logger.info(f"   ✅ Discord alert sent successfully (HTTP {response.status_code})\n")
         
+        except requests.exceptions.Timeout:
+            logger.error(f"   ❌ Discord webhook timeout (15s) - webhook may be slow or unreachable\n")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"   ❌ Discord connection error: {e}\n")
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"   ❌ Discord HTTP error: {e} - Response: {e.response.text if hasattr(e, 'response') else 'N/A'}\n")
         except Exception as e:
-            logger.error(f"   ❌ Failed to send Discord alert: {e}\n")
+            logger.error(f"   ❌ Failed to send Discord alert: {type(e).__name__}: {e}\n")
     
     def _build_discord_embed(self, breakout: BreakoutAlert) -> Dict:
         """Build Discord embed message for breakout alert"""

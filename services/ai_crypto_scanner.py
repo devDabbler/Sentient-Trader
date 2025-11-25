@@ -176,6 +176,11 @@ class AICryptoScanner:
             # Get LLM response
             response = self._query_llm(prompt, symbol=opportunity.symbol)
             
+            # If LLM timed out or returned empty, use rule-based fallback
+            if not response or not response.strip():
+                logger.info(f"🔄 Using rule-based analysis for {opportunity.symbol} (LLM unavailable)")
+                return self._rule_based_confidence(opportunity)
+            
             # Parse response
             ai_data = self._parse_llm_response(response, opportunity)
             
@@ -274,10 +279,10 @@ Respond ONLY with valid JSON, no extra text:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(make_request)
                 try:
-                    response = future.result(timeout=30)  # 30 second timeout per request
+                    response = future.result(timeout=60)  # 60 second timeout for remote Ollama
                     return response if response else ""
                 except concurrent.futures.TimeoutError:
-                    logger.warning(f"⏱️ LLM request timeout for {symbol} (30s) - using rule-based analysis")
+                    logger.warning(f"⏱️ LLM request timeout for {symbol} (60s) - using rule-based analysis")
                     return ""
             
         except Exception as e:
