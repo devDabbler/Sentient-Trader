@@ -49,6 +49,18 @@ class PendingTradeApproval:
         """Check if approval request has expired"""
         elapsed = (datetime.now() - self.created_time).total_seconds() / 60
         return elapsed > self.expires_minutes
+    
+    @staticmethod
+    def price_fmt(price: float) -> str:
+        """Format price for display"""
+        if price >= 1000:
+            return f"{price:,.2f}"
+        elif price >= 1:
+            return f"{price:.4f}"
+        elif price >= 0.01:
+            return f"{price:.6f}"
+        else:
+            return f"{price:.8f}"
 
 
 class DiscordTradeApprovalBot(commands.Bot):
@@ -102,35 +114,191 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         content = message.content.upper().strip()
         
-        # Check for approval/rejection keywords
+        # Check for LIST command to show pending trades
+        if content in ['LIST', 'PENDING', 'TRADES', 'STATUS']:
+            await self._list_pending_trades(message)
+            return
+        
+        # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
+        import re
+        
+        # Pattern: APPROVE/REJECT followed by number or symbol
+        specific_match = re.match(r'(APPROVE|YES|REJECT|NO)\s+(\d+|[A-Z0-9/]+)', content)
+        if not specific_match:
+            # Also try number first: "1 APPROVE" or "BTC APPROVE"
+            specific_match = re.match(r'(\d+|[A-Z0-9/]+)\s+(APPROVE|YES|REJECT|NO)', content)
+            if specific_match:
+                # Swap order for consistent handling
+                identifier = specific_match.group(1)
+                action = specific_match.group(2)
+            else:
+                identifier = None
+                action = None
+        else:
+            action = specific_match.group(1)
+            identifier = specific_match.group(2)
+        
+        if identifier and action:
+            approve = action in ['APPROVE', 'YES']
+            await self._handle_specific_approval(message, identifier, approve)
+            return
+        
+        # Check for simple approval/rejection keywords (applies to most recent)
         if content in ['APPROVE', 'YES', 'GO', 'EXECUTE', 'BUY', 'Y']:
             await self._handle_approval(message, approve=True)
         elif content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N']:
             await self._handle_approval(message, approve=False)
+        elif content in ['APPROVE ALL', 'YES ALL']:
+            await self._handle_approve_all(message, approve=True)
+        elif content in ['REJECT ALL', 'NO ALL', 'CANCEL ALL']:
+            await self._handle_approve_all(message, approve=False)
         
         # Process commands
         await self.process_commands(message)
     
+    async def _list_pending_trades(self, message: discord.Message):
+        """List all pending trade approvals with numbers"""
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
+        
+        if not pending:
+            await message.channel.send("📋 No pending trade approvals.")
+            return
+        
+        # Sort by creation time
+        pending.sort(key=lambda x: x[1].created_time)
+        
+        lines = ["📋 **PENDING TRADE APPROVALS:**\n"]
+        for i, (approval_id, approval) in enumerate(pending, 1):
+            elapsed = (datetime.now() - approval.created_time).total_seconds() / 60
+            lines.append(
+                f"**{i}.** {approval.pair} {approval.side} @ ${approval.price_fmt(approval.entry_price)} "
+                f"(Conf: {approval.confidence:.0f}%) - ⏱️ {elapsed:.0f}m ago"
+            )
+        
+        lines.append("\n**Commands:**")
+        lines.append("• `APPROVE 1` or `1 YES` - Approve specific trade")
+        lines.append("• `REJECT 2` or `2 NO` - Reject specific trade")
+        lines.append("• `APPROVE BTC/USD` - Approve by symbol")
+        lines.append("• `APPROVE ALL` - Approve all pending")
+        lines.append("• `APPROVE` - Approve most recent")
+        
+        await message.channel.send("\n".join(lines))
+    
+    async def _handle_specific_approval(self, message: discord.Message, identifier: str, approve: bool):
+        """Handle approval for a specific trade by number or symbol"""
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
+        
+        if not pending:
+            await message.channel.send("❌ No pending trade approvals.")
+            return
+        
+        # Sort by creation time for consistent numbering
+        pending.sort(key=lambda x: x[1].created_time)
+        
+        target_approval = None
+        
+        # Check if identifier is a number
+        if identifier.isdigit():
+            idx = int(identifier) - 1  # Convert to 0-based
+            if 0 <= idx < len(pending):
+                target_approval = pending[idx][1]
+            else:
+                await message.channel.send(f"❌ Invalid trade number: {identifier}. Use `LIST` to see pending trades.")
+                return
+        else:
+            # Search by symbol (partial match)
+            identifier_clean = identifier.replace('/', '')
+            for _, approval in pending:
+                if identifier_clean in approval.pair.replace('/', '').upper():
+                    target_approval = approval
+                    break
+            
+            if not target_approval:
+                await message.channel.send(f"❌ No pending trade found for: {identifier}. Use `LIST` to see pending trades.")
+                return
+        
+        # Process the approval
+        if approve:
+            target_approval.approved = True
+            await message.channel.send(
+                f"✅ **APPROVED:** {target_approval.pair} {target_approval.side} trade\n"
+                f"Executing trade now..."
+            )
+            logger.info(f"✅ User approved specific trade: {target_approval.approval_id}")
+        else:
+            target_approval.rejected = True
+            await message.channel.send(
+                f"❌ **REJECTED:** {target_approval.pair} {target_approval.side} trade\n"
+                f"Trade cancelled."
+            )
+            logger.info(f"❌ User rejected specific trade: {target_approval.approval_id}")
+        
+        # Call approval callback
+        if self.approval_callback:
+            try:
+                self.approval_callback(target_approval.approval_id, approve)
+            except Exception as e:
+                logger.error(f"Error in approval callback: {e}", exc_info=True)
+    
+    async def _handle_approve_all(self, message: discord.Message, approve: bool):
+        """Approve or reject all pending trades"""
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
+        
+        if not pending:
+            await message.channel.send("❌ No pending trade approvals.")
+            return
+        
+        action = "APPROVED" if approve else "REJECTED"
+        count = 0
+        
+        for approval_id, approval in pending:
+            if approve:
+                approval.approved = True
+            else:
+                approval.rejected = True
+            count += 1
+            
+            # Call approval callback for each
+            if self.approval_callback:
+                try:
+                    self.approval_callback(approval.approval_id, approve)
+                except Exception as e:
+                    logger.error(f"Error in approval callback: {e}", exc_info=True)
+        
+        await message.channel.send(f"{'✅' if approve else '❌'} **{action} {count} trade(s)**")
+        logger.info(f"{'✅' if approve else '❌'} User {action.lower()} all {count} pending trades")
+    
     async def _handle_approval(self, message: discord.Message, approve: bool):
-        """Handle user approval/rejection"""
+        """Handle user approval/rejection (most recent trade)"""
         # Check if there's a pending approval (most recent)
         if not self.pending_approvals:
             await message.channel.send("❌ No pending trade approvals.")
             return
         
-        # Get most recent pending approval
-        latest_approval = None
-        latest_time = None
+        # Get all pending (not approved/rejected)
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
         
-        for approval_id, approval in self.pending_approvals.items():
-            if not approval.approved and not approval.rejected:
-                if latest_time is None or approval.created_time > latest_time:
-                    latest_approval = approval
-                    latest_time = approval.created_time
-        
-        if not latest_approval:
+        if not pending:
             await message.channel.send("❌ No pending approvals found.")
             return
+        
+        # If multiple pending, show list and ask for specific selection
+        if len(pending) > 1:
+            await message.channel.send(
+                f"⚠️ **{len(pending)} trades pending!** Please specify which one:\n"
+                f"• `APPROVE 1` - Approve first trade\n"
+                f"• `APPROVE BTC/USD` - Approve by symbol\n"
+                f"• `APPROVE ALL` - Approve all\n"
+                f"• `LIST` - Show all pending trades"
+            )
+            return
+        
+        # Only one pending - approve/reject it
+        latest_approval = pending[0][1]
         
         # Mark as approved/rejected
         if approve:

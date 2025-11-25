@@ -115,6 +115,29 @@ StandardError=append:$PROJECT_DIR/logs/dex_launch_error.log
 WantedBy=multi-user.target
 EOF
 
+# Discord Approval Bot Service
+sudo tee /etc/systemd/system/sentient-discord-approval.service > /dev/null << EOF
+[Unit]
+Description=Sentient Trader - Discord Trade Approval Bot
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$PROJECT_DIR
+Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
+ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_discord_approval_bot_simple.py
+Restart=always
+RestartSec=10
+StandardOutput=append:$PROJECT_DIR/logs/discord_approval_service.log
+StandardError=append:$PROJECT_DIR/logs/discord_approval_error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # AI Crypto Position Manager Service (OPTIONAL - Only enable if you want AI to execute trades)
 sudo tee /etc/systemd/system/sentient-crypto-ai-trader.service > /dev/null << EOF
 [Unit]
@@ -147,6 +170,7 @@ echo "Enabling services..."
 sudo systemctl enable sentient-stock-monitor
 sudo systemctl enable sentient-crypto-breakout
 sudo systemctl enable sentient-dex-launch
+sudo systemctl enable sentient-discord-approval
 # AI trader NOT auto-enabled - must be started manually
 
 # Start services
@@ -154,6 +178,7 @@ echo "Starting services..."
 sudo systemctl start sentient-stock-monitor
 sudo systemctl start sentient-crypto-breakout
 sudo systemctl start sentient-dex-launch
+sudo systemctl start sentient-discord-approval
 sudo systemctl start sentient-crypto-ai-trader
 
 echo ""
@@ -165,6 +190,7 @@ echo "Service Status:"
 sudo systemctl status sentient-stock-monitor --no-pager -l
 sudo systemctl status sentient-crypto-breakout --no-pager -l
 sudo systemctl status sentient-dex-launch --no-pager -l
+sudo systemctl status sentient-discord-approval --no-pager -l
 sudo systemctl status sentient-crypto-ai-trader --no-pager -l
 echo ""
 echo "ℹ️  AI Trading Service: STARTED (but NOT auto-boot)"
@@ -177,6 +203,11 @@ echo "  View logs:     tail -f $PROJECT_DIR/logs/stock_monitor_service.log"
 echo "  Restart:       sudo systemctl restart sentient-stock-monitor"
 echo "  Stop:          sudo systemctl stop sentient-stock-monitor"
 echo "  Check status:  sudo systemctl status sentient-stock-monitor"
+echo ""
+echo "Discord Approval Bot:"
+echo "  View logs:     tail -f $PROJECT_DIR/logs/discord_approval_service.log"
+echo "  Restart:       sudo systemctl restart sentient-discord-approval"
+echo "  Status:        sudo systemctl status sentient-discord-approval"
 echo ""
 echo "AI Trading Commands (if enabled):"
 echo "  View AI logs:  tail -f $PROJECT_DIR/logs/crypto_ai_position_manager_service.log"
