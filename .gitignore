@@ -77,7 +77,7 @@ docs/
 
 # Configuration files (user-specific)
 active_strategy.json
-config_*.py
+# config_*.py
 run_autotrader_background.py
 
 # Batch scripts (user-specific automation)

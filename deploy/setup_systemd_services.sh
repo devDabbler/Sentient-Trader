@@ -4,7 +4,12 @@
 set -e
 
 USER=$(whoami)
-PROJECT_DIR="/home/$USER/sentient-trader"
+# Handle root user (home is /root, not /home/root)
+if [ "$USER" = "root" ]; then
+    PROJECT_DIR="/root/sentient-trader"
+else
+    PROJECT_DIR="/home/$USER/sentient-trader"
+fi
 
 echo "Creating systemd service files..."
 
