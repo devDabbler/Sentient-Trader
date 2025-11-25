@@ -33,6 +33,7 @@ from services.crypto_scanner import CryptoOpportunityScanner
 from services.ai_crypto_scanner import AICryptoScanner
 from services.pre_listing_scanner import PreListingScanner
 from services.crypto_watchlist_manager import CryptoWatchlistManager
+from services.ticker_manager import TickerManager
 from utils.crypto_pair_utils import normalize_crypto_pair, extract_base_asset
 from clients.supabase_client import get_supabase_client
 
@@ -70,7 +71,7 @@ class BreakoutAlert:
     ai_rating: Optional[float] = None
     
     # Meta
-    timestamp: str = None
+    timestamp: Optional[str] = None
     scan_duration: float = 0.0
     
     def __post_init__(self):
@@ -710,7 +711,7 @@ class CryptoBreakoutMonitor:
                 return False
             
             # Check if exists in database
-            if self.watchlist_manager.is_in_watchlist(breakout.symbol):
+            if self.watchlist_manager and self.watchlist_manager.is_in_watchlist(breakout.symbol):
                 logger.debug(f"   {breakout.symbol} already in watchlist")
                 self.watchlist_added.add(breakout.symbol)  # Track to avoid checking again
                 return False
@@ -735,8 +736,10 @@ class CryptoBreakoutMonitor:
             if breakout.ai_reasoning:
                 opportunity_data['reason'] = breakout.ai_reasoning
             
-            # Add to watchlist
-            success = self.watchlist_manager.add_crypto(breakout.symbol, opportunity_data)
+            if self.watchlist_manager:
+                success = self.watchlist_manager.add_crypto(breakout.symbol, opportunity_data)
+            else:
+                success = False
             
             if success:
                 # Add tags based on alert type
@@ -755,8 +758,9 @@ class CryptoBreakoutMonitor:
                     tags.append('HIGH_SCORE')
                 
                 # Add tags to database
-                for tag in tags:
-                    self.watchlist_manager.add_tag(breakout.symbol, tag)
+                if self.watchlist_manager:
+                    for tag in tags:
+                        self.watchlist_manager.add_tag(breakout.symbol, tag)
                 
                 # Track that we added it
                 self.watchlist_added.add(breakout.symbol)
@@ -771,16 +775,34 @@ class CryptoBreakoutMonitor:
             return False
     
     def _get_watchlist_symbols(self) -> List[str]:
-        """Get symbols from user's watchlist via Supabase"""
-        try:
-            if not self.watchlist_manager:
-                return []
-            
-            return self.watchlist_manager.get_watchlist_symbols()
+        """Get symbols from user's watchlist via Supabase (CryptoWatchlistManager + TickerManager)"""
+        symbols = set()
         
+        # Source 1: CryptoWatchlistManager (Internal bot watchlist)
+        try:
+            if self.watchlist_manager:
+                internal_symbols = self.watchlist_manager.get_watchlist_symbols()
+                symbols.update(internal_symbols)
+                pass  # logger.debug(f"Loaded {len(internal_symbols)} from CryptoWatchlistManager")
         except Exception as e:
-            logger.debug(f"Error fetching watchlist: {e}")
-            return []
+            logger.debug(f"Error fetching from CryptoWatchlistManager: {e}")
+
+        # Source 2: TickerManager (User's My Tickers)
+        try:
+            tm = TickerManager()
+            if tm.test_connection():
+                all_tickers = tm.get_all_tickers()
+                # Filter for crypto types
+                crypto_tickers = [
+                    t['ticker'] for t in all_tickers 
+                    if t.get('type') in ['crypto', 'coin', 'token'] or '/' in t['ticker']
+                ]
+                symbols.update(crypto_tickers)
+                pass  # logger.debug(f"Loaded {len(crypto_tickers)} from TickerManager")
+        except Exception as e:
+            logger.debug(f"Error fetching from TickerManager: {e}")
+
+        return list(symbols)
     
     def _get_uptime(self) -> str:
         """Get monitor uptime"""

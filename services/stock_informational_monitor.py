@@ -113,7 +113,30 @@ class StockInformationalMonitor(LLMServiceMixin):
         print(f"[TRACE] StockInformationalMonitor.__init__: LLM initialized", flush=True)
         
         # Configuration
-        self.watchlist = watchlist or WATCHLIST
+        self.watchlist = watchlist
+        
+        # If no watchlist provided, try to load from TickerManager (Supabase)
+        if not self.watchlist:
+            try:
+                from services.ticker_manager import TickerManager
+                tm = TickerManager()
+                # Only use if we can connect
+                if tm.test_connection():
+                    db_tickers = tm.get_all_tickers()
+                    if db_tickers:
+                        self.watchlist = [t['ticker'] for t in db_tickers]
+                        logger.info(f"Loaded {len(self.watchlist)} tickers from TickerManager (My Tickers)")
+            except Exception as e:
+                logger.warning(f"Failed to load from TickerManager: {e}")
+
+        # Fallback to config if still empty
+        if not self.watchlist:
+            self.watchlist = WATCHLIST
+        
+        # Ensure watchlist is never None
+        if self.watchlist is None:
+            self.watchlist = []
+            
         self.scan_interval = scan_interval_minutes or SCAN_INTERVAL_MINUTES
         self.min_score = min_score or MIN_ENSEMBLE_SCORE
         
@@ -262,7 +285,11 @@ class StockInformationalMonitor(LLMServiceMixin):
         """
         opportunities = []
         
-        logger.info(f"Starting scan of {len(self.watchlist)} tickers...")
+        logger.info(f"Starting scan of {len(self.watchlist) if self.watchlist else 0} tickers...")
+        
+        if not self.watchlist:
+            logger.warning("No tickers in watchlist to scan")
+            return opportunities
         
         for symbol in self.watchlist:
             try:
@@ -412,6 +439,12 @@ class StockInformationalMonitor(LLMServiceMixin):
         Args:
             tickers: List of ticker symbols to add
         """
+        if not tickers:
+            return
+        
+        if not self.watchlist:
+            self.watchlist = []
+        
         existing = set(self.watchlist)
         for ticker in tickers:
             if ticker not in existing:
@@ -421,7 +454,7 @@ class StockInformationalMonitor(LLMServiceMixin):
     
     def remove_ticker(self, ticker: str):
         """Remove a ticker from watchlist"""
-        if ticker in self.watchlist:
+        if self.watchlist and ticker in self.watchlist:
             self.watchlist.remove(ticker)
             logger.info(f"Removed {ticker} from watchlist")
     
@@ -444,7 +477,7 @@ class StockInformationalMonitor(LLMServiceMixin):
     
     def get_watchlist(self) -> List[str]:
         """Get current watchlist"""
-        return self.watchlist.copy()
+        return self.watchlist.copy() if self.watchlist else []
 
 
 # Singleton instance
@@ -490,7 +523,7 @@ if __name__ == "__main__":
     monitor = get_stock_informational_monitor()
     
     logger.info("Starting continuous monitoring...")
-    logger.info(f"Watching {len(monitor.watchlist)} symbols")
+    logger.info(f"Watching {len(monitor.watchlist) if monitor.watchlist else 0} symbols")
     
     # Run continuous monitoring
     try:

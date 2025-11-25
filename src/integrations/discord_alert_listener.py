@@ -15,6 +15,14 @@ import json
 import os
 from collections import deque
 
+# Try to import TickerManager
+try:
+    from services.ticker_manager import TickerManager
+    TICKER_MANAGER_AVAILABLE = True
+except ImportError:
+    logger.warning("Could not import TickerManager. Watchlist commands via Discord replies will be disabled.")
+    TICKER_MANAGER_AVAILABLE = False
+
 
 
 @dataclass
@@ -159,7 +167,7 @@ class DiscordAlertParser:
                 reasoning=content[:200],  # First 200 chars
                 confidence=confidence,
                 timestamp=message.created_at.isoformat(),
-                channel_name=message.channel.name if hasattr(message.channel, 'name') else 'DM',
+                channel_name=message.channel.name if hasattr(message.channel, 'name') and message.channel.name else 'DM',
                 author=str(message.author),
                 raw_message=content,
                 premium_channel=premium_channel
@@ -231,6 +239,40 @@ class DiscordAlertListener(commands.Bot):
             return
         
         is_premium = self.monitored_channels[channel_id]
+
+        # ---------------------------------------------------------
+        # Handle Replies (Add to Watchlist)
+        # ---------------------------------------------------------
+        if message.reference and message.reference.resolved and TICKER_MANAGER_AVAILABLE:
+            # Check if user is asking to watch/track
+            content_lower = message.content.lower().strip()
+            watch_keywords = ['watch', 'track', 'add', 'save', 'follow']
+            
+            if any(k in content_lower for k in watch_keywords):
+                try:
+                    original_msg = message.reference.resolved
+                    if isinstance(original_msg, discord.Message):
+                        # Extract ticker from ORIGINAL message
+                        ticker = self.parser.extract_ticker(original_msg.content)
+                        
+                        if ticker:
+                            # Add to TickerManager
+                            tm = TickerManager()
+                            if tm.add_ticker(ticker, notes=f"Added via Discord by {message.author}"):
+                                await message.add_reaction("✅")
+                                logger.info(f"Added {ticker} to watchlist via Discord reply from {message.author}")
+                            else:
+                                await message.add_reaction("❌")
+                        else:
+                            # Could not find ticker
+                            await message.add_reaction("❓")
+                except Exception as e:
+                    logger.error(f"Error handling watchlist reply: {e}")
+                    await message.add_reaction("⚠️")
+
+        # ---------------------------------------------------------
+        # Parse Alert
+        # ---------------------------------------------------------
         
         # Parse alert
         alert = self.parser.parse_alert(message, premium_channel=is_premium)
@@ -340,7 +382,7 @@ class DiscordAlertManager:
     
     def is_running(self) -> bool:
         """Check if bot is running"""
-        return self.bot.is_ready
+        return bool(self.bot.is_ready)
 
 
 def create_discord_manager(

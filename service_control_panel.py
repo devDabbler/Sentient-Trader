@@ -799,6 +799,129 @@ def check_password():
 
 
 # ============================================================
+# WATCHLIST UI
+# ============================================================
+
+def render_watchlist_manager():
+    """Render the Watchlist Manager section"""
+    st.header("📋 Watchlist Manager")
+    
+    # Try to import TickerManager
+    try:
+        from services.ticker_manager import TickerManager
+        tm = TickerManager()
+        supabase_available = tm.test_connection()
+    except Exception as e:
+        print(f"TickerManager import failed: {e}")
+        supabase_available = False
+        tm = None
+
+    tab1, tab2 = st.tabs(["My Tickers (Supabase)", "Service Watchlists (Local)"])
+    
+    # Tab 1: Global "My Tickers" (Supabase)
+    with tab1:
+        if supabase_available:
+            st.caption("✅ Connected to Supabase 'saved_tickers'")
+            
+            # Add new ticker
+            with st.expander("➕ Add Ticker"):
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    new_ticker = st.text_input("Ticker Symbol", key="sb_new_ticker").upper()
+                with col2:
+                    ticker_type = st.selectbox("Type", ["stock", "crypto", "penny_stock"], key="sb_new_type")
+                
+                if st.button("Add to My Tickers", type="primary"):
+                    if new_ticker:
+                        if tm and tm.add_ticker(new_ticker, ticker_type=ticker_type):
+                            st.success(f"Added {new_ticker}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to add ticker")
+            
+            # List/Manage tickers
+            if tm:
+                tickers = tm.get_all_tickers()
+            else:
+                tickers = []
+            if tickers:
+                ticker_list = [t['ticker'] for t in tickers]
+                selected = st.multiselect(
+                    "Current Watchlist",
+                    options=ticker_list,
+                    default=ticker_list,
+                    key="sb_ticker_list"
+                )
+                
+                # Check for removals
+                to_remove = set(ticker_list) - set(selected)
+                if to_remove:
+                    if st.button(f"Remove {len(to_remove)} tickers?"):
+                        for t in to_remove:
+                            if tm:
+                                tm.remove_ticker(t)
+                        st.success("Updated watchlist")
+                        st.rerun()
+            else:
+                st.info("No tickers found in database.")
+        else:
+            st.warning("⚠️ Supabase connection not available. Ensure credentials are in .env")
+            st.info("Use 'Service Watchlists' tab for local configuration.")
+
+    # Tab 2: Local Service Watchlists (JSON)
+    with tab2:
+        st.caption("Local JSON watchlists used by services if Supabase is unavailable")
+        
+        service_names = list(SERVICES.keys())
+        selected_service = st.selectbox("Select Service", service_names)
+        
+        if selected_service:
+            svc_info = SERVICES[selected_service]
+            svc_key = svc_info['name']
+            
+            current_watchlist = get_service_watchlist(svc_key, svc_info.get('category', 'stocks'))
+            
+            # Custom input
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                custom_add = st.text_input("Add Custom Ticker", key=f"custom_{svc_key}").upper()
+            with col2:
+                if st.button("Add", key=f"btn_add_{svc_key}"):
+                    if custom_add and custom_add not in current_watchlist:
+                        current_watchlist.append(custom_add)
+                        set_service_watchlist(svc_key, current_watchlist)
+                        st.success(f"Added {custom_add}")
+                        st.rerun()
+            
+            # Multiselect with clear/all
+            col_act1, col_act2 = st.columns(2)
+            with col_act1:
+                if st.button("Select All Default", key=f"all_{svc_key}"):
+                    default = DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])
+                    current_watchlist = list(set(current_watchlist + default))
+                    set_service_watchlist(svc_key, current_watchlist)
+                    st.rerun()
+            with col_act2:
+                if st.button("Clear All", key=f"clear_{svc_key}"):
+                    set_service_watchlist(svc_key, [])
+                    st.rerun()
+
+            updated_list = st.multiselect(
+                f"Watchlist for {selected_service}",
+                options=list(set(current_watchlist + DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), []))),
+                default=current_watchlist,
+                key=f"multi_{svc_key}"
+            )
+            
+            # Save changes if different
+            if set(updated_list) != set(current_watchlist):
+                set_service_watchlist(svc_key, updated_list)
+                st.toast("Watchlist updated!")
+                time.sleep(0.5)
+                st.rerun()
+
+
+# ============================================================
 # MAIN APP
 # ============================================================
 
@@ -832,17 +955,94 @@ def main():
         # Auto-refresh option - uses query param trick
         st.markdown("---")
         auto_refresh = st.checkbox("🔄 Auto-refresh", value=False, key="auto_refresh", 
-                                   help="Enable automatic page refresh every 30 seconds")
+                                 help="Auto-refresh every 30 seconds")
         if auto_refresh:
-            # Use streamlit's built-in auto-rerun with a placeholder
-            st.markdown("_Auto-refresh enabled (30s)_")
-            # Add a meta refresh tag via markdown
-            st.markdown(
-                """
-                <meta http-equiv="refresh" content="30">
-                """,
-                unsafe_allow_html=True
-            )
+            time.sleep(30)
+            st.rerun()
+
+    # Tabs
+    tab_status, tab_watchlist, tab_analysis, tab_discord, tab_logs = st.tabs([
+        "📊 Service Status", 
+        "📋 Watchlists",
+        "🔍 Analysis", 
+        "💬 Discord", 
+        "📝 Logs"
+    ])
+    
+    with tab_watchlist:
+        render_watchlist_manager()
+
+    with tab_status:
+        st.markdown("### Service Status")
+        
+        cols = st.columns(3)
+        
+        for i, (svc_label, svc_info) in enumerate(SERVICES.items()):
+            svc_name = svc_info['name']
+            with cols[i % 3]:
+                st.markdown(f"#### {svc_info['emoji']} {svc_label}")
+                st.caption(svc_info['description'])
+                
+                status = get_service_status(svc_name)
+                
+                # Status indicator
+                st.markdown(f"**Status:** {status['status_text']}")
+                st.markdown(f"**Boot:** {status['boot_text']}")
+                if status['memory'] != 'N/A':
+                    st.markdown(f"**Memory:** {status['memory']}")
+                
+                # Controls
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if st.button("Start", key=f"start_{svc_name}", disabled=status['active']):
+                        ok, msg = control_service(svc_name, "start")
+                        if ok:
+                            st.success("Started")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {msg}")
+                
+                with c2:
+                    if st.button("Stop", key=f"stop_{svc_name}", disabled=not status['active']):
+                        ok, msg = control_service(svc_name, "stop")
+                        if ok:
+                            st.success("Stopped")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {msg}")
+                
+                with c3:
+                    if st.button("Restart", key=f"restart_{svc_name}"):
+                        ok, msg = control_service(svc_name, "restart")
+                        if ok:
+                            st.success("Restarted")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {msg}")
+                
+                # Interval config
+                current_interval = get_service_interval(svc_name, svc_info)
+                new_interval = st.number_input(
+                    "Scan Interval (sec)", 
+                    min_value=svc_info.get("interval_min", 10),
+                    max_value=svc_info.get("interval_max", 3600),
+                    value=current_interval,
+                    key=f"interval_{svc_name}"
+                )
+                
+                if new_interval != current_interval:
+                    if st.button("Update Interval", key=f"update_{svc_name}"):
+                        if set_service_interval(svc_name, svc_info, int(new_interval)):
+                            st.success("Interval updated")
+                            time.sleep(1)
+                            st.rerun()
+                
+                st.markdown("---")
+
+    with tab_analysis:
         
         st.markdown("---")
         st.markdown("### 🎛️ Quick Actions")
