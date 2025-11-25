@@ -66,8 +66,8 @@ SERVICES = {
         "category": "crypto",
         "interval_key": "scan_interval_seconds",
         "interval_default": 30,
-        "interval_min": 10,
-        "interval_max": 300
+        "interval_min": 5,
+        "interval_max": 3600  # Up to 1 hour
     },
     "Crypto Breakout Monitor": {
         "name": "sentient-crypto-breakout",
@@ -76,8 +76,8 @@ SERVICES = {
         "category": "crypto",
         "interval_key": "scan_interval_seconds",
         "interval_default": 180,
-        "interval_min": 60,
-        "interval_max": 600
+        "interval_min": 10,
+        "interval_max": 3600  # Up to 1 hour
     },
     "AI Crypto Trader": {
         "name": "sentient-crypto-ai-trader",
@@ -86,8 +86,8 @@ SERVICES = {
         "category": "crypto",
         "interval_key": "check_interval_seconds",
         "interval_default": 60,
-        "interval_min": 30,
-        "interval_max": 300
+        "interval_min": 10,
+        "interval_max": 3600  # Up to 1 hour
     },
     "Stock Monitor": {
         "name": "sentient-stock-monitor",
@@ -96,8 +96,8 @@ SERVICES = {
         "category": "stocks",
         "interval_key": "scan_interval_seconds",
         "interval_default": 300,
-        "interval_min": 60,
-        "interval_max": 900
+        "interval_min": 30,
+        "interval_max": 3600  # Up to 1 hour
     },
     "Discord Approval Bot": {
         "name": "sentient-discord-approval",
@@ -710,29 +710,67 @@ def main():
                 if svc_info.get("interval_key"):
                     with st.expander(f"⚙️ Settings - {display_name}"):
                         current_interval = get_service_interval(service_name, svc_info)
-                        interval_min = svc_info.get("interval_min", 10)
-                        interval_max = svc_info.get("interval_max", 600)
+                        interval_min = svc_info.get("interval_min", 5)
+                        interval_max = svc_info.get("interval_max", 3600)
                         interval_key = svc_info.get("interval_key", "scan_interval_seconds")
                         
                         st.markdown(f"**⏱️ Scan/Check Interval**")
-                        st.caption(f"How often the service checks for updates (in seconds)")
                         
-                        # Show current interval
-                        st.info(f"Current: **{current_interval}s** ({current_interval/60:.1f} min)")
+                        # Show current interval with nice formatting
+                        if current_interval >= 60:
+                            current_display = f"{current_interval}s ({current_interval//60}m {current_interval%60}s)"
+                        else:
+                            current_display = f"{current_interval}s"
+                        st.info(f"Current: **{current_display}**")
                         
-                        # Slider for new interval
-                        new_interval = st.slider(
-                            "New Interval (seconds)",
-                            min_value=interval_min,
-                            max_value=interval_max,
-                            value=current_interval,
-                            step=10,
-                            key=f"interval_{service_name}",
-                            help=f"Range: {interval_min}s - {interval_max}s"
-                        )
+                        # Two input methods: slider for quick adjust, number input for precise
+                        input_col1, input_col2 = st.columns([2, 1])
+                        
+                        with input_col1:
+                            # Slider for quick adjustment
+                            slider_val = st.slider(
+                                "Quick Adjust (drag)",
+                                min_value=interval_min,
+                                max_value=min(600, interval_max),  # Cap slider at 10 min for usability
+                                value=min(current_interval, 600),
+                                step=5,
+                                key=f"slider_{service_name}",
+                                help="Drag for quick adjustment (5-600s)"
+                            )
+                        
+                        with input_col2:
+                            # Number input for precise custom values
+                            custom_val = st.number_input(
+                                "Custom (seconds)",
+                                min_value=interval_min,
+                                max_value=interval_max,
+                                value=current_interval,
+                                step=1,
+                                key=f"custom_{service_name}",
+                                help=f"Enter any value from {interval_min}s to {interval_max}s"
+                            )
+                        
+                        # Determine which value to use (custom takes precedence if changed)
+                        if f"last_custom_{service_name}" not in st.session_state:
+                            st.session_state[f"last_custom_{service_name}"] = current_interval
+                        
+                        # Use custom if it was changed, otherwise use slider
+                        if custom_val != st.session_state[f"last_custom_{service_name}"]:
+                            new_interval = custom_val
+                            st.session_state[f"last_custom_{service_name}"] = custom_val
+                        else:
+                            new_interval = slider_val
+                        
+                        # Show what will be applied
+                        if new_interval != current_interval:
+                            if new_interval >= 60:
+                                new_display = f"{new_interval}s ({new_interval//60}m {new_interval%60}s)"
+                            else:
+                                new_display = f"{new_interval}s"
+                            st.warning(f"📝 New value: **{new_display}** (click Apply to save)")
                         
                         # Apply button
-                        col_apply, col_info = st.columns([1, 2])
+                        col_apply, col_reset = st.columns([1, 1])
                         with col_apply:
                             if st.button("💾 Apply & Restart", key=f"apply_interval_{service_name}", type="primary"):
                                 if set_service_interval(service_name, svc_info, new_interval):
@@ -746,31 +784,36 @@ def main():
                                 else:
                                     st.error("Failed to save interval")
                         
-                        with col_info:
-                            st.caption(f"💡 Changes require a service restart to take effect")
-                        
-                        # Show quick presets
-                        st.markdown("**Quick Presets:**")
-                        preset_col1, preset_col2, preset_col3 = st.columns(3)
-                        
-                        with preset_col1:
-                            if st.button("🚀 Fast (30s)", key=f"preset_fast_{service_name}"):
-                                preset_val = max(30, interval_min)
-                                set_service_interval(service_name, svc_info, preset_val)
+                        with col_reset:
+                            default_val = svc_info.get("interval_default", 60)
+                            if st.button(f"↩️ Reset to Default ({default_val}s)", key=f"reset_{service_name}"):
+                                set_service_interval(service_name, svc_info, default_val)
                                 control_service(service_name, "restart")
                                 st.rerun()
                         
-                        with preset_col2:
-                            if st.button("⚖️ Normal (60s)", key=f"preset_normal_{service_name}"):
-                                set_service_interval(service_name, svc_info, 60)
-                                control_service(service_name, "restart")
-                                st.rerun()
+                        # Quick presets
+                        st.markdown("---")
+                        st.markdown("**⚡ Quick Presets:**")
+                        preset_cols = st.columns(5)
                         
-                        with preset_col3:
-                            if st.button("🐢 Slow (120s)", key=f"preset_slow_{service_name}"):
-                                set_service_interval(service_name, svc_info, 120)
-                                control_service(service_name, "restart")
-                                st.rerun()
+                        presets = [
+                            ("10s", 10, "🏎️"),
+                            ("30s", 30, "🚀"),
+                            ("1m", 60, "⚖️"),
+                            ("5m", 300, "🐢"),
+                            ("15m", 900, "😴"),
+                        ]
+                        
+                        for i, (label, seconds, emoji) in enumerate(presets):
+                            with preset_cols[i]:
+                                if seconds >= interval_min and seconds <= interval_max:
+                                    if st.button(f"{emoji} {label}", key=f"preset_{seconds}_{service_name}"):
+                                        set_service_interval(service_name, svc_info, seconds)
+                                        control_service(service_name, "restart")
+                                        st.rerun()
+                        
+                        # Info about intervals
+                        st.caption(f"💡 Range: {interval_min}s - {interval_max}s ({interval_max//60} min). Lower = more responsive but higher API usage.")
                 
                 st.markdown("---")
     
