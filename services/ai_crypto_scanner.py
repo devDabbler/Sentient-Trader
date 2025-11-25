@@ -127,13 +127,16 @@ class AICryptoScanner:
         ai_opportunities = []
         for i, opp in enumerate(base_opportunities[:max_ai_analysis]):
             try:
+                logger.info(f"   [{i+1}/{max_ai_analysis}] Analyzing {opp.symbol}...")
                 ai_opp = self._add_ai_confidence(opp)
                 
                 # Filter by AI confidence if specified
                 if min_ai_confidence and ai_opp.ai_confidence != min_ai_confidence:
                     if min_ai_confidence == 'HIGH' and ai_opp.ai_confidence not in ['HIGH']:
+                        logger.debug(f"   Filtered {opp.symbol} - AI confidence {ai_opp.ai_confidence} < required {min_ai_confidence}")
                         continue
                     elif min_ai_confidence == 'MEDIUM' and ai_opp.ai_confidence not in ['HIGH', 'MEDIUM']:
+                        logger.debug(f"   Filtered {opp.symbol} - AI confidence {ai_opp.ai_confidence} < required {min_ai_confidence}")
                         continue
                 
                 ai_opportunities.append(ai_opp)
@@ -142,7 +145,10 @@ class AICryptoScanner:
                 # Fall back to rule-based for this one
                 ai_opportunities.append(self._rule_based_confidence(opp))
         
+        logger.info(f"✅ AI analysis complete - {len(ai_opportunities)} opportunities with AI confidence")
+        
         # Add remaining opportunities without AI analysis (rule-based)
+        logger.info(f"Adding {len(base_opportunities) - max_ai_analysis} more with rule-based analysis...")
         for opp in base_opportunities[max_ai_analysis:]:
             ai_opportunities.append(self._rule_based_confidence(opp))
         
@@ -152,7 +158,7 @@ class AICryptoScanner:
             reverse=True
         )
         
-        pass  # logger.info(f"✅ Returning top {min(top_n, len(ai_opportunities} AI-analyzed crypto opportunities"))
+        logger.info(f"✅ Returning {min(top_n, len(ai_opportunities))} AI-analyzed crypto opportunities")
         
         return ai_opportunities[:top_n]
     
@@ -262,29 +268,44 @@ Respond ONLY with valid JSON, no extra text:
             return ""
         
         import concurrent.futures
+        import threading
         
         try:
             # Use MEDIUM priority with caching for crypto analysis (5 min TTL)
             cache_key = f"crypto_ai_{symbol}"
             
-            # Add timeout wrapper to prevent hanging on slow/stuck LLM requests
-            def make_request():
-                return self.llm_helper.request(
-                    prompt=prompt,
-                    cache_key=cache_key,
-                    ttl=300,  # 5 minutes cache
-                    temperature=0.3  # Lower temperature for consistent analysis
-                )
+            # Store result in a mutable container for thread communication
+            result_container = {"response": None, "done": False}
             
-            # Use ThreadPoolExecutor with timeout to prevent hanging
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(make_request)
+            def make_request():
                 try:
-                    response = future.result(timeout=60)  # 60 second timeout for remote Ollama
-                    return response if response else ""
-                except concurrent.futures.TimeoutError:
-                    logger.warning(f"⏱️ LLM request timeout for {symbol} (60s) - using rule-based analysis")
-                    return ""
+                    response = self.llm_helper.request(
+                        prompt=prompt,
+                        cache_key=cache_key,
+                        ttl=300,  # 5 minutes cache
+                        temperature=0.3  # Lower temperature for consistent analysis
+                    )
+                    result_container["response"] = response
+                except Exception as e:
+                    logger.error(f"LLM request error for {symbol}: {e}")
+                finally:
+                    result_container["done"] = True
+            
+            # Start request in daemon thread (won't block shutdown)
+            thread = threading.Thread(target=make_request, daemon=True)
+            thread.start()
+            
+            # Wait with timeout
+            thread.join(timeout=45)  # 45 second timeout (reduced from 60)
+            
+            if result_container["done"] and result_container["response"]:
+                return result_container["response"]
+            elif not result_container["done"]:
+                logger.warning(f"⏱️ LLM request timeout for {symbol} (45s) - using rule-based analysis")
+                # Thread will continue in background but we move on
+                return ""
+            else:
+                return ""
             
         except Exception as e:
             logger.error(f"LLM query failed for {symbol}: {e}")
