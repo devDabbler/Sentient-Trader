@@ -66,7 +66,11 @@ logger.info("=" * 70)
 logger.info(f"✓ Working directory: {os.getcwd()}")
 logger.info(f"✓ Project root: {PROJECT_ROOT}")
 logger.info(f"✓ Python: {sys.executable}")
-logger.info(f"✓ User: {os.getenv('USERNAME', 'UNKNOWN')}")
+logger.info(f"✓ User: {os.getenv('USER', os.getenv('USERNAME', 'UNKNOWN'))}")
+
+# Force flush stdout/stderr for systemd
+sys.stdout.flush()
+sys.stderr.flush()
 
 # Set environment
 os.environ['PYTHONUNBUFFERED'] = '1'

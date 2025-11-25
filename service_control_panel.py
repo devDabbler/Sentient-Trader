@@ -208,34 +208,118 @@ def control_service(service_name: str, action: str) -> tuple:
 
 
 def get_service_logs(service_name: str, lines: int = 50) -> str:
-    """Get recent logs for a service. On Linux uses journalctl; on Windows reads log files or uses Get-WinEvent if necessary."""
-    if platform.system().lower().startswith('win'):
-        candidate_log = None
-        # Map service to likely log filenames
-        log_map = {
-            'sentient-stock-monitor': ['logs\\stock_monitor_service.log', 'logs\\stock_monitor_minimal.log', 'logs\\stock_monitor_ultra_minimal.log', 'logs\\stock_monitor_debug.log'],
-            'sentient-dex-launch': ['logs\\dex_launch_service.log'],
-            'sentient-crypto-breakout': ['logs\\crypto_breakout_service.log']
-        }
-        candidates = log_map.get(service_name, [])
-        project_root = Path(__file__).parent
-        for candidate in candidates:
-            p = project_root / candidate
-            if p.exists():
-                candidate_log = p
-                break
-        if not candidate_log:
-            return f"No local log file found for {service_name} (searched: {candidates})"
-        # Read last N lines
-        try:
-            with open(candidate_log, 'r', encoding='utf-8', errors='ignore') as f:
-                lines_list = f.readlines()
-            return ''.join(lines_list[-lines:])
-        except Exception as e:
-            return f"Error reading log file: {e}"
-    else:
+    """Get recent logs for a service. Reads from log files first (both Windows and Linux), falls back to journalctl on Linux."""
+    project_root = Path(__file__).parent
+    
+    # Map service to likely log filenames (works for both Windows and Linux)
+    log_map = {
+        'sentient-stock-monitor': [
+            'logs/stock_monitor_service.log',
+            'logs/stock_monitor_error.log',
+            'logs/stock_monitor_minimal.log',
+            'logs/stock_monitor_debug.log'
+        ],
+        'sentient-dex-launch': [
+            'logs/dex_launch_service.log',
+            'logs/dex_launch_error.log'
+        ],
+        'sentient-crypto-breakout': [
+            'logs/crypto_breakout_service.log',
+            'logs/crypto_breakout_error.log'
+        ],
+        'sentient-crypto-ai-trader': [
+            'logs/crypto_ai_trader.log',
+            'logs/crypto_ai_position_manager.log'
+        ],
+        'sentient-discord-approval': [
+            'logs/discord_approval_bot.log'
+        ]
+    }
+    
+    candidates = log_map.get(service_name, [])
+    
+    # Try to find and read a log file first
+    all_logs = []
+    for candidate in candidates:
+        # Handle both Windows and Linux path separators
+        if platform.system().lower().startswith('win'):
+            candidate = candidate.replace('/', '\\')
+        log_path = project_root / candidate
+        if log_path.exists():
+            try:
+                with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    file_lines = f.readlines()
+                if file_lines:
+                    # Add header showing which file
+                    all_logs.append(f"=== {candidate} (last {min(lines, len(file_lines))} lines) ===\n")
+                    all_logs.extend(file_lines[-lines:])
+                    all_logs.append("\n")
+            except Exception as e:
+                all_logs.append(f"Error reading {candidate}: {e}\n")
+    
+    if all_logs:
+        return ''.join(all_logs)
+    
+    # Fallback: On Linux, try journalctl if no log files found
+    if not platform.system().lower().startswith('win'):
         success, output = run_command(f"journalctl -u {service_name} -n {lines} --no-pager")
-        return output if success else f"Error fetching logs: {output}"
+        if success and output:
+            return f"=== journalctl output ===\n{output}"
+        return f"No log files found for {service_name} and journalctl returned: {output}"
+    
+    return f"No log files found for {service_name} (searched: {candidates})"
+
+
+def clear_service_logs(service_name: str) -> tuple:
+    """Clear/reset log files for a service. Returns (success, message)."""
+    project_root = Path(__file__).parent
+    
+    # Map service to log filenames
+    log_map = {
+        'sentient-stock-monitor': [
+            'logs/stock_monitor_service.log',
+            'logs/stock_monitor_error.log',
+        ],
+        'sentient-dex-launch': [
+            'logs/dex_launch_service.log',
+            'logs/dex_launch_error.log'
+        ],
+        'sentient-crypto-breakout': [
+            'logs/crypto_breakout_service.log',
+            'logs/crypto_breakout_error.log'
+        ],
+        'sentient-crypto-ai-trader': [
+            'logs/crypto_ai_trader.log',
+        ],
+        'sentient-discord-approval': [
+            'logs/discord_approval_bot.log'
+        ]
+    }
+    
+    candidates = log_map.get(service_name, [])
+    cleared = []
+    errors = []
+    
+    for candidate in candidates:
+        if platform.system().lower().startswith('win'):
+            candidate = candidate.replace('/', '\\')
+        log_path = project_root / candidate
+        
+        if log_path.exists():
+            try:
+                # Truncate the file (clear contents but keep file)
+                with open(log_path, 'w', encoding='utf-8') as f:
+                    f.write(f"=== Log cleared at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+                cleared.append(candidate)
+            except Exception as e:
+                errors.append(f"{candidate}: {e}")
+    
+    if errors:
+        return False, f"Errors: {'; '.join(errors)}"
+    elif cleared:
+        return True, f"Cleared: {', '.join(cleared)}"
+    else:
+        return False, "No log files found to clear"
 
 
 def check_password():
@@ -471,6 +555,16 @@ def main():
                 
                 # Expandable logs section
                 with st.expander(f"📜 View Logs - {display_name}"):
+                    log_col1, log_col2 = st.columns([4, 1])
+                    with log_col2:
+                        if st.button("🗑️ Clear", key=f"clear_logs_{service_name}", help="Clear log files to start fresh"):
+                            success, msg = clear_service_logs(service_name)
+                            if success:
+                                st.toast(f"✅ {msg}")
+                            else:
+                                st.error(msg)
+                            st.rerun()
+                    
                     logs = get_service_logs(service_name, 100)
                     st.code(logs, language="log")
                 
