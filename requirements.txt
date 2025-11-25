@@ -37,3 +37,7 @@ tenacity>=8.2.0  # Robust retry logic with exponential backoff
 circuitbreaker>=1.4.0  # Circuit breaker pattern for resilience
 loguru>=0.7.0  # Fast, efficient logging with minimal boilerplate
 pywin32>=306; sys_platform == 'win32'  # Windows services support (Phase 3)
+
+# Service Control Panel - 2FA Authentication
+pyotp>=2.9.0  # TOTP one-time passwords (Google Authenticator)
+qrcode[pil]>=7.4.0  # QR code generation for 2FA setup
