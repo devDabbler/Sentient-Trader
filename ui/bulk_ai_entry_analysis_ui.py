@@ -250,13 +250,20 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
     
     # Ticker selection
     st.write("**2. Select Tickers**")
-    max_tickers = st.slider(
-        "Number of tickers to analyze",
-        min_value=1,
-        max_value=min(20, len(tickers)),
-        value=min(5, len(tickers)),
-        key="multi_config_max_tickers"
-    )
+    max_possible = min(20, len(tickers))
+    default_tickers = min(5, len(tickers))
+    if max_possible <= 1:
+        # Avoid creating a slider with min==max; show fixed value instead
+        st.write("Number of tickers to analyze:", max_possible)
+        max_tickers = max_possible
+    else:
+        max_tickers = st.slider(
+            "Number of tickers to analyze",
+            min_value=1,
+            max_value=max_possible,
+            value=default_tickers,
+            key="multi_config_max_tickers"
+        )
     
     selected_tickers = tickers[:max_tickers]
     

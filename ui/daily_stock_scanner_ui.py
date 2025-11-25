@@ -206,7 +206,14 @@ def display_tier2_medium_analysis(scanner):
     with col1:
         min_score = st.slider("Min Score", 20, 80, 35, key="stock_t2_min")
     with col2:
-        top_n = st.slider("Analyze Top N", 1, len(tier1_results), min(20, len(tier1_results)), key="stock_t2_n")
+        # Guard against slider min==max when there's only one candidate
+        max_top_n = len(tier1_results)
+        default_top_n = min(20, max_top_n)
+        if max_top_n <= 1:
+            st.write("Analyze Top N:", max_top_n)
+            top_n = max_top_n
+        else:
+            top_n = st.slider("Analyze Top N", 1, max_top_n, default_top_n, key="stock_t2_n")
     
     if st.button("📈 Start Technical Analysis", key="stock_t2_btn", type="primary"):
         scanner.tier2_min_score = min_score
@@ -266,7 +273,14 @@ def display_tier3_deep_analysis(scanner):
     
     col1, col2 = st.columns(2)
     with col1:
-        top_n = st.slider("Analyze Top N", 1, min(10, len(tier2_results)), min(5, len(tier2_results)), key="stock_t3_n")
+        # Guard slider when candidate count is small to avoid min==max error
+        max_top_n = min(10, len(tier2_results))
+        default_top_n = min(5, len(tier2_results))
+        if max_top_n <= 1:
+            st.write("Analyze Top N:", max_top_n)
+            top_n = max_top_n
+        else:
+            top_n = st.slider("Analyze Top N", 1, max_top_n, default_top_n, key="stock_t3_n")
     with col2:
         include_options = st.checkbox("Include Options Analysis", True, key="stock_t3_opt")
     

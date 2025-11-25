@@ -4553,12 +4553,46 @@ def analyze_multi_config_bulk(
                 
                 logger.info("📊 About to render 'Use This Setup' button for {} (key=use_config_{})", str(pair), idx)
                 
-                # Action button - just sets a flag, actual handling is at top of function
+                # Action button - DIRECTLY set session state instead of using flags
+                # This fixes the Streamlit rerun timing issue where flags get lost
                 if st.button(f"✅ Use This Setup for {pair}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
-                    # Set flag to be picked up on next rerun
-                    logger.info(f"🔘 BUTTON CLICKED! Setting use_config_{idx}_clicked = True")
-                    st.session_state[f'use_config_{idx}_clicked'] = True
-                    logger.info(f"🔘 Session state after setting flag: {dict((k,v) for k,v in st.session_state.items() if '_clicked' in str(k))}")
+                    logger.info(f"🔘 BUTTON CLICKED! Directly setting session state for {pair}")
+                    
+                    # Store complete setup with REAL market data (same as flag handler did)
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': row.get('pair', 'UNKNOWN'),
+                        'strategy': row.get('strategy', 'Unknown'),
+                        'confidence': row.get('ai_approved', False),
+                        'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                        'score': row.get('ai_score', 0),
+                        'current_price': row.get('current_price', 0),
+                        'change_24h': row.get('change_24h', 0),
+                        'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                        'volatility': row.get('volatility', 0),
+                        'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                        'ai_reasoning': row.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                        'ai_rating': row.get('ai_confidence', 0) / 10,
+                        'ai_risks': row.get('ai_risks', [])
+                    }
+                    
+                    st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+                    st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+                    st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+                    st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+                    st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
+                    st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
+                    
+                    logger.info(f"📝 Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}, position=${row.get('position_size', 100)}")
+                    
+                    # Switch to Quick Trade main tab AND Execute Trade subtab
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
+                    st.balloons()
                     st.rerun()
         
         # Show comparison table
@@ -4672,11 +4706,46 @@ def analyze_multi_config_bulk(
                         for risk in ai_risks:
                             st.warning(risk)
                 
-                # Action button for each config - uses flag approach for consistency
+                # Action button for each config - DIRECTLY set session state instead of using flags
+                # This fixes the Streamlit rerun timing issue where flags get lost
                 if st.button(f"✅ Use This Setup", key=f"use_filtered_{idx}", use_container_width=True, type="primary"):
-                    logger.info("🔘 Use This Setup clicked for {} - {}", str(pair), str(trade_type))
-                    # Set flag to be picked up by global handler
-                    st.session_state[f'use_filtered_{idx}_clicked'] = True
+                    logger.info("🔘 Use This Setup clicked for {} - {} - directly setting session state", str(pair), str(trade_type))
+                    
+                    # Store complete setup with REAL market data
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': row.get('pair', 'UNKNOWN'),
+                        'strategy': row.get('strategy', 'Unknown'),
+                        'confidence': row.get('ai_approved', False),
+                        'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                        'score': row.get('ai_score', 0),
+                        'current_price': row.get('current_price', 0),
+                        'change_24h': row.get('change_24h', 0),
+                        'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                        'volatility': row.get('volatility', 0),
+                        'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                        'ai_reasoning': row.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                        'ai_rating': row.get('ai_confidence', 0) / 10,
+                        'ai_risks': row.get('ai_risks', [])
+                    }
+                    
+                    st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+                    st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+                    st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+                    st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+                    st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
+                    st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
+                    
+                    logger.info(f"📝 Filtered - Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}")
+                    
+                    # Switch to Quick Trade main tab AND Execute Trade subtab
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
+                    st.balloons()
                     st.rerun()
         
         # Export option

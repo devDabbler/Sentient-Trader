@@ -72,7 +72,8 @@ class AITradingSignalGenerator:
         discord_data: Optional[Dict] = None,
         account_balance: float = 10000.0,
         risk_tolerance: str = "MEDIUM",
-        current_positions: Optional[List[str]] = None
+        current_positions: Optional[List[str]] = None,
+        trading_style: str = "DAY_TRADE"
     ) -> Optional[TradingSignal]:
         """
         Generate AI trading signal
@@ -87,6 +88,7 @@ class AITradingSignalGenerator:
             account_balance: Available capital
             risk_tolerance: LOW, MEDIUM, HIGH
             current_positions: List of symbols currently owned
+            trading_style: The trading style to use for analysis (e.g. DAY_TRADE, OPTIONS, SWING_TRADE)
             
         Returns:
             TradingSignal or None
@@ -103,14 +105,15 @@ class AITradingSignalGenerator:
                 discord_data=discord_data,
                 account_balance=account_balance,
                 risk_tolerance=risk_tolerance,
-                current_positions=current_positions or []
+                current_positions=current_positions or [],
+                trading_style=trading_style
             )
             
             # Get AI analysis using LLM Request Manager
             logger.info(f"🧠 Requesting LLM analysis for {symbol}...")
             
             # Use HIGH priority for trading signals with symbol-based caching (2 min TTL)
-            cache_key = f"signal_{symbol}_{int(time.time() // 120)}"  # Cache per 2-min window
+            cache_key = f"signal_{symbol}_{trading_style}_{int(time.time() // 120)}"  # Cache per 2-min window
             response = self.llm_helper.high_request(
                 prompt,
                 cache_key=cache_key,
@@ -148,9 +151,34 @@ class AITradingSignalGenerator:
         discord_data: Optional[Dict],
         account_balance: float,
         risk_tolerance: str,
-        current_positions: List[str]
+        current_positions: List[str],
+        trading_style: str = "DAY_TRADE"
     ) -> str:
         """Build comprehensive analysis prompt for LLM"""
+        
+        # Map trading style to human readable description
+        style_map = {
+            "AI": "Dynamic Analysis (Identify best strategy: Scalp, Day Trade, Swing, or Options)",
+            "DAY_TRADE": "Day Trading (Intraday exits)",
+            "SWING_TRADE": "Swing Trading (3-10 days)",
+            "SCALP": "Scalping (High Frequency)",
+            "WARRIOR_SCALPING": "Momentum Scalping (Gap & Go)",
+            "BUY_HOLD": "Long-term Investing",
+            "OPTIONS": "Options Trading (Swing/Position)",
+            "ORB_FVG": "Opening Range Breakout (15min)",
+            "EMA_HEIKIN_ASHI": "Trend Following (EMA Crossover)",
+            "RSI_STOCHASTIC_HAMMER": "Reversal Trading (RSI+Stoch)",
+            "FISHER_RSI": "Momentum Trading (Fisher RSI)",
+            "MACD_VOLUME_RSI": "Trend Following (MACD+Vol)",
+            "AGGRESSIVE_SCALPING": "Aggressive Scalping"
+        }
+        
+        human_style = style_map.get(trading_style, "Dynamic Analysis")
+        
+        # Determine time horizon instruction
+        time_horizon_instruction = f'"{trading_style}"'
+        if trading_style == "AI":
+            time_horizon_instruction = '"Recommended timeframe (SCALP, DAY_TRADE, SWING, OPTIONS)"'
         
         # Format technical data
         tech_summary = f"""
@@ -227,7 +255,7 @@ class AITradingSignalGenerator:
         position_status = f"✅ YOU CURRENTLY OWN {symbol}" if own_this_stock else f"❌ YOU DO NOT OWN {symbol}"
         
         # Build complete prompt
-        prompt = f"""You are an expert day trader and scalper analyzing {symbol} for a potential trade.
+        prompt = f"""You are an expert trader analyzing {symbol} for a potential trade.
 
 {tech_summary}
 
@@ -242,7 +270,7 @@ class AITradingSignalGenerator:
 **Trading Parameters:**
 - Account Balance: ${account_balance:,.2f}
 - Risk Tolerance: {risk_tolerance}
-- Trading Style: Day Trading / Scalping (intraday exits)
+- Trading Style: {human_style}
 
 **CRITICAL - Current Position Status:**
 {position_status}
@@ -255,19 +283,19 @@ Analyze all the data above and provide a trading recommendation. Consider:
 3. Social media buzz and retail sentiment
 4. Discord alerts from professional traders (if available)
 5. Risk/reward ratio
-6. Entry/exit timing for day trading
+6. Entry/exit timing for {human_style}
 
 **Respond in this EXACT JSON format:**
 {{
     "signal": "BUY" or "SELL" or "HOLD",
     "confidence": 0-100,
     "entry_price": price to enter (current price or better),
-    "target_price": price target for day trade,
+    "target_price": price target,
     "stop_loss": stop loss price,
     "position_size": number of shares (based on account size and risk),
     "reasoning": "2-3 sentence explanation of your decision",
     "risk_level": "LOW" or "MEDIUM" or "HIGH",
-    "time_horizon": "SCALP" or "DAY_TRADE" or "SWING",
+    "time_horizon": {time_horizon_instruction},
     "technical_score": 0-100,
     "sentiment_score": 0-100,
     "news_score": 0-100,
@@ -282,9 +310,9 @@ Analyze all the data above and provide a trading recommendation. Consider:
 - If you DON'T own it and it looks weak, recommend HOLD (avoid it), NOT SELL
 - If you DON'T own it and it looks strong, recommend BUY
 - If you DO own it and it looks weak or hit target, recommend SELL
-- For day trading, recommend closing position same day
+- For {human_style}, align your targets and stops accordingly
+- If performing Dynamic Analysis, explicitly state the best time horizon (SCALP, DAY_TRADE, SWING, or OPTIONS) in the time_horizon field
 - Position size should not exceed 20% of account balance
-- Stop loss should be 1-3% below entry for day trades
 - Return ONLY valid JSON, no other text
 - **CRITICAL JSON FORMATTING**: Keep all string values on a SINGLE LINE. Do NOT use newlines inside strings. Keep reasoning brief and on one line.
 """

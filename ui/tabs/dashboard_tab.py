@@ -1273,7 +1273,8 @@ def _handle_analysis(search_ticker: str, trading_style: str):
                     technical_data=technical_data,
                     news_data=news_data,
                     sentiment_data=sentiment_data,
-                    social_data=social_data
+                    social_data=social_data,
+                    trading_style=trading_style
                 )
                 st.session_state.ai_trading_signal = ai_signal
             except Exception as e:
@@ -1377,6 +1378,11 @@ def _display_analysis_results():
     with tech_col3:
         st.metric("Support", f"${analysis.support}")
         st.metric("Resistance", f"${analysis.resistance}")
+    
+    # Strategy Recommendation
+    if analysis.recommendation:
+        st.subheader("💡 Strategy Recommendation")
+        st.info(analysis.recommendation)
     
     # News & Sentiment
     st.subheader("📰 Recent News & Sentiment")

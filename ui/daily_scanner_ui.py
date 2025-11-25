@@ -711,13 +711,19 @@ def display_tier2_medium_analysis(scanner):
     
     with col2:
         max_candidates = len(tier1_results)
-        analyze_top_n = st.slider(
-            "Analyze Top N",
-            min_value=1,
-            max_value=max_candidates,
-            value=min(20, max_candidates),
-            key="tier2_top_n"
-        )
+        # Guard slider creation when max == min (e.g., only 1 candidate)
+        default_top = min(20, max_candidates)
+        if max_candidates <= 1:
+            st.write("Analyze Top N:", max_candidates)
+            analyze_top_n = max_candidates
+        else:
+            analyze_top_n = st.slider(
+                "Analyze Top N",
+                min_value=1,
+                max_value=max_candidates,
+                value=default_top,
+                key="tier2_top_n"
+            )
     
     # Analyze button
     if st.button("📈 Start Technical Analysis", key="tier2_analyze", type="primary"):

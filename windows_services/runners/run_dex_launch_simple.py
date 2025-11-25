@@ -79,26 +79,37 @@ logger.info("Starting imports (be patient)...")
 try:
     import_start = time.time()
     
+    logger.info("DEBUG: Step 1 - Importing DEX launch services...")
     sys.stdout.write("DEBUG: Importing DEX launch services...\n")
     sys.stdout.flush()
     from services.launch_announcement_monitor import get_announcement_monitor
+    logger.info("DEBUG: Step 2 - launch_announcement_monitor imported")
     from services.dex_launch_hunter import get_dex_launch_hunter
+    logger.info("DEBUG: Step 3 - dex_launch_hunter imported")
     from services.alert_system import get_alert_system
+    logger.info("DEBUG: Step 4 - alert_system imported")
     
     logger.info(f"✓ Imported in {time.time() - import_start:.1f}s")
     sys.stdout.write("DEBUG: Import complete\n")
     sys.stdout.flush()
     
-    logger.info("Initializing services...")
+    logger.info("DEBUG: Step 5 - Creating announcement monitor...")
     sys.stdout.write("DEBUG: Initializing services...\n")
     sys.stdout.flush()
     monitor = get_announcement_monitor(scan_interval=300)
+    logger.info("DEBUG: Step 6 - Announcement monitor created")
     sys.stdout.write("DEBUG: Announcement monitor created\n")
     sys.stdout.flush()
+    
+    logger.info("DEBUG: Step 7 - Creating DEX hunter...")
     dex_hunter = get_dex_launch_hunter()
+    logger.info("DEBUG: Step 8 - DEX hunter created")
     sys.stdout.write("DEBUG: DEX hunter created\n")
     sys.stdout.flush()
+    
+    logger.info("DEBUG: Step 9 - Creating alert system...")
     alert_system = get_alert_system()
+    logger.info("DEBUG: Step 10 - Alert system created")
     logger.info("✓ Services initialized")
     sys.stdout.write("DEBUG: All services initialized\n")
     sys.stdout.flush()
@@ -124,7 +135,9 @@ try:
         logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
         
         # Start announcement monitoring in background
+        logger.info("DEBUG: Creating monitor_task...")
         monitor_task = asyncio.create_task(monitor.start_monitoring())
+        logger.info("DEBUG: monitor_task created, entering main loop...")
         
         scan_counter = 0
         
@@ -137,7 +150,12 @@ try:
                 # Run the DEX hunter's own scanner to find new launches
                 logger.info("🔍 Running active DEX scan...")
                 try:
-                    await dex_hunter._scan_for_launches()
+                    # Add timeout to prevent hanging
+                    await asyncio.wait_for(
+                        dex_hunter._scan_for_launches(),
+                        timeout=120  # 2 minute timeout
+                    )
+                    logger.info("DEBUG: Active DEX scan completed")
                     
                     # Check for high-score tokens from active scan
                     for addr, token in dex_hunter.discovered_tokens.items():
@@ -165,7 +183,9 @@ try:
                             )
                             token._alerted = True
                             logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
-                            
+                
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ Active DEX scan timed out after 120s, continuing...")
                 except Exception as e:
                     logger.error(f"Active scan error: {e}")
                 
