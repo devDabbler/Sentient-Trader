@@ -151,41 +151,30 @@ class StockInformationalMonitor(LLMServiceMixin):
             logger.info(f"Scanning {symbol}...")
             
             # Get confidence analysis (already migrated to LLM manager)
+            logger.debug(f"  ↳ {symbol}: Calling analyze_ticker...")
             analysis = self.confidence_scanner.analyze_ticker(symbol)
+            logger.debug(f"  ↳ {symbol}: analyze_ticker returned: {analysis is not None}")
             
             if not analysis:
                 logger.info(f"  ↳ {symbol}: Not in scanner cache, skipping")
                 return None
             
             ensemble_score = analysis.get('ensemble_score', 0)
+            logger.info(f"  ↳ {symbol}: Found in cache with score {ensemble_score}")
             
             # Filter by minimum score
             if ensemble_score < self.min_score:
                 logger.info(f"  ↳ {symbol}: Score {ensemble_score} < {self.min_score} threshold, skipping")
                 return None
             
-            # Use LLM helper for qualitative reasoning
-            prompt = f"""
-            Analyze this stock opportunity for {symbol}:
-            
-            Ensemble Score: {ensemble_score}/100
-            Technical Setup: {analysis.get('technical_setup', 'N/A')}
-            ML Confidence: {analysis.get('ml_confidence', 0):.2%}
-            Sentiment Score: {analysis.get('sentiment_score', 50)}/100
-            
-            Provide a concise 2-3 sentence reasoning for why this is (or isn't) a good opportunity.
-            Focus on what makes it compelling right now.
-            """
-            
-            # Use cached LOW priority request (15min TTL from config)
-            reasoning = self.llm_cached(
-                prompt=prompt,
-                cache_key=f"stock_reasoning_{symbol}_{int(time.time() / CACHE_TTL_SECONDS)}",
-                ttl=CACHE_TTL_SECONDS
-            )
-            
-            if not reasoning:
-                reasoning = "LLM analysis unavailable - using technical signals only"
+            # Skip the second LLM call for reasoning - use technical summary instead
+            # This was causing hangs due to rate limiting with local Ollama
+            logger.info(f"  ↳ {symbol}: Score passed threshold, generating reasoning from technical data...")
+            reasoning = f"Score {ensemble_score}/100 with {analysis.get('technical_setup', 'technical indicators')}. "
+            if analysis.get('volume_surge'):
+                reasoning += "Volume surge detected. "
+            confidence_pct = analysis.get('ml_confidence', 0.5) * 100
+            reasoning += f"ML confidence: {confidence_pct:.0f}%."
             
             # Determine timeframe alignment
             timeframe_alignment = self._determine_alignment(analysis)

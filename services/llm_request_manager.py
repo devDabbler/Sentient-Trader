@@ -164,7 +164,7 @@ class LLMRequestManager:
             ),
             "local": RateLimitConfig(
                 max_requests_per_minute=1000,  # Local has no external rate limit
-                max_concurrent_requests=2  # But limit concurrent for GPU memory
+                max_concurrent_requests=4  # Increased from 2 to prevent blocking
             ),
         }
         
@@ -405,8 +405,12 @@ class LLMRequestManager:
                 # Wait for rate limit clearance
                 self._wait_for_rate_limit(provider)
                 
-                # Make API call
-                response = self._call_provider(provider, request)
+                try:
+                    # Make API call
+                    response = self._call_provider(provider, request)
+                finally:
+                    # Always release the concurrent slot, even on error
+                    self._release_concurrent_slot(provider)
                 
                 # Cache if enabled
                 if request.cache_key and self.config.enable_caching:
@@ -714,8 +718,13 @@ class LLMRequestManager:
                     logger.info(f"Rate limit reached for {provider_key}, waiting {wait_time:.1f}s")
                     time.sleep(wait_time)
             
-            # Check concurrent requests
+            # Check concurrent requests with timeout (max 30 seconds wait)
+            max_wait_time = 30
+            wait_start = time.time()
             while self.concurrent_requests[provider_key] >= rate_config.max_concurrent_requests:
+                if time.time() - wait_start > max_wait_time:
+                    logger.warning(f"Timeout waiting for concurrent slot for {provider_key}, proceeding anyway")
+                    break
                 time.sleep(0.1)
             
             # Record this request
