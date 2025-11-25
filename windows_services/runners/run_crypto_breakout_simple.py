@@ -105,15 +105,18 @@ try:
     status_file = PROJECT_ROOT / "logs" / ".crypto_breakout_ready"
     status_file.write_text(f"SERVICE READY at {time.time()}")
     
-    # Get settings
-    scan_interval = getattr(monitor, 'scan_interval_minutes', 15)
-    logger.info(f"Scan interval: {scan_interval} minutes")
+    # Get settings - scan_interval is in SECONDS (default 300 = 5 min)
+    # Environment variable can override: BREAKOUT_SCAN_INTERVAL=180 for 3 minutes
+    scan_interval_seconds = getattr(monitor, 'scan_interval', 300)  # seconds
+    scan_interval_minutes = scan_interval_seconds / 60
+    logger.info(f"Scan interval: {scan_interval_minutes:.1f} minutes ({scan_interval_seconds}s)")
     
-    # Run monitoring loop
-    if hasattr(monitor, 'run_continuous'):
-        logger.info("Using run_continuous() method")
-        monitor.run_continuous()
+    # Run monitoring loop - CryptoBreakoutMonitor has start() method
+    if hasattr(monitor, 'start'):
+        logger.info("Using monitor.start() method - this runs the full monitoring loop")
+        monitor.start()
     else:
+        # Fallback: manual loop calling internal scan method
         logger.info("Using manual scan loop")
         scan_count = 0
         
@@ -122,15 +125,21 @@ try:
                 scan_count += 1
                 logger.info(f"Starting scan #{scan_count}...")
                 
-                if hasattr(monitor, 'scan_opportunities'):
+                # CryptoBreakoutMonitor has _scan_and_alert() method
+                if hasattr(monitor, '_scan_and_alert'):
+                    monitor._scan_and_alert()
+                    logger.info(f"Scan #{scan_count} complete - alerts sent if breakouts found")
+                elif hasattr(monitor, 'scan_opportunities'):
                     opportunities = monitor.scan_opportunities()
                     logger.info(f"Found {len(opportunities) if opportunities else 0} opportunities")
                 elif hasattr(monitor, 'scan'):
                     monitor.scan()
+                else:
+                    logger.warning("No scanning method found!")
                 
-                logger.info(f"Scan complete. Waiting {scan_interval} minutes...")
+                logger.info(f"Waiting {scan_interval_minutes:.1f} minutes until next scan...")
                 logger.info("")
-                time.sleep(scan_interval * 60)
+                time.sleep(scan_interval_seconds)
                 
             except KeyboardInterrupt:
                 raise

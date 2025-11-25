@@ -146,14 +146,18 @@ try:
     logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
     logger.info("")
     
-    # Run monitoring loop
-    if hasattr(manager, 'run_continuous'):
-        logger.info("Using run_continuous() method")
-        manager.run_continuous()
-    elif hasattr(manager, 'run_continuous_async'):
-        logger.info("Using run_continuous_async() method")
-        asyncio.run(manager.run_continuous_async())
+    # Run monitoring loop - AICryptoPositionManager has start_monitoring_loop() and monitor_positions()
+    if hasattr(manager, 'start_monitoring_loop'):
+        logger.info("Using manager.start_monitoring_loop() - this runs continuous monitoring")
+        manager.start_monitoring_loop()
+        # Keep main thread alive while background monitoring runs
+        try:
+            while True:
+                time.sleep(60)
+        except KeyboardInterrupt:
+            raise
     else:
+        # Fallback: manual monitoring loop
         logger.info("Using manual monitoring loop")
         cycle_count = 0
         
@@ -162,14 +166,18 @@ try:
                 cycle_count += 1
                 logger.info(f"Starting position check #{cycle_count}...")
                 
-                if hasattr(manager, 'check_and_manage_positions'):
+                if hasattr(manager, 'monitor_positions'):
+                    decisions = manager.monitor_positions()
+                    if decisions:
+                        logger.info(f"Check #{cycle_count} complete - {len(decisions)} AI decisions made")
+                    else:
+                        logger.info(f"Check #{cycle_count} complete - no positions to manage")
+                elif hasattr(manager, 'check_and_manage_positions'):
                     manager.check_and_manage_positions()
-                elif hasattr(manager, 'monitor_positions'):
-                    manager.monitor_positions()
                 else:
                     logger.warning("No monitoring method found - service may not be functional")
                 
-                logger.info(f"Check #{cycle_count} complete. Waiting {manager.check_interval_seconds}s...")
+                logger.info(f"Waiting {manager.check_interval_seconds}s until next check...")
                 logger.info("")
                 time.sleep(manager.check_interval_seconds)
                 
