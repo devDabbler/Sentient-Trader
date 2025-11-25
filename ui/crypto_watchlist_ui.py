@@ -36,13 +36,18 @@ def display_add_crypto_form(manager: CryptoWatchlistManager):
                     if '/' not in new_symbol:
                         st.error("❌ Invalid format. Use format like: BTC/USD")
                     else:
-                        with st.spinner(f"Adding {new_symbol}..."):
-                            success = manager.add_crypto(new_symbol)
-                            if success:
-                                st.success(f"✅ Added {new_symbol} to watchlist!")
-                                st.rerun()
-                            else:
-                                st.error(f"❌ Failed to add {new_symbol}")
+                        # Check if crypto already exists in watchlist
+                        existing = manager.get_crypto(new_symbol)
+                        if existing:
+                            st.warning(f"⚠️ {new_symbol} is already in your watchlist!")
+                        else:
+                            with st.spinner(f"Adding {new_symbol}..."):
+                                success = manager.add_crypto(new_symbol)
+                                if success:
+                                    st.success(f"✅ Added {new_symbol} to watchlist!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Failed to add {new_symbol}")
                 else:
                     st.warning("Please enter a symbol")
 
@@ -100,11 +105,11 @@ def apply_watchlist_filters(watchlist: List[Dict], filters: Dict) -> List[Dict]:
     if 'ALL' not in filters['strategy']:
         filtered = [w for w in filtered if w.get('strategy') in filters['strategy']]
     
-    # Risk filter
-    filtered = [w for w in filtered if w.get('risk_level') in filters['risk']]
+    # Risk filter - treat None/missing as 'UNKNOWN' and include them
+    filtered = [w for w in filtered if w.get('risk_level') in filters['risk'] or w.get('risk_level') is None]
     
-    # Confidence filter
-    filtered = [w for w in filtered if w.get('confidence_level') in filters['confidence']]
+    # Confidence filter - treat None/missing as 'UNKNOWN' and include them
+    filtered = [w for w in filtered if w.get('confidence_level') in filters['confidence'] or w.get('confidence_level') is None]
     
     # Sorting
     sort_by = filters['sort_by']

@@ -107,7 +107,11 @@ def render_tab():
     
     if st.button("➕ Add Ticker"):
         if new_ticker:
-            if tm.add_ticker(new_ticker, name=new_name, ticker_type=new_type, notes=new_notes):
+            # Check if ticker already exists in watchlist
+            existing = tm.get_ticker(new_ticker)
+            if existing:
+                st.warning(f"⚠️ {new_ticker} is already in your watchlist!")
+            elif tm.add_ticker(new_ticker, name=new_name, ticker_type=new_type, notes=new_notes):
                 # Invalidate ticker cache to force refresh
                 st.session_state.ticker_cache = {}
                 st.session_state.ticker_cache_timestamp = None

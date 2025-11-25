@@ -775,16 +775,22 @@ def render_tab():
                                         logger.info(f"📦 Prepared data dict for {opp.symbol}: keys={list(opp_data.keys())}")
                                         logger.info(f"📊 Data values: price=${opp_data['current_price']}, confidence={opp_data['confidence']}, strategy={opp_data['strategy']}")
                                         
-                                        logger.info(f"🔄 Calling crypto_wl_manager.add_crypto({opp.symbol}, opp_data)")
-                                        success = crypto_wl_manager.add_crypto(opp.symbol, opp_data)
-                                        logger.info(f"✨ add_crypto returned: {success}")
-                                        
-                                        if success:
-                                            st.success(f"✅ Added {opp.symbol} to watchlist!")
-                                            logger.info(f"✅ SUCCESS: {opp.symbol} added to watchlist")
+                                        # Check if crypto already exists in watchlist
+                                        existing = crypto_wl_manager.get_crypto(opp.symbol)
+                                        if existing:
+                                            st.warning(f"⚠️ {opp.symbol} is already in your watchlist!")
+                                            logger.info(f"⚠️ {opp.symbol} already exists in watchlist")
                                         else:
-                                            st.warning(f"⚠️ {opp.symbol} might already be in watchlist")
-                                            logger.warning(f"⚠️ FAILED: {opp.symbol} not added (returned False)")
+                                            logger.info(f"🔄 Calling crypto_wl_manager.add_crypto({opp.symbol}, opp_data)")
+                                            success = crypto_wl_manager.add_crypto(opp.symbol, opp_data)
+                                            logger.info(f"✨ add_crypto returned: {success}")
+                                            
+                                            if success:
+                                                st.success(f"✅ Added {opp.symbol} to watchlist!")
+                                                logger.info(f"✅ SUCCESS: {opp.symbol} added to watchlist")
+                                            else:
+                                                st.error(f"❌ Failed to add {opp.symbol} to watchlist")
+                                                logger.warning(f"⚠️ FAILED: {opp.symbol} not added (returned False)")
                                 except Exception as e:
                                     error_msg = f"Error saving {opp.symbol} to watchlist: {e}"
                                     st.error(f"❌ {error_msg}")
@@ -1201,12 +1207,17 @@ def render_tab():
                                             'reason': f"CoinGecko Trending #{trending_rank} | {' | '.join(runner_potential['signals'][:2])}"
                                         }
                                         
-                                        success = crypto_wl_manager.add_crypto(f"{symbol}/USD", opp_data)
-                                        
-                                        if success:
-                                            st.success(f"✅ Added {symbol} to watchlist!")
+                                        # Check if crypto already exists in watchlist
+                                        existing = crypto_wl_manager.get_crypto(f"{symbol}/USD")
+                                        if existing:
+                                            st.warning(f"⚠️ {symbol}/USD is already in your watchlist!")
                                         else:
-                                            st.warning(f"⚠️ {symbol} might already be in watchlist")
+                                            success = crypto_wl_manager.add_crypto(f"{symbol}/USD", opp_data)
+                                            
+                                            if success:
+                                                st.success(f"✅ Added {symbol} to watchlist!")
+                                            else:
+                                                st.error(f"❌ Failed to add {symbol} to watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {symbol}: {e}")
                                     logger.error("Error saving trending runner to watchlist: {}", str(e), exc_info=True)
@@ -1339,12 +1350,17 @@ def render_tab():
                                             'reason': coin.discovery_reason
                                         }
                                         
-                                        success = crypto_wl_manager.add_crypto(f"{coin.symbol}/USD", opp_data)
-                                        
-                                        if success:
-                                            st.success(f"✅ Added {coin.symbol} to watchlist!")
+                                        # Check if crypto already exists in watchlist
+                                        existing = crypto_wl_manager.get_crypto(f"{coin.symbol}/USD")
+                                        if existing:
+                                            st.warning(f"⚠️ {coin.symbol}/USD is already in your watchlist!")
                                         else:
-                                            st.warning(f"⚠️ {coin.symbol} might already be in watchlist")
+                                            success = crypto_wl_manager.add_crypto(f"{coin.symbol}/USD", opp_data)
+                                            
+                                            if success:
+                                                st.success(f"✅ Added {coin.symbol} to watchlist!")
+                                            else:
+                                                st.error(f"❌ Failed to add {coin.symbol} to watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {coin.symbol}: {e}")
                                     logger.error("Error saving sub-penny to watchlist: {}", str(e), exc_info=True)
@@ -1471,12 +1487,17 @@ def render_tab():
                                             'reason': opp.reason
                                         }
                                         
-                                        success = crypto_wl_manager.add_crypto(opp.symbol, opp_data)
-                                        
-                                        if success:
-                                            st.success(f"✅ Added {opp.symbol} to watchlist!")
+                                        # Check if crypto already exists in watchlist
+                                        existing = crypto_wl_manager.get_crypto(opp.symbol)
+                                        if existing:
+                                            st.warning(f"⚠️ {opp.symbol} is already in your watchlist!")
                                         else:
-                                            st.warning(f"⚠️ {opp.symbol} might already be in watchlist")
+                                            success = crypto_wl_manager.add_crypto(opp.symbol, opp_data)
+                                            
+                                            if success:
+                                                st.success(f"✅ Added {opp.symbol} to watchlist!")
+                                            else:
+                                                st.error(f"❌ Failed to add {opp.symbol} to watchlist")
                                 except Exception as e:
                                     st.error(f"❌ Error saving {opp.symbol}: {e}")
                                     logger.error("Error saving penny crypto to watchlist: {}", str(e), exc_info=True)
