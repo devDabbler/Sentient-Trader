@@ -50,7 +50,8 @@ fi
 sudo tee /etc/systemd/system/sentient-stock-monitor.service > /dev/null << EOF
 [Unit]
 Description=Sentient Trader - Stock Monitor
-After=network.target
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -58,10 +59,13 @@ User=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
 EnvironmentFile=-$PROJECT_DIR/.env.systemd
-ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_stock_monitor_simple.py
+ExecStart=$PROJECT_DIR/venv/bin/python3 -u windows_services/runners/run_stock_monitor_simple.py
 Restart=always
-RestartSec=10
+RestartSec=30
+TimeoutStartSec=120
+TimeoutStopSec=30
 StandardOutput=append:$PROJECT_DIR/logs/stock_monitor_service.log
 StandardError=append:$PROJECT_DIR/logs/stock_monitor_error.log
 

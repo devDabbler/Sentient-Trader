@@ -154,14 +154,14 @@ class StockInformationalMonitor(LLMServiceMixin):
             analysis = self.confidence_scanner.analyze_ticker(symbol)
             
             if not analysis:
-                logger.debug(f"No analysis for {symbol}")
+                logger.info(f"  ↳ {symbol}: Not in scanner cache, skipping")
                 return None
             
             ensemble_score = analysis.get('ensemble_score', 0)
             
             # Filter by minimum score
             if ensemble_score < self.min_score:
-                logger.debug(f"{symbol} score {ensemble_score} below threshold {self.min_score}")
+                logger.info(f"  ↳ {symbol}: Score {ensemble_score} < {self.min_score} threshold, skipping")
                 return None
             
             # Use LLM helper for qualitative reasoning
