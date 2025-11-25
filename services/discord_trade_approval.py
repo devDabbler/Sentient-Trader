@@ -114,6 +114,30 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         content = message.content.upper().strip()
         
+        # 🔔 CHECK IF THIS IS A REPLY TO A SPECIFIC APPROVAL MESSAGE
+        if message.reference and message.reference.message_id:
+            replied_to_id = str(message.reference.message_id)
+            
+            # Find the approval that matches this message ID
+            for approval_id, approval in self.pending_approvals.items():
+                if approval.discord_message_id == replied_to_id:
+                    # Found the approval - check if it's approve or reject
+                    if content in ['APPROVE', 'YES', 'GO', 'EXECUTE', 'Y', '✅', 'OK']:
+                        await self._handle_reply_approval(message, approval_id, approval, approve=True)
+                        return
+                    elif content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N', '❌']:
+                        await self._handle_reply_approval(message, approval_id, approval, approve=False)
+                        return
+                    else:
+                        # Reply to the approval message but unclear intent
+                        await message.channel.send(
+                            f"❓ Reply with **APPROVE** or **REJECT** to confirm your decision for {approval.pair}"
+                        )
+                        return
+            
+            # Replied to a message but it's not a pending approval (maybe expired or already handled)
+            # Continue to normal processing
+        
         # Check for LIST command to show pending trades
         if content in ['LIST', 'PENDING', 'TRADES', 'STATUS']:
             await self._list_pending_trades(message)
@@ -242,6 +266,57 @@ class DiscordTradeApprovalBot(commands.Bot):
             except Exception as e:
                 logger.error(f"Error in approval callback: {e}", exc_info=True)
     
+    async def _handle_reply_approval(
+        self, 
+        message: discord.Message, 
+        approval_id: str, 
+        approval: 'PendingTradeApproval', 
+        approve: bool
+    ):
+        """
+        Handle approval/rejection when user replies directly to an approval message
+        This is the most intuitive way to approve a specific trade
+        """
+        # Check if already processed
+        if approval.approved or approval.rejected:
+            await message.channel.send(
+                f"⚠️ This trade ({approval.pair}) has already been {'approved' if approval.approved else 'rejected'}."
+            )
+            return
+        
+        # Check if expired
+        if approval.is_expired():
+            await message.channel.send(
+                f"⏰ This approval request for {approval.pair} has **expired**. "
+                f"The trade opportunity may no longer be valid."
+            )
+            return
+        
+        # Process the approval
+        if approve:
+            approval.approved = True
+            # Reply to the original message for clear context
+            await message.reply(
+                f"✅ **APPROVED:** {approval.pair} {approval.side}\n"
+                f"🚀 Executing trade now..."
+            )
+            logger.info(f"✅ User approved trade via reply: {approval_id} ({approval.pair})")
+        else:
+            approval.rejected = True
+            await message.reply(
+                f"❌ **REJECTED:** {approval.pair} {approval.side}\n"
+                f"Trade cancelled."
+            )
+            logger.info(f"❌ User rejected trade via reply: {approval_id} ({approval.pair})")
+        
+        # Call approval callback to execute/cancel the trade
+        if self.approval_callback:
+            try:
+                self.approval_callback(approval_id, approve)
+            except Exception as e:
+                logger.error(f"Error in approval callback: {e}", exc_info=True)
+                await message.channel.send(f"⚠️ Error processing trade: {str(e)[:100]}")
+
     async def _handle_approve_all(self, message: discord.Message, approve: bool):
         """Approve or reject all pending trades"""
         pending = [(aid, a) for aid, a in self.pending_approvals.items() 
@@ -420,13 +495,17 @@ class DiscordTradeApprovalBot(commands.Bot):
                     inline=False
                 )
             
-            # Instructions
+            # Instructions - emphasize reply feature
             embed.add_field(
                 name="⏰ How to Approve/Reject",
                 value=(
-                    "**Reply in this channel with:**\n"
-                    "• `APPROVE` or `YES` → Execute trade ✅\n"
-                    "• `REJECT` or `NO` → Cancel trade ❌\n\n"
+                    "**Option 1: Reply to THIS message**\n"
+                    "↩️ Reply with `YES` or `NO`\n\n"
+                    "**Option 2: Type in channel**\n"
+                    "• `APPROVE` or `YES` → Execute ✅\n"
+                    "• `REJECT` or `NO` → Cancel ❌\n"
+                    "• `APPROVE BTC/USD` → Approve by symbol\n"
+                    "• `LIST` → Show all pending\n\n"
                     "⏱️ *Expires in 60 minutes*"
                 ),
                 inline=False

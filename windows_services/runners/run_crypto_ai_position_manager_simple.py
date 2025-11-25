@@ -116,7 +116,7 @@ try:
         enable_breakeven_moves=True,       # Enable break-even protection
         enable_partial_exits=True,         # Enable partial profit taking
         min_ai_confidence=70.0,            # Only act on high-confidence decisions (0-100)
-        require_manual_approval=False      # PRODUCTION: Set to False for auto-execution (use with caution!)
+        require_manual_approval=True       # SAFETY: Require Discord approval before executing trades
     )
     logger.info("✓ AI Position Manager created")
     sys.stdout.flush()
@@ -195,10 +195,20 @@ try:
     logger.info(f"✓ AI Decisions: {manager.enable_ai_decisions}")
     logger.info(f"✓ Trailing Stops: {manager.enable_trailing_stops}")
     logger.info(f"✓ Manual Approval Required: {manager.require_manual_approval}")
+    logger.info(f"✓ Discord Approval: {'✅ ENABLED' if manager.discord_approval_manager else '❌ NOT CONFIGURED'}")
     logger.info(f"✓ Min confidence: {manager.min_ai_confidence}%")
     logger.info(f"✓ Positions being monitored: {len(manager.positions)}")
     logger.info("")
-    logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
+    
+    if manager.require_manual_approval:
+        if manager.discord_approval_manager:
+            logger.info("🔐 DISCORD APPROVAL MODE - AI recommendations require your approval via Discord")
+            logger.info("   Reply APPROVE or REJECT in Discord when prompted")
+        else:
+            logger.warning("⚠️ MANUAL APPROVAL MODE - AI recommendations require approval in the app")
+    else:
+        logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
+    
     logger.info("")
     sys.stdout.flush()
     sys.stderr.flush()

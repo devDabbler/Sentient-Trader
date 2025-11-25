@@ -155,6 +155,10 @@ class AICryptoPositionManager:
         # SAFETY: Pending approvals queue
         self.pending_approvals: Dict[str, Dict] = {}  # {approval_id: {trade_id, decision, timestamp}}
         
+        # Discord approval integration
+        self.discord_approval_manager = None
+        self._init_discord_approval()
+        
         # State management
         self.is_running = False
         self.thread = None
@@ -186,7 +190,52 @@ class AICryptoPositionManager:
         logger.info(f"   Partial Exits: {' ENABLED' if enable_partial_exits else ' DISABLED'}")
         logger.info(f"   Min AI Confidence: {min_ai_confidence}%")
         logger.info("   SAFETY - MANUAL APPROVAL: {}", str(' REQUIRED' if require_manual_approval else ' AUTO-EXECUTE (DANGEROUS!)'))
+        logger.info(f"   Discord Approval: {'✅ ENABLED' if self.discord_approval_manager else '❌ NOT CONFIGURED'}")
         logger.info("=" * 80)
+    
+    def _init_discord_approval(self):
+        """Initialize Discord approval manager for trade approvals"""
+        try:
+            from services.discord_trade_approval import get_discord_approval_manager
+            
+            # Create callback for when trades are approved/rejected via Discord
+            def on_discord_approval(approval_id: str, approved: bool):
+                self._handle_discord_approval(approval_id, approved)
+            
+            self.discord_approval_manager = get_discord_approval_manager(approval_callback=on_discord_approval)
+            
+            if self.discord_approval_manager and self.discord_approval_manager.enabled:
+                logger.info("✅ Discord approval integration enabled")
+            else:
+                logger.warning("⚠️ Discord approval not configured - will use local approval queue")
+                self.discord_approval_manager = None
+                
+        except Exception as e:
+            logger.warning(f"Could not initialize Discord approval: {e}")
+            self.discord_approval_manager = None
+    
+    def _handle_discord_approval(self, approval_id: str, approved: bool):
+        """Handle approval/rejection from Discord"""
+        logger.info(f"📨 Discord approval received: {approval_id} -> {'APPROVED' if approved else 'REJECTED'}")
+        
+        # Find the pending approval
+        if approval_id not in self.pending_approvals:
+            logger.warning(f"Approval ID not found: {approval_id}")
+            return
+        
+        pending = self.pending_approvals[approval_id]
+        trade_id = pending['trade_id']
+        decision = pending['decision']
+        
+        if approved:
+            logger.info(f"✅ Executing approved trade: {pending.get('pair', trade_id)}")
+            # Execute with skip_approval=True since it's been approved via Discord
+            self.execute_decision(trade_id, decision, skip_approval=True)
+        else:
+            logger.info(f"❌ Trade rejected via Discord: {pending.get('pair', trade_id)}")
+        
+        # Remove from pending
+        del self.pending_approvals[approval_id]
     
     def add_position(
         self,
@@ -971,21 +1020,16 @@ Analyze the position using these factors:
         if self.require_manual_approval and not skip_approval:
             # Add to pending approvals queue instead of executing
             approval_id = f"{trade_id}_{int(time.time())}"
+            position = self.positions[trade_id]
+            current_price = position.current_price or position.entry_price
+            pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+            
             self.pending_approvals[approval_id] = {
                 'trade_id': trade_id,
                 'decision': decision,
                 'timestamp': datetime.now(),
-                'pair': self.positions[trade_id].pair
+                'pair': position.pair
             }
-            logger.warning(f"🚨 APPROVAL REQUIRED: {decision.action} for {self.positions[trade_id].pair}")
-            logger.warning(f"   Reasoning: {decision.reasoning}")
-            logger.warning(f"   Approval ID: {approval_id}")
-            logger.warning(f"   ⚠️ Trade will NOT execute until you approve it in the UI")
-            
-            # Send Discord notification for pending approval
-            position = self.positions[trade_id]
-            current_price = position.current_price or position.entry_price
-            pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
             
             action_emoji = {
                 'CLOSE_NOW': '🚪',
@@ -996,15 +1040,65 @@ Analyze the position using these factors:
                 'MOVE_TO_BREAKEVEN': '🛡️'
             }
             
-            self._send_notification(
-                f"{action_emoji.get(decision.action, '🤖')} AI Recommendation: {position.pair}",
-                f"**Action:** {decision.action}\n"
-                f"**Confidence:** {decision.confidence:.1f}%\n"
-                f"**Current P&L:** {pnl_pct:+.2f}%\n"
-                f"**Reasoning:** {decision.reasoning[:200]}\n\n"
-                f"⚠️ **APPROVAL REQUIRED** - Check the app to approve/reject",
-                color=15844367  # Orange for pending approval
-            )
+            logger.warning(f"🚨 APPROVAL REQUIRED: {decision.action} for {position.pair}")
+            logger.warning(f"   Reasoning: {decision.reasoning}")
+            logger.warning(f"   Approval ID: {approval_id}")
+            
+            # 🔔 SEND DISCORD APPROVAL REQUEST
+            if self.discord_approval_manager:
+                try:
+                    # Build detailed reasoning
+                    reasoning = (
+                        f"**AI Analysis:**\n{decision.reasoning}\n\n"
+                        f"**Technical Score:** {decision.technical_score:.0f}/100\n"
+                        f"**Trend Score:** {decision.trend_score:.0f}/100\n"
+                        f"**Risk Score:** {decision.risk_score:.0f}/100\n\n"
+                        f"**Current P&L:** {pnl_pct:+.2f}%\n"
+                        f"**Entry:** ${position.entry_price:,.6f}\n"
+                        f"**Current:** ${current_price:,.6f}"
+                    )
+                    
+                    # Determine position size in USD
+                    position_size_usd = position.volume * current_price
+                    
+                    sent = self.discord_approval_manager.send_approval_request(
+                        approval_id=approval_id,
+                        pair=position.pair,
+                        side=decision.action,  # Using action as "side" for exit decisions
+                        entry_price=current_price,
+                        position_size=position_size_usd,
+                        stop_loss=position.stop_loss,
+                        take_profit=position.take_profit,
+                        strategy=f"AI Position Manager - {decision.action}",
+                        confidence=decision.confidence,
+                        reasoning=reasoning,
+                        additional_info=(
+                            f"{action_emoji.get(decision.action, '🤖')} **Recommended Action:** {decision.action}\n"
+                            f"**Urgency:** {decision.urgency}\n"
+                            f"**Position Volume:** {position.volume:.6f}\n"
+                            f"**Hold Time:** {(datetime.now() - position.entry_time).total_seconds() / 3600:.1f} hours"
+                        )
+                    )
+                    
+                    if sent:
+                        logger.info(f"📨 Discord approval request sent for {position.pair}")
+                        logger.info(f"   Reply APPROVE or REJECT in Discord to execute")
+                    else:
+                        logger.warning(f"⚠️ Could not send Discord approval - check Discord bot status")
+                        
+                except Exception as e:
+                    logger.error(f"Error sending Discord approval: {e}")
+            else:
+                # Fallback: send simple notification
+                self._send_notification(
+                    f"{action_emoji.get(decision.action, '🤖')} AI Recommendation: {position.pair}",
+                    f"**Action:** {decision.action}\n"
+                    f"**Confidence:** {decision.confidence:.1f}%\n"
+                    f"**Current P&L:** {pnl_pct:+.2f}%\n"
+                    f"**Reasoning:** {decision.reasoning[:200]}\n\n"
+                    f"⚠️ **APPROVAL REQUIRED** - Discord bot not configured, approve in app",
+                    color=15844367  # Orange for pending approval
+                )
             
             return False  # Not executed, awaiting approval
         
