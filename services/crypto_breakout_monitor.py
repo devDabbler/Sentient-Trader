@@ -432,7 +432,7 @@ class CryptoBreakoutMonitor:
             score=opp.score,
             confidence=opp.confidence if hasattr(opp, 'confidence') else 'MEDIUM',
             price=opp.current_price if hasattr(opp, 'current_price') else 0.0,
-            change_24h=opp.change_24h if hasattr(opp, 'change_24h') else 0.0,
+            change_24h=opp.change_pct_24h if hasattr(opp, 'change_pct_24h') else 0.0,
             volume_ratio=getattr(opp, 'volume_ratio', 1.0),
             rsi=getattr(opp, 'rsi', 50.0),
             ema_8=getattr(opp, 'ema_8', 0.0),
@@ -761,7 +761,7 @@ class CryptoBreakoutMonitor:
                 # Track that we added it
                 self.watchlist_added.add(breakout.symbol)
                 
-                logger.info("   ✅ Added {} to watchlist with tags: {', '.join(tags)}", str(breakout.symbol))
+                logger.info(f"   ✅ Added {breakout.symbol} to watchlist with tags: {', '.join(tags)}")
                 return True
             
             return False

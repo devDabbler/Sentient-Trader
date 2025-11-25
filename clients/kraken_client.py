@@ -256,7 +256,11 @@ class KrakenClient:
             # Kraken returns errors in the 'error' field
             if data.get('error'):
                 error_msg = ', '.join(data['error'])
-                logger.error(f"Kraken API error: {error_msg}")
+                # Use DEBUG for "Unknown asset pair" (common with watchlist items), ERROR for others
+                if 'Unknown asset pair' in error_msg:
+                    logger.debug(f"Kraken API: {error_msg}")
+                else:
+                    logger.error(f"Kraken API error: {error_msg}")
                 raise ValueError(f"Kraken API error: {error_msg}")
             
             return data.get('result', {})
@@ -309,7 +313,11 @@ class KrakenClient:
             # Check for errors
             if data.get('error'):
                 error_msg = ', '.join(data['error'])
-                logger.error(f"Kraken API error: {error_msg}")
+                # Use DEBUG for "Unknown asset pair" (common with watchlist items), ERROR for others
+                if 'Unknown asset pair' in error_msg:
+                    logger.debug(f"Kraken API: {error_msg}")
+                else:
+                    logger.error(f"Kraken API error: {error_msg}")
                 raise ValueError(f"Kraken API error: {error_msg}")
             
             return data.get('result', {})
