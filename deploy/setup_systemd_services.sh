@@ -165,6 +165,29 @@ StandardError=append:$PROJECT_DIR/logs/crypto_ai_position_manager_error.log
 WantedBy=multi-user.target
 EOF
 
+# ORB FVG Scanner Service (Stock Day Trading - 9:30 AM - 12:30 PM ET)
+sudo tee /etc/systemd/system/sentient-orb-fvg.service > /dev/null << EOF
+[Unit]
+Description=Sentient Trader - ORB FVG Scanner (15-min Opening Range Breakout + Fair Value Gap)
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$PROJECT_DIR
+Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
+ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_orb_fvg_simple.py
+Restart=always
+RestartSec=30
+StandardOutput=append:$PROJECT_DIR/logs/orb_fvg_service.log
+StandardError=append:$PROJECT_DIR/logs/orb_fvg_error.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Reload systemd
 echo "Reloading systemd daemon..."
 sudo systemctl daemon-reload
@@ -181,6 +204,7 @@ sudo systemctl start sentient-crypto-breakout
 sudo systemctl start sentient-dex-launch
 sudo systemctl start sentient-discord-approval
 sudo systemctl start sentient-crypto-ai-trader
+sudo systemctl start sentient-orb-fvg
 
 echo ""
 echo "=========================================="
@@ -193,6 +217,7 @@ sudo systemctl status sentient-crypto-breakout --no-pager -l
 sudo systemctl status sentient-dex-launch --no-pager -l
 sudo systemctl status sentient-discord-approval --no-pager -l
 sudo systemctl status sentient-crypto-ai-trader --no-pager -l
+sudo systemctl status sentient-orb-fvg --no-pager -l
 echo ""
 echo "ℹ️  All services are RUNNING but NOT auto-start on boot."
 echo "ℹ️  Use the Control Panel to enable auto-start for individual services."

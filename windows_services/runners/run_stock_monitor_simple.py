@@ -121,9 +121,39 @@ try:
     sys.stdout.write(f"DEBUG: Logged instance created\n")
     sys.stdout.flush()
     
+    # ============================================================
+    # Load watchlist from Control Panel config (if available)
+    # ============================================================
+    try:
+        from service_config_loader import load_service_watchlist, load_discord_settings
+        
+        custom_watchlist = load_service_watchlist('sentient-stock-monitor')
+        if custom_watchlist:
+            logger.info(f"  📋 Control Panel watchlist: {len(custom_watchlist)} tickers")
+            # Override monitor's watchlist
+            if hasattr(monitor, 'watchlist'):
+                monitor.watchlist = custom_watchlist
+            elif hasattr(monitor, 'tickers'):
+                monitor.tickers = custom_watchlist
+        
+        # Load Discord settings
+        discord_settings = load_discord_settings('sentient-stock-monitor')
+        if discord_settings.get('enabled') is False:
+            logger.info("  🔕 Discord alerts DISABLED via Control Panel")
+            os.environ['DISCORD_ALERTS_DISABLED'] = 'true'
+        else:
+            min_conf = discord_settings.get('min_confidence', 70)
+            logger.info(f"  🔔 Discord alerts enabled (min confidence: {min_conf}%)")
+            os.environ['DISCORD_MIN_CONFIDENCE'] = str(min_conf)
+            
+    except ImportError:
+        logger.debug("service_config_loader not available - using defaults")
+    except Exception as e:
+        logger.warning(f"Could not load Control Panel config: {e}")
+    
     sys.stdout.write(f"DEBUG: About to access monitor.watchlist\n")
     sys.stdout.flush()
-    watchlist_len = len(monitor.watchlist)
+    watchlist_len = len(monitor.watchlist) if hasattr(monitor, 'watchlist') else 0
     sys.stdout.write(f"DEBUG: Watchlist has {watchlist_len} symbols\n")
     sys.stdout.flush()
     logger.info(f"  ✓ Watchlist: {watchlist_len} symbols")

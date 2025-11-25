@@ -57,6 +57,46 @@ TOTP_ENABLED = TOTP_AVAILABLE and TOTP_SECRET and len(TOTP_SECRET) >= 16
 
 # Service intervals config file path
 SERVICE_INTERVALS_FILE = Path(__file__).parent / "data" / "service_intervals.json"
+SERVICE_WATCHLISTS_FILE = Path(__file__).parent / "data" / "service_watchlists.json"
+SERVICE_DISCORD_FILE = Path(__file__).parent / "data" / "service_discord_settings.json"
+ACTIVE_STRATEGY_FILE = Path(__file__).parent / "active_strategy.json"
+ANALYSIS_REQUESTS_FILE = Path(__file__).parent / "data" / "analysis_requests.json"
+ANALYSIS_RESULTS_FILE = Path(__file__).parent / "data" / "analysis_results.json"
+
+# Default watchlists for each service type
+DEFAULT_WATCHLISTS = {
+    "crypto": ['BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD', 'SHIB/USD', 'PEPE/USD'],
+    "stocks": ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT', 'PLTR', 'SOFI', 'COIN'],
+    "dex": ['solana', 'ethereum', 'base'],  # chains to monitor
+}
+
+# Analysis presets for quick mobile access
+ANALYSIS_PRESETS = {
+    "quick_crypto": {
+        "name": "Quick Crypto Scan",
+        "emoji": "⚡",
+        "tickers": ['BTC/USD', 'ETH/USD', 'SOL/USD'],
+        "depth": "quick"
+    },
+    "full_crypto": {
+        "name": "Full Crypto Analysis",
+        "emoji": "🔬",
+        "tickers": None,  # Use watchlist
+        "depth": "deep"
+    },
+    "stock_momentum": {
+        "name": "Stock Momentum Scan",
+        "emoji": "🚀",
+        "tickers": ['NVDA', 'TSLA', 'AMD', 'PLTR', 'COIN', 'MARA'],
+        "depth": "medium"
+    },
+    "orb_fvg_scan": {
+        "name": "ORB+FVG Day Trade",
+        "emoji": "🎯",
+        "tickers": ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AMD'],
+        "depth": "deep"
+    },
+}
 
 SERVICES = {
     "DEX Launch Monitor": {
@@ -98,6 +138,16 @@ SERVICES = {
         "interval_default": 300,
         "interval_min": 30,
         "interval_max": 3600  # Up to 1 hour
+    },
+    "ORB FVG Scanner": {
+        "name": "sentient-orb-fvg",
+        "description": "15-min Opening Range Breakout + Fair Value Gap scanner (9:30 AM - 12:30 PM ET)",
+        "emoji": "🎯",
+        "category": "stocks",
+        "interval_key": "scan_interval_seconds",
+        "interval_default": 60,
+        "interval_min": 30,
+        "interval_max": 300  # Up to 5 minutes (intraday strategy)
     },
     "Discord Approval Bot": {
         "name": "sentient-discord-approval",
@@ -166,6 +216,227 @@ def set_service_interval(service_name: str, svc_info: dict, new_interval: int) -
 
 
 # ============================================================
+# WATCHLIST MANAGEMENT
+# ============================================================
+
+def load_service_watchlists() -> dict:
+    """Load service-specific watchlists from JSON file"""
+    try:
+        if SERVICE_WATCHLISTS_FILE.exists():
+            with open(SERVICE_WATCHLISTS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading service watchlists: {e}")
+    return {}
+
+
+def save_service_watchlists(watchlists: dict) -> bool:
+    """Save service watchlists to JSON file"""
+    try:
+        SERVICE_WATCHLISTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SERVICE_WATCHLISTS_FILE, 'w') as f:
+            json.dump(watchlists, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving service watchlists: {e}")
+        return False
+
+
+def get_service_watchlist(service_name: str, category: str = "stocks") -> list:
+    """Get watchlist for a specific service"""
+    watchlists = load_service_watchlists()
+    if service_name in watchlists:
+        return watchlists[service_name].get("tickers", [])
+    # Return default based on category
+    return DEFAULT_WATCHLISTS.get(category, [])
+
+
+def set_service_watchlist(service_name: str, tickers: list) -> bool:
+    """Set watchlist for a specific service"""
+    watchlists = load_service_watchlists()
+    if service_name not in watchlists:
+        watchlists[service_name] = {}
+    watchlists[service_name]["tickers"] = tickers
+    watchlists[service_name]["updated"] = datetime.now().isoformat()
+    return save_service_watchlists(watchlists)
+
+
+# ============================================================
+# STRATEGY CONFIG MANAGEMENT
+# ============================================================
+
+def load_active_strategy() -> dict:
+    """Load active strategy configuration"""
+    try:
+        if ACTIVE_STRATEGY_FILE.exists():
+            with open(ACTIVE_STRATEGY_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading active strategy: {e}")
+    return {"active_strategy": "PAPER_TRADING", "available_strategies": {}}
+
+
+def save_active_strategy(strategy_data: dict) -> bool:
+    """Save active strategy configuration"""
+    try:
+        strategy_data["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(ACTIVE_STRATEGY_FILE, 'w') as f:
+            json.dump(strategy_data, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving active strategy: {e}")
+        return False
+
+
+def switch_strategy(strategy_key: str) -> tuple:
+    """Switch to a different strategy configuration"""
+    strategy_data = load_active_strategy()
+    available = strategy_data.get("available_strategies", {})
+    
+    if strategy_key not in available:
+        return False, f"Strategy '{strategy_key}' not found"
+    
+    strategy_data["active_strategy"] = strategy_key
+    strategy_data["config_file"] = available[strategy_key].get("config_file", "")
+    
+    if save_active_strategy(strategy_data):
+        return True, f"Switched to {available[strategy_key].get('name', strategy_key)}"
+    return False, "Failed to save strategy configuration"
+
+
+# ============================================================
+# ON-DEMAND ANALYSIS
+# ============================================================
+
+def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = None) -> bool:
+    """Queue an analysis request for services to pick up"""
+    try:
+        ANALYSIS_REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Load existing requests
+        requests = []
+        if ANALYSIS_REQUESTS_FILE.exists():
+            with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
+                requests = json.load(f)
+        
+        # Add new request
+        preset = ANALYSIS_PRESETS.get(preset_key, {})
+        request = {
+            "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "preset": preset_key,
+            "tickers": custom_tickers or preset.get("tickers", []),
+            "depth": preset.get("depth", "medium"),
+            "status": "pending",
+            "created": datetime.now().isoformat(),
+        }
+        requests.append(request)
+        
+        # Keep only last 20 requests
+        requests = requests[-20:]
+        
+        with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
+            json.dump(requests, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error queuing analysis: {e}")
+        return False
+
+
+def get_analysis_requests() -> list:
+    """Get pending analysis requests"""
+    try:
+        if ANALYSIS_REQUESTS_FILE.exists():
+            with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading analysis requests: {e}")
+    return []
+
+
+def clear_analysis_requests() -> bool:
+    """Clear all analysis requests"""
+    try:
+        with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
+            json.dump([], f)
+        return True
+    except Exception as e:
+        print(f"Error clearing analysis requests: {e}")
+        return False
+
+
+# ============================================================
+# DISCORD SETTINGS MANAGEMENT
+# ============================================================
+
+def load_discord_settings() -> dict:
+    """Load Discord settings for all services"""
+    try:
+        if SERVICE_DISCORD_FILE.exists():
+            with open(SERVICE_DISCORD_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading discord settings: {e}")
+    return {}
+
+
+def save_discord_settings(settings: dict) -> bool:
+    """Save Discord settings"""
+    try:
+        SERVICE_DISCORD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SERVICE_DISCORD_FILE, 'w') as f:
+            json.dump(settings, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving discord settings: {e}")
+        return False
+
+
+def get_service_discord_settings(service_name: str) -> dict:
+    """Get Discord settings for a specific service"""
+    settings = load_discord_settings()
+    default = {
+        'enabled': True,
+        'min_confidence': 70,
+        'alert_types': ['signal', 'breakout', 'error'],
+        'cooldown_minutes': 15,
+    }
+    return {**default, **settings.get(service_name, {})}
+
+
+def set_service_discord_settings(service_name: str, new_settings: dict) -> bool:
+    """Set Discord settings for a specific service"""
+    all_settings = load_discord_settings()
+    all_settings[service_name] = new_settings
+    return save_discord_settings(all_settings)
+
+
+# ============================================================
+# ANALYSIS RESULTS
+# ============================================================
+
+def get_analysis_results() -> dict:
+    """Get analysis results from all services"""
+    try:
+        if ANALYSIS_RESULTS_FILE.exists():
+            with open(ANALYSIS_RESULTS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading analysis results: {e}")
+    return {}
+
+
+def clear_analysis_results() -> bool:
+    """Clear all analysis results"""
+    try:
+        with open(ANALYSIS_RESULTS_FILE, 'w') as f:
+            json.dump({}, f)
+        return True
+    except Exception as e:
+        print(f"Error clearing analysis results: {e}")
+        return False
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -191,17 +462,8 @@ def get_service_status(service_name: str) -> dict:
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',
-            'sentient-crypto-ai-trader': 'SentientCryptoAI'
-        }
-        svc_to_control = windows_name_map.get(service_name, service_name)
-        # Use sc query for Windows
-        # Map systemd-style service names to Windows service names where possible
-        windows_name_map = {
-            'sentient-stock-monitor': 'SentientStockMonitor',
-            'sentient-dex-launch': 'SentientDEXLaunch',
-            'sentient-crypto-breakout': 'SentientCryptoBreakout',
-            'sentient-discord-approval': 'SentientDiscordApproval',
-            'sentient-crypto-ai-trader': 'SentientCryptoAI'
+            'sentient-crypto-ai-trader': 'SentientCryptoAI',
+            'sentient-orb-fvg': 'SentientORBFVG'
         }
         svc_to_check = windows_name_map.get(service_name, service_name)
         success, output = run_command(f"sc query {svc_to_check}")
@@ -252,7 +514,8 @@ def control_service(service_name: str, action: str) -> tuple:
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',
-            'sentient-crypto-ai-trader': 'SentientCryptoAI'
+            'sentient-crypto-ai-trader': 'SentientCryptoAI',
+            'sentient-orb-fvg': 'SentientORBFVG'
         }
         svc_to_control = windows_name_map.get(service_name, service_name)
         
@@ -313,6 +576,10 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
         'sentient-discord-approval': [
             'logs/discord_approval_service.log',
             'logs/discord_approval_error.log',
+        ],
+        'sentient-orb-fvg': [
+            'logs/orb_fvg_service.log',
+            'logs/orb_fvg_error.log',
         ]
     }
     
@@ -398,6 +665,10 @@ def clear_service_logs(service_name: str) -> tuple:
         'sentient-discord-approval': [
             'logs/discord_approval_service.log',
             'logs/discord_approval_error.log',
+        ],
+        'sentient-orb-fvg': [
+            'logs/orb_fvg_service.log',
+            'logs/orb_fvg_error.log',
         ]
     }
     
@@ -578,12 +849,12 @@ def main():
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("▶️ Start All"):
+            if st.button("▶️ Start\nAll", use_container_width=True):
                 for svc in SERVICES.values():
                     control_service(svc["name"], "start")
                 st.rerun()
         with col2:
-            if st.button("⏹️ Stop All"):
+            if st.button("⏹️ Stop\nAll", use_container_width=True):
                 for svc in SERVICES.values():
                     control_service(svc["name"], "stop")
                 st.rerun()
@@ -592,6 +863,93 @@ def main():
         st.markdown("### 📊 Overview")
         running = sum(1 for s in SERVICES.values() if get_service_status(s["name"])["active"])
         st.metric("Services Running", f"{running}/{len(SERVICES)}")
+        
+        # ============================================================
+        # STRATEGY CONFIG (Mobile-Friendly)
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 🎯 Active Strategy")
+        
+        strategy_data = load_active_strategy()
+        current_strategy = strategy_data.get("active_strategy", "PAPER_TRADING")
+        available_strategies = strategy_data.get("available_strategies", {})
+        
+        # Show current strategy
+        current_info = available_strategies.get(current_strategy, {})
+        st.info(f"**{current_info.get('name', current_strategy)}**")
+        st.caption(current_info.get('description', ''))
+        
+        # Strategy switcher dropdown
+        strategy_options = list(available_strategies.keys())
+        if strategy_options:
+            selected = st.selectbox(
+                "Switch Strategy",
+                options=strategy_options,
+                index=strategy_options.index(current_strategy) if current_strategy in strategy_options else 0,
+                format_func=lambda x: available_strategies.get(x, {}).get('name', x),
+                key="strategy_selector",
+                label_visibility="collapsed"
+            )
+            
+            if selected and selected != current_strategy:
+                if st.button("🔄 Apply Strategy", type="primary", use_container_width=True):
+                    success, msg = switch_strategy(str(selected))
+                    if success:
+                        st.toast(f"✅ {msg}")
+                        # Restart relevant services
+                        control_service("sentient-stock-monitor", "restart")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        
+        # ============================================================
+        # QUICK ANALYSIS (Mobile-Friendly)
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 🔬 Quick Analysis")
+        st.caption("Trigger on-demand scans")
+        
+        # Analysis preset buttons (big, mobile-friendly)
+        for preset_key, preset_info in ANALYSIS_PRESETS.items():
+            if st.button(
+                f"{preset_info['emoji']} {preset_info['name']}", 
+                key=f"analysis_{preset_key}",
+                use_container_width=True
+            ):
+                if queue_analysis_request(preset_key):
+                    st.toast(f"✅ {preset_info['name']} queued!")
+                else:
+                    st.error("Failed to queue analysis")
+        
+        # Custom analysis input
+        with st.expander("📝 Custom Analysis"):
+            custom_tickers = st.text_input(
+                "Tickers (comma-separated)",
+                placeholder="NVDA, TSLA, AMD",
+                key="custom_analysis_tickers"
+            )
+            depth = st.select_slider(
+                "Depth",
+                options=["quick", "medium", "deep"],
+                value="medium",
+                key="custom_analysis_depth"
+            )
+            if st.button("🚀 Run Custom", use_container_width=True):
+                tickers = [t.strip().upper() for t in custom_tickers.split(",") if t.strip()]
+                if tickers:
+                    if queue_analysis_request("custom", tickers):
+                        st.toast(f"✅ Custom analysis for {len(tickers)} tickers queued!")
+                else:
+                    st.warning("Enter at least one ticker")
+        
+        # Show pending requests count
+        requests = get_analysis_requests()
+        pending = [r for r in requests if r.get("status") == "pending"]
+        if pending:
+            st.caption(f"📋 {len(pending)} pending request(s)")
+            if st.button("🗑️ Clear Queue", key="clear_analysis_queue"):
+                clear_analysis_requests()
+                st.rerun()
     
     # Main content - Service Cards by Category
     st.markdown("---")
@@ -773,7 +1131,7 @@ def main():
                         col_apply, col_reset = st.columns([1, 1])
                         with col_apply:
                             if st.button("💾 Apply & Restart", key=f"apply_interval_{service_name}", type="primary"):
-                                if set_service_interval(service_name, svc_info, new_interval):
+                                if set_service_interval(service_name, svc_info, int(new_interval)):
                                     # Restart the service to apply new interval
                                     success, msg = control_service(service_name, "restart")
                                     if success:
@@ -814,8 +1172,273 @@ def main():
                         
                         # Info about intervals
                         st.caption(f"💡 Range: {interval_min}s - {interval_max}s ({interval_max//60} min). Lower = more responsive but higher API usage.")
+                        
+                        # ============================================================
+                        # WATCHLIST / TICKER FILTERING
+                        # ============================================================
+                        st.markdown("---")
+                        st.markdown("**📋 Watchlist / Ticker Filter**")
+                        
+                        category = svc_info.get("category", "stocks")
+                        current_watchlist = get_service_watchlist(service_name, category)
+                        
+                        # Get default tickers based on service type
+                        if category == "crypto" and service_name != "sentient-dex-launch":
+                            all_tickers = [
+                                'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 
+                                'DOGE/USD', 'SHIB/USD', 'PEPE/USD', 'XRP/USD', 'ADA/USD',
+                                'DOT/USD', 'MATIC/USD', 'UNI/USD', 'ATOM/USD', 'ARB/USD'
+                            ]
+                        elif service_name == "sentient-dex-launch":
+                            all_tickers = ['solana', 'ethereum', 'base', 'arbitrum', 'polygon']
+                        else:
+                            all_tickers = [
+                                'SPY', 'QQQ', 'IWM', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT',
+                                'META', 'AMZN', 'GOOGL', 'PLTR', 'SOFI', 'COIN', 'MARA',
+                                'RIOT', 'HOOD', 'NFLX', 'CRM', 'SHOP'
+                            ]
+                        
+                        # Quick action buttons (mobile-friendly)
+                        btn_col1, btn_col2, btn_col3 = st.columns(3)
+                        with btn_col1:
+                            if st.button("✅ All", key=f"watchlist_all_{service_name}", use_container_width=True):
+                                set_service_watchlist(service_name, all_tickers)
+                                st.rerun()
+                        with btn_col2:
+                            if st.button("❌ Clear", key=f"watchlist_clear_{service_name}", use_container_width=True):
+                                set_service_watchlist(service_name, [])
+                                st.rerun()
+                        with btn_col3:
+                            if st.button("🔝 Top 5", key=f"watchlist_top_{service_name}", use_container_width=True):
+                                set_service_watchlist(service_name, all_tickers[:5])
+                                st.rerun()
+                        
+                        # Multiselect for tickers
+                        selected_tickers = st.multiselect(
+                            "Select tickers to monitor",
+                            options=all_tickers,
+                            default=[t for t in current_watchlist if t in all_tickers],
+                            key=f"watchlist_select_{service_name}",
+                            help="Select which tickers this service should scan"
+                        )
+                        
+                        # Custom ticker input
+                        custom_input = st.text_input(
+                            "Add custom tickers (comma-separated)",
+                            placeholder="SMCI, RDDT, MSTR",
+                            key=f"custom_tickers_{service_name}"
+                        )
+                        
+                        # Save watchlist button
+                        if st.button("💾 Save Watchlist", key=f"save_watchlist_{service_name}", type="primary", use_container_width=True):
+                            # Combine selected and custom tickers
+                            final_tickers = list(selected_tickers)
+                            if custom_input:
+                                custom_list = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
+                                final_tickers.extend([t for t in custom_list if t not in final_tickers])
+                            
+                            if set_service_watchlist(service_name, final_tickers):
+                                st.toast(f"✅ Saved {len(final_tickers)} tickers!")
+                                # Restart service to apply
+                                control_service(service_name, "restart")
+                                st.rerun()
+                            else:
+                                st.error("Failed to save watchlist")
+                        
+                        st.caption(f"📊 Currently monitoring: {len(current_watchlist)} ticker(s)")
+                        
+                        # ============================================================
+                        # DISCORD ALERT SETTINGS
+                        # ============================================================
+                        st.markdown("---")
+                        st.markdown("**🔔 Discord Alert Settings**")
+                        
+                        discord_settings = get_service_discord_settings(service_name)
+                        
+                        # Enable/Disable toggle
+                        alerts_enabled = st.checkbox(
+                            "Enable Discord Alerts",
+                            value=discord_settings.get('enabled', True),
+                            key=f"discord_enabled_{service_name}",
+                            help="Turn Discord notifications on/off for this service"
+                        )
+                        
+                        if alerts_enabled:
+                            # Minimum confidence slider
+                            min_confidence = st.slider(
+                                "Min Confidence for Alerts",
+                                min_value=50,
+                                max_value=95,
+                                value=discord_settings.get('min_confidence', 70),
+                                step=5,
+                                key=f"discord_confidence_{service_name}",
+                                help="Only send alerts for signals above this confidence level"
+                            )
+                            
+                            # Alert cooldown
+                            cooldown = st.number_input(
+                                "Cooldown (minutes)",
+                                min_value=1,
+                                max_value=120,
+                                value=discord_settings.get('cooldown_minutes', 15),
+                                key=f"discord_cooldown_{service_name}",
+                                help="Minimum time between alerts for the same ticker"
+                            )
+                            
+                            # Alert types
+                            all_alert_types = ['signal', 'breakout', 'error', 'summary']
+                            current_types = discord_settings.get('alert_types', ['signal', 'breakout', 'error'])
+                            alert_types = st.multiselect(
+                                "Alert Types",
+                                options=all_alert_types,
+                                default=[t for t in current_types if t in all_alert_types],
+                                key=f"discord_types_{service_name}",
+                                help="Which types of alerts to send"
+                            )
+                        else:
+                            min_confidence = 70
+                            cooldown = 15
+                            alert_types = ['signal', 'breakout', 'error']
+                        
+                        # Save Discord settings button
+                        if st.button("💾 Save Discord Settings", key=f"save_discord_{service_name}", use_container_width=True):
+                            new_discord_settings = {
+                                'enabled': alerts_enabled,
+                                'min_confidence': min_confidence,
+                                'cooldown_minutes': int(cooldown),
+                                'alert_types': alert_types,
+                            }
+                            if set_service_discord_settings(service_name, new_discord_settings):
+                                st.toast(f"✅ Discord settings saved!")
+                                control_service(service_name, "restart")
+                                st.rerun()
+                            else:
+                                st.error("Failed to save Discord settings")
                 
                 st.markdown("---")
+    
+    # ============================================================
+    # ANALYSIS REQUESTS QUEUE
+    # ============================================================
+    st.markdown("## 📊 Analysis Queue")
+    
+    requests = get_analysis_requests()
+    
+    if requests:
+        # Show recent requests
+        for req in reversed(requests[-5:]):  # Show last 5
+            status_emoji = "⏳" if req.get("status") == "pending" else "✅"
+            preset = ANALYSIS_PRESETS.get(req.get("preset", ""), {})
+            preset_name = preset.get("name", req.get("preset", "Custom"))
+            tickers = req.get("tickers", [])
+            ticker_display = ", ".join(tickers[:3]) + (f" +{len(tickers)-3}" if len(tickers) > 3 else "")
+            
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                st.write(f"{status_emoji} **{preset_name}**")
+            with col2:
+                st.caption(f"📈 {ticker_display}")
+            with col3:
+                created = req.get("created", "")[:16].replace("T", " ")
+                st.caption(created)
+        
+        if st.button("🗑️ Clear All Requests", use_container_width=True):
+            clear_analysis_requests()
+            st.rerun()
+    else:
+        st.info("No analysis requests queued. Use the sidebar to trigger scans from your phone! 📱")
+    
+    st.markdown("---")
+    
+    # ============================================================
+    # ANALYSIS RESULTS VIEWER
+    # ============================================================
+    st.markdown("## 📈 Recent Analysis Results")
+    
+    analysis_results = get_analysis_results()
+    
+    if analysis_results:
+        # Show results by service
+        result_tabs = st.tabs(list(analysis_results.keys()) + ["📋 All"])
+        
+        for i, (service, data) in enumerate(analysis_results.items()):
+            with result_tabs[i]:
+                results = data.get('results', [])
+                updated = data.get('updated', 'Unknown')[:16].replace('T', ' ')
+                
+                st.caption(f"Last updated: {updated} | {len(results)} result(s)")
+                
+                if results:
+                    # Show last 10 results
+                    for result in results[-10:]:
+                        ticker = result.get('ticker', result.get('symbol', 'N/A'))
+                        signal = result.get('signal', result.get('action', 'N/A'))
+                        confidence = result.get('confidence', result.get('score', 0))
+                        price = result.get('price', result.get('entry_price', 0))
+                        
+                        # Color based on signal
+                        if signal in ['LONG', 'BUY', 'BULLISH']:
+                            signal_color = "🟢"
+                        elif signal in ['SHORT', 'SELL', 'BEARISH']:
+                            signal_color = "🔴"
+                        else:
+                            signal_color = "🟡"
+                        
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                        with col1:
+                            st.write(f"**{ticker}**")
+                        with col2:
+                            st.write(f"{signal_color} {signal}")
+                        with col3:
+                            if isinstance(confidence, (int, float)):
+                                st.write(f"{confidence:.0f}%")
+                            else:
+                                st.write(str(confidence))
+                        with col4:
+                            if isinstance(price, (int, float)) and price > 0:
+                                st.write(f"${price:.2f}")
+                else:
+                    st.info("No results yet")
+        
+        # "All" tab - combined view
+        with result_tabs[-1]:
+            all_results = []
+            for service, data in analysis_results.items():
+                for result in data.get('results', []):
+                    result['_service'] = service
+                    all_results.append(result)
+            
+            if all_results:
+                st.caption(f"Total: {len(all_results)} results across all services")
+                for result in all_results[-15:]:
+                    ticker = result.get('ticker', result.get('symbol', 'N/A'))
+                    signal = result.get('signal', result.get('action', 'N/A'))
+                    confidence = result.get('confidence', result.get('score', 0))
+                    service = result.get('_service', 'Unknown')[:20]
+                    
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+                    with col1:
+                        st.write(f"**{ticker}**")
+                    with col2:
+                        st.write(signal)
+                    with col3:
+                        if isinstance(confidence, (int, float)):
+                            st.write(f"{confidence:.0f}%")
+                        else:
+                            st.write(str(confidence))
+                    with col4:
+                        st.caption(service)
+            else:
+                st.info("No results from any service yet")
+        
+        # Clear results button
+        if st.button("🗑️ Clear All Results", key="clear_all_results"):
+            clear_analysis_results()
+            st.rerun()
+    else:
+        st.info("No analysis results yet. Trigger a scan from the sidebar or wait for services to generate results.")
+    
+    st.markdown("---")
     
     # System Info
     with st.expander("🖥️ System Information"):
