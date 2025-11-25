@@ -207,7 +207,7 @@ def control_service(service_name: str, action: str) -> tuple:
         return run_command(cmd)
 
 
-def get_service_logs(service_name: str, lines: int = 50) -> str:
+def get_service_logs(service_name: str, lines: int = 100) -> str:
     """Get recent logs for a service. Reads from log files first (both Windows and Linux), falls back to journalctl on Linux."""
     project_root = Path(__file__).parent
     
@@ -247,10 +247,24 @@ def get_service_logs(service_name: str, lines: int = 50) -> str:
         log_path = project_root / candidate
         if log_path.exists():
             try:
+                # Read file with explicit flush-friendly approach
                 with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    # Seek to end to get file size, then read from appropriate position
+                    f.seek(0, 2)  # Seek to end
+                    file_size = f.tell()
+                    
+                    # For large files, read last ~100KB (should be plenty for recent logs)
+                    read_size = min(file_size, 100 * 1024)
+                    f.seek(max(0, file_size - read_size))
+                    
+                    # Skip partial first line if we didn't start at beginning
+                    if file_size > read_size:
+                        f.readline()  # Discard partial line
+                    
                     file_lines = f.readlines()
+                    
                 if file_lines:
-                    # Add header showing which file
+                    # Add header showing which file and timestamp
                     all_logs.append(f"=== {candidate} (last {min(lines, len(file_lines))} lines) ===\n")
                     all_logs.extend(file_lines[-lines:])
                     all_logs.append("\n")
@@ -453,6 +467,21 @@ def main():
         if st.button("🔄 Refresh Status"):
             st.rerun()
         
+        # Auto-refresh option - uses query param trick
+        st.markdown("---")
+        auto_refresh = st.checkbox("🔄 Auto-refresh", value=False, key="auto_refresh", 
+                                   help="Enable automatic page refresh every 30 seconds")
+        if auto_refresh:
+            # Use streamlit's built-in auto-rerun with a placeholder
+            st.markdown("_Auto-refresh enabled (30s)_")
+            # Add a meta refresh tag via markdown
+            st.markdown(
+                """
+                <meta http-equiv="refresh" content="30">
+                """,
+                unsafe_allow_html=True
+            )
+        
         st.markdown("---")
         st.markdown("### 🎛️ Quick Actions")
         
@@ -555,8 +584,17 @@ def main():
                 
                 # Expandable logs section
                 with st.expander(f"📜 View Logs - {display_name}"):
-                    log_col1, log_col2 = st.columns([4, 1])
+                    log_col1, log_col2, log_col3 = st.columns([3, 1, 1])
                     with log_col2:
+                        # Line count selector
+                        log_lines = st.selectbox(
+                            "Lines",
+                            options=[50, 100, 200, 500],
+                            index=1,  # Default to 100
+                            key=f"log_lines_{service_name}",
+                            label_visibility="collapsed"
+                        )
+                    with log_col3:
                         if st.button("🗑️ Clear", key=f"clear_logs_{service_name}", help="Clear log files to start fresh"):
                             success, msg = clear_service_logs(service_name)
                             if success:
@@ -565,8 +603,17 @@ def main():
                                 st.error(msg)
                             st.rerun()
                     
-                    logs = get_service_logs(service_name, 100)
-                    st.code(logs, language="log")
+                    # Refresh button in its own row
+                    if st.button("🔄 Refresh Logs", key=f"refresh_logs_{service_name}", use_container_width=True):
+                        st.rerun()
+                    
+                    logs = get_service_logs(service_name, log_lines)
+                    
+                    # Use a container with fixed height for scrollable logs
+                    st.code(logs, language="log", line_numbers=False)
+                    
+                    # Show log file info
+                    st.caption(f"💡 Tip: Click 'Refresh Logs' to see latest entries. Showing last {log_lines} lines.")
                 
                 st.markdown("---")
     
