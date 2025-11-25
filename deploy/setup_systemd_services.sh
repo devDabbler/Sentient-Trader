@@ -17,10 +17,29 @@ echo "Creating systemd service files..."
 # Create systemd-compatible env file from .env (strips quotes and comments)
 echo "Creating systemd-compatible environment file..."
 if [ -f "$PROJECT_DIR/.env" ]; then
-    # Convert .env to systemd format (remove quotes, handle special chars)
-    grep -v '^#' "$PROJECT_DIR/.env" | grep -v '^$' | sed 's/^export //' > "$PROJECT_DIR/.env.systemd"
+    # Convert .env to systemd format:
+    # 1. Remove comment lines (starting with #)
+    # 2. Remove empty lines
+    # 3. Remove 'export ' prefix if present
+    # 4. Remove surrounding quotes from values (both single and double)
+    grep -v '^\s*#' "$PROJECT_DIR/.env" | grep -v '^\s*$' | sed 's/^export //' | sed "s/=\"/=/" | sed "s/\"$//" | sed "s/='/=/" | sed "s/'$//" > "$PROJECT_DIR/.env.systemd"
+    
+    # Count variables
+    VAR_COUNT=$(wc -l < "$PROJECT_DIR/.env.systemd")
     chmod 600 "$PROJECT_DIR/.env.systemd"
-    echo "  ✅ Created $PROJECT_DIR/.env.systemd"
+    echo "  ✅ Created $PROJECT_DIR/.env.systemd ($VAR_COUNT variables)"
+    
+    # Verify critical variables exist
+    if grep -q "DISCORD_WEBHOOK_URL" "$PROJECT_DIR/.env.systemd"; then
+        echo "  ✅ DISCORD_WEBHOOK_URL found"
+    else
+        echo "  ⚠️  WARNING: DISCORD_WEBHOOK_URL not found in .env!"
+    fi
+    if grep -q "KRAKEN_API_KEY" "$PROJECT_DIR/.env.systemd"; then
+        echo "  ✅ KRAKEN_API_KEY found"
+    else
+        echo "  ⚠️  WARNING: KRAKEN_API_KEY not found in .env!"
+    fi
 else
     echo "  ⚠️  WARNING: $PROJECT_DIR/.env not found!"
     echo "     Services may not have required API keys (Discord, OpenAI, Kraken, etc.)"
