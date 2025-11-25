@@ -359,7 +359,7 @@ class AICryptoTradeReviewer:
             'strategy_context': req['description']
         }
         
-        logger.info("🤖 Rule-based review ({}): {'APPROVED' if approved else 'REJECTED'} - {len(issues))} issues found", str(strategy))
+        logger.info(f"🤖 Rule-based review ({strategy}): {'APPROVED' if approved else 'REJECTED'} - {len(issues)} issues found")
         
         return approved, confidence, reasoning, recommendations
     

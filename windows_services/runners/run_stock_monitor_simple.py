@@ -36,6 +36,14 @@ log_dir = PROJECT_ROOT / "logs"
 log_dir.mkdir(exist_ok=True)
 
 logger.remove()
+# Add stderr handler (so we see logs in terminal)
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    colorize=True
+)
+# Add file handler with explicit buffering
 logger.add(
     str(log_dir / "stock_monitor_service.log"),
     rotation="50 MB",
@@ -43,7 +51,9 @@ logger.add(
     level="INFO",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
-    diagnose=True
+    diagnose=True,
+    enqueue=False,  # Synchronous writes to ensure logs appear immediately
+    buffering=1  # Line buffering
 )
 
 logger.info("=" * 70)
@@ -57,6 +67,13 @@ logger.info(f"✓ User: {os.getenv('USERNAME', 'UNKNOWN')}")
 # Set environment
 os.environ['PYTHONUNBUFFERED'] = '1'
 
+# Suppress verbose yfinance/urllib HTTP error output to stderr
+# These errors are non-fatal but clutter the output
+import logging
+logging.getLogger('yfinance').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
+
 logger.info("")
 logger.info("Starting imports (may take 30-60 seconds in Task Scheduler)...")
 logger.info("Be patient - network libraries need time to initialize...")
@@ -67,25 +84,68 @@ import_start = time.time()
 
 try:
     logger.info("  Step 1/3: Importing stock_informational_monitor...")
+    import sys
+    sys.stdout.write("DEBUG: About to import stock_informational_monitor\n")
+    sys.stdout.flush()
     from services.stock_informational_monitor import get_stock_informational_monitor
+    sys.stdout.write("DEBUG: Import statement completed\n")
+    sys.stdout.flush()
     logger.info(f"  ✓ Import completed in {time.time() - import_start:.1f}s")
+    sys.stdout.write("DEBUG: Logger message written\n")
+    sys.stdout.flush()
     
     logger.info("")
     logger.info("  Step 2/3: Creating monitor instance...")
+    sys.stdout.write("DEBUG: About to create monitor instance\n")
+    sys.stdout.flush()
     instance_start = time.time()
     monitor = get_stock_informational_monitor()
+    sys.stdout.write(f"DEBUG: get_stock_informational_monitor() returned\n")
+    sys.stdout.flush()
+    
+    # Force stdout/stderr flush before logger calls
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    sys.stdout.write(f"DEBUG: About to log instance created message\n")
+    sys.stdout.flush()
     logger.info(f"  ✓ Instance created in {time.time() - instance_start:.1f}s")
-    logger.info(f"  ✓ Watchlist: {len(monitor.watchlist)} symbols")
+    sys.stdout.write(f"DEBUG: Logged instance created\n")
+    sys.stdout.flush()
+    
+    sys.stdout.write(f"DEBUG: About to access monitor.watchlist\n")
+    sys.stdout.flush()
+    watchlist_len = len(monitor.watchlist)
+    sys.stdout.write(f"DEBUG: Watchlist has {watchlist_len} symbols\n")
+    sys.stdout.flush()
+    logger.info(f"  ✓ Watchlist: {watchlist_len} symbols")
     
     # Get scan interval
+    sys.stdout.write(f"DEBUG: About to get scan_interval\n")
+    sys.stdout.flush()
     scan_interval = getattr(monitor, 'scan_interval_minutes', 30)
+    sys.stdout.write(f"DEBUG: scan_interval = {scan_interval}\n")
+    sys.stdout.flush()
     logger.info(f"  ✓ Scan interval: {scan_interval} minutes")
     
+    sys.stdout.write(f"DEBUG: About to print SERVICE READY\n")
+    sys.stdout.flush()
+    
+    # Print SERVICE READY to both stdout AND logger
     logger.info("")
     logger.info("=" * 70)
-    logger.info(f"🚀 SERVICE READY (total startup: {time.time() - import_start:.1f}s)")
+    service_ready_msg = f"🚀 SERVICE READY (total startup: {time.time() - import_start:.1f}s)"
+    logger.info(service_ready_msg)
+    print(f"\n{'='*70}")
+    print(service_ready_msg)
+    print(f"{'='*70}\n")
+    sys.stdout.flush()
     logger.info("=" * 70)
     logger.info("")
+    
+    # Write status file for batch script verification
+    status_file = PROJECT_ROOT / "logs" / ".stock_monitor_ready"
+    status_file.write_text(f"SERVICE READY at {time.time()}")
     
     # Step 3/3: Start monitoring loop
     if hasattr(monitor, 'run_continuous'):

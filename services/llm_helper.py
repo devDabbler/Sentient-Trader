@@ -282,3 +282,219 @@ class LLMServiceMixin:
         if not hasattr(self, 'llm_helper'):
             raise RuntimeError("LLM helper not initialized. Call _init_llm() first.")
         return self.llm_helper.cached_request(prompt, cache_key, ttl, **kwargs)
+
+
+# Groq-specific convenience functions
+
+def groq_request(
+    prompt: str,
+    service_name: str,
+    model: str = "llama-3.1-8b-instant",
+    priority: str = "MEDIUM",
+    cache_key: Optional[str] = None,
+    ttl: int = 300,
+    temperature: float = 0.7
+) -> Optional[str]:
+    """
+    Make a request specifically to Groq for ultra-fast inference
+    
+    Groq provides extremely fast LLM inference using custom LPU hardware.
+    Use this when you need speed over cost optimization.
+    
+    Available models:
+    - llama-3.1-8b-instant (fastest, good for simple tasks)
+    - llama-3.1-70b-versatile (more capable, still fast)
+    - llama-3.3-70b-versatile (latest llama)
+    - mixtral-8x7b-32768 (good for longer contexts)
+    
+    Example:
+        from services.llm_helper import groq_request
+        
+        response = groq_request(
+            "Analyze this stock: AAPL - Current price $180, RSI 65, above 20 EMA",
+            service_name="stock_analyzer"
+        )
+    """
+    from services.llm_request_manager import get_llm_manager
+    manager = get_llm_manager()
+    
+    # Force model to use groq prefix for routing
+    groq_model = f"groq/{model}" if not model.startswith("groq/") else model
+    
+    return manager.request(
+        prompt=prompt,
+        service_name=service_name,
+        priority=priority,
+        cache_key=cache_key,
+        ttl=ttl,
+        model=groq_model,
+        temperature=temperature
+    )
+
+
+def groq_fast_analysis(
+    prompt: str,
+    service_name: str = "groq_analysis",
+    cache_key: Optional[str] = None
+) -> Optional[str]:
+    """
+    Quick wrapper for fast Groq analysis using llama-3.1-8b-instant
+    
+    Best for:
+    - Quick sentiment analysis
+    - Simple pattern recognition
+    - Fast preliminary filtering
+    - High-volume, low-latency needs
+    
+    Example:
+        from services.llm_helper import groq_fast_analysis
+        
+        sentiment = groq_fast_analysis(
+            "Is this bullish or bearish? AAPL up 2%, volume 150% of average",
+            cache_key="sentiment_AAPL"
+        )
+    """
+    return groq_request(
+        prompt=prompt,
+        service_name=service_name,
+        model="llama-3.1-8b-instant",
+        priority="MEDIUM",
+        cache_key=cache_key,
+        temperature=0.3  # Lower temp for more consistent analysis
+    )
+
+
+# =============================================================================
+# HYBRID LLM Functions - Local Ollama + Groq intelligent routing
+# =============================================================================
+
+def hybrid_request(
+    prompt: str,
+    service_name: str,
+    force_provider: Optional[str] = None,
+    cache_key: Optional[str] = None,
+    ttl: int = 300,
+    temperature: float = 0.3
+) -> Optional[str]:
+    """
+    Intelligent hybrid LLM request with automatic routing.
+    
+    Routes based on task complexity:
+    - Simple tasks → Local Ollama (home PC via OLLAMA_BASE_URL) - FREE
+    - Complex tasks → Groq (cloud, fast inference) - cheap/free tier
+    
+    This SKIPS OpenRouter entirely, solving reliability issues.
+    
+    Setup for DigitalOcean → Home PC:
+    1. Install Tailscale on both DO server and home PC
+    2. Set OLLAMA_BASE_URL=http://100.x.x.x:11434 on DO server
+    3. Ensure GROQ_API_KEY is set for complex task fallback
+    
+    Args:
+        prompt: The prompt to send
+        service_name: Name of calling service (for tracking)
+        force_provider: Force 'local' or 'groq' (bypasses auto-routing)
+        cache_key: Optional cache key
+        ttl: Cache TTL in seconds
+        temperature: Sampling temperature
+    
+    Returns:
+        Response text or None if failed
+    
+    Example:
+        from services.llm_helper import hybrid_request
+        
+        # Auto-routed based on complexity
+        response = hybrid_request(
+            "Is AAPL bullish or bearish?",  # Simple → Local
+            service_name="quick_check"
+        )
+        
+        response = hybrid_request(
+            "Analyze AAPL with full technical breakdown in JSON format",  # Complex → Groq
+            service_name="full_analysis"
+        )
+        
+        # Force specific provider
+        response = hybrid_request(
+            "Any prompt",
+            service_name="my_service",
+            force_provider="local"  # Always use home PC
+        )
+    """
+    from services.llm_request_manager import get_llm_manager
+    manager = get_llm_manager()
+    return manager.hybrid_request(
+        prompt=prompt,
+        service_name=service_name,
+        force_provider=force_provider,
+        cache_key=cache_key,
+        ttl=ttl,
+        temperature=temperature
+    )
+
+
+def local_llm_request(
+    prompt: str,
+    service_name: str,
+    cache_key: Optional[str] = None,
+    ttl: int = 300,
+    temperature: float = 0.3
+) -> Optional[str]:
+    """
+    Force request to local Ollama (your home PC).
+    Falls back to Groq if local is unavailable.
+    
+    Example:
+        from services.llm_helper import local_llm_request
+        
+        response = local_llm_request(
+            "Quick sentiment check: AAPL +2%",
+            service_name="sentiment"
+        )
+    """
+    return hybrid_request(
+        prompt=prompt,
+        service_name=service_name,
+        force_provider="local",
+        cache_key=cache_key,
+        ttl=ttl,
+        temperature=temperature
+    )
+
+
+def smart_analysis(
+    prompt: str,
+    service_name: str = "smart_analysis",
+    cache_key: Optional[str] = None,
+    ttl: int = 300
+) -> Optional[str]:
+    """
+    Smart analysis that auto-routes to the best provider.
+    
+    - JSON/structured output requests → Groq (better instruction following)
+    - Simple sentiment/confirmation → Local (free, fast)
+    - Long prompts (>2000 chars) → Groq (better context handling)
+    
+    Example:
+        from services.llm_helper import smart_analysis
+        
+        # Will auto-route to Groq (JSON requested)
+        result = smart_analysis(
+            "Analyze AAPL and return JSON with sentiment, confidence, and reasons",
+            service_name="trading_signal"
+        )
+        
+        # Will auto-route to Local (simple task)
+        result = smart_analysis(
+            "Is this setup bullish? RSI 65, above EMA",
+            service_name="quick_check"
+        )
+    """
+    return hybrid_request(
+        prompt=prompt,
+        service_name=service_name,
+        cache_key=cache_key,
+        ttl=ttl,
+        temperature=0.3
+    )

@@ -36,6 +36,27 @@ except ImportError:
     logger.debug("StrategyAdvisor not available")
     StrategyAdvisor = None
 
+# Import Daily Stock Scanner UI
+try:
+    from ui.daily_stock_scanner_ui import render_daily_stock_scanner
+except ImportError:
+    logger.debug("Daily Stock Scanner UI not available")
+    render_daily_stock_scanner = None
+
+
+def render_daily_scanner_section():
+    """Render the Daily Stock Scanner section"""
+    if render_daily_stock_scanner is None:
+        st.error("Daily Stock Scanner not available. Please check installation.")
+        return
+    
+    try:
+        render_daily_stock_scanner()
+    except Exception as e:
+        logger.error(f"Error rendering daily scanner: {e}", exc_info=True)
+        st.error(f"Error loading Daily Scanner: {e}")
+
+
 # Helper functions for filter presets
 def _apply_filter_preset(filters, preset_name):
     """Apply a filter preset to the filters object"""
@@ -53,10 +74,24 @@ def render_tab():
     """Main render function called from app.py"""
     st.header("Advanced Scanner")
     
-    # TODO: Review and fix imports
-    # Tab implementation below (extracted from app.py)
-
-
+    # Sub-feature selector (similar to crypto tab pattern)
+    st.markdown("**Select Scanner Mode:**")
+    scanner_mode = st.radio(
+        "Scanner Mode",
+        options=["📊 Daily Scanner", "🚀 Advanced Opportunity Scanner"],
+        horizontal=True,
+        key="scanner_mode_selector",
+        label_visibility="collapsed"
+    )
+    
+    st.divider()
+    
+    # Route to appropriate scanner
+    if scanner_mode == "📊 Daily Scanner":
+        render_daily_scanner_section()
+        return
+    
+    # Original Advanced Opportunity Scanner below
     st.header("🚀 Advanced Opportunity Scanner")
     st.write("**All-in-one scanner** with AI/ML analysis, powerful filters, reverse split detection, and merger candidate identification!")
     

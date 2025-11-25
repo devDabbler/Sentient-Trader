@@ -73,6 +73,7 @@ trading_signals.log
 # Data folder and all contents
 data/
 backups/
+docs/
 
 # Configuration files (user-specific)
 active_strategy.json
@@ -81,6 +82,7 @@ run_autotrader_background.py
 
 # Batch scripts (user-specific automation)
 *.bat
+*.vbs
 
 # Excluded directories
 tests/

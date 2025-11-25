@@ -33,6 +33,14 @@ log_dir = PROJECT_ROOT / "logs"
 log_dir.mkdir(exist_ok=True)
 
 logger.remove()
+# Add stderr handler (so we see logs in terminal)
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    colorize=True
+)
+# Add file handler
 logger.add(
     str(log_dir / "crypto_breakout_service.log"),
     rotation="50 MB",
@@ -40,7 +48,9 @@ logger.add(
     level="INFO",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
-    diagnose=True
+    diagnose=True,
+    enqueue=False,
+    buffering=1
 )
 
 logger.info("=" * 70)
@@ -48,8 +58,15 @@ logger.info("📈 CRYPTO BREAKOUT - SIMPLE RUNNER")
 logger.info("=" * 70)
 logger.info(f"✓ Working directory: {os.getcwd()}")
 logger.info(f"✓ Python: {sys.executable}")
+logger.info(f"✓ User: {os.getenv('USERNAME', 'UNKNOWN')}")
 
 os.environ['PYTHONUNBUFFERED'] = '1'
+
+# Suppress verbose HTTP error output
+import logging
+logging.getLogger('yfinance').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
 
 logger.info("")
 logger.info("Starting imports (be patient)...")
@@ -57,18 +74,36 @@ logger.info("Starting imports (be patient)...")
 try:
     import_start = time.time()
     
+    sys.stdout.write("DEBUG: Importing CryptoBreakoutMonitor...\n")
+    sys.stdout.flush()
     from services.crypto_breakout_monitor import CryptoBreakoutMonitor
     logger.info(f"✓ Imported in {time.time() - import_start:.1f}s")
+    sys.stdout.write("DEBUG: Import complete\n")
+    sys.stdout.flush()
     
     logger.info("Creating monitor instance...")
+    sys.stdout.write("DEBUG: Creating monitor instance...\n")
+    sys.stdout.flush()
     monitor = CryptoBreakoutMonitor()
     logger.info("✓ Monitor created")
+    sys.stdout.write("DEBUG: Monitor created\n")
+    sys.stdout.flush()
     
+    # Print SERVICE READY to both stdout AND logger
     logger.info("")
     logger.info("=" * 70)
-    logger.info("🚀 SERVICE READY")
+    service_ready_msg = f"🚀 SERVICE READY (total startup: {time.time() - import_start:.1f}s)"
+    logger.info(service_ready_msg)
+    print(f"\n{'='*70}")
+    print(service_ready_msg)
+    print(f"{'='*70}\n")
+    sys.stdout.flush()
     logger.info("=" * 70)
     logger.info("")
+    
+    # Write status file for batch script verification
+    status_file = PROJECT_ROOT / "logs" / ".crypto_breakout_ready"
+    status_file.write_text(f"SERVICE READY at {time.time()}")
     
     # Get settings
     scan_interval = getattr(monitor, 'scan_interval_minutes', 15)

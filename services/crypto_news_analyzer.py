@@ -23,13 +23,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Try to import FinBERT analyzer
-try:
-    from services.finbert_sentiment import get_finbert_analyzer, FinBERTSentiment
-    FINBERT_AVAILABLE = True
-except ImportError:
-    FINBERT_AVAILABLE = False
-    logger.warning("⚠️ FinBERT not available, using keyword-based sentiment")
+# LAZY import for FinBERT - torch/transformers are heavy and slow down service startup
+# FinBERT will be imported on first use, not at module load
+FINBERT_AVAILABLE = None  # Will be set on first check
+_finbert_module = None
+
+def _get_finbert():
+    """Lazy load FinBERT module to avoid slow startup"""
+    global FINBERT_AVAILABLE, _finbert_module
+    if FINBERT_AVAILABLE is None:
+        try:
+            from services import finbert_sentiment as fb
+            _finbert_module = fb
+            FINBERT_AVAILABLE = True
+            logger.info("✅ FinBERT module loaded (lazy)")
+        except ImportError:
+            FINBERT_AVAILABLE = False
+            logger.warning("⚠️ FinBERT not available, using keyword-based sentiment")
+    return _finbert_module if FINBERT_AVAILABLE else None
 
 
 @dataclass
@@ -88,17 +99,15 @@ class CryptoNewsAnalyzer:
         self.last_coingecko_call = 0
         self.rate_limit_delay = 6.0  # 10 calls/min = 6 seconds between calls
         
-        # Initialize FinBERT analyzer if available
-        self.use_finbert = use_finbert and FINBERT_AVAILABLE
-        if self.use_finbert:
-            try:
-                self.finbert_analyzer = get_finbert_analyzer()
-                logger.info("📰 Crypto News Analyzer initialized with FinBERT")
-            except Exception as e:
-                logger.warning(f"⚠️ FinBERT initialization failed: {e}, using keyword fallback")
-                self.use_finbert = False
-        else:
+        # Initialize FinBERT analyzer if requested (loaded lazily on first use)
+        self._use_finbert_requested = use_finbert
+        self.use_finbert = False  # Will be set to True on first successful finbert load
+        self.finbert_analyzer = None
+        
+        if not use_finbert:
             logger.info("📰 Crypto News Analyzer initialized (keyword-based sentiment)")
+        else:
+            logger.info("📰 Crypto News Analyzer initialized (FinBERT will load on first use)")
         
         # News sentiment keywords (crypto-specific) - FALLBACK when FinBERT unavailable
         self.bullish_keywords = {
@@ -326,7 +335,19 @@ class CryptoNewsAnalyzer:
         """
         text = f"{title}. {description}"
         
-        if self.use_finbert and hasattr(self, 'finbert_analyzer'):
+        # Lazy-load FinBERT on first use
+        if self._use_finbert_requested and not self.use_finbert:
+            fb = _get_finbert()
+            if fb:
+                try:
+                    self.finbert_analyzer = fb.get_finbert_analyzer()
+                    self.use_finbert = True
+                    logger.info("📰 FinBERT analyzer loaded successfully")
+                except Exception as e:
+                    logger.warning(f"⚠️ FinBERT initialization failed: {e}, using keyword fallback")
+                    self._use_finbert_requested = False  # Don't retry
+        
+        if self.use_finbert and self.finbert_analyzer:
             try:
                 # Use FinBERT for accurate financial sentiment
                 finbert_result = self.finbert_analyzer.analyze_sentiment(text)

@@ -3,10 +3,16 @@ FDA and Healthcare Catalyst Detection Service
 
 Detects FDA approvals, clinical trials, and healthcare news that can drive
 massive price movements in pharma/biotech penny stocks.
+
+IMPORTANT: Uses lazy import of yfinance to prevent Task Scheduler hangs
 """
 
+# Lazy import - only load when actually fetching data
+def _get_yf():
+    import yfinance as yf
+    return yf
+
 from loguru import logger
-import yfinance as yf
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -122,9 +128,11 @@ class FDACatalystDetector:
     """Detects FDA and healthcare catalysts for stocks"""
     
     def __init__(self):
+        print(f"[TRACE] FDACatalystDetector.__init__: Starting...", flush=True)
         from loguru import logger
         self.logger = logger
         self.fda_keywords = [keyword for catalyst_info in FDA_CATALYSTS.values() for keyword in catalyst_info['keywords']]
+        print(f"[TRACE] FDACatalystDetector.__init__: Complete", flush=True)
     
     def is_healthcare_stock(self, ticker: str, info: Dict = None) -> Tuple[bool, str]:
         """
@@ -139,6 +147,7 @@ class FDACatalystDetector:
         """
         try:
             if info is None:
+                yf = _get_yf()
                 stock = yf.Ticker(ticker)
                 info = stock.info
             
@@ -175,6 +184,7 @@ class FDACatalystDetector:
             FDACatalyst object if found, None otherwise
         """
         try:
+            yf = _get_yf()
             stock = yf.Ticker(ticker)
             
             # First check if it's a healthcare stock

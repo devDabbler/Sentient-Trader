@@ -906,12 +906,12 @@ Evaluate these critical factors:
             # Already handled above, but catch here too for safety
             logger.debug("Discord webhook not available, skipping notification")
         except Exception as e:
-            logger.warning("Failed to send entry notification for {}: {type(e).__name__)}: {e}", str(opportunity.pair), exc_info=True)
+            logger.warning(f"Failed to send entry notification for {opportunity.pair}: {type(e).__name__}: {e}", exc_info=True)
     
     def _handle_approval_response(self, approval_id: str, approved: bool):
         """Handle approval response from Discord"""
         try:
-            logger.info("📬 Received approval response: {} -> {'APPROVED' if approved else 'REJECTED'}", str(approval_id))
+            logger.info(f"📬 Received approval response: {approval_id} -> {'APPROVED' if approved else 'REJECTED'}")
             
             # Find the opportunity with this approval ID
             opportunity_found = None

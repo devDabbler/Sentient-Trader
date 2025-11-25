@@ -31,6 +31,42 @@ class AlertSystem:
         """Add a callback to be triggered when alerts are created"""
         self.alert_callbacks.append(callback)
     
+    def send_alert(self, title: str, message: str, priority: str = "MEDIUM", metadata: Optional[Dict] = None):
+        """
+        Simplified alert sending method (convenience wrapper)
+        Creates a TradingAlert and triggers it
+        """
+        try:
+            # Map string priority to AlertPriority enum
+            priority_map = {
+                "CRITICAL": AlertPriority.CRITICAL,
+                "HIGH": AlertPriority.HIGH,
+                "MEDIUM": AlertPriority.MEDIUM,
+                "LOW": AlertPriority.LOW
+            }
+            alert_priority = priority_map.get(priority.upper(), AlertPriority.MEDIUM)
+            
+            # Extract ticker/symbol from metadata
+            ticker = metadata.get('symbol', 'UNKNOWN') if metadata else 'UNKNOWN'
+            
+            # Create TradingAlert (uses 'ticker' and 'details' not 'symbol' and 'metadata')
+            alert = TradingAlert(
+                ticker=ticker,
+                alert_type=AlertType.HIGH_CONFIDENCE,  # Generic opportunity type
+                priority=alert_priority,
+                message=f"{title}\n\n{message}",
+                timestamp=datetime.now(),
+                confidence_score=metadata.get('score', 0.0) if metadata else 0.0,
+                details=metadata or {}
+            )
+            
+            # Trigger it
+            self.trigger_alert(alert)
+            
+        except Exception as e:
+            logger.error(f"Error in send_alert: {e}")
+            raise
+    
     def trigger_alert(self, alert: TradingAlert):
         """Trigger an alert and execute callbacks"""
         self.alerts.append(alert)

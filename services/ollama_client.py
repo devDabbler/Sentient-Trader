@@ -20,10 +20,20 @@ load_dotenv()
 
 @dataclass
 class OllamaConfig:
-    """Configuration for Ollama client"""
+    """
+    Configuration for Ollama client.
+    
+    For REMOTE Ollama (e.g., home PC from DigitalOcean server):
+    Set OLLAMA_BASE_URL environment variable to your home PC's address.
+    
+    Connectivity options:
+    - Tailscale: OLLAMA_BASE_URL=http://100.x.x.x:11434 (recommended)
+    - SSH Tunnel: OLLAMA_BASE_URL=http://localhost:11434 (after ssh -L 11434:localhost:11434)
+    - Direct: OLLAMA_BASE_URL=http://your-home-ip:11434 (requires port forwarding + auth)
+    """
     base_url: str = "http://localhost:11434"
     model: str = "qwen2.5:7b"  # Default to best trading model
-    timeout: int = 120  # Increased for longer prompts
+    timeout: int = 180  # Increased for remote/network latency
     temperature: float = 0.3  # Lower for more consistent trading analysis
     max_tokens: int = 2000
     stream: bool = False
@@ -33,6 +43,12 @@ class OllamaConfig:
         env_base_url = os.getenv('OLLAMA_BASE_URL')
         if env_base_url:
             self.base_url = env_base_url
+            logger.info(f"🌐 Using remote Ollama: {env_base_url}")
+        
+        # Override timeout for remote connections
+        env_timeout = os.getenv('OLLAMA_TIMEOUT')
+        if env_timeout:
+            self.timeout = int(env_timeout)
     
     
 class OllamaClient:

@@ -4,6 +4,7 @@ AI-Enhanced Confidence Scanner
 Uses LLM to provide intelligent confidence analysis for top trades.
 Adds AI reasoning on top of quantitative scoring.
 """
+print("[TRACE] ai_confidence_scanner.py: Starting module load...", flush=True)
 
 import os
 from typing import List, Dict, Optional
@@ -32,11 +33,19 @@ class AIConfidenceScanner:
     Can work with or without LLM API keys.
     """
 
-    def __init__(self, use_llm: Optional[bool] = None, base_scanner=None, llm_analyzer=None):
+    def __init__(self, use_llm: Optional[bool] = None, base_scanner: bool = False):
         """
-        Initialize AI scanner with optional pre-created dependencies for performance
+        Initialize AI Confidence Scanner
+        
+        Args:
+            use_llm: Whether to use LLM for analysis (default: True if API key available)
+            base_scanner: If True, don't initialize TopTradesScanner (for subclassing)
         """
-        self.scanner = base_scanner if base_scanner is not None else TopTradesScanner()
+        print(f"[TRACE] AIConfidenceScanner.__init__: Starting (use_llm={use_llm}, base_scanner={base_scanner})", flush=True)
+        if not base_scanner:
+            # Disable optimizations during init to avoid yfinance validation hangs
+            self.scanner = TopTradesScanner(use_optimizations=False)
+        print(f"[TRACE] AIConfidenceScanner.__init__: TopTradesScanner initialized", flush=True)
 
         # Auto-detect if we should use LLM
         if use_llm is None:
@@ -45,39 +54,20 @@ class AIConfidenceScanner:
             self.use_llm = use_llm
 
         # Initialize LLM Request Manager helper (MEDIUM priority for informational analysis)
+        print(f"[TRACE] AIConfidenceScanner.__init__: About to initialize LLM (use_llm={self.use_llm})", flush=True)
         if self.use_llm:
             try:
                 self.llm_helper = get_llm_helper("ai_confidence_scanner", default_priority="MEDIUM")
                 logger.success("🚀 AI Confidence Scanner using LLM Request Manager")
+                print(f"[TRACE] AIConfidenceScanner.__init__: LLM helper initialized", flush=True)
             except Exception as e:
                 logger.warning(f"Hybrid LLM failed, trying original: {e}")
-                try:
-                    from .llm_strategy_analyzer import LLMStrategyAnalyzer
-                    from utils.config_loader import get_api_key
-
-                    api_key = get_api_key('OPENROUTER_API_KEY', 'openrouter')
-                    model = os.getenv('AI_CONFIDENCE_MODEL') or get_api_key('AI_CONFIDENCE_MODEL', 'models') or 'google/gemini-2.0-flash-exp:free'
-
-                    if not api_key:
-                        logger.error("❌ OPENROUTER_API_KEY not found - AI analysis disabled")
-                        self.use_llm = False
-                        self.llm_analyzer = None
-                    else:
-                        self.llm_analyzer = LLMStrategyAnalyzer(provider="openrouter", model=model, api_key=api_key)
-                        logger.info("✅ AI Confidence Scanner initialized with OpenRouter fallback")
-                        logger.info(f"   Model: {model}")
-                        logger.info("   API Key: {}", str('*' * (len(api_key) - 8) + api_key[-8:]))
-                except Exception as e2:
-                    logger.error(f"❌ LLM initialization failed completely: {e2}")
-                    self.use_llm = False
-                    self.llm_analyzer = None
+                self.use_llm = False
+                self.llm_helper = None
         else:
             self.llm_helper = None
-
-        # Keep backward compatibility with legacy llm_analyzer parameter
-        if llm_analyzer is not None:
-            logger.warning("⚠️ llm_analyzer parameter is deprecated, using LLM Request Manager instead")
-            self.use_llm = True
+        
+        print(f"[TRACE] AIConfidenceScanner.__init__: Initialization complete", flush=True)
 
     def _check_llm_available(self) -> bool:
         """Check if OpenRouter LLM API key is available"""
@@ -85,6 +75,60 @@ class AIConfidenceScanner:
         if not has_key:
             logger.warning("⚠️ OpenRouter API key not found in environment")
         return has_key
+
+    def review_stock(
+        self,
+        ticker: str,
+        price: float = 0,
+        change_pct: float = 0,
+        volume_ratio: float = 1,
+        rsi: float = 50,
+        trend: str = "UNKNOWN"
+    ) -> tuple:
+        """
+        Review a stock for trading suitability.
+        
+        Returns:
+            tuple: (approved: bool, confidence: float, reasoning: str, recommendations: list)
+        """
+        try:
+            # Create a mock TopTrade for analysis
+            mock_trade = TopTrade(
+                ticker=ticker,
+                score=50 + (change_pct * 2) + ((volume_ratio - 1) * 10),  # Simple score estimate
+                price=price,
+                change_pct=change_pct,
+                volume=0,  # Not used for review
+                volume_ratio=volume_ratio,
+                reason=f"RSI: {rsi:.1f}, Trend: {trend}",
+                trade_type="stock",
+                confidence="MEDIUM",
+                risk_level="MEDIUM"
+            )
+            
+            # Get AI confidence analysis
+            analysis = self._generate_ai_confidence(mock_trade, "stock")
+            
+            # Determine approval based on confidence
+            ai_confidence = analysis.get('ai_confidence', 'MEDIUM')
+            ai_rating = analysis.get('ai_rating', 5.0)
+            ai_reasoning = analysis.get('ai_reasoning', '')
+            ai_risks = analysis.get('ai_risks', '')
+            
+            # Approve if confidence is HIGH or above
+            approved = ai_confidence in ['VERY HIGH', 'HIGH', 'MEDIUM-HIGH']
+            confidence_pct = ai_rating * 10  # Convert 0-10 to 0-100
+            
+            recommendations = []
+            if ai_risks:
+                recommendations.append(f"Risks: {ai_risks}")
+            
+            return approved, confidence_pct, ai_reasoning, recommendations
+            
+        except Exception as e:
+            logger.debug(f"Error in review_stock for {ticker}: {e}")
+            # Return neutral response on error
+            return False, 50.0, "Unable to analyze", []
 
     def _generate_ai_confidence(self, trade: TopTrade, trade_type: str) -> Dict:
         """Generate AI confidence analysis for a trade"""
@@ -280,7 +324,7 @@ Be concise but insightful. Focus on actionable analysis."""
             if not result['ai_risks'] or len(result['ai_risks']) < 10:
                 result['ai_risks'] = 'Monitor standard market risks and use appropriate position sizing.'
 
-            logger.debug("Parsed: confidence={}, rating={result['ai_rating']}", str(result['ai_confidence']))
+            logger.debug(f"Parsed: confidence={result['ai_confidence']}, rating={result['ai_rating']}")
         except Exception as e:
             logger.error(f"Error parsing LLM response: {e}")
             logger.debug(f"Response was: {response}")

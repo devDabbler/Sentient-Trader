@@ -33,6 +33,13 @@ except ImportError:
     OLLAMA_AVAILABLE = False
     logger.warning("Ollama client not available - will use only OpenRouter")
 
+# Import LLM request manager for usage tracking
+try:
+    from .llm_request_manager import get_llm_manager
+    LLM_MANAGER_AVAILABLE = True
+except ImportError:
+    LLM_MANAGER_AVAILABLE = False
+
 
 @dataclass
 class LLMResponse:
@@ -48,9 +55,10 @@ class LLMResponse:
 @dataclass
 class LLMConfig:
     """Configuration for hybrid LLM usage"""
-    prefer_local: bool = True  # Prefer local Ollama over cloud
+    prefer_local: bool = os.getenv('PREFER_LOCAL_LLM', 'true').lower() == 'true'  # Prefer local Ollama over cloud
     local_model: str = "qwen2.5:7b"
-    cloud_model: str = "google/gemini-2.0-flash-exp:free"
+    # Use env var or default to a reliable free model
+    cloud_model: str = os.getenv('OPENROUTER_MODEL', 'mistralai/mistral-small-3.1-24b-instruct:free')
     fallback_enabled: bool = True
     max_local_timeout: int = 120  # Increased for longer prompts
     max_cloud_timeout: int = 30
@@ -70,10 +78,12 @@ class HybridLLMAnalyzer:
         self.config = config or LLMConfig()
         self.ollama_client: Optional[OllamaClient] = None
         self.openrouter_api_key = os.getenv('OPENROUTER_API_KEY')
+        self.groq_api_key = os.getenv('GROQ_API_KEY')  # Groq fallback
         
         # Performance tracking
         self.local_performance_history = []
         self.cloud_performance_history = []
+        self.groq_performance_history = []
         
         # Initialize local Ollama client if available
         if OLLAMA_AVAILABLE and self.config.prefer_local:
@@ -139,7 +149,17 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('local', generation_time, success=True)
-                        pass  # logger.success(f"✅ Local analysis completed in {}s {generation_time:.1f}")
+                        # Track in LLM manager for usage dashboard
+                        if LLM_MANAGER_AVAILABLE:
+                            try:
+                                get_llm_manager().record_external_usage(
+                                    service_name=f"hybrid_{analysis_type}",
+                                    provider="local_ollama",
+                                    tokens=len(response) // 4,  # Rough estimate
+                                    cost=0.0  # Local is free
+                                )
+                            except Exception:
+                                pass
                         return response
                     else:
                         logger.warning(f"⚠️ Local Ollama returned no response, trying fallback...")
@@ -152,10 +172,46 @@ class HybridLLMAnalyzer:
                     if response:
                         generation_time = time.time() - start_time
                         self._record_performance('cloud', generation_time, success=True)
-                        pass  # logger.success(f"✅ Cloud analysis completed in {}s {generation_time:.1f}")
+                        # Track in LLM manager for usage dashboard
+                        if LLM_MANAGER_AVAILABLE:
+                            try:
+                                tokens_est = len(response) // 4
+                                # Rough cost estimate for free tier models
+                                cost_est = 0.0 if 'free' in self.config.cloud_model else tokens_est * 0.00001
+                                get_llm_manager().record_external_usage(
+                                    service_name=f"hybrid_{analysis_type}",
+                                    provider="openrouter",
+                                    tokens=tokens_est,
+                                    cost=cost_est
+                                )
+                            except Exception:
+                                pass
                         return response
                     else:
                         self._record_performance('cloud', time.time() - start_time, success=False)
+                        
+                elif provider == 'groq' and self.groq_api_key:
+                    logger.info(f"⚡ Using Groq (fast fallback): llama-3.1-8b-instant")
+                    response = self._call_groq(prompt, temperature)
+                    
+                    if response:
+                        generation_time = time.time() - start_time
+                        self._record_performance('groq', generation_time, success=True)
+                        # Track in LLM manager for usage dashboard
+                        if LLM_MANAGER_AVAILABLE:
+                            try:
+                                tokens_est = len(response) // 4
+                                get_llm_manager().record_external_usage(
+                                    service_name=f"hybrid_{analysis_type}",
+                                    provider="groq",
+                                    tokens=tokens_est,
+                                    cost=0.0  # Groq free tier
+                                )
+                            except Exception:
+                                pass
+                        return response
+                    else:
+                        self._record_performance('groq', time.time() - start_time, success=False)
                         
             except Exception as e:
                 last_error = e
@@ -191,6 +247,10 @@ class HybridLLMAnalyzer:
                 providers.append('cloud')
             if self.ollama_client:
                 providers.append('local')
+        
+        # Always add Groq as final fallback if available
+        if self.groq_api_key and 'groq' not in providers:
+            providers.append('groq')
         
         return providers
     
@@ -238,6 +298,48 @@ class HybridLLMAnalyzer:
             logger.error(f"Error calling OpenRouter: {e}")
             return None
     
+    def _call_groq(self, prompt: str, temperature: Optional[float] = None) -> Optional[str]:
+        """Call Groq API - ultra-fast inference fallback"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.groq_api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "llama-3.1-8b-instant",  # Fast default
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an expert trading analyst. Provide precise, actionable analysis."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": temperature or 0.3,
+                "max_tokens": 2000
+            }
+            
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return data['choices'][0]['message']['content']
+            else:
+                logger.error(f"Groq API error: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error calling Groq: {e}")
+            return None
+    
     def _record_performance(self, provider: str, generation_time: float, success: bool):
         """Record performance metrics for provider optimization"""
         performance_data = {
@@ -255,13 +357,21 @@ class HybridLLMAnalyzer:
             self.cloud_performance_history.append(performance_data)
             if len(self.cloud_performance_history) > 20:
                 self.cloud_performance_history.pop(0)
+        elif provider == 'groq':
+            self.groq_performance_history.append(performance_data)
+            if len(self.groq_performance_history) > 20:
+                self.groq_performance_history.pop(0)
     
     def _get_average_performance(self, provider: str) -> Optional[float]:
         """Get average successful response time for provider"""
-        history = (
-            self.local_performance_history if provider == 'local' 
-            else self.cloud_performance_history
-        )
+        if provider == 'local':
+            history = self.local_performance_history
+        elif provider == 'cloud':
+            history = self.cloud_performance_history
+        elif provider == 'groq':
+            history = self.groq_performance_history
+        else:
+            return None
         
         successful_times = [
             entry['generation_time'] for entry in history 
@@ -352,9 +462,13 @@ class HybridLLMAnalyzer:
 def create_hybrid_llm_analyzer(
     prefer_local: bool = True,
     local_model: str = "qwen2.5:7b",
-    cloud_model: str = "google/gemini-2.0-flash-exp:free"
+    cloud_model: Optional[str] = None  # Use env var default if not specified
 ) -> HybridLLMAnalyzer:
     """Create optimized hybrid LLM analyzer for trading"""
+    # Use env var if cloud_model not explicitly provided
+    if cloud_model is None:
+        cloud_model = os.getenv('OPENROUTER_MODEL', 'mistralai/mistral-small-3.1-24b-instruct:free')
+    
     config = LLMConfig(
         prefer_local=prefer_local,
         local_model=local_model,
@@ -370,10 +484,16 @@ def get_best_trading_analyzer() -> HybridLLMAnalyzer:
     local_available = OLLAMA_AVAILABLE
     cloud_available = bool(os.getenv('OPENROUTER_API_KEY'))
     
+    # Check env var for preference (defaults to True if not set)
+    prefer_local_env = os.getenv('PREFER_LOCAL_LLM', 'true').lower() == 'true'
+    
     if local_available and cloud_available:
-        # Both available - prefer local for privacy and cost
-        logger.info("🚀 Both local and cloud LLM available - preferring local")
-        return create_hybrid_llm_analyzer(prefer_local=True)
+        # Both available - use env var preference
+        if prefer_local_env:
+            logger.info("🚀 Both local and cloud LLM available - preferring local (PREFER_LOCAL_LLM=true)")
+        else:
+            logger.info("☁️ Both local and cloud LLM available - preferring cloud (PREFER_LOCAL_LLM=false)")
+        return create_hybrid_llm_analyzer(prefer_local=prefer_local_env)
     elif local_available:
         # Only local available
         logger.info("🤖 Only local LLM available")

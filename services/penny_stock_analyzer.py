@@ -3,14 +3,21 @@ Penny Stock Scoring and Analysis Module
 
 This module provides comprehensive scoring algorithms for penny stocks,
 including momentum, valuation, catalyst, and composite scores.
+
+IMPORTANT: Uses lazy import of yfinance to prevent Task Scheduler hangs
 """
+print("[TRACE] penny_stock_analyzer.py: Starting module load...", flush=True)
+
+# Lazy import - only load when actually fetching data
+def _get_yf():
+    import yfinance as yf
+    return yf
 
 import pandas as pd
 import numpy as np
 from typing import Dict, Tuple, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
-import yfinance as yf
 from loguru import logger
 from services.penny_stock_constants import PENNY_THRESHOLDS, is_penny_stock
 from services.fda_catalyst_detector import FDACatalystDetector
@@ -595,7 +602,8 @@ class PennyStockAnalyzer:
             Dictionary with complete analysis
         """
         try:
-            # Fetch stock data
+            # Fetch stock data (lazy import to prevent Task Scheduler hangs)
+            yf = _get_yf()
             stock = yf.Ticker(ticker)
             info = stock.info
             hist = stock.history(period='3mo')

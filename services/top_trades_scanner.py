@@ -6,6 +6,7 @@ based on multiple criteria including volume, momentum, and scoring.
 
 IMPORTANT: Uses lazy import of yfinance to prevent Task Scheduler hangs
 """
+print("[TRACE] top_trades_scanner.py: Starting module load...", flush=True)
 
 # Lazy import - only load when actually fetching data
 def _get_yf():
@@ -45,81 +46,29 @@ class TopTradesScanner:
     
     # Popular tickers to scan (can be customized)
     # EXPANDED UNIVERSE: Focus on affordable stocks for small capital accounts
+    # MINIMAL UNIVERSE FOR TESTING - verified active tickers only
+    # TODO: Expand after fixing initialization validation issue
     OPTIONS_UNIVERSE = [
-        # Affordable Tech & Growth (Under $50)
-        'SOFI', 'HOOD', 'SNAP', 'PINS', 'RBLX', 'DKNG', 'OPEN', 'PLBY',
-        'INTC', 'AMD', 'QCOM', 'TXN', 'MU', 'WDC', 'STX',
-        # EV & Clean Energy (Under $50)
-        'RIVN', 'LCID', 'NKLA', 'FSR', 'RIDE', 'GOEV', 'WKHS',
-        'PLUG', 'FCEL', 'BLDP', 'BE', 'RUN', 'ENPH', 'SEDG',
-        'CHPT', 'BLNK', 'EVGO', 'QS', 'STEM', 'CLSK',
-        # Crypto & Fintech (Under $50)
-        'COIN', 'MARA', 'RIOT', 'CLSK', 'HUT', 'BITF', 'ARBK',
-        'SQ', 'PYPL', 'AFRM', 'UPST', 'LC', 'NU', 'PAYO',
-        # Telecom (Under $50)
-        'NOK', 'ERIC', 'T', 'VZ', 'TMUS', 'LUMN', 'SATS',
-        # Meme & High Volume (Under $50)
-        'GME', 'AMC', 'BB', 'BBBY', 'EXPR', 'KOSS',
-        # Finance (Under $50)
-        'BAC', 'WFC', 'C', 'USB', 'PNC', 'TFC', 'ALLY',
-        # Energy (Under $50)
-        'XOM', 'CVX', 'COP', 'SLB', 'HAL', 'OXY', 'DVN',
-        'MRO', 'APA', 'FANG', 'CLR', 'MPC', 'VLO', 'PSX',
-        # Travel & Hospitality (Under $50)
-        'AAL', 'UAL', 'DAL', 'LUV', 'JBLU', 'SAVE', 'ALK',
-        'CCL', 'RCL', 'NCLH', 'EXPE', 'LYFT', 'UBER',
-        # Cannabis (Under $50)
-        'TLRY', 'CGC', 'ACB', 'SNDL', 'HEXO', 'OGI', 'CRON',
-        # Chinese ADRs (Under $50)
-        'NIO', 'XPEV', 'LI', 'IQ', 'BILI', 'DIDI', 'GRAB',
-        # Biotech (Under $50)
-        'MRNA', 'BNTX', 'NVAX', 'VXRT', 'INO', 'OCGN', 'SRNE',
-        # Large Caps (for reference - will be filtered by price)
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA', 'NFLX',
-        'PLTR', 'SHOP', 'SNOW', 'NET', 'CRWD', 'DDOG', 'MDB',
-        # Indices/ETFs
-        'SPY', 'QQQ', 'IWM', 'DIA', 'XLF', 'XLE', 'XLK', 'XLV'
+        # Core Tech
+        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
+        # Popular Stocks
+        'AMD', 'SOFI', 'PLTR', 'COIN', 'MARA', 'RIOT',
+        # Indices
+        'SPY', 'QQQ', 'IWM'
     ]
     
+    # MINIMAL UNIVERSE FOR TESTING - verified active tickers only
+    # TODO: Expand after fixing initialization validation issue
     PENNY_STOCK_UNIVERSE = [
-        # Popular penny stocks
-        'SOFI', 'NIO', 'LCID', 'RIVN', 'PLUG', 'FCEL', 'SNDL', 
-        'CLOV', 'WISH', 'SKLZ', 'GSAT', 'BNGO', 'ZOM', 'TXMD', 'IDEX',
-        'SIRI', 'NOK', 'BB', 'SENS', 'CLVS', 'OCGN',
-        
-        # Obscure biotech/pharma pennies (high volatility, breakout potential)
-        'NVCR', 'ZLAB', 'CASI', 'FREQ', 'CRBP', 'VXRT', 'MRNA', 'DVAX',
-        'EPIX', 'EGAN', 'RGNX', 'PSTV', 'AKBA', 'ARDX', 'SNOA', 'MNKD',
-        'TPTX', 'VKTX', 'ALNY', 'BLUE', 'SGMO', 'CRSP', 'EDIT', 'NTLA',
-        
-        # Mining & resources (commodity plays, breakout on news)
-        'GOLD', 'AUY', 'AG', 'CDE', 'HL', 'GPL', 'EXK', 'FSM', 'PAAS',
-        'SVM', 'MARA', 'RIOT', 'BITF', 'HUT', 'CLSK', 'ARBK',
-        
-        # Energy & clean tech (emerging sector momentum)
-        'TELL', 'MAXN', 'RUN', 'NOVA', 'SEDG', 'ENPH', 'BE', 'QS', 'BLNK',
-        'CHPT', 'EVGO', 'FSR', 'GOEV', 'WKHS', 'RIDE', 'HYLN', 'NKLA',
-        
-        # Crypto-related (high beta, breakout potential)
-        'COIN', 'MSTR', 'SI', 'RIOT', 'MARA', 'BTBT', 'CAN', 'SOS',
-        'EBON', 'FTFT', 'GREE', 'BTCM', 'WULF',
-        
-        # Tech/emerging (obscure growth plays)
-        'SOUN', 'BBAI', 'KSCP', 'FRZA', 'VRAR', 'VUZI', 'KOPN', 'AEHR',
-        'WOLF', 'MVIS', 'LAZR', 'LIDR', 'OUST', 'VLDR', 'INVZ',
-        
-        # Cannabis (high volatility, news-driven)
-        'TLRY', 'CGC', 'ACB', 'HEXO', 'OGI', 'CRON', 'CURLF', 'GTBIF',
-        
-        # Shipping/transport (economic plays)
-        'TOPS', 'SHIP', 'SBLK', 'STNG', 'DHT', 'FRO', 'EURN', 'NAT',
-        
-        # Spec plays (high risk/reward)
-        'MULN', 'FFIE', 'AMTD', 'HKD', 'GFAI', 'ATAI', 'HOLO', 'IMPP'
+        'SOFI', 'NIO', 'PLUG', 'SNDL', 'NOK', 'BB',
+        'MARA', 'RIOT', 'CLSK',
+        'TLRY', 'CGC', 'ACB'
     ]
     
     def __init__(self, use_optimizations: bool = True):
+        print(f"[TRACE] TopTradesScanner.__init__: Starting...", flush=True)
         self.penny_analyzer = PennyStockAnalyzer()
+        print(f"[TRACE] TopTradesScanner.__init__: PennyStockAnalyzer created", flush=True)
         self.use_optimizations = use_optimizations
         
         # Initialize optimizations if enabled
@@ -131,6 +80,7 @@ class TopTradesScanner:
             except ImportError:
                 self.use_optimizations = False
                 logger.warning("⚠️ Optimizations not available, falling back to standard processing")
+        print(f"[TRACE] TopTradesScanner.__init__: Complete", flush=True)
     
     def scan_top_options_trades(self, top_n: int = 20, use_parallel: bool = True) -> List[TopTrade]:
         """

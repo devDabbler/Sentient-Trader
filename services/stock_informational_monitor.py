@@ -5,21 +5,36 @@ Monitors stocks without executing trades - alerts only
 Integrates with LLM Request Manager for cost-efficient scanning
 Uses LOW priority LLM requests with aggressive caching
 """
-
 import time
-import logging
+import sys
+_debug_file = open('DEBUG_TRACE.txt', 'a')
+_debug_file.write("[TRACE] stock_informational_monitor.py: Starting module load...\n")
+_debug_file.flush()
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
 import json
 import os
 
+from loguru import logger
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported logger\n")
+_debug_file.flush()
 from services.llm_helper import get_llm_helper, LLMServiceMixin
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported llm_helper\n")
+_debug_file.flush()
 from services.alert_system import get_alert_system
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported alert_system\n")
+_debug_file.flush()
 from services.ai_confidence_scanner import AIConfidenceScanner
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported AIConfidenceScanner\n")
+_debug_file.flush()
 
+_debug_file.write("[TRACE] stock_informational_monitor.py: About to import config_stock_informational\n")
+_debug_file.flush()
 try:
     import config_stock_informational as cfg
+    _debug_file.write("[TRACE] stock_informational_monitor.py: Imported config_stock_informational\n")
+    _debug_file.flush()
     SCAN_INTERVAL_MINUTES = cfg.SCAN_INTERVAL_MINUTES
     CACHE_TTL_SECONDS = cfg.CACHE_TTL_SECONDS
     WATCHLIST = cfg.WATCHLIST
@@ -27,7 +42,11 @@ try:
     ENABLE_ALERTS = cfg.ENABLE_ALERTS
     LOG_OPPORTUNITIES = cfg.LOG_OPPORTUNITIES
     OPPORTUNITIES_LOG_PATH = cfg.OPPORTUNITIES_LOG_PATH
+    _debug_file.write("[TRACE] stock_informational_monitor.py: Loaded config values\n")
+    _debug_file.flush()
 except ImportError:
+    _debug_file.write("[TRACE] stock_informational_monitor.py: Config not found, using defaults\n")
+    _debug_file.flush()
     # Fallback to default settings
     SCAN_INTERVAL_MINUTES = 30
     CACHE_TTL_SECONDS = 900
@@ -37,9 +56,8 @@ except ImportError:
     LOG_OPPORTUNITIES = True
     OPPORTUNITIES_LOG_PATH = "logs/stock_opportunities.json"
 
-
-logger = logging.getLogger(__name__)
-
+_debug_file.write("[TRACE] stock_informational_monitor.py: About to define dataclasses and classes\n")
+_debug_file.flush()
 
 @dataclass
 class StockOpportunity:
@@ -86,10 +104,13 @@ class StockInformationalMonitor(LLMServiceMixin):
             scan_interval_minutes: Scan frequency (or use config)
             min_score: Minimum ensemble score for alerts (or use config)
         """
+        print(f"[TRACE] StockInformationalMonitor.__init__: Starting initialization...", flush=True)
         super().__init__()
+        print(f"[TRACE] StockInformationalMonitor.__init__: super().__init__() completed", flush=True)
         
         # Initialize LLM helper with LOW priority
         self._init_llm("stock_informational_monitor", default_priority="LOW")
+        print(f"[TRACE] StockInformationalMonitor.__init__: LLM initialized", flush=True)
         
         # Configuration
         self.watchlist = watchlist or WATCHLIST
@@ -97,18 +118,24 @@ class StockInformationalMonitor(LLMServiceMixin):
         self.min_score = min_score or MIN_ENSEMBLE_SCORE
         
         # Services
+        print(f"[TRACE] StockInformationalMonitor.__init__: Getting alert system...", flush=True)
         self.alert_system = get_alert_system()
+        print(f"[TRACE] StockInformationalMonitor.__init__: Creating AIConfidenceScanner...", flush=True)
         self.confidence_scanner = AIConfidenceScanner()
+        print(f"[TRACE] StockInformationalMonitor.__init__: AIConfidenceScanner created", flush=True)
         
         # State
+        print(f"[TRACE] StockInformationalMonitor.__init__: Setting up state variables...", flush=True)
         self.opportunities: List[StockOpportunity] = []
         self.last_scan_time: Optional[datetime] = None
         self.is_running = False
         
+        print(f"[TRACE] StockInformationalMonitor.__init__: About to log initialization complete...", flush=True)
         logger.info(
             f"Stock Informational Monitor initialized "
             f"({len(self.watchlist)} tickers, {self.scan_interval}min interval)"
         )
+        print(f"[TRACE] StockInformationalMonitor.__init__: Constructor COMPLETE", flush=True)
     
     def scan_ticker(self, symbol: str) -> Optional[StockOpportunity]:
         """
@@ -378,6 +405,57 @@ class StockInformationalMonitor(LLMServiceMixin):
             opp for opp in self.opportunities
             if opp.alert_priority == priority.upper()
         ]
+    
+    def update_watchlist(self, new_tickers: List[str]):
+        """
+        Update the watchlist with new tickers
+        
+        Args:
+            new_tickers: List of ticker symbols to monitor
+        """
+        self.watchlist = list(set(new_tickers))  # Remove duplicates
+        logger.info(f"Updated watchlist to {len(self.watchlist)} tickers: {self.watchlist[:10]}...")
+    
+    def add_tickers(self, tickers: List[str]):
+        """
+        Add tickers to existing watchlist
+        
+        Args:
+            tickers: List of ticker symbols to add
+        """
+        existing = set(self.watchlist)
+        for ticker in tickers:
+            if ticker not in existing:
+                self.watchlist.append(ticker)
+                existing.add(ticker)
+        logger.info(f"Added {len(tickers)} tickers. Total: {len(self.watchlist)}")
+    
+    def remove_ticker(self, ticker: str):
+        """Remove a ticker from watchlist"""
+        if ticker in self.watchlist:
+            self.watchlist.remove(ticker)
+            logger.info(f"Removed {ticker} from watchlist")
+    
+    def sync_from_tiered_scanner(self, tiered_results: List[Dict]):
+        """
+        Sync watchlist from tiered scanner results
+        
+        Args:
+            tiered_results: Results from TieredStockScanner (Tier 2 or 3)
+        """
+        new_tickers = []
+        for result in tiered_results:
+            ticker = result.get('ticker')
+            if ticker:
+                new_tickers.append(ticker)
+        
+        if new_tickers:
+            self.add_tickers(new_tickers)
+            logger.info(f"Synced {len(new_tickers)} tickers from tiered scanner")
+    
+    def get_watchlist(self) -> List[str]:
+        """Get current watchlist"""
+        return self.watchlist.copy()
 
 
 # Singleton instance
@@ -398,26 +476,32 @@ def get_stock_informational_monitor(
     Returns:
         StockInformationalMonitor instance
     """
+    print(f"[TRACE] get_stock_informational_monitor: Called with watchlist={watchlist}, kwargs={kwargs}", flush=True)
     global _monitor_instance
     
     if _monitor_instance is None:
+        print(f"[TRACE] get_stock_informational_monitor: Creating NEW instance...", flush=True)
         _monitor_instance = StockInformationalMonitor(
             watchlist=watchlist,
             **kwargs
         )
+        print(f"[TRACE] get_stock_informational_monitor: Instance created successfully", flush=True)
+    else:
+        print(f"[TRACE] get_stock_informational_monitor: Returning existing instance", flush=True)
     
     return _monitor_instance
 
 
+_debug_file.write("[TRACE] stock_informational_monitor.py: Module load COMPLETE\n")
+_debug_file.flush()
+_debug_file.close()
+
 if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
     # Create monitor
     monitor = get_stock_informational_monitor()
+    
+    logger.info("Starting continuous monitoring...")
+    logger.info(f"Watching {len(monitor.watchlist)} symbols")
     
     # Run continuous monitoring
     try:

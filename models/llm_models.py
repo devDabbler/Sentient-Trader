@@ -20,6 +20,7 @@ class LLMProvider(Enum):
     OPENROUTER = "openrouter"
     CLAUDE = "claude"
     OPENAI = "openai"
+    GROQ = "groq"
     LOCAL = "local"
 
 
@@ -111,6 +112,12 @@ MODEL_COSTS = {
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "meta-llama/llama-3.1-70b-instruct": {"input": 0.35, "output": 0.40},
     "google/gemini-pro-1.5": {"input": 1.25, "output": 5.00},
+    # Groq models (very fast inference, competitive pricing)
+    "groq/llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},
+    "groq/llama-3.1-70b-versatile": {"input": 0.59, "output": 0.79},
+    "groq/llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
+    "groq/mixtral-8x7b-32768": {"input": 0.24, "output": 0.24},
+    "llama-3.1-8b-instant": {"input": 0.05, "output": 0.08},  # Groq model name without prefix
 }
 
 
