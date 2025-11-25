@@ -216,26 +216,44 @@ class AICryptoPositionManager:
     
     def _handle_discord_approval(self, approval_id: str, approved: bool):
         """Handle approval/rejection from Discord"""
-        logger.info(f"📨 Discord approval received: {approval_id} -> {'APPROVED' if approved else 'REJECTED'}")
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(f"📨 DISCORD APPROVAL RECEIVED")
+        logger.info("=" * 60)
+        logger.info(f"   Approval ID: {approval_id}")
+        logger.info(f"   Decision: {'✅ APPROVED' if approved else '❌ REJECTED'}")
         
         # Find the pending approval
         if approval_id not in self.pending_approvals:
-            logger.warning(f"Approval ID not found: {approval_id}")
+            logger.warning(f"   ⚠️ Approval ID not found in pending queue!")
+            logger.warning(f"   Current pending: {list(self.pending_approvals.keys())}")
             return
         
         pending = self.pending_approvals[approval_id]
         trade_id = pending['trade_id']
         decision = pending['decision']
+        pair = pending.get('pair', trade_id)
+        
+        logger.info(f"   Pair: {pair}")
+        logger.info(f"   Action: {decision.action}")
+        logger.info(f"   Confidence: {decision.confidence:.0f}%")
         
         if approved:
-            logger.info(f"✅ Executing approved trade: {pending.get('pair', trade_id)}")
+            logger.info("")
+            logger.info(f"🚀 EXECUTING APPROVED TRADE: {pair}")
             # Execute with skip_approval=True since it's been approved via Discord
-            self.execute_decision(trade_id, decision, skip_approval=True)
+            result = self.execute_decision(trade_id, decision, skip_approval=True)
+            if result:
+                logger.info(f"   ✅ Trade executed successfully!")
+            else:
+                logger.error(f"   ❌ Trade execution failed!")
         else:
-            logger.info(f"❌ Trade rejected via Discord: {pending.get('pair', trade_id)}")
+            logger.info(f"   Trade cancelled - no action taken")
         
         # Remove from pending
         del self.pending_approvals[approval_id]
+        logger.info(f"   Removed from pending queue (remaining: {len(self.pending_approvals)})")
+        logger.info("=" * 60)
     
     def add_position(
         self,
@@ -397,42 +415,41 @@ class AICryptoPositionManager:
         decisions = []
         
         if not self.positions:
-            # Changed from debug to info for visibility
             return decisions
         
-        logger.info(f"📋 Checking {len(self.positions)} tracked positions...")
+        active_positions = [(tid, p) for tid, p in self.positions.items() if p.status == PositionStatus.ACTIVE.value]
+        logger.info(f"   Analyzing {len(active_positions)} active position(s)...")
         
-        for trade_id, position in list(self.positions.items()):
+        for trade_id, position in active_positions:
             try:
-                # Skip if not active
-                if position.status != PositionStatus.ACTIVE.value:
-                    continue
+                logger.info(f"")
+                logger.info(f"   ━━━ {position.pair} ━━━")
                 
                 # Skip futures/staking positions (not supported for spot trading)
-                # Check for .F, .S, .M, .P suffixes in the base currency
                 pair_parts = position.pair.split('/')
                 if len(pair_parts) > 0:
                     base_currency = pair_parts[0]
                     if any(base_currency.endswith(suffix) for suffix in ['.F', '.S', '.M', '.P']):
-                        logger.warning(f" Closing futures/staking position: {position.pair} (not supported for spot trading)")
-                        # Mark as closed to stop monitoring
+                        logger.warning(f"   ⏭️ Skipping {position.pair} - futures/staking not supported")
                         position.status = PositionStatus.CLOSED.value
                         position.exit_time = datetime.now()
                         position.exit_reason = "Futures/staking contract not supported"
                         continue
                 
                 # Get current price
+                logger.info(f"   📡 Fetching current price...")
                 ticker_info = self.kraken_client.get_ticker_info(position.pair)
                 if not ticker_info:
-                    logger.warning(f" Failed to get ticker for {position.pair}")
+                    logger.warning(f"   ⚠️ Failed to get ticker for {position.pair}")
                     continue
                 
                 current_price = float(ticker_info.get('c', [0])[0])
                 if current_price <= 0:
-                    logger.warning(f" Invalid price for {position.pair}: {current_price}")
+                    logger.warning(f"   ⚠️ Invalid price: {current_price}")
                     continue
                 
                 # Update position tracking
+                old_price = position.current_price
                 position.current_price = current_price
                 position.last_check_time = datetime.now()
                 position.highest_price = max(position.highest_price, current_price)
@@ -449,11 +466,25 @@ class AICryptoPositionManager:
                 if pnl_pct < 0:
                     position.max_adverse_pct = min(position.max_adverse_pct, pnl_pct)
                 
+                # Log position status
+                price_change = ((current_price - old_price) / old_price * 100) if old_price > 0 else 0
+                pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                logger.info(f"   💰 Price: ${current_price:,.6f} ({price_change:+.2f}% since last check)")
+                logger.info(f"   {pnl_emoji} P&L: {pnl_pct:+.2f}% (Max: {position.max_favorable_pct:+.2f}%, Min: {position.max_adverse_pct:+.2f}%)")
+                logger.info(f"   🎯 Stop: ${position.stop_loss:,.6f} | Target: ${position.take_profit:,.6f}")
+                
+                # Calculate distance to stop/target
+                dist_to_stop = ((current_price - position.stop_loss) / current_price) * 100
+                dist_to_target = ((position.take_profit - current_price) / current_price) * 100
+                logger.info(f"   📏 Distance: Stop {dist_to_stop:+.2f}% | Target {dist_to_target:+.2f}%")
+                
                 # 1. Check basic exit conditions (stop/target)
+                logger.info(f"   🔍 Checking exit conditions...")
                 basic_action = self._check_basic_exit_conditions(position, current_price, pnl_pct)
                 if basic_action:
                     decisions.append(basic_action)
-                    logger.info(f" BASIC EXIT SIGNAL: {position.pair} - {basic_action.action} ({basic_action.reasoning})")
+                    logger.info(f"   🚨 EXIT SIGNAL: {basic_action.action}")
+                    logger.info(f"      Reason: {basic_action.reasoning}")
                     continue
                 
                 # 2. Check breakeven move
@@ -461,63 +492,53 @@ class AICryptoPositionManager:
                     be_action = self._check_breakeven_move(position, pnl_pct)
                     if be_action:
                         decisions.append(be_action)
-                        logger.info(f" BREAKEVEN MOVE: {position.pair} - Moving stop to breakeven")
+                        logger.info(f"   🛡️ BREAKEVEN MOVE triggered at {pnl_pct:+.2f}%")
                         continue
+                    else:
+                        if not position.moved_to_breakeven:
+                            logger.info(f"   🛡️ Breakeven: Not triggered (need {position.breakeven_trigger_pct}%+)")
                 
                 # 3. Check trailing stop
                 if self.enable_trailing_stops and pnl_pct > 0:
                     trail_action = self._check_trailing_stop(position, current_price, pnl_pct)
                     if trail_action:
                         decisions.append(trail_action)
-                        logger.info(f" TRAILING STOP: {position.pair} - Tightening stop to ${trail_action.new_stop:,.2f}")
+                        logger.info(f"   📈 TRAILING STOP: Tightening to ${trail_action.new_stop:,.4f}")
                         continue
+                    else:
+                        logger.info(f"   📈 Trailing: Active (trail: {position.trailing_stop_pct}%)")
                 
-                # 4. Get AI recommendation (every check for ACTIVE positions)
+                # 4. Get AI recommendation
                 if self.enable_ai_decisions and self.llm_analyzer:
+                    logger.info(f"   🤖 Getting AI recommendation...")
                     ai_decision = self._get_ai_recommendation(position, current_price, pnl_pct)
                     
-                    if ai_decision and ai_decision.confidence >= self.min_ai_confidence:
-                        logger.info(f" AI RECOMMENDATION: {position.pair} - {ai_decision.action} (confidence: {ai_decision.confidence:.0f}%)")
-                        logger.info(f"   Reasoning: {ai_decision.reasoning}")
-                        
-                        # Execute AI decision (will require approval if enabled)
-                        result = self.execute_decision(position.trade_id, ai_decision)
-                        if not result and self.require_manual_approval:
-                            logger.info(f"   Awaiting manual approval in UI...")
-                        
-                        # Update position with AI feedback
-                        position.last_ai_action = ai_decision.action
-                        position.last_ai_reasoning = ai_decision.reasoning
-                        position.last_ai_confidence = ai_decision.confidence
-                        
-                        # Log AI decision to journal
-                        try:
-                            from services.unified_trade_journal import get_unified_journal, AIDecisionLog
-                            journal = get_unified_journal()
+                    if ai_decision:
+                        logger.info(f"   🤖 AI says: {ai_decision.action} (confidence: {ai_decision.confidence:.0f}%)")
+                        if ai_decision.confidence >= self.min_ai_confidence:
+                            logger.info(f"   ✅ Confidence meets threshold ({self.min_ai_confidence}%) - executing")
+                            decisions.append(ai_decision)
                             
-                            decision_log = AIDecisionLog(
-                                timestamp=datetime.now(),
-                                action=ai_decision.action,
-                                confidence=ai_decision.confidence,
-                                reasoning=ai_decision.reasoning,
-                                technical_score=ai_decision.technical_score,
-                                trend_score=ai_decision.trend_score,
-                                risk_score=ai_decision.risk_score,
-                                new_stop=ai_decision.new_stop,
-                                new_target=ai_decision.new_target,
-                                partial_pct=ai_decision.partial_pct
-                            )
+                            # Execute AI decision (will require approval if enabled)
+                            result = self.execute_decision(position.trade_id, ai_decision)
+                            if not result and self.require_manual_approval:
+                                logger.info(f"   ⏳ Sent to Discord for approval")
                             
-                            journal.log_ai_decision(trade_id, decision_log)
-                        except Exception as e:
-                            logger.debug(f"Could not log AI decision to journal: {e}")
+                            # Update position with AI feedback
+                            position.last_ai_action = ai_decision.action
+                            position.last_ai_reasoning = ai_decision.reasoning
+                            position.last_ai_confidence = ai_decision.confidence
+                        else:
+                            logger.info(f"   ⏸️ Confidence below threshold - no action")
+                    else:
+                        logger.info(f"   🤖 AI: No strong recommendation")
+                else:
+                    logger.info(f"   🤖 AI decisions: {'Disabled' if not self.enable_ai_decisions else 'No LLM configured'}")
                 
-                # Log status periodically
-                hold_time = (datetime.now() - position.entry_time).total_seconds() / 60
-                # logger.debug(f"✓ {position.pair}: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%), Hold: {hold_time:.0f}min, AI: {position.last_ai_action}")
+                logger.info(f"   ✅ {position.pair} check complete")
                 
             except Exception as e:
-                logger.error(f"Error monitoring position {trade_id}: {str(e)}")
+                logger.error(f"   ❌ Error monitoring {trade_id}: {str(e)}")
                 continue
         
         # Save state after check
@@ -1448,40 +1469,75 @@ Analyze the position using these factors:
             while self.is_running:
                 try:
                     cycle_count += 1
-                    active_count = len([p for p in self.positions.values() if p.status == PositionStatus.ACTIVE.value])
+                    active_positions = [p for p in self.positions.values() if p.status == PositionStatus.ACTIVE.value]
+                    active_count = len(active_positions)
                     
-                    # Heartbeat log every cycle
-                    logger.info(f"💓 Cycle #{cycle_count} - Monitoring {active_count} active positions...")
+                    # Detailed heartbeat log every cycle
+                    logger.info("")
+                    logger.info("=" * 60)
+                    logger.info(f"💓 CYCLE #{cycle_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    logger.info("=" * 60)
+                    logger.info(f"   Active positions: {active_count}")
+                    logger.info(f"   Pending approvals: {len(self.pending_approvals)}")
+                    
+                    # Show each position status
+                    if active_positions:
+                        logger.info("")
+                        logger.info("📊 POSITION STATUS:")
+                        for pos in active_positions:
+                            pnl_pct = 0
+                            if pos.current_price and pos.entry_price:
+                                pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
+                            pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                            hold_hours = (datetime.now() - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
+                            logger.info(f"   {pnl_emoji} {pos.pair}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
+                            logger.info(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f}")
+                    
                     sys.stdout.flush()
                     
                     # Monitor all positions
+                    logger.info("")
+                    logger.info("🔍 ANALYZING POSITIONS...")
                     decisions = self.monitor_positions()
                     
                     # Execute AI decisions
                     if decisions:
-                        logger.info(f"📊 Found {len(decisions)} AI decisions to process")
-                        for decision in decisions:
+                        logger.info("")
+                        logger.info(f"⚡ ACTIONS REQUIRED: {len(decisions)} decision(s)")
+                        for i, decision in enumerate(decisions, 1):
+                            logger.info(f"   [{i}] {decision.action} - Confidence: {decision.confidence:.0f}%")
+                            logger.info(f"       Reason: {decision.reasoning[:100]}...")
+                            
                             # Find the position for this decision
                             for trade_id, position in self.positions.items():
                                 if position.status == PositionStatus.ACTIVE.value:
+                                    logger.info(f"       Executing for: {position.pair}")
                                     self.execute_decision(trade_id, decision)
                                     break
                     else:
                         if active_count == 0:
-                            logger.info(f"⏳ No positions to manage - waiting for trades...")
+                            logger.info("   ⏳ No positions to manage - waiting for trades...")
                         else:
-                            logger.info(f"✓ Cycle #{cycle_count} complete - all positions healthy")
+                            logger.info("   ✅ All positions healthy - no action needed")
                     
+                    # Show pending approvals if any
+                    if self.pending_approvals:
+                        logger.info("")
+                        logger.info(f"⏳ PENDING APPROVALS ({len(self.pending_approvals)}):")
+                        for approval_id, approval in self.pending_approvals.items():
+                            age_mins = (datetime.now() - approval['timestamp']).total_seconds() / 60
+                            logger.info(f"   • {approval['pair']}: {approval['decision'].action} (waiting {age_mins:.0f}m)")
+                    
+                    logger.info("")
+                    logger.info(f"💤 Sleeping {self.check_interval_seconds}s until next cycle...")
+                    logger.info("=" * 60)
                     sys.stdout.flush()
                     sys.stderr.flush()
                     
-                    # Sleep until next check
-                    logger.info(f"💤 Next check in {self.check_interval_seconds}s...")
-                    sys.stdout.flush()
                     time.sleep(self.check_interval_seconds)
                     
                 except Exception as e:
-                    logger.error("Error in monitoring loop: {}", str(e), exc_info=True)
+                    logger.error("❌ Error in monitoring loop: {}", str(e), exc_info=True)
                     sys.stdout.flush()
                     time.sleep(10)  # Short sleep on error
             
