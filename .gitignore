@@ -99,3 +99,8 @@ migrations/
 # .cursorignore  # Keep this file in git so Cursor settings are shared
 .cursor/.streamlit/secrets.toml
 .streamlit/secrets.toml
+
+# Server-specific files
+.env.systemd
+DEBUG_TRACE.txt
+FETCH_HEAD
