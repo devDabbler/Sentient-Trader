@@ -34,6 +34,9 @@ from loguru import logger
 log_dir = PROJECT_ROOT / "logs"
 log_dir.mkdir(exist_ok=True)
 
+# Open log file in unbuffered/line-buffered mode
+log_file_path = str(log_dir / "crypto_ai_position_manager_service.log")
+
 logger.remove()
 # Add stderr handler (so we see logs in terminal)
 logger.add(
@@ -42,17 +45,20 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
     colorize=True
 )
-# Add file handler
+# Add file handler with immediate flush
+# Using a custom sink function to ensure immediate writes
+def file_sink(message):
+    with open(log_file_path, "a", encoding="utf-8") as f:
+        f.write(message)
+        f.flush()
+
 logger.add(
-    str(log_dir / "crypto_ai_position_manager_service.log"),
-    rotation="50 MB",
-    retention="30 days",
+    file_sink,
     level="INFO",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
     diagnose=True,
-    enqueue=False,
-    buffering=1
+    enqueue=False
 )
 
 logger.info("=" * 70)
@@ -150,16 +156,9 @@ try:
     logger.info("=" * 70)
     logger.info("")
     
-    # DEBUG: Immediately after SERVICE READY
-    print("DEBUG: After SERVICE READY, before status file write")
-    sys.stdout.flush()
-    
     # Write status file for batch script verification
     status_file = PROJECT_ROOT / "logs" / ".crypto_ai_position_manager_ready"
     status_file.write_text(f"SERVICE READY at {time.time()}")
-    
-    print("DEBUG: Status file written, now logging config...")
-    sys.stdout.flush()
     
     logger.info(f"✓ Check interval: {manager.check_interval_seconds}s")
     logger.info(f"✓ AI Decisions: {manager.enable_ai_decisions}")
@@ -169,8 +168,6 @@ try:
     logger.info("")
     logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
     logger.info("")
-    
-    print("DEBUG: About to start monitoring loop...")
     sys.stdout.flush()
     sys.stderr.flush()
     
