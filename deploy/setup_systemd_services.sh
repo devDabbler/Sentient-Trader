@@ -169,15 +169,12 @@ EOF
 echo "Reloading systemd daemon..."
 sudo systemctl daemon-reload
 
-# Enable services (start on boot)
-echo "Enabling services..."
-sudo systemctl enable sentient-stock-monitor
-sudo systemctl enable sentient-crypto-breakout
-sudo systemctl enable sentient-dex-launch
-sudo systemctl enable sentient-discord-approval
-# AI trader NOT auto-enabled - must be started manually
+# NOTE: Services are NOT auto-enabled by default
+# Use the Control Panel to enable/disable auto-start for each service
+echo "Services created but NOT auto-enabled."
+echo "Use the Control Panel to enable auto-start for services you want."
 
-# Start services
+# Start services (they will run now but won't auto-start on reboot)
 echo "Starting services..."
 sudo systemctl start sentient-stock-monitor
 sudo systemctl start sentient-crypto-breakout
@@ -197,7 +194,8 @@ sudo systemctl status sentient-dex-launch --no-pager -l
 sudo systemctl status sentient-discord-approval --no-pager -l
 sudo systemctl status sentient-crypto-ai-trader --no-pager -l
 echo ""
-echo "ℹ️  AI Trading Service: STARTED (but NOT auto-boot)"
+echo "ℹ️  All services are RUNNING but NOT auto-start on boot."
+echo "ℹ️  Use the Control Panel to enable auto-start for individual services."
 echo "   Service name: sentient-crypto-ai-trader"
 echo "   Will NOT restart on server reboot - start manually with:"
 echo "   sudo systemctl start sentient-crypto-ai-trader"

@@ -190,7 +190,8 @@ def get_service_status(service_name: str) -> dict:
             'sentient-stock-monitor': 'SentientStockMonitor',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
-            'sentient-discord-approval': 'SentientDiscordApproval'
+            'sentient-discord-approval': 'SentientDiscordApproval',
+            'sentient-crypto-ai-trader': 'SentientCryptoAI'
         }
         svc_to_control = windows_name_map.get(service_name, service_name)
         # Use sc query for Windows
@@ -199,7 +200,8 @@ def get_service_status(service_name: str) -> dict:
             'sentient-stock-monitor': 'SentientStockMonitor',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
-            'sentient-discord-approval': 'SentientDiscordApproval'
+            'sentient-discord-approval': 'SentientDiscordApproval',
+            'sentient-crypto-ai-trader': 'SentientCryptoAI'
         }
         svc_to_check = windows_name_map.get(service_name, service_name)
         success, output = run_command(f"sc query {svc_to_check}")
