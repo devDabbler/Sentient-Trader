@@ -7,6 +7,7 @@ Adds AI reasoning on top of quantitative scoring.
 print("[TRACE] ai_confidence_scanner.py: Starting module load...", flush=True)
 
 import os
+import time
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from loguru import logger
@@ -46,6 +47,12 @@ class AIConfidenceScanner:
             # Disable optimizations during init to avoid yfinance validation hangs
             self.scanner = TopTradesScanner(use_optimizations=False)
         print(f"[TRACE] AIConfidenceScanner.__init__: TopTradesScanner initialized", flush=True)
+        
+        # Cache for scan results to avoid re-scanning for every ticker
+        self._cached_options_trades: Optional[List[TopTrade]] = None
+        self._cached_penny_trades: Optional[List[TopTrade]] = None
+        self._cache_timestamp: Optional[float] = None
+        self._cache_ttl_seconds: float = 300  # 5 minute cache
 
         # Auto-detect if we should use LLM
         if use_llm is None:
@@ -444,9 +451,37 @@ Be concise but insightful. Focus on actionable analysis."""
         logger.info(f"Found {len(filtered_trades)} quality AI-analyzed penny stocks (from {len(trades)} scanned)")
         return filtered_trades
 
+    def _get_cached_trades(self) -> tuple:
+        """
+        Get cached trade scans to avoid rescanning for every ticker.
+        Returns (options_trades, penny_trades) tuple.
+        """
+        import time
+        current_time = time.time()
+        
+        # Check if cache is still valid
+        if (self._cache_timestamp is None or 
+            current_time - self._cache_timestamp > self._cache_ttl_seconds):
+            # Cache expired or doesn't exist - refresh
+            logger.info("Refreshing trade cache (scanning options + penny stocks)...")
+            self._cached_options_trades = self.scanner.scan_top_options_trades(top_n=100)
+            self._cached_penny_trades = self.scanner.scan_top_penny_stocks(top_n=100)
+            self._cache_timestamp = current_time
+            logger.info(f"Cache refreshed: {len(self._cached_options_trades or [])} options, "
+                       f"{len(self._cached_penny_trades or [])} penny stocks")
+        
+        return (self._cached_options_trades or [], self._cached_penny_trades or [])
+    
+    def invalidate_cache(self):
+        """Force cache refresh on next analyze_ticker call"""
+        self._cache_timestamp = None
+        logger.info("Trade cache invalidated")
+
     def analyze_ticker(self, ticker: str) -> Optional[Dict]:
         """
         Analyze a single ticker and return ensemble analysis
+        
+        Uses cached scanner results to avoid rescanning for every ticker.
         
         Args:
             ticker: Stock ticker symbol
@@ -455,19 +490,18 @@ Be concise but insightful. Focus on actionable analysis."""
             Dict with ensemble_score, technical_setup, ml_confidence, etc.
         """
         try:
-            # Use TopTradesScanner to get basic trade info
-            trades = self.scanner.scan_top_options_trades(top_n=100)
+            # Get cached trades (only scans once per cache TTL)
+            options_trades, penny_trades = self._get_cached_trades()
             
-            # Find the ticker in the results
-            trade = next((t for t in trades if t.ticker.upper() == ticker.upper()), None)
-            
-            if not trade:
-                # Try penny stock universe
-                trades = self.scanner.scan_top_penny_stocks(top_n=100)
-                trade = next((t for t in trades if t.ticker.upper() == ticker.upper()), None)
+            # Find the ticker in options results first
+            trade = next((t for t in options_trades if t.ticker.upper() == ticker.upper()), None)
             
             if not trade:
-                logger.debug(f"Ticker {ticker} not found in scanner results")
+                # Try penny stock results
+                trade = next((t for t in penny_trades if t.ticker.upper() == ticker.upper()), None)
+            
+            if not trade:
+                logger.debug(f"Ticker {ticker} not found in cached scanner results")
                 return None
             
             # Get AI confidence analysis

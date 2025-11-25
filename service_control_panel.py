@@ -19,16 +19,28 @@ First time setup:
 import streamlit as st
 import subprocess
 import os
+from pathlib import Path
 from datetime import datetime
+import importlib
+from typing import Any, Optional
+import platform
 
-# Try to import TOTP library
+# Try to import TOTP library dynamically to avoid static linter errors when dev env
+# doesn't have these optional dependencies installed.  Uses importlib so Pylance
+# doesn't raise unresolved import warnings, and sets fallbacks to None.
+pyotp: Optional[Any] = None
+qrcode: Optional[Any] = None
+import io
+import base64
+TOTP_AVAILABLE = False
 try:
-    import pyotp
-    import qrcode
-    import io
-    import base64
+    pyotp = importlib.import_module("pyotp")  # type: ignore
+    qrcode = importlib.import_module("qrcode")  # type: ignore
     TOTP_AVAILABLE = True
-except ImportError:
+except Exception:
+    # If importlib failed to load optional deps, keep fallbacks and mark disabled
+    pyotp = None
+    qrcode = None
     TOTP_AVAILABLE = False
 
 # ============================================================
@@ -93,53 +105,137 @@ def run_command(cmd: str) -> tuple:
 
 
 def get_service_status(service_name: str) -> dict:
-    """Get status of a systemd service"""
-    # Check if active
-    success, output = run_command(f"systemctl is-active {service_name}")
-    is_active = output == "active"
-    
-    # Check if enabled (starts on boot)
-    success2, output2 = run_command(f"systemctl is-enabled {service_name}")
-    is_enabled = output2 == "enabled"
-    
-    # Get uptime/status details
-    success3, details = run_command(f"systemctl status {service_name} --no-pager -n 0")
-    
-    # Parse memory usage if available
-    memory = "N/A"
-    if "Memory:" in details:
-        for line in details.split('\n'):
-            if "Memory:" in line:
-                memory = line.split("Memory:")[1].strip().split()[0]
-                break
-    
-    return {
-        "active": is_active,
-        "enabled": is_enabled,
-        "status_text": "🟢 Running" if is_active else "🔴 Stopped",
-        "boot_text": "Auto-start ON" if is_enabled else "Auto-start OFF",
-        "memory": memory
-    }
+    """Get status of a service. Uses systemd/journalctl on Linux and sc/Get-Service on Windows."""
+    if platform.system().lower().startswith('win'):
+        windows_name_map = {
+            'sentient-stock-monitor': 'SentientStockMonitor',
+            'sentient-dex-launch': 'SentientDEXLaunch',
+            'sentient-crypto-breakout': 'SentientCryptoBreakout',
+            'sentient-discord-approval': 'SentientDiscordApproval'
+        }
+        svc_to_control = windows_name_map.get(service_name, service_name)
+        # Use sc query for Windows
+        # Map systemd-style service names to Windows service names where possible
+        windows_name_map = {
+            'sentient-stock-monitor': 'SentientStockMonitor',
+            'sentient-dex-launch': 'SentientDEXLaunch',
+            'sentient-crypto-breakout': 'SentientCryptoBreakout',
+            'sentient-discord-approval': 'SentientDiscordApproval'
+        }
+        svc_to_check = windows_name_map.get(service_name, service_name)
+        success, output = run_command(f"sc query {svc_to_check}")
+        is_active = success and ('RUNNING' in output)
+        # Use sc qc to determine start type (auto/manual)
+        success2, output2 = run_command(f"sc qc {svc_to_check}")
+        enabled = False
+        if success2 and 'AUTO_START' in output2.upper():
+            enabled = True
+        memory = 'N/A'
+        # On Windows we don't have systemd status lines to parse memory from easily
+        return {
+            "active": is_active,
+            "enabled": enabled,
+            "status_text": "🟢 Running" if is_active else "🔴 Stopped",
+            "boot_text": "Auto-start ON" if enabled else "Auto-start OFF",
+            "memory": memory
+        }
+    else:
+        # Linux (systemd)
+        success, output = run_command(f"systemctl is-active {service_name}")
+        is_active = output == "active"
+        success2, output2 = run_command(f"systemctl is-enabled {service_name}")
+        is_enabled = output2 == "enabled"
+        success3, details = run_command(f"systemctl status {service_name} --no-pager -n 0")
+        memory = "N/A"
+        if "Memory:" in details:
+            for line in details.split('\n'):
+                if "Memory:" in line:
+                    memory = line.split("Memory:")[1].strip().split()[0]
+                    break
+        return {
+            "active": is_active,
+            "enabled": is_enabled,
+            "status_text": "🟢 Running" if is_active else "🔴 Stopped",
+            "boot_text": "Auto-start ON" if is_enabled else "Auto-start OFF",
+            "memory": memory
+        }
 
 
 def control_service(service_name: str, action: str) -> tuple:
-    """Start, stop, restart, enable, or disable a service"""
-    if action in ["start", "stop", "restart"]:
-        cmd = f"sudo systemctl {action} {service_name}"
-    elif action == "enable":
-        cmd = f"sudo systemctl enable {service_name}"
-    elif action == "disable":
-        cmd = f"sudo systemctl disable {service_name}"
+    """Start, stop, restart, enable, or disable a service.
+    Uses systemctl on Linux and sc/Get-Service on Windows."""
+    if platform.system().lower().startswith('win'):
+        # Map systemd-style names to Windows service names
+        windows_name_map = {
+            'sentient-stock-monitor': 'SentientStockMonitor',
+            'sentient-dex-launch': 'SentientDEXLaunch',
+            'sentient-crypto-breakout': 'SentientCryptoBreakout',
+            'sentient-discord-approval': 'SentientDiscordApproval',
+            'sentient-crypto-ai-trader': 'SentientCryptoAI'
+        }
+        svc_to_control = windows_name_map.get(service_name, service_name)
+        
+        # On Windows try sc start/stop for built-in service control; nssm can also be used
+        action_map = {
+            'start': 'start',
+            'stop': 'stop',
+            'restart': 'stop'  # implement restart via stop+start
+        }
+        if action == 'restart':
+            # perform stop then start
+            ok1, out1 = run_command(f"sc stop {svc_to_control}")
+            time.sleep(1)
+            ok2, out2 = run_command(f"sc start {svc_to_control}")
+            return ok1 and ok2, out1 + "\n" + out2
+        elif action in ['start', 'stop']:
+            return run_command(f"sc {action} {svc_to_control}")
+        elif action == 'enable':
+            return run_command(f"sc config {svc_to_control} start= auto")
+        elif action == 'disable':
+            return run_command(f"sc config {svc_to_control} start= disabled")
+        else:
+            return False, f"Unknown action: {action}"
     else:
-        return False, f"Unknown action: {action}"
-    
-    return run_command(cmd)
+        if action in ["start", "stop", "restart"]:
+            cmd = f"sudo systemctl {action} {service_name}"
+        elif action == "enable":
+            cmd = f"sudo systemctl enable {service_name}"
+        elif action == "disable":
+            cmd = f"sudo systemctl disable {service_name}"
+        else:
+            return False, f"Unknown action: {action}"
+        return run_command(cmd)
 
 
 def get_service_logs(service_name: str, lines: int = 50) -> str:
-    """Get recent logs for a service"""
-    success, output = run_command(f"journalctl -u {service_name} -n {lines} --no-pager")
-    return output if success else f"Error fetching logs: {output}"
+    """Get recent logs for a service. On Linux uses journalctl; on Windows reads log files or uses Get-WinEvent if necessary."""
+    if platform.system().lower().startswith('win'):
+        candidate_log = None
+        # Map service to likely log filenames
+        log_map = {
+            'sentient-stock-monitor': ['logs\\stock_monitor_service.log', 'logs\\stock_monitor_minimal.log', 'logs\\stock_monitor_ultra_minimal.log', 'logs\\stock_monitor_debug.log'],
+            'sentient-dex-launch': ['logs\\dex_launch_service.log'],
+            'sentient-crypto-breakout': ['logs\\crypto_breakout_service.log']
+        }
+        candidates = log_map.get(service_name, [])
+        project_root = Path(__file__).parent
+        for candidate in candidates:
+            p = project_root / candidate
+            if p.exists():
+                candidate_log = p
+                break
+        if not candidate_log:
+            return f"No local log file found for {service_name} (searched: {candidates})"
+        # Read last N lines
+        try:
+            with open(candidate_log, 'r', encoding='utf-8', errors='ignore') as f:
+                lines_list = f.readlines()
+            return ''.join(lines_list[-lines:])
+        except Exception as e:
+            return f"Error reading log file: {e}"
+    else:
+        success, output = run_command(f"journalctl -u {service_name} -n {lines} --no-pager")
+        return output if success else f"Error fetching logs: {output}"
 
 
 def check_password():
@@ -174,6 +270,9 @@ def check_password():
             
             # Show QR code option for first-time setup
             with st.expander("📱 First time? Scan QR Code"):
+                # pyotp and qrcode were loaded dynamically above; assert for static checkers
+                assert pyotp is not None, "pyotp module is required for TOTP functionality"
+                assert qrcode is not None, "qrcode module is required for QR generation"
                 totp = pyotp.TOTP(TOTP_SECRET)
                 provisioning_uri = totp.provisioning_uri(
                     name="admin",
@@ -198,6 +297,8 @@ def check_password():
             totp_code = st.text_input("📲 Enter 6-digit code from Authenticator", max_chars=6, key="totp_input")
             
             if st.button("Verify Code", type="primary"):
+                # runtime guard for static type checkers
+                assert pyotp is not None, "pyotp module is required for TOTP functionality"
                 totp = pyotp.TOTP(TOTP_SECRET)
                 if totp.verify(totp_code, valid_window=1):
                     st.session_state.authenticated = True
@@ -222,6 +323,12 @@ def check_password():
                 st.success("✅ 2FA enabled")
             else:
                 st.warning("⚠️ 2FA not configured")
+                # If a secret exists but the optional deps are missing, show actionable error
+                if TOTP_SECRET and not TOTP_AVAILABLE:
+                    st.error(
+                        "TOTP secret is set but required libraries (`pyotp`, `qrcode`) are not installed.\n"
+                        "Install them with: `pip install -r requirements.txt` or `pip install pyotp qrcode[pil]`"
+                    )
         
         if not TOTP_ENABLED:
             st.info("💡 To enable 2FA, set `CONTROL_PANEL_TOTP_SECRET` in your .env file")
@@ -364,7 +471,7 @@ def main():
                 
                 # Expandable logs section
                 with st.expander(f"📜 View Logs - {display_name}"):
-                    logs = get_service_logs(service_name, 30)
+                    logs = get_service_logs(service_name, 100)
                     st.code(logs, language="log")
                 
                 st.markdown("---")

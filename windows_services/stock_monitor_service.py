@@ -24,11 +24,28 @@ import time
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Ensure running from project root (critical when Windows services run from system paths)
+os.chdir(PROJECT_ROOT)
+# Make logs directory if it doesn't exist
+log_dir = PROJECT_ROOT / "logs"
+log_dir.mkdir(exist_ok=True)
 
 from services.windows_service_base import WindowsServiceBase, install_service, check_pywin32_installed
+# Configure logging early so any service errors are persisted to the configured log file
 from loguru import logger
+logger.remove()
+logger.add(
+    str(log_dir / "stock_monitor_service.log"),
+    rotation="50 MB",
+    retention="30 days",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+    backtrace=True,
+    diagnose=True,
+)
 
 
 class StockMonitorService(WindowsServiceBase):
