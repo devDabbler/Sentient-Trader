@@ -146,12 +146,20 @@ try:
     print(service_ready_msg)
     print(f"{'='*70}\n")
     sys.stdout.flush()
+    sys.stderr.flush()
     logger.info("=" * 70)
     logger.info("")
+    
+    # DEBUG: Immediately after SERVICE READY
+    print("DEBUG: After SERVICE READY, before status file write")
+    sys.stdout.flush()
     
     # Write status file for batch script verification
     status_file = PROJECT_ROOT / "logs" / ".crypto_ai_position_manager_ready"
     status_file.write_text(f"SERVICE READY at {time.time()}")
+    
+    print("DEBUG: Status file written, now logging config...")
+    sys.stdout.flush()
     
     logger.info(f"✓ Check interval: {manager.check_interval_seconds}s")
     logger.info(f"✓ AI Decisions: {manager.enable_ai_decisions}")
@@ -161,6 +169,8 @@ try:
     logger.info("")
     logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
     logger.info("")
+    
+    print("DEBUG: About to start monitoring loop...")
     sys.stdout.flush()
     sys.stderr.flush()
     

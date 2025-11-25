@@ -1338,11 +1338,19 @@ Analyze the position using these factors:
         import threading
         import sys
         
+        print("DEBUG: start_monitoring_loop() called")
+        sys.stdout.flush()
+        
         if self.is_running:
             logger.warning("Monitoring loop already running")
             return
         
+        print("DEBUG: About to define monitoring_loop function")
+        sys.stdout.flush()
+        
         def monitoring_loop():
+            print("DEBUG: monitoring_loop() thread STARTED")
+            sys.stdout.flush()
             self.is_running = True
             cycle_count = 0
             logger.info("=" * 80)
@@ -1358,6 +1366,7 @@ Analyze the position using these factors:
                     
                     # Heartbeat log every cycle
                     logger.info(f"💓 Cycle #{cycle_count} - Monitoring {active_count} active positions...")
+                    print(f"DEBUG: Cycle #{cycle_count} - {active_count} positions")
                     sys.stdout.flush()
                     
                     # Monitor all positions
@@ -1388,14 +1397,21 @@ Analyze the position using these factors:
                     
                 except Exception as e:
                     logger.error("Error in monitoring loop: {}", str(e), exc_info=True)
+                    print(f"DEBUG: Error in loop: {e}")
                     sys.stdout.flush()
                     time.sleep(10)  # Short sleep on error
             
             logger.info("🛑 AI Crypto Position Manager stopped")
             sys.stdout.flush()
         
+        print("DEBUG: Creating thread...")
+        sys.stdout.flush()
         self.thread = threading.Thread(target=monitoring_loop, daemon=True)
+        print("DEBUG: Starting thread...")
+        sys.stdout.flush()
         self.thread.start()
+        print("DEBUG: Thread started, returning from start_monitoring_loop()")
+        sys.stdout.flush()
         logger.info(f"✅ Monitoring loop started (checking every {self.check_interval_seconds}s)")
     
     def stop(self):
