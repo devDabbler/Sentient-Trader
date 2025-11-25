@@ -363,11 +363,12 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         # If multiple pending, show list and ask for specific selection
         if len(pending) > 1:
+            action_word = "APPROVE" if approve else "REJECT"
             await message.channel.send(
                 f"⚠️ **{len(pending)} trades pending!** Please specify which one:\n"
-                f"• `APPROVE 1` - Approve first trade\n"
-                f"• `APPROVE BTC/USD` - Approve by symbol\n"
-                f"• `APPROVE ALL` - Approve all\n"
+                f"• `{action_word} 1` - {action_word.capitalize()} first trade\n"
+                f"• `{action_word} BTC/USD` - {action_word.capitalize()} by symbol\n"
+                f"• `{action_word} ALL` - {action_word.capitalize()} all\n"
                 f"• `LIST` - Show all pending trades"
             )
             return

@@ -121,6 +121,23 @@ class AITradeDecision:
     metadata: Optional[Dict[str, Any]] = None
 
 
+def _load_service_interval(service_name: str = "sentient-crypto-ai-trader") -> int:
+    """Load the check interval from service config file"""
+    import json
+    from pathlib import Path
+    
+    config_file = Path(__file__).parent.parent / "data" / "service_intervals.json"
+    try:
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+                service_config = config.get(service_name, {})
+                return service_config.get("check_interval_seconds", 60)
+    except Exception as e:
+        logger.debug(f"Could not load service interval config: {e}")
+    return 60  # Default
+
+
 class AICryptoPositionManager:
     """
     AI-Enhanced Position Manager for Crypto Trading
@@ -131,7 +148,7 @@ class AICryptoPositionManager:
         self,
         kraken_client,
         llm_analyzer=None,
-        check_interval_seconds: int = 60,
+        check_interval_seconds: Optional[int] = None,  # Now optional, loads from config
         enable_ai_decisions: bool = True,
         enable_trailing_stops: bool = True,
         enable_breakeven_moves: bool = True,
@@ -146,7 +163,7 @@ class AICryptoPositionManager:
         Args:
             kraken_client: KrakenClient instance
             llm_analyzer: LLM analyzer for AI decisions (LLMStrategyAnalyzer)
-            check_interval_seconds: How often to check positions (default: 60s)
+            check_interval_seconds: How often to check positions (default: loads from config or 60s)
             enable_ai_decisions: Enable AI-powered exit decisions
             enable_trailing_stops: Enable trailing stop feature
             enable_breakeven_moves: Enable break-even stop moves
@@ -157,7 +174,13 @@ class AICryptoPositionManager:
         """
         self.kraken_client = kraken_client
         self.llm_analyzer = llm_analyzer
+        
+        # Load interval from config file if not provided
+        if check_interval_seconds is None:
+            check_interval_seconds = _load_service_interval()
+            logger.info(f"📂 Loaded check interval from config: {check_interval_seconds}s")
         self.check_interval_seconds = check_interval_seconds
+        
         self.enable_ai_decisions = enable_ai_decisions
         self.enable_trailing_stops = enable_trailing_stops
         self.enable_breakeven_moves = enable_breakeven_moves
@@ -422,14 +445,14 @@ class AICryptoPositionManager:
             return True
         return False
     
-    def monitor_positions(self) -> List[AITradeDecision]:
+    def monitor_positions(self) -> List[tuple]:
         """
         Check all monitored positions and get AI recommendations
         
         Returns:
-            List of AI decisions for positions requiring action
+            List of (AITradeDecision, trade_id) tuples for positions requiring action
         """
-        decisions = []
+        decisions: List[tuple] = []
         
         if not self.positions:
             return decisions
@@ -499,7 +522,7 @@ class AICryptoPositionManager:
                 log_and_print(f"   🔍 Checking exit conditions...")
                 basic_action = self._check_basic_exit_conditions(position, current_price, pnl_pct)
                 if basic_action:
-                    decisions.append(basic_action)
+                    decisions.append((basic_action, trade_id))  # Include trade_id with decision
                     log_and_print(f"   🚨 EXIT SIGNAL: {basic_action.action}")
                     log_and_print(f"      Reason: {basic_action.reasoning}")
                     continue
@@ -508,7 +531,7 @@ class AICryptoPositionManager:
                 if self.enable_breakeven_moves:
                     be_action = self._check_breakeven_move(position, pnl_pct)
                     if be_action:
-                        decisions.append(be_action)
+                        decisions.append((be_action, trade_id))  # Include trade_id with decision
                         log_and_print(f"   🛡️ BREAKEVEN MOVE triggered at {pnl_pct:+.2f}%")
                         continue
                     else:
@@ -519,7 +542,7 @@ class AICryptoPositionManager:
                 if self.enable_trailing_stops and pnl_pct > 0:
                     trail_action = self._check_trailing_stop(position, current_price, pnl_pct)
                     if trail_action:
-                        decisions.append(trail_action)
+                        decisions.append((trail_action, trade_id))  # Include trade_id with decision
                         log_and_print(f"   📈 TRAILING STOP: Tightening to ${trail_action.new_stop:,.4f}")
                         continue
                     else:
@@ -534,7 +557,7 @@ class AICryptoPositionManager:
                         log_and_print(f"   🤖 AI says: {ai_decision.action} (confidence: {ai_decision.confidence:.0f}%)")
                         if ai_decision.confidence >= self.min_ai_confidence:
                             log_and_print(f"   ✅ Confidence meets threshold ({self.min_ai_confidence}%) - executing")
-                            decisions.append(ai_decision)
+                            decisions.append((ai_decision, trade_id))  # Include trade_id with decision
                             
                             # Execute AI decision (will require approval if enabled)
                             result = self.execute_decision(position.trade_id, ai_decision)
@@ -858,9 +881,9 @@ class AICryptoPositionManager:
             indicators['ema_50'] = df['close'].ewm(span=50).mean().iloc[-1] if len(df) >= 50 else indicators['ema_20']
             
             # RSI
-            delta = df['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            delta = df['close'].diff().fillna(0).astype(float)
+            gain = delta.clip(lower=0).rolling(window=14).mean()
+            loss = (-delta.clip(upper=0)).rolling(window=14).mean()
             rs = gain / loss
             indicators['rsi'] = (100 - (100 / (1 + rs))).iloc[-1]
             
@@ -1517,16 +1540,15 @@ Analyze the position using these factors:
                     if decisions:
                         log_and_print("")
                         log_and_print(f"⚡ ACTIONS REQUIRED: {len(decisions)} decision(s)")
-                        for i, decision in enumerate(decisions, 1):
+                        for i, (decision, decision_trade_id) in enumerate(decisions, 1):
+                            position = self.positions.get(decision_trade_id)
+                            pair_name = position.pair if position else 'Unknown'
                             log_and_print(f"   [{i}] {decision.action} - Confidence: {decision.confidence:.0f}%")
                             log_and_print(f"       Reason: {decision.reasoning[:100]}...")
+                            log_and_print(f"       Executing for: {pair_name}")
                             
-                            # Find the position for this decision
-                            for trade_id, position in self.positions.items():
-                                if position.status == PositionStatus.ACTIVE.value:
-                                    log_and_print(f"       Executing for: {position.pair}")
-                                    self.execute_decision(trade_id, decision)
-                                    break
+                            if position:
+                                self.execute_decision(decision_trade_id, decision)
                     else:
                         if active_count == 0:
                             log_and_print("   ⏳ No positions to manage - waiting for trades...")

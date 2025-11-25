@@ -19,6 +19,8 @@ First time setup:
 import streamlit as st
 import subprocess
 import os
+import json
+import time
 from pathlib import Path
 from datetime import datetime
 import importlib
@@ -53,30 +55,49 @@ ADMIN_PASSWORD = os.getenv("CONTROL_PANEL_PASSWORD", "admin")  # Set your own
 TOTP_SECRET = os.getenv("CONTROL_PANEL_TOTP_SECRET")
 TOTP_ENABLED = TOTP_AVAILABLE and TOTP_SECRET and len(TOTP_SECRET) >= 16
 
+# Service intervals config file path
+SERVICE_INTERVALS_FILE = Path(__file__).parent / "data" / "service_intervals.json"
+
 SERVICES = {
     "DEX Launch Monitor": {
         "name": "sentient-dex-launch",
         "description": "Scans for new token launches on DEX platforms (Solana, ETH, etc.)",
         "emoji": "🚀",
-        "category": "crypto"
+        "category": "crypto",
+        "interval_key": "scan_interval_seconds",
+        "interval_default": 30,
+        "interval_min": 10,
+        "interval_max": 300
     },
     "Crypto Breakout Monitor": {
         "name": "sentient-crypto-breakout",
         "description": "Monitors crypto for breakout patterns and momentum",
         "emoji": "📈",
-        "category": "crypto"
+        "category": "crypto",
+        "interval_key": "scan_interval_seconds",
+        "interval_default": 180,
+        "interval_min": 60,
+        "interval_max": 600
     },
     "AI Crypto Trader": {
         "name": "sentient-crypto-ai-trader",
         "description": "AI-powered crypto position manager (executes trades)",
         "emoji": "🤖",
-        "category": "crypto"
+        "category": "crypto",
+        "interval_key": "check_interval_seconds",
+        "interval_default": 60,
+        "interval_min": 30,
+        "interval_max": 300
     },
     "Stock Monitor": {
         "name": "sentient-stock-monitor",
         "description": "Monitors stocks for trading opportunities",
         "emoji": "📊",
-        "category": "stocks"
+        "category": "stocks",
+        "interval_key": "scan_interval_seconds",
+        "interval_default": 300,
+        "interval_min": 60,
+        "interval_max": 900
     },
     "Discord Approval Bot": {
         "name": "sentient-discord-approval",
@@ -85,6 +106,64 @@ SERVICES = {
         "category": "infrastructure"
     }
 }
+
+# ============================================================
+# SERVICE INTERVAL FUNCTIONS
+# ============================================================
+
+def load_service_intervals() -> dict:
+    """Load service intervals from JSON file"""
+    try:
+        if SERVICE_INTERVALS_FILE.exists():
+            with open(SERVICE_INTERVALS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading service intervals: {e}")
+    return {}
+
+
+def save_service_intervals(intervals: dict) -> bool:
+    """Save service intervals to JSON file"""
+    try:
+        SERVICE_INTERVALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(SERVICE_INTERVALS_FILE, 'w') as f:
+            json.dump(intervals, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving service intervals: {e}")
+        return False
+
+
+def get_service_interval(service_name: str, svc_info: dict) -> int:
+    """Get the current interval for a service"""
+    intervals = load_service_intervals()
+    interval_key = svc_info.get("interval_key")
+    if not interval_key:
+        return 0
+    
+    service_config = intervals.get(service_name, {})
+    return service_config.get(interval_key, svc_info.get("interval_default", 60))
+
+
+def set_service_interval(service_name: str, svc_info: dict, new_interval: int) -> bool:
+    """Set the interval for a service and trigger a restart if running"""
+    intervals = load_service_intervals()
+    interval_key = svc_info.get("interval_key")
+    if not interval_key:
+        return False
+    
+    if service_name not in intervals:
+        intervals[service_name] = {}
+    
+    intervals[service_name][interval_key] = new_interval
+    
+    if save_service_intervals(intervals):
+        # Also update environment variable for running process
+        env_var_name = f"{service_name.upper().replace('-', '_')}_{interval_key.upper()}"
+        os.environ[env_var_name] = str(new_interval)
+        return True
+    return False
+
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -624,6 +703,72 @@ def main():
                     
                     # Show log file info
                     st.caption(f"💡 Tip: Click 'Refresh Logs' to see latest entries. Showing last {log_lines} lines.")
+                
+                # Expandable settings section (only for services with configurable intervals)
+                if svc_info.get("interval_key"):
+                    with st.expander(f"⚙️ Settings - {display_name}"):
+                        current_interval = get_service_interval(service_name, svc_info)
+                        interval_min = svc_info.get("interval_min", 10)
+                        interval_max = svc_info.get("interval_max", 600)
+                        interval_key = svc_info.get("interval_key", "scan_interval_seconds")
+                        
+                        st.markdown(f"**⏱️ Scan/Check Interval**")
+                        st.caption(f"How often the service checks for updates (in seconds)")
+                        
+                        # Show current interval
+                        st.info(f"Current: **{current_interval}s** ({current_interval/60:.1f} min)")
+                        
+                        # Slider for new interval
+                        new_interval = st.slider(
+                            "New Interval (seconds)",
+                            min_value=interval_min,
+                            max_value=interval_max,
+                            value=current_interval,
+                            step=10,
+                            key=f"interval_{service_name}",
+                            help=f"Range: {interval_min}s - {interval_max}s"
+                        )
+                        
+                        # Apply button
+                        col_apply, col_info = st.columns([1, 2])
+                        with col_apply:
+                            if st.button("💾 Apply & Restart", key=f"apply_interval_{service_name}", type="primary"):
+                                if set_service_interval(service_name, svc_info, new_interval):
+                                    # Restart the service to apply new interval
+                                    success, msg = control_service(service_name, "restart")
+                                    if success:
+                                        st.toast(f"✅ Interval set to {new_interval}s and service restarted!")
+                                    else:
+                                        st.warning(f"Interval saved but restart failed: {msg}")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to save interval")
+                        
+                        with col_info:
+                            st.caption(f"💡 Changes require a service restart to take effect")
+                        
+                        # Show quick presets
+                        st.markdown("**Quick Presets:**")
+                        preset_col1, preset_col2, preset_col3 = st.columns(3)
+                        
+                        with preset_col1:
+                            if st.button("🚀 Fast (30s)", key=f"preset_fast_{service_name}"):
+                                preset_val = max(30, interval_min)
+                                set_service_interval(service_name, svc_info, preset_val)
+                                control_service(service_name, "restart")
+                                st.rerun()
+                        
+                        with preset_col2:
+                            if st.button("⚖️ Normal (60s)", key=f"preset_normal_{service_name}"):
+                                set_service_interval(service_name, svc_info, 60)
+                                control_service(service_name, "restart")
+                                st.rerun()
+                        
+                        with preset_col3:
+                            if st.button("🐢 Slow (120s)", key=f"preset_slow_{service_name}"):
+                                set_service_interval(service_name, svc_info, 120)
+                                control_service(service_name, "restart")
+                                st.rerun()
                 
                 st.markdown("---")
     
