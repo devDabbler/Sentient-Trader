@@ -300,6 +300,7 @@ class CryptoBreakoutMonitor:
             
             for alert_type, method_name, top_n in scan_types:
                 logger.info(f"   Scanning for {alert_type} opportunities...")
+                scan_type_start = time.time()
                 
                 opportunities = []
                 
@@ -318,11 +319,17 @@ class CryptoBreakoutMonitor:
                                 breakouts.append(alert)
                                 logger.info(f"      ✓ {alert.symbol}: Social {result.social_score:.0f}, {alert.confidence} confidence")
                         
+                        logger.info(f"   ✅ {alert_type} scan complete in {time.time() - scan_type_start:.1f}s")
                         continue  # Skip normal processing for pre-listing scans
                 
                 # Normal breakout/buzzing/hottest scanning
-                if self.use_ai and hasattr(self.scanner, 'scan_with_ai_confidence'):
-                    # AI scanner
+                # Only use AI for BREAKOUT scan to prevent cumulative timeouts
+                # BUZZING and HOTTEST use quantitative scoring only (much faster)
+                use_ai_for_this_scan = self.use_ai and alert_type == 'BREAKOUT'
+                
+                if use_ai_for_this_scan and hasattr(self.scanner, 'scan_with_ai_confidence'):
+                    # AI scanner - only for BREAKOUT
+                    logger.info(f"      🤖 Using AI analysis for {alert_type}...")
                     strategy_map = {
                         'BREAKOUT': 'ALL',
                         'BUZZING': 'MOMENTUM', 
@@ -335,7 +342,8 @@ class CryptoBreakoutMonitor:
                         min_ai_confidence=self.min_confidence if self.min_confidence else None
                     )
                 else:
-                    # Quantitative scanner - use base scanner methods
+                    # Quantitative scanner - faster, no AI timeout risk
+                    logger.info(f"      📊 Using quantitative analysis for {alert_type}...")
                     if hasattr(self.scanner, 'base_scanner'):
                         base = self.scanner.base_scanner
                     elif hasattr(self.scanner, method_name):
@@ -359,6 +367,8 @@ class CryptoBreakoutMonitor:
                         alert = self._opportunity_to_alert(opp, alert_type)
                         breakouts.append(alert)
                         logger.info(f"      ✓ {alert.symbol}: Score {alert.score:.1f}, {alert.confidence} confidence")
+                
+                logger.info(f"   ✅ {alert_type} scan complete in {time.time() - scan_type_start:.1f}s - found {len(opportunities)} opportunities")
         
         except Exception as e:
             logger.error("Error detecting breakouts: {}", str(e), exc_info=True)
@@ -366,6 +376,7 @@ class CryptoBreakoutMonitor:
         # Sort by score
         breakouts.sort(key=lambda x: x.score, reverse=True)
         
+        logger.info(f"🔍 Total breakouts detected: {len(breakouts)}")
         return breakouts
     
     def _pre_listing_to_alert(self, signal, alert_type: str) -> BreakoutAlert:

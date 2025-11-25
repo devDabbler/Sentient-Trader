@@ -119,7 +119,8 @@ class AICryptoScanner:
         
         # Limit AI analysis to top N opportunities to prevent timeout issues
         # AI analysis is expensive - only analyze the best quantitative picks
-        max_ai_analysis = min(5, len(base_opportunities))
+        # Reduced from 5 to 3 to prevent cumulative timeout issues with remote Ollama
+        max_ai_analysis = min(3, len(base_opportunities))
         logger.info(f"Analyzing top {max_ai_analysis} with AI (limiting to prevent timeouts)...")
         
         # Add AI confidence analysis to each opportunity

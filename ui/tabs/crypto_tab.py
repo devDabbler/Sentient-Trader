@@ -175,6 +175,15 @@ def render_tab():
         current_index = 1  # Default to Crypto Scanner if state is invalid
         st.session_state.active_crypto_tab = tab_options[current_index]
 
+    # CRITICAL: Sync the radio selector key with active_crypto_tab for programmatic navigation
+    # This ensures that when active_crypto_tab is set programmatically (e.g., from Daily Scanner),
+    # the radio button reflects the correct tab on the next render
+    if 'crypto_tab_selector' not in st.session_state:
+        st.session_state.crypto_tab_selector = st.session_state.active_crypto_tab
+    elif st.session_state.crypto_tab_selector != st.session_state.active_crypto_tab:
+        # Programmatic navigation detected - sync the selector
+        st.session_state.crypto_tab_selector = st.session_state.active_crypto_tab
+
     st.radio(
         "Select Crypto Feature:",
         tab_options,
@@ -192,16 +201,26 @@ def render_tab():
     # ========== CHECK FOR MULTI-CONFIG BUTTON CLICKS (GLOBAL HANDLER) ==========
     # This catches button clicks from Daily Scanner and transfers setup to Quick Trade
     # Runs BEFORE tab rendering so it works regardless of which tab you navigate to
+    
+    # Debug: Log clicked flags in session state
+    clicked_flags = [k for k in st.session_state.keys() if '_clicked' in str(k)]
+    if clicked_flags:
+        logger.info(f"🔘 CRYPTO TAB GLOBAL - Found clicked flags: {clicked_flags}")
+    
     if 'multi_config_results' in st.session_state and st.session_state.multi_config_results is not None:
         results_df = st.session_state.multi_config_results
+        logger.info(f"🔘 CRYPTO TAB GLOBAL - multi_config_results found with {len(results_df)} rows, index: {list(results_df.index)}")
         
         # Check if any "Use This Setup" button was clicked
         selected_config_idx = None
         for idx in results_df.index:
             # Check both button types: use_config_{idx} (best-per-pair) and use_filtered_{idx} (filtered results)
-            if st.session_state.get(f'use_config_{idx}_clicked', False):
+            flag_key = f'use_config_{idx}_clicked'
+            flag_value = st.session_state.get(flag_key, False)
+            logger.debug(f"🔘 CRYPTO TAB GLOBAL - Checking {flag_key} = {flag_value}")
+            if flag_value:
                 selected_config_idx = idx
-                st.session_state[f'use_config_{idx}_clicked'] = False  # Reset flag
+                st.session_state[flag_key] = False  # Reset flag
                 logger.info(f"🔘 CRYPTO TAB - Detected button click for config {idx} (best-per-pair)")
                 break
             elif st.session_state.get(f'use_filtered_{idx}_clicked', False):

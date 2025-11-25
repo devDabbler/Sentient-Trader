@@ -4409,13 +4409,23 @@ def analyze_multi_config_bulk(
         best_per_pair = best_per_pair.sort_values('ai_score', ascending=False)
         
         logger.info(f"📊 Rendering {len(best_per_pair)} best-per-pair expanders")
+        logger.info(f"📊 best_per_pair index values: {list(best_per_pair.index)}")
         
         # Check if any button was clicked BEFORE rendering (Streamlit button state fix)
         selected_config_idx = None
+        
+        # Debug: Check what clicked flags exist in session state
+        clicked_flags = [k for k in st.session_state.keys() if '_clicked' in str(k)]
+        logger.info(f"📊 Current clicked flags in session state: {clicked_flags}")
+        
         for idx in best_per_pair.index:
-            if st.session_state.get(f'use_config_{idx}_clicked', False):
+            flag_key = f'use_config_{idx}_clicked'
+            flag_value = st.session_state.get(flag_key, False)
+            logger.debug(f"📊 Checking flag {flag_key} = {flag_value}")
+            if flag_value:
                 selected_config_idx = idx
-                st.session_state[f'use_config_{idx}_clicked'] = False  # Reset flag
+                st.session_state[flag_key] = False  # Reset flag
+                logger.info(f"🔘 FOUND clicked flag: {flag_key}")
                 break
         
         # If a config was selected, load it and navigate
@@ -4546,7 +4556,9 @@ def analyze_multi_config_bulk(
                 # Action button - just sets a flag, actual handling is at top of function
                 if st.button(f"✅ Use This Setup for {pair}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
                     # Set flag to be picked up on next rerun
+                    logger.info(f"🔘 BUTTON CLICKED! Setting use_config_{idx}_clicked = True")
                     st.session_state[f'use_config_{idx}_clicked'] = True
+                    logger.info(f"🔘 Session state after setting flag: {dict((k,v) for k,v in st.session_state.items() if '_clicked' in str(k))}")
                     st.rerun()
         
         # Show comparison table

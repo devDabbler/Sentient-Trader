@@ -140,7 +140,9 @@ def display_watchlist_summary(watchlist: List[Dict]):
         st.metric("Total Cryptos", len(watchlist))
     
     with col2:
-        avg_score = sum(w.get('composite_score', 0) for w in watchlist) / len(watchlist)
+        # Handle None values properly - use 0 if value is None or missing
+        scores = [w.get('composite_score') or 0 for w in watchlist]
+        avg_score = sum(scores) / len(watchlist) if watchlist else 0
         st.metric("Avg Score", f"{avg_score:.1f}")
     
     with col3:
@@ -148,7 +150,8 @@ def display_watchlist_summary(watchlist: List[Dict]):
         st.metric("High Confidence", f"{high_conf}/{len(watchlist)}")
     
     with col4:
-        gainers = sum(1 for w in watchlist if w.get('change_pct_24h', 0) > 0)
+        # Handle None values - treat None as 0 for comparison
+        gainers = sum(1 for w in watchlist if (w.get('change_pct_24h') or 0) > 0)
         st.metric("24h Gainers", f"{gainers}/{len(watchlist)}")
     
     with col5:

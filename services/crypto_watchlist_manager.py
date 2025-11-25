@@ -147,7 +147,7 @@ class CryptoWatchlistManager:
                 logger.warning(f"⚠️ No opportunity_data provided")
             
             logger.info(f"💾 Final data dict has {len(data)} fields: {list(data.keys())}")
-            logger.info("🔍 Data sample: symbol={}, price={data.get('current_price')}, strategy={data.get('strategy')}", str(data.get('symbol')))
+            logger.info(f"🔍 Data sample: symbol={data.get('symbol')}, price={data.get('current_price')}, strategy={data.get('strategy')}")
             
             # Upsert to database
             logger.info(f"📤 Executing Supabase upsert for {symbol}...")
@@ -161,7 +161,7 @@ class CryptoWatchlistManager:
             return True
                 
         except Exception as e:
-            logger.error("❌ EXCEPTION in add_crypto for {symbol}: {}", str(e), exc_info=True)
+            logger.error(f"❌ EXCEPTION in add_crypto for {symbol}: {e}", exc_info=True)
             return False
     
     def remove_crypto(self, symbol: str) -> bool:
@@ -231,13 +231,17 @@ class CryptoWatchlistManager:
             return None
         
         try:
+            # Use limit(1) instead of single() to avoid exception when no results
             response = self.supabase.table('crypto_watchlist')\
                 .select('*')\
                 .eq('symbol', symbol)\
-                .single()\
+                .limit(1)\
                 .execute()
             
-            return response.data if response.data else None
+            # Return first result if exists, otherwise None
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
                 
         except Exception as e:
             logger.error(f"Error getting {symbol}: {e}")
