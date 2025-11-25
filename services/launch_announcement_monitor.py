@@ -250,7 +250,7 @@ class LaunchAnnouncementMonitor:
                         thirty_min_ago = datetime.now() - timedelta(minutes=30)
                         
                         for boost in data[:10]:  # Top 10 boosts
-                            # Parse boost data
+                            # Parse boost data - API returns chainId and tokenAddress at top level
                             chain_id = boost.get('chainId', '')
                             chain = self._parse_chain_id(chain_id)
                             
@@ -258,18 +258,25 @@ class LaunchAnnouncementMonitor:
                                 continue
                             
                             token_address = boost.get('tokenAddress', '')
+                            if not token_address:
+                                continue
+                            
+                            # Token symbol/name may not be in boost data - will be resolved during analysis
+                            # DexScreener boost API only returns: chainId, tokenAddress, amount, totalAmount, icon, header, openGraph, description, links
+                            token_symbol = boost.get('description', '')[:20] if boost.get('description') else 'BOOSTED'
                             
                             announcement = LaunchAnnouncement(
                                 source="dexscreener_boost",
                                 token_address=token_address,
-                                token_symbol=boost.get('name', 'UNKNOWN'),
-                                token_name=boost.get('description', 'Unknown'),
+                                token_symbol=token_symbol,
+                                token_name=boost.get('description', 'Boosted Token'),
                                 chain=chain,
                                 announced_at=datetime.now(),
-                                announcement_url=boost.get('url', ''),
+                                announcement_url=f"https://dexscreener.com/{chain_id}/{token_address}",
                                 confidence_score=70.0,  # Boosted = paid promotion
                                 metadata={
                                     'boost_amount': boost.get('amount', 0),
+                                    'total_amount': boost.get('totalAmount', 0),
                                     'links': boost.get('links', [])
                                 }
                             )

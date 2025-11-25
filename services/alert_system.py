@@ -88,8 +88,14 @@ class AlertSystem:
         try:
             alerts_data = []
             if os.path.exists(self.alert_log_path):
-                with open(self.alert_log_path, 'r') as f:
-                    alerts_data = json.load(f)
+                try:
+                    with open(self.alert_log_path, 'r') as f:
+                        content = f.read().strip()
+                        if content:  # Only parse if file has content
+                            alerts_data = json.loads(content)
+                except (json.JSONDecodeError, ValueError):
+                    # File exists but is empty or corrupted - start fresh
+                    alerts_data = []
             
             alerts_data.append(alert.to_dict())
             

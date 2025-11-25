@@ -153,8 +153,8 @@ class TopTradesScanner:
         
         return results[:top_n]
     
-    def _scan_options_trades_parallel(self, top_n: int, max_workers: int = 8) -> List[TopTrade]:
-        """Parallel options scanning using ThreadPoolExecutor (4-8x faster)"""
+    def _scan_options_trades_parallel(self, top_n: int, max_workers: int = 2) -> List[TopTrade]:
+        """Parallel options scanning using ThreadPoolExecutor with rate limiting"""
         logger.info(f"\U0001f680 Using parallel processing ({max_workers} workers) for {len(self.OPTIONS_UNIVERSE)} options tickers")
         
         results = []
@@ -232,8 +232,8 @@ class TopTradesScanner:
         
         return results[:top_n]
     
-    def _scan_penny_stocks_parallel(self, top_n: int, max_workers: int = 8) -> List[TopTrade]:
-        """Parallel penny stock scanning using ThreadPoolExecutor (4-8x faster)"""
+    def _scan_penny_stocks_parallel(self, top_n: int, max_workers: int = 2) -> List[TopTrade]:
+        """Parallel penny stock scanning using ThreadPoolExecutor with rate limiting"""
         logger.info(f"🚀 Using parallel processing ({max_workers} workers) for {len(self.PENNY_STOCK_UNIVERSE)} penny stocks")
         
         results = []
@@ -275,6 +275,9 @@ class TopTradesScanner:
     def _analyze_options_opportunity(self, ticker: str) -> TopTrade:
         """Analyze a stock for options trading potential"""
         try:
+            # Rate limiting delay to avoid yfinance 429 errors
+            time.sleep(0.5)
+            
             yf = _get_yf()  # Lazy import
             stock = yf.Ticker(ticker)
             
@@ -478,6 +481,9 @@ class TopTradesScanner:
     def _analyze_penny_stock_opportunity(self, ticker: str) -> TopTrade:
         """Analyze a penny stock for trading potential with breakout detection"""
         try:
+            # Rate limiting delay to avoid yfinance 429 errors
+            time.sleep(0.5)
+            
             yf = _get_yf()  # Lazy import
             stock = yf.Ticker(ticker)
             

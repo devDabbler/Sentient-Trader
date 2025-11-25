@@ -121,27 +121,69 @@ try:
     
     # Async monitoring loop
     async def monitor_loop():
-        logger.info("Starting announcement monitoring...")
+        logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
         
         # Start announcement monitoring in background
         monitor_task = asyncio.create_task(monitor.start_monitoring())
         
+        scan_counter = 0
+        
         try:
             while True:
-                # Get recent announcements
+                scan_counter += 1
+                logger.info(f"🔄 Scan cycle #{scan_counter} starting...")
+                
+                # ===== PART 1: Active DEX Scanning =====
+                # Run the DEX hunter's own scanner to find new launches
+                logger.info("🔍 Running active DEX scan...")
+                try:
+                    await dex_hunter._scan_for_launches()
+                    
+                    # Check for high-score tokens from active scan
+                    for addr, token in dex_hunter.discovered_tokens.items():
+                        if hasattr(token, '_alerted'):
+                            continue  # Already alerted
+                        
+                        if token.composite_score >= 60:
+                            alert_msg = (
+                                f"🚀 NEW TOKEN DISCOVERED!\n\n"
+                                f"Token: {token.symbol}\n"
+                                f"Chain: {token.chain.value}\n"
+                                f"Score: {token.composite_score:.1f}/100\n"
+                                f"Liquidity: ${token.liquidity_usd:,.0f}\n"
+                                f"Volume 24h: ${token.volume_24h:,.0f}\n"
+                                f"Age: {token.age_hours:.1f}h\n"
+                                f"Risk: {token.risk_level.value}\n\n"
+                                f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}"
+                            )
+                            
+                            alert_system.send_alert(
+                                "DEX_DISCOVERY",
+                                alert_msg,
+                                priority="HIGH" if token.composite_score >= 70 else "MEDIUM",
+                                metadata={'symbol': token.symbol, 'score': token.composite_score}
+                            )
+                            token._alerted = True
+                            logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
+                            
+                except Exception as e:
+                    logger.error(f"Active scan error: {e}")
+                
+                # ===== PART 2: Process Announcements =====
+                # Get recent announcements from various sources
                 recent = monitor.get_recent_announcements(minutes=10)
                 
                 if recent:
                     logger.info(f"📢 Processing {len(recent)} announcements...")
                     
                     for announcement in recent:
-                        if announcement.token_address in dex_hunter.discovered_tokens:
+                        if announcement.token_address.lower() in dex_hunter.discovered_tokens:
                             continue
                         
-                        logger.info(f"🔍 {announcement.token_symbol} from {announcement.source}")
+                        logger.info(f"🔍 Analyzing: {announcement.token_symbol} from {announcement.source}")
                         
                         try:
-                            success, token = await dex_hunter._analyze_token(
+                            success, token = await dex_hunter.analyze_token(
                                 announcement.token_address,
                                 announcement.chain
                             )
@@ -155,25 +197,32 @@ try:
                                     f"Score: {token.composite_score:.1f}/100\n"
                                     f"Liquidity: ${token.liquidity_usd:,.0f}\n"
                                     f"Risk: {token.risk_level.value}\n\n"
-                                    f"DexScreener: https://dexscreener.com/{token.chain.value}/{token.contract_address}"
+                                    f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}"
                                 )
                                 
                                 alert_system.send_alert(
                                     "LAUNCH_DETECTED",
                                     alert_msg,
-                                    priority="HIGH" if token.composite_score >= 70 else "MEDIUM"
+                                    priority="HIGH" if token.composite_score >= 70 else "MEDIUM",
+                                    metadata={'symbol': token.symbol, 'score': token.composite_score}
                                 )
+                                logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
                         
                         except Exception as e:
                             logger.error(f"Error analyzing {announcement.token_symbol}: {e}")
                 
-                # Show stats
+                # ===== Show Stats =====
                 stats = monitor.get_stats()
+                discovered_count = len(dex_hunter.discovered_tokens)
+                high_score_count = sum(1 for t in dex_hunter.discovered_tokens.values() if t.composite_score >= 60)
+                
                 logger.info(
-                    f"📊 {stats.get('total_announcements', 0)} total, "
-                    f"{stats.get('last_30_min', 0)} in last 30min"
+                    f"📊 Stats: {discovered_count} tokens discovered, "
+                    f"{high_score_count} high-score, "
+                    f"{stats.get('total_announcements', 0)} announcements"
                 )
                 
+                logger.info(f"💤 Sleeping 5 minutes until next scan...")
                 await asyncio.sleep(300)  # 5 minutes
                 
         except Exception as e:
