@@ -16,6 +16,10 @@ os.chdir(PROJECT_ROOT)
 # Add to Python path
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables from .env file (CRITICAL for Discord alerts, API keys, etc.)
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / '.env')
+
 # Add venv site-packages (handle both Windows and Linux)
 if sys.platform == "win32":
     venv_site_packages = PROJECT_ROOT / "venv" / "Lib" / "site-packages"

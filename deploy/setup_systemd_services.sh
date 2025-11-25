@@ -1,5 +1,6 @@
 #!/bin/bash
 # Create systemd service files for background services
+# Updated: Now includes EnvironmentFile for .env loading (fallback for load_dotenv)
 
 set -e
 
@@ -13,6 +14,19 @@ fi
 
 echo "Creating systemd service files..."
 
+# Create systemd-compatible env file from .env (strips quotes and comments)
+echo "Creating systemd-compatible environment file..."
+if [ -f "$PROJECT_DIR/.env" ]; then
+    # Convert .env to systemd format (remove quotes, handle special chars)
+    grep -v '^#' "$PROJECT_DIR/.env" | grep -v '^$' | sed 's/^export //' > "$PROJECT_DIR/.env.systemd"
+    chmod 600 "$PROJECT_DIR/.env.systemd"
+    echo "  ✅ Created $PROJECT_DIR/.env.systemd"
+else
+    echo "  ⚠️  WARNING: $PROJECT_DIR/.env not found!"
+    echo "     Services may not have required API keys (Discord, OpenAI, Kraken, etc.)"
+    touch "$PROJECT_DIR/.env.systemd"
+fi
+
 # Stock Monitor Service
 sudo tee /etc/systemd/system/sentient-stock-monitor.service > /dev/null << EOF
 [Unit]
@@ -25,6 +39,7 @@ User=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
 ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_stock_monitor_simple.py
 Restart=always
 RestartSec=10
@@ -47,6 +62,7 @@ User=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
 ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_crypto_breakout_simple.py
 Restart=always
 RestartSec=10
@@ -69,6 +85,7 @@ User=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
 ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_dex_launch_simple.py
 Restart=always
 RestartSec=10
@@ -91,6 +108,7 @@ User=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=-$PROJECT_DIR/.env.systemd
 ExecStart=$PROJECT_DIR/venv/bin/python3 windows_services/runners/run_crypto_ai_position_manager_simple.py
 Restart=always
 RestartSec=10
