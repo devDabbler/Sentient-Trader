@@ -82,22 +82,12 @@ logger.info("Starting imports (be patient)...")
 try:
     import_start = time.time()
     
-    logger.info("DEBUG: Step 1 - Importing AICryptoPositionManager...")
-    sys.stdout.write("DEBUG: Importing AICryptoPositionManager...\n")
-    sys.stdout.flush()
+    logger.info("Importing AICryptoPositionManager...")
     from services.ai_crypto_position_manager import AICryptoPositionManager
-    logger.info("DEBUG: Step 2 - AICryptoPositionManager imported")
     
-    logger.info("DEBUG: Step 3 - Importing KrakenClient...")
+    logger.info("Importing KrakenClient...")
     from clients.kraken_client import KrakenClient
-    logger.info("DEBUG: Step 4 - KrakenClient imported")
-    logger.info(f"✓ Imported in {time.time() - import_start:.1f}s")
-    sys.stdout.write("DEBUG: Import complete\n")
-    sys.stdout.flush()
-    
-    logger.info("DEBUG: Step 5 - Loading environment...")
-    sys.stdout.write("DEBUG: Initializing Kraken client...\n")
-    sys.stdout.flush()
+    logger.info(f"✓ Imports complete in {time.time() - import_start:.1f}s")
     
     # Load API credentials from environment
     from dotenv import load_dotenv
@@ -106,27 +96,17 @@ try:
     api_key = os.getenv('KRAKEN_API_KEY')
     api_secret = os.getenv('KRAKEN_API_SECRET')
     
-    logger.info(f"DEBUG: Step 6 - API key present: {bool(api_key)}, API secret present: {bool(api_secret)}")
-    
     if not api_key or not api_secret:
         logger.error("❌ KRAKEN_API_KEY and KRAKEN_API_SECRET must be set in .env")
         sys.exit(1)
     
-    logger.info(f"DEBUG: Step 6 - API key present: {bool(api_key)}, API secret present: {bool(api_secret)}")
+    logger.info("✓ API credentials loaded")
     
-    if not api_key or not api_secret:
-        logger.error("❌ KRAKEN_API_KEY and KRAKEN_API_SECRET must be set in .env")
-        sys.exit(1)
-    
-    logger.info("DEBUG: Step 7 - Creating Kraken client...")
+    logger.info("Initializing Kraken client...")
     kraken_client = KrakenClient(api_key=api_key, api_secret=api_secret)
-    logger.info("DEBUG: Step 8 - Kraken client created")
     logger.info("✓ Kraken client initialized")
-    sys.stdout.write("DEBUG: Kraken client initialized\n")
-    sys.stdout.flush()
     
-    logger.info("DEBUG: Step 9 - Creating AI Position Manager instance...")
-    sys.stdout.write("DEBUG: Creating AI Position Manager...\n")
+    logger.info("Creating AI Position Manager...")
     sys.stdout.flush()
     manager = AICryptoPositionManager(
         kraken_client=kraken_client,
@@ -138,12 +118,63 @@ try:
         min_ai_confidence=70.0,            # Only act on high-confidence decisions (0-100)
         require_manual_approval=False      # PRODUCTION: Set to False for auto-execution (use with caution!)
     )
-    logger.info("DEBUG: Step 10 - AI Position Manager created successfully")
     logger.info("✓ AI Position Manager created")
-    sys.stdout.write("DEBUG: AI Position Manager created\n")
     sys.stdout.flush()
     
-    # Print SERVICE READY to both stdout AND logger
+    # ============================================================
+    # SYNC WITH KRAKEN - Check actual positions on startup
+    # ============================================================
+    logger.info("")
+    logger.info("=" * 70)
+    logger.info("📊 SYNCING WITH KRAKEN - Checking your current positions...")
+    logger.info("=" * 70)
+    sys.stdout.flush()
+    
+    try:
+        # First, show all Kraken balances/positions
+        kraken_positions = kraken_client.get_open_positions(calculate_real_cost=True, min_value=1.0)
+        
+        if kraken_positions:
+            logger.info(f"")
+            logger.info(f"📈 Found {len(kraken_positions)} position(s) on Kraken:")
+            logger.info("-" * 50)
+            
+            total_value = 0
+            total_pnl = 0
+            for pos in kraken_positions:
+                value = pos.volume * pos.current_price
+                pnl = pos.unrealized_pnl if hasattr(pos, 'unrealized_pnl') else 0
+                pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+                
+                total_value += value
+                total_pnl += pnl
+                
+                pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                logger.info(f"  {pnl_emoji} {pos.pair}: {pos.volume:.6f} @ ${pos.current_price:,.2f}")
+                logger.info(f"      Entry: ${pos.entry_price:,.2f} | Value: ${value:,.2f} | P&L: {pnl_pct:+.2f}%")
+            
+            logger.info("-" * 50)
+            logger.info(f"💰 Total Portfolio Value: ${total_value:,.2f}")
+            logger.info("")
+        else:
+            logger.info("")
+            logger.info("📭 No positions found on Kraken (or all positions < $1)")
+            logger.info("   The AI will monitor once you open trades via the UI")
+            logger.info("")
+        
+        # Now sync positions to the AI manager
+        sync_result = manager.sync_with_kraken()
+        logger.info(f"🔄 Sync Result: {sync_result['added']} added, {sync_result['removed']} removed, {sync_result['kept']} kept")
+        
+    except Exception as e:
+        logger.error(f"❌ Error syncing with Kraken: {e}")
+        logger.info("   Will continue with empty position list")
+    
+    sys.stdout.flush()
+    
+    # ============================================================
+    # SERVICE READY
+    # ============================================================
     logger.info("")
     logger.info("=" * 70)
     service_ready_msg = f"🚀 SERVICE READY - AI ACTIVELY MONITORING POSITIONS (startup: {time.time() - import_start:.1f}s)"
@@ -165,6 +196,7 @@ try:
     logger.info(f"✓ Trailing Stops: {manager.enable_trailing_stops}")
     logger.info(f"✓ Manual Approval Required: {manager.require_manual_approval}")
     logger.info(f"✓ Min confidence: {manager.min_ai_confidence}%")
+    logger.info(f"✓ Positions being monitored: {len(manager.positions)}")
     logger.info("")
     logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
     logger.info("")
@@ -173,7 +205,7 @@ try:
     
     # Run monitoring loop - AICryptoPositionManager has start_monitoring_loop() and monitor_positions()
     if hasattr(manager, 'start_monitoring_loop'):
-        logger.info("Using manager.start_monitoring_loop() - this runs continuous monitoring")
+        logger.info("🔄 Starting continuous monitoring loop...")
         sys.stdout.flush()
         manager.start_monitoring_loop()
         
