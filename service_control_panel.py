@@ -211,13 +211,11 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
     """Get recent logs for a service. Reads from log files first (both Windows and Linux), falls back to journalctl on Linux."""
     project_root = Path(__file__).parent
     
-    # Map service to likely log filenames (works for both Windows and Linux)
+    # Map service to likely log filenames - MUST match systemd StandardOutput/StandardError paths
     log_map = {
         'sentient-stock-monitor': [
             'logs/stock_monitor_service.log',
             'logs/stock_monitor_error.log',
-            'logs/stock_monitor_minimal.log',
-            'logs/stock_monitor_debug.log'
         ],
         'sentient-dex-launch': [
             'logs/dex_launch_service.log',
@@ -228,11 +226,12 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
             'logs/crypto_breakout_error.log'
         ],
         'sentient-crypto-ai-trader': [
-            'logs/crypto_ai_trader.log',
-            'logs/crypto_ai_position_manager.log'
+            'logs/crypto_ai_position_manager_service.log',
+            'logs/crypto_ai_position_manager_error.log'
         ],
         'sentient-discord-approval': [
-            'logs/discord_approval_bot.log'
+            'logs/discord_approval_service.log',
+            'logs/discord_approval_error.log',
         ]
     }
     
@@ -276,10 +275,19 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
     
     # Fallback: On Linux, try journalctl if no log files found
     if not platform.system().lower().startswith('win'):
-        success, output = run_command(f"journalctl -u {service_name} -n {lines} --no-pager")
-        if success and output:
-            return f"=== journalctl output ===\n{output}"
-        return f"No log files found for {service_name} and journalctl returned: {output}"
+        # Try to get logs from journalctl with better formatting
+        success, output = run_command(f"journalctl -u {service_name} -n {lines} --no-pager -o short-iso")
+        if success and output and 'No entries' not in output:
+            header = f"=== systemd journal for {service_name} (last {lines} lines) ===\n"
+            header += f"=== Note: Log files not found - showing journal output ===\n\n"
+            return header + output
+        
+        # Check if service exists at all
+        success2, status = run_command(f"systemctl is-active {service_name}")
+        if 'inactive' in status or 'dead' in status:
+            return f"Service '{service_name}' is not running.\n\nNo log files found at:\n" + '\n'.join(f"  - {c}" for c in candidates)
+        
+        return f"No logs found for {service_name}.\n\nSearched files:\n" + '\n'.join(f"  - {c}" for c in candidates) + "\n\nJournal: " + output
     
     return f"No log files found for {service_name} (searched: {candidates})"
 
@@ -288,7 +296,7 @@ def clear_service_logs(service_name: str) -> tuple:
     """Clear/reset log files for a service. Returns (success, message)."""
     project_root = Path(__file__).parent
     
-    # Map service to log filenames
+    # Map service to log filenames - MUST match systemd StandardOutput/StandardError paths
     log_map = {
         'sentient-stock-monitor': [
             'logs/stock_monitor_service.log',
@@ -303,10 +311,12 @@ def clear_service_logs(service_name: str) -> tuple:
             'logs/crypto_breakout_error.log'
         ],
         'sentient-crypto-ai-trader': [
-            'logs/crypto_ai_trader.log',
+            'logs/crypto_ai_position_manager_service.log',
+            'logs/crypto_ai_position_manager_error.log'
         ],
         'sentient-discord-approval': [
-            'logs/discord_approval_bot.log'
+            'logs/discord_approval_service.log',
+            'logs/discord_approval_error.log',
         ]
     }
     
