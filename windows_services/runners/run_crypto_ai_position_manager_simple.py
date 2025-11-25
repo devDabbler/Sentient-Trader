@@ -215,6 +215,7 @@ try:
     
     # Run monitoring loop - AICryptoPositionManager has start_monitoring_loop() and monitor_positions()
     if hasattr(manager, 'start_monitoring_loop'):
+        print("🔄 Starting continuous monitoring loop...", flush=True)
         logger.info("🔄 Starting continuous monitoring loop...")
         sys.stdout.flush()
         manager.start_monitoring_loop()
@@ -222,8 +223,10 @@ try:
         # Wait a moment and verify thread started
         time.sleep(2)
         if manager.is_running and manager.thread and manager.thread.is_alive():
+            print("✅ Background monitoring thread is ALIVE and running", flush=True)
             logger.info("✅ Background monitoring thread is ALIVE and running")
         else:
+            print("❌ Background thread failed to start!", flush=True)
             logger.error("❌ Background thread failed to start!")
             logger.error(f"   is_running: {manager.is_running}")
             logger.error(f"   thread: {manager.thread}")
@@ -238,10 +241,14 @@ try:
             while True:
                 time.sleep(60)
                 heartbeat_count += 1
-                # Main thread heartbeat every 5 minutes
-                if heartbeat_count % 5 == 0:
-                    logger.info(f"💓 Main thread heartbeat #{heartbeat_count} - Service uptime: {heartbeat_count} min")
-                    sys.stdout.flush()
+                # Main thread heartbeat every minute
+                print(f"💓 Heartbeat #{heartbeat_count} - Service running for {heartbeat_count} min", flush=True)
+                logger.info(f"💓 Main thread heartbeat #{heartbeat_count} - Service uptime: {heartbeat_count} min")
+                
+                # Also print position count
+                active_count = len([p for p in manager.positions.values() if hasattr(p, 'status') and p.status == 'ACTIVE'])
+                print(f"   📊 Active positions: {active_count}/{len(manager.positions)}", flush=True)
+                sys.stdout.flush()
         except KeyboardInterrupt:
             raise
     else:

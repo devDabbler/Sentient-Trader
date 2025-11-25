@@ -16,6 +16,7 @@ from loguru import logger
 import time
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -24,6 +25,22 @@ import pandas as pd
 import numpy as np
 
 from services.trading_agents import TradingAgentOrchestrator, CoordinatorDecisionContext
+
+
+def log_and_print(message: str, level: str = "INFO"):
+    """Log message AND print to stdout to ensure visibility in service logs"""
+    if level == "INFO":
+        logger.info(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    elif level == "ERROR":
+        logger.error(message)
+    else:
+        logger.debug(message)
+    
+    # Also print to stdout for immediate visibility in tail -f
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"{timestamp} | {level:8} | {message}", flush=True)
 
 
 class PositionAction(Enum):
@@ -400,7 +417,7 @@ class AICryptoPositionManager:
             position.status = PositionStatus.CLOSED.value
             del self.positions[trade_id]
             
-            logger.info(f" Removed {position.pair} from AI monitoring (Reason: {reason})")
+            log_and_print(f"📤 Removed {position.pair} from AI monitoring (Reason: {reason})")
             self._save_state()
             return True
         return False
@@ -418,34 +435,34 @@ class AICryptoPositionManager:
             return decisions
         
         active_positions = [(tid, p) for tid, p in self.positions.items() if p.status == PositionStatus.ACTIVE.value]
-        logger.info(f"   Analyzing {len(active_positions)} active position(s)...")
+        log_and_print(f"   Analyzing {len(active_positions)} active position(s)...")
         
         for trade_id, position in active_positions:
             try:
-                logger.info(f"")
-                logger.info(f"   ━━━ {position.pair} ━━━")
+                log_and_print(f"")
+                log_and_print(f"   ━━━ {position.pair} ━━━")
                 
                 # Skip futures/staking positions (not supported for spot trading)
                 pair_parts = position.pair.split('/')
                 if len(pair_parts) > 0:
                     base_currency = pair_parts[0]
                     if any(base_currency.endswith(suffix) for suffix in ['.F', '.S', '.M', '.P']):
-                        logger.warning(f"   ⏭️ Skipping {position.pair} - futures/staking not supported")
+                        log_and_print(f"   ⏭️ Skipping {position.pair} - futures/staking not supported", "WARNING")
                         position.status = PositionStatus.CLOSED.value
                         position.exit_time = datetime.now()
                         position.exit_reason = "Futures/staking contract not supported"
                         continue
                 
                 # Get current price
-                logger.info(f"   📡 Fetching current price...")
+                log_and_print(f"   📡 Fetching current price...")
                 ticker_info = self.kraken_client.get_ticker_info(position.pair)
                 if not ticker_info:
-                    logger.warning(f"   ⚠️ Failed to get ticker for {position.pair}")
+                    log_and_print(f"   ⚠️ Failed to get ticker for {position.pair}", "WARNING")
                     continue
                 
                 current_price = float(ticker_info.get('c', [0])[0])
                 if current_price <= 0:
-                    logger.warning(f"   ⚠️ Invalid price: {current_price}")
+                    log_and_print(f"   ⚠️ Invalid price: {current_price}", "WARNING")
                     continue
                 
                 # Update position tracking
@@ -469,22 +486,22 @@ class AICryptoPositionManager:
                 # Log position status
                 price_change = ((current_price - old_price) / old_price * 100) if old_price > 0 else 0
                 pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
-                logger.info(f"   💰 Price: ${current_price:,.6f} ({price_change:+.2f}% since last check)")
-                logger.info(f"   {pnl_emoji} P&L: {pnl_pct:+.2f}% (Max: {position.max_favorable_pct:+.2f}%, Min: {position.max_adverse_pct:+.2f}%)")
-                logger.info(f"   🎯 Stop: ${position.stop_loss:,.6f} | Target: ${position.take_profit:,.6f}")
+                log_and_print(f"   💰 Price: ${current_price:,.6f} ({price_change:+.2f}% since last check)")
+                log_and_print(f"   {pnl_emoji} P&L: {pnl_pct:+.2f}% (Max: {position.max_favorable_pct:+.2f}%, Min: {position.max_adverse_pct:+.2f}%)")
+                log_and_print(f"   🎯 Stop: ${position.stop_loss:,.6f} | Target: ${position.take_profit:,.6f}")
                 
                 # Calculate distance to stop/target
                 dist_to_stop = ((current_price - position.stop_loss) / current_price) * 100
                 dist_to_target = ((position.take_profit - current_price) / current_price) * 100
-                logger.info(f"   📏 Distance: Stop {dist_to_stop:+.2f}% | Target {dist_to_target:+.2f}%")
+                log_and_print(f"   📏 Distance: Stop {dist_to_stop:+.2f}% | Target {dist_to_target:+.2f}%")
                 
                 # 1. Check basic exit conditions (stop/target)
-                logger.info(f"   🔍 Checking exit conditions...")
+                log_and_print(f"   🔍 Checking exit conditions...")
                 basic_action = self._check_basic_exit_conditions(position, current_price, pnl_pct)
                 if basic_action:
                     decisions.append(basic_action)
-                    logger.info(f"   🚨 EXIT SIGNAL: {basic_action.action}")
-                    logger.info(f"      Reason: {basic_action.reasoning}")
+                    log_and_print(f"   🚨 EXIT SIGNAL: {basic_action.action}")
+                    log_and_print(f"      Reason: {basic_action.reasoning}")
                     continue
                 
                 # 2. Check breakeven move
@@ -492,53 +509,53 @@ class AICryptoPositionManager:
                     be_action = self._check_breakeven_move(position, pnl_pct)
                     if be_action:
                         decisions.append(be_action)
-                        logger.info(f"   🛡️ BREAKEVEN MOVE triggered at {pnl_pct:+.2f}%")
+                        log_and_print(f"   🛡️ BREAKEVEN MOVE triggered at {pnl_pct:+.2f}%")
                         continue
                     else:
                         if not position.moved_to_breakeven:
-                            logger.info(f"   🛡️ Breakeven: Not triggered (need {position.breakeven_trigger_pct}%+)")
+                            log_and_print(f"   🛡️ Breakeven: Not triggered (need {position.breakeven_trigger_pct}%+)")
                 
                 # 3. Check trailing stop
                 if self.enable_trailing_stops and pnl_pct > 0:
                     trail_action = self._check_trailing_stop(position, current_price, pnl_pct)
                     if trail_action:
                         decisions.append(trail_action)
-                        logger.info(f"   📈 TRAILING STOP: Tightening to ${trail_action.new_stop:,.4f}")
+                        log_and_print(f"   📈 TRAILING STOP: Tightening to ${trail_action.new_stop:,.4f}")
                         continue
                     else:
-                        logger.info(f"   📈 Trailing: Active (trail: {position.trailing_stop_pct}%)")
+                        log_and_print(f"   📈 Trailing: Active (trail: {position.trailing_stop_pct}%)")
                 
                 # 4. Get AI recommendation
                 if self.enable_ai_decisions and self.llm_analyzer:
-                    logger.info(f"   🤖 Getting AI recommendation...")
+                    log_and_print(f"   🤖 Getting AI recommendation...")
                     ai_decision = self._get_ai_recommendation(position, current_price, pnl_pct)
                     
                     if ai_decision:
-                        logger.info(f"   🤖 AI says: {ai_decision.action} (confidence: {ai_decision.confidence:.0f}%)")
+                        log_and_print(f"   🤖 AI says: {ai_decision.action} (confidence: {ai_decision.confidence:.0f}%)")
                         if ai_decision.confidence >= self.min_ai_confidence:
-                            logger.info(f"   ✅ Confidence meets threshold ({self.min_ai_confidence}%) - executing")
+                            log_and_print(f"   ✅ Confidence meets threshold ({self.min_ai_confidence}%) - executing")
                             decisions.append(ai_decision)
                             
                             # Execute AI decision (will require approval if enabled)
                             result = self.execute_decision(position.trade_id, ai_decision)
                             if not result and self.require_manual_approval:
-                                logger.info(f"   ⏳ Sent to Discord for approval")
+                                log_and_print(f"   ⏳ Sent to Discord for approval")
                             
                             # Update position with AI feedback
                             position.last_ai_action = ai_decision.action
                             position.last_ai_reasoning = ai_decision.reasoning
                             position.last_ai_confidence = ai_decision.confidence
                         else:
-                            logger.info(f"   ⏸️ Confidence below threshold - no action")
+                            log_and_print(f"   ⏸️ Confidence below threshold - no action")
                     else:
-                        logger.info(f"   🤖 AI: No strong recommendation")
+                        log_and_print(f"   🤖 AI: No strong recommendation")
                 else:
-                    logger.info(f"   🤖 AI decisions: {'Disabled' if not self.enable_ai_decisions else 'No LLM configured'}")
+                    log_and_print(f"   🤖 AI decisions: {'Disabled' if not self.enable_ai_decisions else 'No LLM configured'}")
                 
-                logger.info(f"   ✅ {position.pair} check complete")
+                log_and_print(f"   ✅ {position.pair} check complete")
                 
             except Exception as e:
-                logger.error(f"   ❌ Error monitoring {trade_id}: {str(e)}")
+                log_and_print(f"   ❌ Error monitoring {trade_id}: {str(e)}", "ERROR")
                 continue
         
         # Save state after check
@@ -1034,7 +1051,7 @@ Analyze the position using these factors:
             True if executed successfully, False if awaiting approval
         """
         if trade_id not in self.positions:
-            logger.error(f"Position {trade_id} not found")
+            log_and_print(f"Position {trade_id} not found", "ERROR")
             return False
         
         # 🚨 SAFETY CHECK: Require manual approval unless explicitly skipped
@@ -1061,9 +1078,9 @@ Analyze the position using these factors:
                 'MOVE_TO_BREAKEVEN': '🛡️'
             }
             
-            logger.warning(f"🚨 APPROVAL REQUIRED: {decision.action} for {position.pair}")
-            logger.warning(f"   Reasoning: {decision.reasoning}")
-            logger.warning(f"   Approval ID: {approval_id}")
+            log_and_print(f"🚨 APPROVAL REQUIRED: {decision.action} for {position.pair}", "WARNING")
+            log_and_print(f"   Reasoning: {decision.reasoning}")
+            log_and_print(f"   Approval ID: {approval_id}")
             
             # 🔔 SEND DISCORD APPROVAL REQUEST
             if self.discord_approval_manager:
@@ -1102,13 +1119,13 @@ Analyze the position using these factors:
                     )
                     
                     if sent:
-                        logger.info(f"📨 Discord approval request sent for {position.pair}")
-                        logger.info(f"   Reply APPROVE or REJECT in Discord to execute")
+                        log_and_print(f"📨 Discord approval request sent for {position.pair}")
+                        log_and_print(f"   Reply APPROVE or REJECT in Discord to execute")
                     else:
-                        logger.warning(f"⚠️ Could not send Discord approval - check Discord bot status")
+                        log_and_print(f"⚠️ Could not send Discord approval - check Discord bot status", "WARNING")
                         
                 except Exception as e:
-                    logger.error(f"Error sending Discord approval: {e}")
+                    log_and_print(f"Error sending Discord approval: {e}", "ERROR")
             else:
                 # Fallback: send simple notification
                 self._send_notification(
@@ -1126,13 +1143,13 @@ Analyze the position using these factors:
         position = self.positions[trade_id]
         
         try:
-            logger.info("=" * 80)
-            logger.info(f"🤖 EXECUTING AI DECISION: {position.pair}")
-            logger.info("=" * 80)
-            logger.info(f"   Action: {decision.action}")
-            logger.info(f"   Confidence: {decision.confidence:.1f}%")
-            logger.info(f"   Reasoning: {decision.reasoning}")
-            logger.info("=" * 80)
+            log_and_print("=" * 80)
+            log_and_print(f"🤖 EXECUTING AI DECISION: {position.pair}")
+            log_and_print("=" * 80)
+            log_and_print(f"   Action: {decision.action}")
+            log_and_print(f"   Confidence: {decision.confidence:.1f}%")
+            log_and_print(f"   Reasoning: {decision.reasoning}")
+            log_and_print("=" * 80)
             
             if decision.action == PositionAction.CLOSE_NOW.value:
                 return self._execute_close_position(position, decision)
@@ -1150,15 +1167,15 @@ Analyze the position using these factors:
                 return self._execute_move_to_breakeven(position, decision)
             
             elif decision.action == PositionAction.HOLD.value:
-                logger.info(f"✓ HOLD - No action needed for {position.pair}")
+                log_and_print(f"✓ HOLD - No action needed for {position.pair}")
                 return True
             
             else:
-                logger.warning(f"Unknown action: {decision.action}")
+                log_and_print(f"Unknown action: {decision.action}", "WARNING")
                 return False
                 
         except Exception as e:
-            logger.error("Error executing decision for {trade_id}: {}", str(e), exc_info=True)
+            log_and_print(f"Error executing decision for {trade_id}: {str(e)}", "ERROR")
             return False
     
     def _execute_close_position(
@@ -1460,11 +1477,9 @@ Analyze the position using these factors:
         def monitoring_loop():
             self.is_running = True
             cycle_count = 0
-            logger.info("=" * 80)
-            logger.info("🚀 AI CRYPTO POSITION MANAGER MONITORING STARTED")
-            logger.info("=" * 80)
-            sys.stdout.flush()
-            sys.stderr.flush()
+            log_and_print("=" * 60)
+            log_and_print("🚀 AI CRYPTO POSITION MANAGER MONITORING STARTED")
+            log_and_print("=" * 60)
             
             while self.is_running:
                 try:
@@ -1473,81 +1488,74 @@ Analyze the position using these factors:
                     active_count = len(active_positions)
                     
                     # Detailed heartbeat log every cycle
-                    logger.info("")
-                    logger.info("=" * 60)
-                    logger.info(f"💓 CYCLE #{cycle_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    logger.info("=" * 60)
-                    logger.info(f"   Active positions: {active_count}")
-                    logger.info(f"   Pending approvals: {len(self.pending_approvals)}")
+                    log_and_print("")
+                    log_and_print("=" * 60)
+                    log_and_print(f"💓 CYCLE #{cycle_count} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    log_and_print("=" * 60)
+                    log_and_print(f"   Active positions: {active_count}")
+                    log_and_print(f"   Pending approvals: {len(self.pending_approvals)}")
                     
                     # Show each position status
                     if active_positions:
-                        logger.info("")
-                        logger.info("📊 POSITION STATUS:")
+                        log_and_print("")
+                        log_and_print("📊 POSITION STATUS:")
                         for pos in active_positions:
                             pnl_pct = 0
                             if pos.current_price and pos.entry_price:
                                 pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
                             pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
                             hold_hours = (datetime.now() - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
-                            logger.info(f"   {pnl_emoji} {pos.pair}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
-                            logger.info(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f}")
-                    
-                    sys.stdout.flush()
+                            log_and_print(f"   {pnl_emoji} {pos.pair}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
+                            log_and_print(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f}")
                     
                     # Monitor all positions
-                    logger.info("")
-                    logger.info("🔍 ANALYZING POSITIONS...")
+                    log_and_print("")
+                    log_and_print("🔍 ANALYZING POSITIONS...")
                     decisions = self.monitor_positions()
                     
                     # Execute AI decisions
                     if decisions:
-                        logger.info("")
-                        logger.info(f"⚡ ACTIONS REQUIRED: {len(decisions)} decision(s)")
+                        log_and_print("")
+                        log_and_print(f"⚡ ACTIONS REQUIRED: {len(decisions)} decision(s)")
                         for i, decision in enumerate(decisions, 1):
-                            logger.info(f"   [{i}] {decision.action} - Confidence: {decision.confidence:.0f}%")
-                            logger.info(f"       Reason: {decision.reasoning[:100]}...")
+                            log_and_print(f"   [{i}] {decision.action} - Confidence: {decision.confidence:.0f}%")
+                            log_and_print(f"       Reason: {decision.reasoning[:100]}...")
                             
                             # Find the position for this decision
                             for trade_id, position in self.positions.items():
                                 if position.status == PositionStatus.ACTIVE.value:
-                                    logger.info(f"       Executing for: {position.pair}")
+                                    log_and_print(f"       Executing for: {position.pair}")
                                     self.execute_decision(trade_id, decision)
                                     break
                     else:
                         if active_count == 0:
-                            logger.info("   ⏳ No positions to manage - waiting for trades...")
+                            log_and_print("   ⏳ No positions to manage - waiting for trades...")
                         else:
-                            logger.info("   ✅ All positions healthy - no action needed")
+                            log_and_print("   ✅ All positions healthy - no action needed")
                     
                     # Show pending approvals if any
                     if self.pending_approvals:
-                        logger.info("")
-                        logger.info(f"⏳ PENDING APPROVALS ({len(self.pending_approvals)}):")
+                        log_and_print("")
+                        log_and_print(f"⏳ PENDING APPROVALS ({len(self.pending_approvals)}):")
                         for approval_id, approval in self.pending_approvals.items():
                             age_mins = (datetime.now() - approval['timestamp']).total_seconds() / 60
-                            logger.info(f"   • {approval['pair']}: {approval['decision'].action} (waiting {age_mins:.0f}m)")
+                            log_and_print(f"   • {approval['pair']}: {approval['decision'].action} (waiting {age_mins:.0f}m)")
                     
-                    logger.info("")
-                    logger.info(f"💤 Sleeping {self.check_interval_seconds}s until next cycle...")
-                    logger.info("=" * 60)
-                    sys.stdout.flush()
-                    sys.stderr.flush()
+                    log_and_print("")
+                    log_and_print(f"💤 Sleeping {self.check_interval_seconds}s until next cycle...")
+                    log_and_print("=" * 60)
                     
                     time.sleep(self.check_interval_seconds)
                     
                 except Exception as e:
-                    logger.error("❌ Error in monitoring loop: {}", str(e), exc_info=True)
-                    sys.stdout.flush()
+                    log_and_print(f"❌ Error in monitoring loop: {str(e)}", "ERROR")
                     time.sleep(10)  # Short sleep on error
             
-            logger.info("🛑 AI Crypto Position Manager stopped")
-            sys.stdout.flush()
+            log_and_print("🛑 AI Crypto Position Manager stopped")
         
         self.thread = threading.Thread(target=monitoring_loop, daemon=True)
         self.thread.start()
-        logger.info(f"✅ Monitoring loop started (checking every {self.check_interval_seconds}s)")
-        sys.stdout.flush()
+        log_and_print(f"✅ Monitoring loop started (checking every {self.check_interval_seconds}s)")
     
     def stop(self):
         """Stop the monitoring loop"""
@@ -1713,8 +1721,11 @@ Analyze the position using these factors:
             Dict with 'removed', 'added', 'kept' counts
         """
         try:
+            log_and_print("🔄 Syncing with Kraken portfolio...")
+            
             # Fetch current Kraken positions
             kraken_positions = self.kraken_client.get_open_positions(calculate_real_cost=True)
+            log_and_print(f"   Found {len(kraken_positions)} position(s) on Kraken")
             
             # Create a map of Kraken positions by pair
             kraken_pairs = {}
@@ -1732,7 +1743,7 @@ Analyze the position using these factors:
                 # Check if this pair still exists in Kraken
                 if ai_pos.pair not in kraken_pairs:
                     positions_to_remove.append(trade_id)
-                    logger.info(f"📤 Removing {ai_pos.pair} - No longer in Kraken portfolio")
+                    log_and_print(f"   📤 Removing {ai_pos.pair} - No longer in Kraken portfolio")
                 else:
                     kept_count += 1
             
@@ -1757,6 +1768,8 @@ Analyze the position using these factors:
                     stop_loss = pos.current_price * 0.95
                     take_profit = pos.current_price * 1.10
                     
+                    log_and_print(f"   📥 Adding {pos.pair} - Volume: {pos.volume:.6f}, Entry: ${pos.entry_price:,.4f}")
+                    
                     success = self.add_position(
                         trade_id=trade_id,
                         pair=pos.pair,
@@ -1771,11 +1784,11 @@ Analyze the position using these factors:
                     
                     if success:
                         added_count += 1
-                        logger.info(f"📥 Added {pos.pair} - Found in Kraken portfolio")
+                        log_and_print(f"   ✅ Added {pos.pair} to AI monitoring")
             
             self._save_state()
             
-            logger.info(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
+            log_and_print(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
             
             return {
                 'added': added_count,
@@ -1784,7 +1797,7 @@ Analyze the position using these factors:
             }
             
         except Exception as e:
-            logger.error(f"Error syncing with Kraken: {e}", exc_info=True)
+            log_and_print(f"Error syncing with Kraken: {e}", "ERROR")
             return {'added': 0, 'removed': 0, 'kept': 0}
     
     def get_status(self) -> Dict:
