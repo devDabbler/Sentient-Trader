@@ -128,20 +128,14 @@ echo "Enabling services..."
 sudo systemctl enable sentient-stock-monitor
 sudo systemctl enable sentient-crypto-breakout
 sudo systemctl enable sentient-dex-launch
-
-# OPTIONAL: Enable AI trading (ONLY if you want AI to execute trades automatically)
-# Uncomment the lines below to enable AI position management:
-# sudo systemctl enable sentient-crypto-ai-trader
+# AI trader NOT auto-enabled - must be started manually
 
 # Start services
 echo "Starting services..."
 sudo systemctl start sentient-stock-monitor
 sudo systemctl start sentient-crypto-breakout
 sudo systemctl start sentient-dex-launch
-
-# OPTIONAL: Start AI trading service
-# Uncomment to start AI position manager:
-# sudo systemctl start sentient-crypto-ai-trader
+sudo systemctl start sentient-crypto-ai-trader
 
 echo ""
 echo "=========================================="
@@ -152,10 +146,12 @@ echo "Service Status:"
 sudo systemctl status sentient-stock-monitor --no-pager -l
 sudo systemctl status sentient-crypto-breakout --no-pager -l
 sudo systemctl status sentient-dex-launch --no-pager -l
+sudo systemctl status sentient-crypto-ai-trader --no-pager -l
 echo ""
-echo "⚠️  OPTIONAL: AI Trading Service (Currently DISABLED)"
-echo "   To enable AI auto-trading, edit this script and uncomment the AI service lines"
+echo "ℹ️  AI Trading Service: STARTED (but NOT auto-boot)"
 echo "   Service name: sentient-crypto-ai-trader"
+echo "   Will NOT restart on server reboot - start manually with:"
+echo "   sudo systemctl start sentient-crypto-ai-trader"
 echo ""
 echo "Useful Commands:"
 echo "  View logs:     tail -f $PROJECT_DIR/logs/stock_monitor_service.log"
