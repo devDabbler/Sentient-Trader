@@ -117,19 +117,33 @@ class AICryptoScanner:
         
         logger.info(f"Found {len(base_opportunities)} base opportunities, adding AI analysis...")
         
+        # Limit AI analysis to top N opportunities to prevent timeout issues
+        # AI analysis is expensive - only analyze the best quantitative picks
+        max_ai_analysis = min(5, len(base_opportunities))
+        logger.info(f"Analyzing top {max_ai_analysis} with AI (limiting to prevent timeouts)...")
+        
         # Add AI confidence analysis to each opportunity
         ai_opportunities = []
-        for opp in base_opportunities:
-            ai_opp = self._add_ai_confidence(opp)
-            
-            # Filter by AI confidence if specified
-            if min_ai_confidence and ai_opp.ai_confidence != min_ai_confidence:
-                if min_ai_confidence == 'HIGH' and ai_opp.ai_confidence not in ['HIGH']:
-                    continue
-                elif min_ai_confidence == 'MEDIUM' and ai_opp.ai_confidence not in ['HIGH', 'MEDIUM']:
-                    continue
-            
-            ai_opportunities.append(ai_opp)
+        for i, opp in enumerate(base_opportunities[:max_ai_analysis]):
+            try:
+                ai_opp = self._add_ai_confidence(opp)
+                
+                # Filter by AI confidence if specified
+                if min_ai_confidence and ai_opp.ai_confidence != min_ai_confidence:
+                    if min_ai_confidence == 'HIGH' and ai_opp.ai_confidence not in ['HIGH']:
+                        continue
+                    elif min_ai_confidence == 'MEDIUM' and ai_opp.ai_confidence not in ['HIGH', 'MEDIUM']:
+                        continue
+                
+                ai_opportunities.append(ai_opp)
+            except Exception as e:
+                logger.warning(f"Skipping AI analysis for {opp.symbol}: {e}")
+                # Fall back to rule-based for this one
+                ai_opportunities.append(self._rule_based_confidence(opp))
+        
+        # Add remaining opportunities without AI analysis (rule-based)
+        for opp in base_opportunities[max_ai_analysis:]:
+            ai_opportunities.append(self._rule_based_confidence(opp))
         
         # Re-sort by combined score (quant + AI rating)
         ai_opportunities.sort(
@@ -241,17 +255,30 @@ Respond ONLY with valid JSON, no extra text:
         if not self.llm_helper:
             return ""
         
+        import concurrent.futures
+        
         try:
             # Use MEDIUM priority with caching for crypto analysis (5 min TTL)
             cache_key = f"crypto_ai_{symbol}"
-            response = self.llm_helper.request(
-                prompt=prompt,
-                cache_key=cache_key,
-                ttl=300,  # 5 minutes cache
-                temperature=0.3  # Lower temperature for consistent analysis
-            )
             
-            return response if response else ""
+            # Add timeout wrapper to prevent hanging on slow/stuck LLM requests
+            def make_request():
+                return self.llm_helper.request(
+                    prompt=prompt,
+                    cache_key=cache_key,
+                    ttl=300,  # 5 minutes cache
+                    temperature=0.3  # Lower temperature for consistent analysis
+                )
+            
+            # Use ThreadPoolExecutor with timeout to prevent hanging
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(make_request)
+                try:
+                    response = future.result(timeout=30)  # 30 second timeout per request
+                    return response if response else ""
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"⏱️ LLM request timeout for {symbol} (30s) - using rule-based analysis")
+                    return ""
             
         except Exception as e:
             logger.error(f"LLM query failed for {symbol}: {e}")
