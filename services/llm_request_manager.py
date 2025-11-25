@@ -648,9 +648,11 @@ class LLMRequestManager:
             "Content-Type": "application/json"
         }
         
-        # Map model name - strip groq/ prefix if present
-        model = request.model or "llama-3.1-8b-instant"
-        if model.startswith("groq/"):
+        # Map model name - use default for hybrid routing or strip groq/ prefix
+        model = request.model
+        if not model or model == "hybrid":
+            model = "llama-3.1-8b-instant"
+        elif model.startswith("groq/"):
             model = model.replace("groq/", "")
         
         payload = {
