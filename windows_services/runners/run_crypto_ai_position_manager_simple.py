@@ -161,15 +161,38 @@ try:
     logger.info("")
     logger.warning("⚠️  AUTO-EXECUTION MODE - AI will execute trades without approval!")
     logger.info("")
+    sys.stdout.flush()
+    sys.stderr.flush()
     
     # Run monitoring loop - AICryptoPositionManager has start_monitoring_loop() and monitor_positions()
     if hasattr(manager, 'start_monitoring_loop'):
         logger.info("Using manager.start_monitoring_loop() - this runs continuous monitoring")
+        sys.stdout.flush()
         manager.start_monitoring_loop()
+        
+        # Wait a moment and verify thread started
+        time.sleep(2)
+        if manager.is_running and manager.thread and manager.thread.is_alive():
+            logger.info("✅ Background monitoring thread is ALIVE and running")
+        else:
+            logger.error("❌ Background thread failed to start!")
+            logger.error(f"   is_running: {manager.is_running}")
+            logger.error(f"   thread: {manager.thread}")
+            if manager.thread:
+                logger.error(f"   thread.is_alive(): {manager.thread.is_alive()}")
+        
+        sys.stdout.flush()
+        
         # Keep main thread alive while background monitoring runs
+        heartbeat_count = 0
         try:
             while True:
                 time.sleep(60)
+                heartbeat_count += 1
+                # Main thread heartbeat every 5 minutes
+                if heartbeat_count % 5 == 0:
+                    logger.info(f"💓 Main thread heartbeat #{heartbeat_count} - Service uptime: {heartbeat_count} min")
+                    sys.stdout.flush()
         except KeyboardInterrupt:
             raise
     else:

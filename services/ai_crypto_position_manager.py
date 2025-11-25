@@ -348,10 +348,10 @@ class AICryptoPositionManager:
         decisions = []
         
         if not self.positions:
-            logger.debug("No positions to monitor")
+            # Changed from debug to info for visibility
             return decisions
         
-        logger.debug(f" Checking {len(self.positions)} positions...")
+        logger.info(f"📋 Checking {len(self.positions)} tracked positions...")
         
         for trade_id, position in list(self.positions.items()):
             try:
@@ -1336,6 +1336,7 @@ Analyze the position using these factors:
         Checks positions every check_interval_seconds
         """
         import threading
+        import sys
         
         if self.is_running:
             logger.warning("Monitoring loop already running")
@@ -1343,31 +1344,55 @@ Analyze the position using these factors:
         
         def monitoring_loop():
             self.is_running = True
+            cycle_count = 0
             logger.info("=" * 80)
             logger.info("🚀 AI CRYPTO POSITION MANAGER STARTED")
             logger.info("=" * 80)
+            sys.stdout.flush()
+            sys.stderr.flush()
             
             while self.is_running:
                 try:
+                    cycle_count += 1
+                    active_count = len([p for p in self.positions.values() if p.status == PositionStatus.ACTIVE.value])
+                    
+                    # Heartbeat log every cycle
+                    logger.info(f"💓 Cycle #{cycle_count} - Monitoring {active_count} active positions...")
+                    sys.stdout.flush()
+                    
                     # Monitor all positions
                     decisions = self.monitor_positions()
                     
                     # Execute AI decisions
-                    for decision in decisions:
-                        # Find the position for this decision
-                        for trade_id, position in self.positions.items():
-                            if position.status == PositionStatus.ACTIVE.value:
-                                self.execute_decision(trade_id, decision)
-                                break
+                    if decisions:
+                        logger.info(f"📊 Found {len(decisions)} AI decisions to process")
+                        for decision in decisions:
+                            # Find the position for this decision
+                            for trade_id, position in self.positions.items():
+                                if position.status == PositionStatus.ACTIVE.value:
+                                    self.execute_decision(trade_id, decision)
+                                    break
+                    else:
+                        if active_count == 0:
+                            logger.info(f"⏳ No positions to manage - waiting for trades...")
+                        else:
+                            logger.info(f"✓ Cycle #{cycle_count} complete - all positions healthy")
+                    
+                    sys.stdout.flush()
+                    sys.stderr.flush()
                     
                     # Sleep until next check
+                    logger.info(f"💤 Next check in {self.check_interval_seconds}s...")
+                    sys.stdout.flush()
                     time.sleep(self.check_interval_seconds)
                     
                 except Exception as e:
                     logger.error("Error in monitoring loop: {}", str(e), exc_info=True)
+                    sys.stdout.flush()
                     time.sleep(10)  # Short sleep on error
             
             logger.info("🛑 AI Crypto Position Manager stopped")
+            sys.stdout.flush()
         
         self.thread = threading.Thread(target=monitoring_loop, daemon=True)
         self.thread.start()
