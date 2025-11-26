@@ -1005,7 +1005,7 @@ def main():
                 # Controls
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    if st.button("Start", key=f"start_{svc_name}", disabled=status['active']):
+                    if st.button("Start", key=f"tab_start_{svc_name}", disabled=status['active']):
                         ok, msg = control_service(svc_name, "start")
                         if ok:
                             st.success("Started")
@@ -1015,7 +1015,7 @@ def main():
                             st.error(f"Error: {msg}")
                 
                 with c2:
-                    if st.button("Stop", key=f"stop_{svc_name}", disabled=not status['active']):
+                    if st.button("Stop", key=f"tab_stop_{svc_name}", disabled=not status['active']):
                         ok, msg = control_service(svc_name, "stop")
                         if ok:
                             st.success("Stopped")
@@ -1025,7 +1025,7 @@ def main():
                             st.error(f"Error: {msg}")
                 
                 with c3:
-                    if st.button("Restart", key=f"restart_{svc_name}"):
+                    if st.button("Restart", key=f"tab_restart_{svc_name}"):
                         ok, msg = control_service(svc_name, "restart")
                         if ok:
                             st.success("Restarted")
@@ -1046,11 +1046,11 @@ def main():
                         min_value=interval_min,
                         max_value=interval_max,
                         value=current_interval,
-                        key=f"interval_{svc_name}"
+                        key=f"tab_interval_{svc_name}"
                     )
                     
                     if new_interval != current_interval:
-                        if st.button("Update Interval", key=f"update_{svc_name}"):
+                        if st.button("Update Interval", key=f"tab_update_{svc_name}"):
                             if set_service_interval(svc_name, svc_info, int(new_interval)):
                                 st.success("Interval updated")
                                 time.sleep(1)
@@ -1205,7 +1205,7 @@ def main():
                     btn_col1, btn_col2, btn_col3 = st.columns(3)
                     
                     with btn_col1:
-                        if st.button("▶️", key=f"start_{service_name}", help="Start"):
+                        if st.button("▶️", key=f"main_start_{service_name}", help="Start"):
                             success, msg = control_service(service_name, "start")
                             if success:
                                 st.toast(f"✅ {display_name} started!")
@@ -1214,7 +1214,7 @@ def main():
                             st.rerun()
                     
                     with btn_col2:
-                        if st.button("⏹️", key=f"stop_{service_name}", help="Stop"):
+                        if st.button("⏹️", key=f"main_stop_{service_name}", help="Stop"):
                             success, msg = control_service(service_name, "stop")
                             if success:
                                 st.toast(f"⏹️ {display_name} stopped!")
@@ -1223,7 +1223,7 @@ def main():
                             st.rerun()
                     
                     with btn_col3:
-                        if st.button("🔄", key=f"restart_{service_name}", help="Restart"):
+                        if st.button("🔄", key=f"main_restart_{service_name}", help="Restart"):
                             success, msg = control_service(service_name, "restart")
                             if success:
                                 st.toast(f"🔄 {display_name} restarted!")
@@ -1239,11 +1239,11 @@ def main():
                         st.caption("💡 Recommended: Keep ON")
                     
                     if status["enabled"]:
-                        if st.button("🔕 Disable", key=f"disable_{service_name}"):
+                        if st.button("🔕 Disable", key=f"main_disable_{service_name}"):
                             control_service(service_name, "disable")
                             st.rerun()
                     else:
-                        if st.button("🔔 Enable", key=f"enable_{service_name}"):
+                        if st.button("🔔 Enable", key=f"main_enable_{service_name}"):
                             control_service(service_name, "enable")
                             st.rerun()
                 
@@ -1310,7 +1310,7 @@ def main():
                                 max_value=min(600, interval_max),  # Cap slider at 10 min for usability
                                 value=min(current_interval, 600),
                                 step=5,
-                                key=f"slider_{service_name}",
+                                key=f"main_slider_{service_name}",
                                 help="Drag for quick adjustment (5-600s)"
                             )
                         
@@ -1322,18 +1322,18 @@ def main():
                                 max_value=interval_max,
                                 value=current_interval,
                                 step=1,
-                                key=f"custom_{service_name}",
+                                key=f"main_custom_{service_name}",
                                 help=f"Enter any value from {interval_min}s to {interval_max}s"
                             )
                         
                         # Determine which value to use (custom takes precedence if changed)
-                        if f"last_custom_{service_name}" not in st.session_state:
-                            st.session_state[f"last_custom_{service_name}"] = current_interval
+                        if f"main_last_custom_{service_name}" not in st.session_state:
+                            st.session_state[f"main_last_custom_{service_name}"] = current_interval
                         
                         # Use custom if it was changed, otherwise use slider
-                        if custom_val != st.session_state[f"last_custom_{service_name}"]:
+                        if custom_val != st.session_state[f"main_last_custom_{service_name}"]:
                             new_interval = custom_val
-                            st.session_state[f"last_custom_{service_name}"] = custom_val
+                            st.session_state[f"main_last_custom_{service_name}"] = custom_val
                         else:
                             new_interval = slider_val
                         
@@ -1348,7 +1348,7 @@ def main():
                         # Apply button
                         col_apply, col_reset = st.columns([1, 1])
                         with col_apply:
-                            if st.button("💾 Apply & Restart", key=f"apply_interval_{service_name}", type="primary"):
+                            if st.button("💾 Apply & Restart", key=f"main_apply_interval_{service_name}", type="primary"):
                                 if set_service_interval(service_name, svc_info, int(new_interval)):
                                     # Restart the service to apply new interval
                                     success, msg = control_service(service_name, "restart")
@@ -1362,7 +1362,7 @@ def main():
                         
                         with col_reset:
                             default_val = svc_info.get("interval_default", 60)
-                            if st.button(f"↩️ Reset to Default ({default_val}s)", key=f"reset_{service_name}"):
+                            if st.button(f"↩️ Reset to Default ({default_val}s)", key=f"main_reset_{service_name}"):
                                 set_service_interval(service_name, svc_info, default_val)
                                 control_service(service_name, "restart")
                                 st.rerun()
@@ -1383,7 +1383,7 @@ def main():
                         for i, (label, seconds, emoji) in enumerate(presets):
                             with preset_cols[i]:
                                 if seconds >= interval_min and seconds <= interval_max:
-                                    if st.button(f"{emoji} {label}", key=f"preset_{seconds}_{service_name}"):
+                                    if st.button(f"{emoji} {label}", key=f"main_preset_{seconds}_{service_name}"):
                                         set_service_interval(service_name, svc_info, seconds)
                                         control_service(service_name, "restart")
                                         st.rerun()
@@ -1419,15 +1419,15 @@ def main():
                         # Quick action buttons (mobile-friendly)
                         btn_col1, btn_col2, btn_col3 = st.columns(3)
                         with btn_col1:
-                            if st.button("✅ All", key=f"watchlist_all_{service_name}", use_container_width=True):
+                            if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True):
                                 set_service_watchlist(service_name, all_tickers)
                                 st.rerun()
                         with btn_col2:
-                            if st.button("❌ Clear", key=f"watchlist_clear_{service_name}", use_container_width=True):
+                            if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True):
                                 set_service_watchlist(service_name, [])
                                 st.rerun()
                         with btn_col3:
-                            if st.button("🔝 Top 5", key=f"watchlist_top_{service_name}", use_container_width=True):
+                            if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True):
                                 set_service_watchlist(service_name, all_tickers[:5])
                                 st.rerun()
                         
@@ -1436,7 +1436,7 @@ def main():
                             "Select tickers to monitor",
                             options=all_tickers,
                             default=[t for t in current_watchlist if t in all_tickers],
-                            key=f"watchlist_select_{service_name}",
+                            key=f"main_watchlist_select_{service_name}",
                             help="Select which tickers this service should scan"
                         )
                         
@@ -1444,11 +1444,11 @@ def main():
                         custom_input = st.text_input(
                             "Add custom tickers (comma-separated)",
                             placeholder="SMCI, RDDT, MSTR",
-                            key=f"custom_tickers_{service_name}"
+                            key=f"main_custom_tickers_{service_name}"
                         )
                         
                         # Save watchlist button
-                        if st.button("💾 Save Watchlist", key=f"save_watchlist_{service_name}", type="primary", use_container_width=True):
+                        if st.button("💾 Save Watchlist", key=f"main_save_watchlist_{service_name}", type="primary", use_container_width=True):
                             # Combine selected and custom tickers
                             final_tickers = list(selected_tickers)
                             if custom_input:
@@ -1477,7 +1477,7 @@ def main():
                         alerts_enabled = st.checkbox(
                             "Enable Discord Alerts",
                             value=discord_settings.get('enabled', True),
-                            key=f"discord_enabled_{service_name}",
+                            key=f"main_discord_enabled_{service_name}",
                             help="Turn Discord notifications on/off for this service"
                         )
                         
@@ -1489,7 +1489,7 @@ def main():
                                 max_value=95,
                                 value=discord_settings.get('min_confidence', 70),
                                 step=5,
-                                key=f"discord_confidence_{service_name}",
+                                key=f"main_discord_confidence_{service_name}",
                                 help="Only send alerts for signals above this confidence level"
                             )
                             
@@ -1499,7 +1499,7 @@ def main():
                                 min_value=1,
                                 max_value=120,
                                 value=discord_settings.get('cooldown_minutes', 15),
-                                key=f"discord_cooldown_{service_name}",
+                                key=f"main_discord_cooldown_{service_name}",
                                 help="Minimum time between alerts for the same ticker"
                             )
                             
@@ -1510,7 +1510,7 @@ def main():
                                 "Alert Types",
                                 options=all_alert_types,
                                 default=[t for t in current_types if t in all_alert_types],
-                                key=f"discord_types_{service_name}",
+                                key=f"main_discord_types_{service_name}",
                                 help="Which types of alerts to send"
                             )
                         else:
@@ -1519,7 +1519,7 @@ def main():
                             alert_types = ['signal', 'breakout', 'error']
                         
                         # Save Discord settings button
-                        if st.button("💾 Save Discord Settings", key=f"save_discord_{service_name}", use_container_width=True):
+                        if st.button("💾 Save Discord Settings", key=f"main_save_discord_{service_name}", use_container_width=True):
                             new_discord_settings = {
                                 'enabled': alerts_enabled,
                                 'min_confidence': min_confidence,
