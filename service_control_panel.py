@@ -188,11 +188,22 @@ def get_service_interval(service_name: str, svc_info: dict) -> int:
     """Get the current interval for a service"""
     intervals = load_service_intervals()
     interval_key = svc_info.get("interval_key")
+    min_interval = svc_info.get("interval_min", 10)
+    max_interval = svc_info.get("interval_max", 3600)
+    default_interval = svc_info.get("interval_default", min_interval)
+    
     if not interval_key:
-        return 0
+        return default_interval
     
     service_config = intervals.get(service_name, {})
-    return service_config.get(interval_key, svc_info.get("interval_default", 60))
+    interval = service_config.get(interval_key, default_interval)
+    
+    # Ensure interval is within valid range (min to max)
+    # Handle cases where interval might be 0, None, or invalid
+    if not isinstance(interval, (int, float)) or interval <= 0:
+        interval = default_interval
+    
+    return max(min_interval, min(int(interval), max_interval))
 
 
 def set_service_interval(service_name: str, svc_info: dict, new_interval: int) -> bool:
@@ -1023,22 +1034,27 @@ def main():
                         else:
                             st.error(f"Error: {msg}")
                 
-                # Interval config
-                current_interval = get_service_interval(svc_name, svc_info)
-                new_interval = st.number_input(
-                    "Scan Interval (sec)", 
-                    min_value=svc_info.get("interval_min", 10),
-                    max_value=svc_info.get("interval_max", 3600),
-                    value=current_interval,
-                    key=f"interval_{svc_name}"
-                )
-                
-                if new_interval != current_interval:
-                    if st.button("Update Interval", key=f"update_{svc_name}"):
-                        if set_service_interval(svc_name, svc_info, int(new_interval)):
-                            st.success("Interval updated")
-                            time.sleep(1)
-                            st.rerun()
+                # Interval config - only show for services that support intervals
+                if svc_info.get("interval_key"):
+                    current_interval = get_service_interval(svc_name, svc_info)
+                    interval_min = svc_info.get("interval_min", 10)
+                    interval_max = svc_info.get("interval_max", 3600)
+                    # Ensure current_interval is within valid range
+                    current_interval = max(interval_min, min(current_interval, interval_max))
+                    new_interval = st.number_input(
+                        "Scan Interval (sec)", 
+                        min_value=interval_min,
+                        max_value=interval_max,
+                        value=current_interval,
+                        key=f"interval_{svc_name}"
+                    )
+                    
+                    if new_interval != current_interval:
+                        if st.button("Update Interval", key=f"update_{svc_name}"):
+                            if set_service_interval(svc_name, svc_info, int(new_interval)):
+                                st.success("Interval updated")
+                                time.sleep(1)
+                                st.rerun()
                 
                 st.markdown("---")
 
@@ -1270,6 +1286,8 @@ def main():
                         current_interval = get_service_interval(service_name, svc_info)
                         interval_min = svc_info.get("interval_min", 5)
                         interval_max = svc_info.get("interval_max", 3600)
+                        # Ensure current_interval is within valid range
+                        current_interval = max(interval_min, min(current_interval, interval_max))
                         interval_key = svc_info.get("interval_key", "scan_interval_seconds")
                         
                         st.markdown(f"**⏱️ Scan/Check Interval**")
