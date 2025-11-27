@@ -248,24 +248,47 @@ def display_multi_config_bulk_analysis(tickers: List[str], entry_assistant: AISt
         st.error("⚠️ Position sizes and risk levels cannot be empty")
         return
     
-    # Ticker selection
+    # Ticker selection with multiselect and quick buttons (user-preferred pattern)
     st.write("**2. Select Tickers**")
-    max_possible = min(20, len(tickers))
-    default_tickers = min(5, len(tickers))
-    if max_possible <= 1:
-        # Avoid creating a slider with min==max; show fixed value instead
-        st.write("Number of tickers to analyze:", max_possible)
-        max_tickers = max_possible
-    else:
-        max_tickers = st.slider(
-            "Number of tickers to analyze",
-            min_value=1,
-            max_value=max_possible,
-            value=default_tickers,
-            key="multi_config_max_tickers"
-        )
     
-    selected_tickers = tickers[:max_tickers]
+    # Initialize session state for selections
+    if 'multi_config_selected_tickers' not in st.session_state:
+        st.session_state.multi_config_selected_tickers = tickers[:min(5, len(tickers))]
+    
+    # Quick selection buttons
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1, 1, 1, 2])
+    
+    with btn_col1:
+        if st.button("✅ Select All", key="multi_config_select_all", use_container_width=True):
+            st.session_state.multi_config_selected_tickers = tickers[:20]  # Cap at 20 for performance
+            st.rerun()
+    
+    with btn_col2:
+        if st.button("❌ Clear All", key="multi_config_clear_all", use_container_width=True):
+            st.session_state.multi_config_selected_tickers = []
+            st.rerun()
+    
+    with btn_col3:
+        top_n = min(10, len(tickers))
+        if st.button(f"🔝 Top {top_n}", key="multi_config_top_n", use_container_width=True):
+            st.session_state.multi_config_selected_tickers = tickers[:top_n]
+            st.rerun()
+    
+    with btn_col4:
+        st.caption(f"📊 {len(st.session_state.multi_config_selected_tickers)}/{len(tickers)} selected")
+    
+    # Multiselect widget - allows searching and selecting specific tickers
+    selected_tickers = st.multiselect(
+        "Select tickers to analyze",
+        options=tickers,
+        default=st.session_state.multi_config_selected_tickers,
+        key="multi_config_ticker_multiselect",
+        help="Select tickers from your watchlist. Use the buttons above for quick selection.",
+        max_selections=20  # Cap for performance
+    )
+    
+    # Sync back to session state
+    st.session_state.multi_config_selected_tickers = selected_tickers
     
     # Calculate total configurations
     total_configs = len(selected_tickers) * len(position_sizes) * len(risk_levels) * len(selected_styles)

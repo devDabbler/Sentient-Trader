@@ -17,11 +17,13 @@ discord.py>=2.3.0
 pyqlib
 supabase>=2.0.0
 crawl4ai>=0.7.0
+playwright>=1.40.0  # Browser automation for Crawl4AI (run: playwright install chromium)
 nest-asyncio>=1.5.0  # Critical for Windows async subprocess support
 praw>=7.7.0  # Reddit API for social sentiment (avoids rate limiting)
 feedparser>=6.0.0  # Fast RSS feed parsing for Reddit (no rate limits!)
 httpx>=0.24.0  # Modern async HTTP client for RSS feeds
 apscheduler>=3.10.0  # Scheduled event detection
+selenium>=4.38.0  # Web browser automation for human-like behavior
 
 # PHASE 1 ENHANCEMENTS: FinBERT for Financial Sentiment Analysis
 transformers>=4.30.0  # Hugging Face transformers for FinBERT model

@@ -3,6 +3,7 @@ Watchlist Tab
 Manage ticker watchlist, bulk analysis, and strategy-specific monitoring
 
 Extracted from app.py for modularization
+Refactored for consistent UI patterns across stock and crypto watchlists.
 """
 import streamlit as st
 from loguru import logger
@@ -16,6 +17,25 @@ from .common_imports import (
     ComprehensiveAnalyzer,
     TradingStyleAnalyzer
 )
+
+# Import unified watchlist components
+try:
+    from ui.components.watchlist_components import (
+        display_ticker_multiselect,
+        display_analysis_mode_selector,
+        display_trading_style_selector,
+        display_position_risk_inputs,
+        display_filter_sort_controls,
+        display_analysis_summary_metrics,
+        display_action_badge,
+        display_fast_mode_toggle,
+        display_broker_connection_warning,
+        display_llm_connection_warning
+    )
+    WATCHLIST_COMPONENTS_AVAILABLE = True
+except ImportError:
+    logger.debug("Unified watchlist components not available, using inline implementations")
+    WATCHLIST_COMPONENTS_AVAILABLE = False
 
 # Import additional modules with fallbacks
 try:
@@ -33,14 +53,8 @@ except ImportError:
 
 def render_tab():
     """Main render function called from app.py"""
-    st.header("Watchlist")
-    
-    # TODO: Review and fix imports
-    # Tab implementation below (extracted from app.py)
-
-
-    st.header("⭐ My Tickers")
-    st.write("Manage your saved tickers and watchlists.")
+    st.header("⭐ Stock Watchlist")
+    st.write("Manage your saved tickers with AI-powered analysis and bulk operations.")
     
     # Use cached ticker manager from session state
     tm = st.session_state.ticker_manager

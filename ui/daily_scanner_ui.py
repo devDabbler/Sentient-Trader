@@ -173,7 +173,7 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
         
         # Show sentiment indicator for sentiment-enabled sources
         if "sentiment" in scan_source.lower() or "Trending" in scan_source or "Buzz" in scan_source or "Dynamic" in scan_source:
-            st.info("🧠 This source includes Reddit & social sentiment analysis")
+            st.info("🧠 This source includes Reddit & social sentiment analysis + 🐦 X/Twitter sentiment")
     
     with col2:
         # Filter settings
@@ -225,7 +225,7 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                 pairs = scanner.get_all_scan_pairs()
                 logger.info(f"   Got {len(pairs)} pairs from all categories")
             
-            elif scan_source == "💰 Penny Cryptos (<$1)":
+            elif scan_source == "💰 Penny Cryptos (<$1)" or "Penny Cryptos" in scan_source:
                 logger.info("✅ Matched: Penny Cryptos")
                 # Use penny crypto scanner
                 try:
@@ -247,7 +247,8 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     st.error("Penny crypto scanner unavailable, using default")
                     pairs = scanner.get_all_scan_pairs()
             
-            elif scan_source == "🔬 Sub-Penny (<$0.01)":
+            elif scan_source == "🔬 Sub-Penny (<$0.01)" or "Sub-Penny" in scan_source:
+                logger.info("✅ Matched: Sub-Penny")
                 # Use sub-penny discovery
                 try:
                     from services.sub_penny_discovery import SubPennyDiscovery
@@ -352,36 +353,60 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     st.error(f"Runner scan error: {str(e)[:200]}")
                     st.warning(f"Using default scan with {len(pairs)} pairs.")
             
-            elif scan_source == "🔥 CoinGecko Trending (with sentiment)":
-                # Use CoinGecko trending with sentiment
+            elif scan_source == "🔥 CoinGecko Trending (with sentiment)" or "CoinGecko Trending" in scan_source:
+                logger.info("✅ Matched: CoinGecko Trending")
+                # Use CoinGecko trending with sentiment + X/Twitter
                 try:
                     sentiment_analyzer = CryptoSentimentAnalyzer()
-                    trending = asyncio.run(sentiment_analyzer.get_trending_cryptos(top_n=20))
+                    
+                    # Get trending with full sentiment (includes X/Twitter)
+                    status_placeholder = st.empty()
+                    status_placeholder.info("🔥 Fetching CoinGecko trending + 🐦 X sentiment...")
+                    
+                    trending_with_sentiment = asyncio.run(
+                        sentiment_analyzer.get_trending_with_sentiment(top_n=20)
+                    )
                     
                     # Extract symbols and try to match to Kraken pairs
                     trending_pairs = []
+                    trending_sentiment_data = {}  # Store sentiment data by pair
                     all_pairs = scanner.get_all_scan_pairs()
                     
-                    for trend in trending:
+                    for trend in trending_with_sentiment:
                         # Try to find matching Kraken pair
-                        symbol = trend.symbol
+                        symbol = trend.get('symbol', '')
                         for pair in all_pairs:
                             if symbol in pair:
                                 trending_pairs.append(pair)
+                                # Store X sentiment data for this pair
+                                social = trend.get('social_sentiment', {})
+                                trending_sentiment_data[pair] = {
+                                    'x_tweet_count': social.get('x_tweet_count', 0),
+                                    'x_sentiment_score': social.get('x_sentiment_score', 0),
+                                    'x_bullish_count': social.get('x_bullish_count', 0),
+                                    'x_bearish_count': social.get('x_bearish_count', 0),
+                                    'trending_score': trend.get('trending_score', 0),
+                                    'runner_potential': trend.get('runner_potential', {}),
+                                }
                                 break
+                    
+                    # Store sentiment data in session for later use
+                    st.session_state.trending_sentiment_data = trending_sentiment_data
                     
                     if trending_pairs:
                         pairs = trending_pairs
-                        st.success(f"🔥 Found {len(pairs)} CoinGecko trending coins with sentiment data")
+                        x_count = sum(1 for p in trending_pairs if trending_sentiment_data.get(p, {}).get('x_tweet_count', 0) > 0)
+                        status_placeholder.success(f"🔥 Found {len(pairs)} CoinGecko trending coins | 🐦 X data for {x_count} coins")
                     else:
                         pairs = scanner.get_all_scan_pairs()
-                        st.warning("No trending coins available on Kraken, using all pairs")
+                        status_placeholder.warning("No trending coins available on Kraken, using all pairs")
                 except Exception as e:
                     logger.error("CoinGecko trending error: {}", str(e), exc_info=True)
                     pairs = scanner.get_all_scan_pairs()
                     st.warning("Trending analysis unavailable, using default scan")
             
-            elif scan_source == "🌐 Dynamic Discovery (CG + CMC + Reddit)":
+            elif scan_source == "🌐 Dynamic Discovery (CG + CMC + Reddit)" or "Dynamic Discovery" in scan_source:
+                logger.info("✅ Matched: Dynamic Discovery")
                 # Dynamic multi-source discovery
                 try:
                     status_placeholder = st.empty()
@@ -428,32 +453,58 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     pairs = scanner.get_all_scan_pairs()
                     st.warning("Discovery unavailable, using default scan")
             
-            elif scan_source == "🗣️ Social Buzz (Reddit/StockTwits)":
-                # Social sentiment-based discovery
+            elif scan_source == "🗣️ Social Buzz (Reddit/StockTwits)" or "Social Buzz" in scan_source:
+                logger.info("✅ Matched: Social Buzz")
+                # Social sentiment-based discovery with X/Twitter
                 try:
                     status_placeholder = st.empty()
-                    status_placeholder.info("🗣️ Analyzing social buzz from Reddit & StockTwits...")
+                    status_placeholder.info("🗣️ Analyzing social buzz from Reddit, StockTwits & 🐦 X...")
                     
                     # Get coins with high social activity
-                    social_analyzer = SocialSentimentAnalyzer()
+                    sentiment_analyzer = CryptoSentimentAnalyzer()
                     
                     # Scan social sentiment for popular crypto coins
                     crypto_pairs = scanner.get_all_scan_pairs()
                     buzz_pairs = []
+                    buzz_sentiment_data = {}
                     
-                    # Sample top coins for social buzz (async would be better but keeping simple)
+                    # Analyze top coins for social buzz including X
                     for pair in crypto_pairs[:20]:  # Check top 20 for buzz
                         try:
                             # Extract symbol (e.g., BTC from BTC/USD)
                             symbol = pair.split('/')[0]
-                            # Note: This is simplified - full implementation would check actual social sentiment
-                            buzz_pairs.append(pair)
-                        except:
+                            
+                            # Get full sentiment including X
+                            sentiment = asyncio.run(
+                                sentiment_analyzer.analyze_crypto_sentiment(symbol, include_x=True)
+                            )
+                            
+                            # Include if has any social activity
+                            total_mentions = sentiment.get('total_mentions', 0)
+                            x_tweets = sentiment.get('x_tweet_count', 0)
+                            
+                            if total_mentions > 0 or x_tweets > 0:
+                                buzz_pairs.append(pair)
+                                buzz_sentiment_data[pair] = {
+                                    'x_tweet_count': x_tweets,
+                                    'x_sentiment_score': sentiment.get('x_sentiment_score', 0),
+                                    'x_bullish_count': sentiment.get('x_bullish_count', 0),
+                                    'x_bearish_count': sentiment.get('x_bearish_count', 0),
+                                    'reddit_mentions': sentiment.get('reddit_mentions', 0),
+                                    'overall_sentiment': sentiment.get('overall_sentiment', 'NEUTRAL'),
+                                }
+                        except Exception as e:
+                            logger.debug(f"Error getting sentiment for {pair}: {e}")
+                            buzz_pairs.append(pair)  # Still include even if sentiment fails
                             continue
+                    
+                    # Store sentiment data for display
+                    st.session_state.trending_sentiment_data = buzz_sentiment_data
                     
                     if buzz_pairs:
                         pairs = buzz_pairs
-                        status_placeholder.success(f"🗣️ Found {len(pairs)} coins with social activity")
+                        x_count = sum(1 for p in buzz_pairs if buzz_sentiment_data.get(p, {}).get('x_tweet_count', 0) > 0)
+                        status_placeholder.success(f"🗣️ Found {len(pairs)} coins with social activity | 🐦 X data for {x_count} coins")
                     else:
                         pairs = scanner.get_all_scan_pairs()
                         status_placeholder.warning("Social data limited, using default scan")
@@ -463,7 +514,8 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     pairs = scanner.get_all_scan_pairs()
                     st.warning("Social analysis unavailable, using default scan")
             
-            elif scan_source == "⭐ My Watchlist":
+            elif scan_source == "⭐ My Watchlist" or "My Watchlist" in scan_source or "Watchlist" in scan_source:
+                logger.info("✅ Matched: My Watchlist")
                 # Load from crypto watchlist manager
                 try:
                     if 'crypto_watchlist_manager' not in st.session_state:
@@ -484,12 +536,13 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     st.error(f"Failed to load watchlist: {e}")
                     return
             
-            elif scan_source == "📈 Top Gainers (24h)":
+            elif scan_source == "📈 Top Gainers (24h)" or "Top Gainers" in scan_source:
+                logger.info("✅ Matched: Top Gainers")
                 # Filter for top gainers
                 pairs = scanner.get_all_scan_pairs()
                 st.info("🎯 Will prioritize coins with highest 24h gains")
             
-            elif scan_source == "📊 High Volume Surge":
+            elif scan_source == "📊 High Volume Surge" or "High Volume" in scan_source:
                 logger.info("✅ Matched: High Volume Surge")
                 # Filter for volume surges
                 pairs = scanner.get_all_scan_pairs()
@@ -540,6 +593,20 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                 
                 # Store results - ensure it's a list
                 if isinstance(results, list):
+                    # Merge X sentiment data if available (from CoinGecko Trending scan)
+                    trending_sentiment = st.session_state.get('trending_sentiment_data', {})
+                    if trending_sentiment:
+                        for result in results:
+                            pair = result.get('pair', '')
+                            if pair in trending_sentiment:
+                                sentiment_data = trending_sentiment[pair]
+                                result['x_tweet_count'] = sentiment_data.get('x_tweet_count', 0)
+                                result['x_sentiment_score'] = sentiment_data.get('x_sentiment_score', 0)
+                                result['x_bullish_count'] = sentiment_data.get('x_bullish_count', 0)
+                                result['x_bearish_count'] = sentiment_data.get('x_bearish_count', 0)
+                                result['trending_score'] = sentiment_data.get('trending_score', 0)
+                        logger.info(f"Merged X sentiment data for {len([r for r in results if r.get('x_tweet_count', 0) > 0])} coins")
+                    
                     st.session_state.tier1_results = results
                     st.session_state.tier1_timestamp = datetime.now()
                     logger.debug(f"Stored {len(results)} results in session state")
@@ -581,13 +648,41 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
         
         # Convert to DataFrame for display
         df = pd.DataFrame(results)
-        df = df[['pair', 'score', 'price', 'change_24h', 'volume_24h']]
-        df.columns = ['Pair', 'Score', 'Price', '24h %', 'Volume']
+        
+        # Check if X sentiment data is available
+        has_x_sentiment = any('x_tweet_count' in r or 'x_sentiment_score' in r for r in results)
+        
+        if has_x_sentiment:
+            # Include X sentiment columns
+            columns_to_show = ['pair', 'score', 'price', 'change_24h', 'volume_24h']
+            
+            # Add X sentiment columns if they exist
+            if 'x_tweet_count' in df.columns:
+                columns_to_show.append('x_tweet_count')
+            if 'x_sentiment_score' in df.columns:
+                columns_to_show.append('x_sentiment_score')
+            
+            df = df[[c for c in columns_to_show if c in df.columns]]
+            
+            # Rename columns
+            column_names = {'pair': 'Pair', 'score': 'Score', 'price': 'Price', 
+                          'change_24h': '24h %', 'volume_24h': 'Volume',
+                          'x_tweet_count': '🐦 Tweets', 'x_sentiment_score': '🐦 X Score'}
+            df.columns = [column_names.get(c, c) for c in df.columns]
+        else:
+            df = df[['pair', 'score', 'price', 'change_24h', 'volume_24h']]
+            df.columns = ['Pair', 'Score', 'Price', '24h %', 'Volume']
         
         # Format columns
         df['Price'] = df['Price'].apply(lambda x: f"${x:.8f}" if x < 0.01 else f"${x:.4f}")
         df['24h %'] = df['24h %'].apply(lambda x: f"{x:+.2f}%")
         df['Volume'] = df['Volume'].apply(lambda x: f"${x:,.0f}")
+        
+        # Format X sentiment columns if present
+        if '🐦 Tweets' in df.columns:
+            df['🐦 Tweets'] = df['🐦 Tweets'].apply(lambda x: f"{int(x)}" if pd.notna(x) else "—")
+        if '🐦 X Score' in df.columns:
+            df['🐦 X Score'] = df['🐦 X Score'].apply(lambda x: f"{x:.0f}" if pd.notna(x) and x > 0 else "—")
         
         st.dataframe(df, use_container_width=True, hide_index=True)
         
@@ -1473,40 +1568,47 @@ def display_quick_mode_results(results):
             acol1, acol2 = st.columns(2)
             
             with acol1:
-                if st.button(f"� Use This Setup", key=f"use_quick_{i}", type="primary" if is_ready else "secondary"):
+                # Use on_click callback for reliable session state setting in expanders
+                def set_quick_setup(result_data, idx):
+                    logger.info(f"🔘 QUICK SETUP CALLBACK! Setting up {result_data['pair']}")
                     # Transfer setup to Quick Trade
                     st.session_state.crypto_scanner_opportunity = {
-                        'symbol': result['pair'],
-                        'strategy': result.get('strategy', 'Unknown'),
-                        'confidence': result.get('strategy_confidence', 0) > 70,
-                        'risk_level': result.get('risk_level', 'Medium'),
-                        'score': result.get('score', 0),
-                        'current_price': result.get('entry_price', result.get('price', 0)),
-                        'change_24h': result.get('change_24h', 0),
-                        'volume_ratio': result.get('volume_ratio', 1.0),
-                        'volatility': result.get('volatility', 0),
-                        'reason': f"{result.get('strategy_signal', 'HOLD')} recommended",
-                        'ai_reasoning': result.get('ai_recommendation', ''),
-                        'ai_confidence': 'High' if result.get('ai_confidence', 0) >= 75 else 'Medium',
-                        'ai_rating': result.get('ai_confidence', 0) / 10,
-                        'ai_risks': result.get('ai_risks', [])
+                        'symbol': result_data['pair'],
+                        'strategy': result_data.get('strategy', 'Unknown'),
+                        'confidence': result_data.get('strategy_confidence', 0) > 70,
+                        'risk_level': result_data.get('risk_level', 'Medium'),
+                        'score': result_data.get('score', 0),
+                        'current_price': result_data.get('entry_price', result_data.get('price', 0)),
+                        'change_24h': result_data.get('change_24h', 0),
+                        'volume_ratio': result_data.get('volume_ratio', 1.0),
+                        'volatility': result_data.get('volatility', 0),
+                        'reason': f"{result_data.get('strategy_signal', 'HOLD')} recommended",
+                        'ai_reasoning': result_data.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if result_data.get('ai_confidence', 0) >= 75 else 'Medium',
+                        'ai_rating': result_data.get('ai_confidence', 0) / 10,
+                        'ai_risks': result_data.get('ai_risks', [])
                     }
-                    st.session_state.crypto_quick_pair = result['pair']
-                    st.session_state.crypto_quick_trade_pair = result['pair']
+                    st.session_state.crypto_quick_pair = result_data['pair']
+                    st.session_state.crypto_quick_trade_pair = result_data['pair']
                     st.session_state.crypto_quick_direction = 'BUY'
                     st.session_state.crypto_trading_mode = 'Spot Trading'
                     st.session_state.crypto_quick_leverage = 1
-                    st.session_state.crypto_quick_position_size = 100
-                    st.session_state.crypto_quick_stop_pct = 2.0
-                    st.session_state.crypto_quick_target_pct = 5.0
+                    st.session_state.crypto_quick_position_size = 200
+                    st.session_state.crypto_quick_stop_pct = 3.0
+                    st.session_state.crypto_quick_target_pct = 10.0  # Higher target to beat Kraken fees
                     
                     # Navigate to Quick Trade
                     st.session_state.active_crypto_tab = "⚡ Quick Trade"
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Setup ready! Switching to Execute Trade...")
-                    st.balloons()
-                    st.rerun()
+                    st.session_state.show_quick_setup_success = {'pair': result_data['pair']}
+                
+                st.button(
+                    f"✅ Use This Setup", 
+                    key=f"use_quick_{i}", 
+                    type="primary" if is_ready else "secondary",
+                    on_click=set_quick_setup,
+                    args=(result, i)
+                )
             
             with acol2:
                 if st.button(f"🤖 Add to Monitor", key=f"monitor_quick_{i}", type="secondary"):
@@ -1615,9 +1717,9 @@ def display_standard_mode_results(results):
                     st.session_state.crypto_quick_direction = 'BUY'
                     st.session_state.crypto_trading_mode = 'Spot Trading'
                     st.session_state.crypto_quick_leverage = 1
-                    st.session_state.crypto_quick_position_size = 100
-                    st.session_state.crypto_quick_stop_pct = 2.0
-                    st.session_state.crypto_quick_target_pct = 5.0
+                    st.session_state.crypto_quick_position_size = 200
+                    st.session_state.crypto_quick_stop_pct = 3.0
+                    st.session_state.crypto_quick_target_pct = 10.0  # Higher target to beat Kraken fees
                     
                     # Navigate to Quick Trade
                     st.session_state.active_crypto_tab = "⚡ Quick Trade"

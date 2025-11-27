@@ -5,10 +5,10 @@ Combines:
 1. CoinGecko trending API (emerging coins gaining attention)
 2. Reddit sentiment (r/cryptocurrency, r/CryptoCurrency, r/defi, r/bitcoin, r/ethereum, etc.)
 3. Forum sentiment (StockTwits, etc.)
-4. On-chain metrics (optional)
+4. X/Twitter sentiment (via Nitter scraping - same as DEX Hunter)
+5. On-chain metrics (optional)
 
-Note: Twitter/X is skipped for crypto (as requested). Reddit uses existing RSS + API framework
-with crypto-specific subreddits automatically detected.
+Now includes X sentiment scraping using the same infrastructure as DEX Launch Hunter.
 """
 
 import os
@@ -83,13 +83,17 @@ class CryptoSentimentAnalyzer:
             'bag', 'bagholding', 'rug', 'scam', 'ponzi', 'dead coin'
         }
         
+        # X sentiment service (lazy loaded)
+        self._x_sentiment_service = None
+        self._x_sentiment_enabled = True  # Can be disabled if scraping fails
+        
         logger.info("🔧 Crypto Sentiment Analyzer initialized")
         logger.info("   • CoinGecko trending API (10 calls/min limit)")
         logger.info("   • Reddit sentiment: Uses existing RSS + API framework")
         logger.info("     - Crypto subreddits: r/cryptocurrency, r/CryptoCurrency, r/defi, r/bitcoin, r/ethereum, etc.")
         logger.info("     - Auto-detects crypto symbols and uses appropriate subreddits")
         logger.info("   • Forum sentiment: StockTwits (crypto trading discussions)")
-        logger.info("   • Twitter/X: Skipped for crypto (as requested)")
+        logger.info("   • X/Twitter sentiment: Nitter scraping (same as DEX Hunter)")
         logger.info("   • 1-hour cache for trending data")
     
     async def get_trending_cryptos(self, top_n: int = 10) -> List[CryptoTrendingData]:
@@ -226,39 +230,50 @@ class CryptoSentimentAnalyzer:
         
         return results
     
-    async def analyze_crypto_sentiment(self, symbol: str) -> Dict:
+    async def analyze_crypto_sentiment(self, symbol: str, include_x: bool = True) -> Dict:
         """
-        Analyze social sentiment for a specific crypto from Reddit and popular forums
+        Analyze social sentiment for a specific crypto from Reddit, forums, and X/Twitter
         
         Args:
             symbol: Crypto symbol (e.g., 'BTC', 'ETH', 'SHIB')
+            include_x: Whether to include X/Twitter sentiment (default: True)
             
         Returns:
-            Dict with sentiment analysis
+            Dict with sentiment analysis including X data when available
         """
         try:
-            # Get sentiment from Reddit and forums (skip Twitter/X)
+            # Get sentiment from Reddit and forums
             reddit_sentiment = await self._get_reddit_sentiment(symbol)
             forum_sentiment = await self._get_forum_sentiment(symbol)
             
-            # Combine sentiments
+            # Get X/Twitter sentiment (same as DEX Hunter)
+            x_sentiment = None
+            x_data = {}
+            if include_x and self._x_sentiment_enabled:
+                x_sentiment = await self._get_x_sentiment(symbol)
+                if x_sentiment:
+                    x_data = {
+                        'x_tweet_count': x_sentiment.get('tweet_count', 0),
+                        'x_sentiment_score': x_sentiment.get('x_sentiment_score', 0),
+                        'x_bullish_count': x_sentiment.get('bullish_tweet_count', 0),
+                        'x_bearish_count': x_sentiment.get('bearish_tweet_count', 0),
+                        'x_engagement_velocity': x_sentiment.get('engagement_velocity', 0),
+                        'x_unique_authors': x_sentiment.get('unique_authors', 0),
+                        'x_heuristic_sentiment': x_sentiment.get('heuristic_sentiment', 0),
+                    }
+            
+            # Combine sentiments from all sources
             all_mentions = reddit_sentiment['mentions'] + forum_sentiment['mentions']
             
-            if not all_mentions:
-                return {
-                    'reddit_mentions': 0,
-                    'twitter_mentions': 0,
-                    'overall_sentiment': 'NEUTRAL',
-                    'overall_sentiment_score': 0.0,
-                    'bullish_count': 0,
-                    'bearish_count': 0,
-                    'neutral_count': 0
-                }
-            
-            # Calculate aggregate sentiment
+            # Calculate aggregate sentiment (including X if available)
             bullish_count = sum(1 for m in all_mentions if m['sentiment'] == 'BULLISH')
             bearish_count = sum(1 for m in all_mentions if m['sentiment'] == 'BEARISH')
             neutral_count = sum(1 for m in all_mentions if m['sentiment'] == 'NEUTRAL')
+            
+            # Add X sentiment counts
+            if x_data:
+                bullish_count += x_data.get('x_bullish_count', 0)
+                bearish_count += x_data.get('x_bearish_count', 0)
             
             # Overall sentiment
             if bullish_count > bearish_count * 1.5:
@@ -272,17 +287,27 @@ class CryptoSentimentAnalyzer:
             total = bullish_count + bearish_count + neutral_count
             overall_score = (bullish_count - bearish_count) / total if total > 0 else 0
             
-            return {
+            # If X sentiment is strong, blend it into overall score
+            if x_data and x_data.get('x_tweet_count', 0) >= 5:
+                x_score = x_data.get('x_heuristic_sentiment', 0)  # -1 to 1
+                # Weight: 60% traditional, 40% X (X is more real-time)
+                overall_score = (overall_score * 0.6) + (x_score * 0.4)
+            
+            result = {
                 'reddit_mentions': len(reddit_sentiment['mentions']),
                 'forum_mentions': len(forum_sentiment['mentions']),
-                'total_mentions': len(all_mentions),
+                'total_mentions': len(all_mentions) + x_data.get('x_tweet_count', 0),
                 'overall_sentiment': overall_sentiment,
                 'overall_sentiment_score': overall_score,
                 'bullish_count': bullish_count,
                 'bearish_count': bearish_count,
                 'neutral_count': neutral_count,
-                'mentions': all_mentions
+                'mentions': all_mentions,
+                # X-specific data
+                **x_data
             }
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error analyzing sentiment for {symbol}: {e}")
@@ -294,7 +319,9 @@ class CryptoSentimentAnalyzer:
                 'overall_sentiment_score': 0.0,
                 'bullish_count': 0,
                 'bearish_count': 0,
-                'neutral_count': 0
+                'neutral_count': 0,
+                'x_tweet_count': 0,
+                'x_sentiment_score': 0,
             }
     
     async def _get_reddit_sentiment(self, symbol: str) -> Dict:
@@ -373,6 +400,67 @@ class CryptoSentimentAnalyzer:
         except Exception as e:
             logger.debug(f"Forum sentiment error for {symbol}: {e}")
             return {'mentions': []}
+    
+    async def _get_x_sentiment(self, symbol: str) -> Optional[Dict]:
+        """
+        Get X/Twitter sentiment using the same service as DEX Hunter.
+        
+        Uses Nitter scraping with rule-based sentiment analysis (FREE).
+        LLM analysis is budget-controlled and only used for high-engagement tokens.
+        
+        Args:
+            symbol: Crypto symbol (e.g., 'BTC', 'ETH', 'PEPE')
+            
+        Returns:
+            Dict with X sentiment data or None if unavailable
+        """
+        try:
+            # Lazy load X sentiment service
+            if self._x_sentiment_service is None:
+                try:
+                    from services.x_sentiment_service import XSentimentService
+                    self._x_sentiment_service = XSentimentService(use_llm=True)  # Use local LLM
+                    logger.info("🐦 X Sentiment Service loaded for crypto analyzer (with local LLM)")
+                except ImportError as e:
+                    logger.warning(f"X Sentiment Service not available: {e}")
+                    self._x_sentiment_enabled = False
+                    return None
+                except Exception as e:
+                    logger.warning(f"Failed to initialize X Sentiment Service: {e}")
+                    self._x_sentiment_enabled = False
+                    return None
+            
+            # Extract base symbol
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+            base_symbol = base_symbol.upper().strip()
+            
+            # Fetch X sentiment snapshot
+            logger.debug(f"🐦 Fetching X sentiment for ${base_symbol}...")
+            snapshot = await self._x_sentiment_service.fetch_snapshot(
+                symbol=base_symbol,
+                max_tweets=30,  # Limit for speed
+                force_refresh=False  # Use cache if available
+            )
+            
+            if snapshot and snapshot.tweet_count > 0:
+                return {
+                    'tweet_count': snapshot.tweet_count,
+                    'unique_authors': snapshot.unique_authors,
+                    'total_likes': snapshot.total_likes,
+                    'total_reposts': snapshot.total_reposts,
+                    'engagement_velocity': snapshot.engagement_velocity,
+                    'heuristic_sentiment': snapshot.heuristic_sentiment,
+                    'bullish_tweet_count': snapshot.bullish_tweet_count,
+                    'bearish_tweet_count': snapshot.bearish_tweet_count,
+                    'x_sentiment_score': snapshot.x_sentiment_score,  # 0-100
+                    'neg_mention_ratio': snapshot.neg_mention_ratio,
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"X sentiment error for {symbol}: {e}")
+            return None
     
     def _analyze_text_sentiment(self, text: str) -> Tuple[str, float]:
         """

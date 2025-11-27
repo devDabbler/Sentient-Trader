@@ -1014,7 +1014,7 @@ class KrakenClient:
             
         except Exception as e:
             logger.error(f"Error placing order: {e}")
-            return None
+            raise e  # Re-raise so UI can display specific error
     
     def cancel_order(self, order_id: str) -> bool:
         """

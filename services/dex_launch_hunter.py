@@ -27,6 +27,15 @@ from clients.dexscreener_client import DexScreenerClient
 from services.token_safety_analyzer import TokenSafetyAnalyzer
 from services.smart_money_tracker import SmartMoneyTracker
 
+# Optional X Sentiment integration
+try:
+    from services.x_sentiment_service import XSentimentService, get_x_sentiment_service
+    from services.llm_budget_manager import get_llm_budget_manager
+    X_SENTIMENT_AVAILABLE = True
+except ImportError:
+    X_SENTIMENT_AVAILABLE = False
+    logger.warning("X Sentiment Service not available")
+
 
 class DexLaunchHunter:
     """Main orchestrator for DEX launch hunting"""
@@ -44,6 +53,20 @@ class DexLaunchHunter:
         self.dex_client = DexScreenerClient()
         self.safety_analyzer = TokenSafetyAnalyzer()
         self.smart_money_tracker = SmartMoneyTracker()
+        
+        # X Sentiment integration (optional - catches early pump coins)
+        # Uses local LLM (Ollama) - no budget limits needed
+        self.x_sentiment_service = None
+        self.enable_x_sentiment = True  # Toggle for X scraping
+        if X_SENTIMENT_AVAILABLE and self.enable_x_sentiment:
+            try:
+                self.x_sentiment_service = get_x_sentiment_service(
+                    use_llm=True,  # Uses local Ollama LLM (FREE)
+                    llm_budget_manager=None  # No budget limits with local LLM
+                )
+                logger.info("✅ X Sentiment Service integrated with DEX Hunter (local LLM)")
+            except Exception as e:
+                logger.warning(f"Could not initialize X Sentiment Service: {e}")
         
         # State
         self.discovered_tokens: Dict[str, TokenLaunch] = {}  # contract_address -> TokenLaunch
@@ -453,8 +476,11 @@ class DexLaunchHunter:
         
         token.velocity_score = min(velocity, 100.0)
         
-        # 3. Social Buzz Score (placeholder - implement with social sentiment)
-        token.social_buzz_score = 0.0
+        # 3. Social Buzz Score (from X sentiment if available)
+        # Note: social_buzz_score is populated by _enrich_with_x_sentiment()
+        # Don't reset to 0 if already set!
+        if not hasattr(token, 'social_buzz_score') or token.social_buzz_score is None:
+            token.social_buzz_score = 0.0
         
         # 4. Whale Activity Score (placeholder - implement with smart money tracker)
         token.whale_activity_score = 0.0
@@ -496,13 +522,27 @@ class DexLaunchHunter:
         if volume_surge_detected:
             logger.warning(f" VOLUME SURGE: {token.symbol} - Spike score: {token.volume_spike_score:.0f}")
         
-        # 5. Composite Score (weighted average)
-        token.composite_score = (
-            token.pump_potential_score * 0.30 +      # 30% pump potential
-            token.velocity_score * 0.25 +            # 25% momentum
-            token.volume_spike_score * 0.20 +        # 20% volume surge (NEW!)
-            token.contract_safety.safety_score * 0.25 if token.contract_safety else 0  # 25% safety
-        )
+        # 5. Composite Score (weighted average with X sentiment)
+        safety_score = token.contract_safety.safety_score if token.contract_safety else 0
+        
+        # If we have X sentiment data, include it in scoring
+        if token.social_buzz_score > 0:
+            token.composite_score = (
+                token.pump_potential_score * 0.25 +    # 25% pump potential
+                token.velocity_score * 0.20 +          # 20% momentum
+                token.volume_spike_score * 0.15 +      # 15% volume surge
+                token.social_buzz_score * 0.20 +       # 20% X sentiment (NEW!)
+                safety_score * 0.20                    # 20% safety
+            )
+            logger.debug(f"\U0001F426 {token.symbol} score includes X sentiment: {token.social_buzz_score:.1f}")
+        else:
+            # No X data yet, use original weights
+            token.composite_score = (
+                token.pump_potential_score * 0.30 +    # 30% pump potential
+                token.velocity_score * 0.25 +          # 25% momentum
+                token.volume_spike_score * 0.20 +      # 20% volume surge
+                safety_score * 0.25                    # 25% safety
+            )
         
         return token
     
@@ -619,6 +659,75 @@ class DexLaunchHunter:
                 self.discovered_tokens[address] = self._score_token(token)
             except Exception as e:
                 logger.error(f"Error processing token {address}: {e}")
+        
+        # Enrich top candidates with X sentiment (only for promising tokens)
+        if self.x_sentiment_service:
+            await self._enrich_with_x_sentiment()
+    
+    async def _enrich_with_x_sentiment(self):
+        """
+        Fetch X sentiment for top tokens by DEX score.
+        Only enriches promising tokens to conserve API/scraping budget.
+        """
+        if not self.x_sentiment_service:
+            return
+        
+        # Get top tokens by composite score (that don't have X data yet)
+        tokens_needing_x = [
+            token for token in self.discovered_tokens.values()
+            if token.social_buzz_score == 0.0  # Not yet enriched
+            and token.composite_score >= 30  # Only promising ones
+            and token.age_hours < 24  # Fresh tokens only
+        ]
+        
+        # Sort by score, take top 10 per cycle
+        tokens_needing_x = sorted(
+            tokens_needing_x, 
+            key=lambda t: t.composite_score, 
+            reverse=True
+        )[:10]
+        
+        for token in tokens_needing_x:
+            try:
+                logger.info(f"\U0001F426 Fetching X sentiment for {token.symbol}...")
+                
+                snapshot = await self.x_sentiment_service.fetch_snapshot(
+                    symbol=token.symbol,
+                    max_tweets=50
+                )
+                
+                if snapshot and snapshot.tweet_count > 0:
+                    # Update social signals on token
+                    token.social_signals = SocialSignal(
+                        source="x_twitter",
+                        mention_count=snapshot.tweet_count,
+                        sentiment_score=snapshot.heuristic_sentiment,
+                        engagement_score=snapshot.engagement_velocity * 100,
+                    )
+                    
+                    # Update social buzz score (0-100)
+                    token.social_buzz_score = snapshot.x_sentiment_score
+                    
+                    # Re-calculate composite score with social data
+                    token = self._score_token(token)
+                    
+                    # Update in storage
+                    self.discovered_tokens[token.contract_address.lower()] = token
+                    
+                    logger.info(
+                        f"\u2705 X sentiment for {token.symbol}: "
+                        f"tweets={snapshot.tweet_count}, "
+                        f"sentiment={snapshot.heuristic_sentiment:.2f}, "
+                        f"buzz_score={token.social_buzz_score:.1f}"
+                    )
+                else:
+                    logger.debug(f"No X data found for {token.symbol}")
+                
+                # Small delay between X requests (be polite)
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                logger.warning(f"Failed to fetch X sentiment for {token.symbol}: {e}")
     
     async def _generate_alerts(self):
         """Generate alerts for promising tokens"""
@@ -687,6 +796,15 @@ class DexLaunchHunter:
         
         if token.liquidity_usd >= 50000:
             reasons.append(f"💰 Good liquidity (${token.liquidity_usd:,.0f})")
+        
+        # X Sentiment reasons (NEW!)
+        if token.social_buzz_score >= 60:
+            reasons.append(f"🐦 Strong X buzz ({token.social_buzz_score:.0f}/100)")
+        elif token.social_buzz_score >= 40:
+            reasons.append(f"🐦 Moderate X activity ({token.social_buzz_score:.0f}/100)")
+        
+        if token.social_signals and token.social_signals.mention_count >= 20:
+            reasons.append(f"📢 High X mentions ({token.social_signals.mention_count})")
         
         return len(reasons) > 0, reasons
     

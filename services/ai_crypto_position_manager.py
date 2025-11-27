@@ -155,7 +155,8 @@ class AICryptoPositionManager:
         enable_partial_exits: bool = True,
         min_ai_confidence: float = 65.0,
         state_file: str = "data/ai_crypto_positions.json",
-        require_manual_approval: bool = True  # SAFETY: Require manual approval for trades
+        require_manual_approval: bool = True,  # SAFETY: Require manual approval for trades
+        max_positions: int = 15  # Maximum concurrent monitored positions
     ):
         """
         Initialize AI Crypto Position Manager
@@ -171,6 +172,7 @@ class AICryptoPositionManager:
             min_ai_confidence: Minimum AI confidence to act (0-100)
             state_file: File to persist position state
             require_manual_approval: SAFETY - Require user approval before executing trades (default: True)
+            max_positions: Maximum concurrent positions to monitor (default: 15)
         """
         self.kraken_client = kraken_client
         self.llm_analyzer = llm_analyzer
@@ -211,7 +213,7 @@ class AICryptoPositionManager:
         self.ai_exit_signals = 0
         
         # Safety
-        self.max_positions = 10
+        self.max_positions = max_positions
         self.emergency_mode = False
 
         # Multi-agent coordinator (lazy instantiation)
@@ -229,6 +231,7 @@ class AICryptoPositionManager:
         logger.info(f"   Breakeven Moves: {' ENABLED' if enable_breakeven_moves else ' DISABLED'}")
         logger.info(f"   Partial Exits: {' ENABLED' if enable_partial_exits else ' DISABLED'}")
         logger.info(f"   Min AI Confidence: {min_ai_confidence}%")
+        logger.info(f"   Max Positions: {max_positions}")
         logger.info("   SAFETY - MANUAL APPROVAL: {}", str(' REQUIRED' if require_manual_approval else ' AUTO-EXECUTE (DANGEROUS!)'))
         logger.info(f"   Discord Approval: {'✅ ENABLED' if self.discord_approval_manager else '❌ NOT CONFIGURED'}")
         logger.info("=" * 80)

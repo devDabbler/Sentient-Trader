@@ -52,6 +52,16 @@ def display_add_crypto_form(manager: CryptoWatchlistManager):
                     st.warning("Please enter a symbol")
 
 
+def safe_numeric(value, default=0):
+    """Safely convert a value to a number, handling None and non-numeric types"""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def display_watchlist_filters():
     """Display filter controls for watchlist"""
     col1, col2, col3, col4 = st.columns(4)
@@ -111,20 +121,20 @@ def apply_watchlist_filters(watchlist: List[Dict], filters: Dict) -> List[Dict]:
     # Confidence filter - treat None/missing as 'UNKNOWN' and include them
     filtered = [w for w in filtered if w.get('confidence_level') in filters['confidence'] or w.get('confidence_level') is None]
     
-    # Sorting
+    # Sorting - use safe_numeric to handle None values properly
     sort_by = filters['sort_by']
     if 'Score (High to Low)' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('composite_score', 0), reverse=True)
+        filtered = sorted(filtered, key=lambda x: safe_numeric(x.get('composite_score')), reverse=True)
     elif 'Score (Low to High)' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('composite_score', 0))
+        filtered = sorted(filtered, key=lambda x: safe_numeric(x.get('composite_score')))
     elif 'Change % (High to Low)' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('change_pct_24h', 0), reverse=True)
+        filtered = sorted(filtered, key=lambda x: safe_numeric(x.get('change_pct_24h')), reverse=True)
     elif 'Change % (Low to High)' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('change_pct_24h', 0))
+        filtered = sorted(filtered, key=lambda x: safe_numeric(x.get('change_pct_24h')))
     elif 'Volume (High to Low)' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('volume_24h', 0), reverse=True)
+        filtered = sorted(filtered, key=lambda x: safe_numeric(x.get('volume_24h')), reverse=True)
     elif 'Recently Added' in sort_by:
-        filtered = sorted(filtered, key=lambda x: x.get('date_added', ''), reverse=True)
+        filtered = sorted(filtered, key=lambda x: x.get('date_added') or '', reverse=True)
     
     return filtered
 
@@ -140,8 +150,8 @@ def display_watchlist_summary(watchlist: List[Dict]):
         st.metric("Total Cryptos", len(watchlist))
     
     with col2:
-        # Handle None values properly - use 0 if value is None or missing
-        scores = [w.get('composite_score') or 0 for w in watchlist]
+        # Handle None values properly using safe_numeric
+        scores = [safe_numeric(w.get('composite_score')) for w in watchlist]
         avg_score = sum(scores) / len(watchlist) if watchlist else 0
         st.metric("Avg Score", f"{avg_score:.1f}")
     
@@ -150,8 +160,8 @@ def display_watchlist_summary(watchlist: List[Dict]):
         st.metric("High Confidence", f"{high_conf}/{len(watchlist)}")
     
     with col4:
-        # Handle None values - treat None as 0 for comparison
-        gainers = sum(1 for w in watchlist if (w.get('change_pct_24h') or 0) > 0)
+        # Handle None values using safe_numeric
+        gainers = sum(1 for w in watchlist if safe_numeric(w.get('change_pct_24h')) > 0)
         st.metric("24h Gainers", f"{gainers}/{len(watchlist)}")
     
     with col5:
@@ -162,13 +172,13 @@ def display_watchlist_summary(watchlist: List[Dict]):
 def display_crypto_card(crypto: Dict, index: int, manager: CryptoWatchlistManager, kraken_client=None):
     """Display a single crypto watchlist card"""
     symbol = crypto.get('symbol', 'N/A')
-    score = crypto.get('composite_score', 0)
-    confidence = crypto.get('confidence_level', 'UNKNOWN')
-    risk = crypto.get('risk_level', 'UNKNOWN')
-    strategy = crypto.get('strategy', 'N/A')
+    score = safe_numeric(crypto.get('composite_score'))
+    confidence = crypto.get('confidence_level') or 'UNKNOWN'
+    risk = crypto.get('risk_level') or 'UNKNOWN'
+    strategy = crypto.get('strategy') or 'N/A'
     
-    # Build card title
-    change_pct = crypto.get('change_pct_24h', 0)
+    # Build card title - use safe_numeric for all numeric comparisons
+    change_pct = safe_numeric(crypto.get('change_pct_24h'))
     direction = "🟢" if change_pct > 0 else "🔴"
     
     card_title = f"#{index} | {symbol} | Score: {score:.1f} | {confidence} Conf | {risk} Risk | {direction} {change_pct:.2f}%"
@@ -1321,6 +1331,63 @@ def render_crypto_watchlist_tab(
             
             # Bulk actions
             display_crypto_watchlist_actions(manager, watchlist)
+            
+            st.divider()
+            
+            # Bulk AI Analysis Section - similar to stock watchlist
+            with st.expander("🎯 **BULK AI ANALYSIS** (Click to Expand)", expanded=False):
+                st.markdown("#### 🎯 Bulk AI Analysis for Crypto Watchlist")
+                st.caption("Analyze multiple cryptos at once to find the best trading opportunities")
+                
+                # Get all symbols from watchlist
+                all_crypto_symbols = [crypto.get('symbol') for crypto in watchlist if crypto.get('symbol')]
+                
+                if all_crypto_symbols:
+                    # Multiselect with quick buttons
+                    if 'bulk_crypto_selected' not in st.session_state:
+                        st.session_state.bulk_crypto_selected = all_crypto_symbols[:min(5, len(all_crypto_symbols))]
+                    
+                    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1, 1, 1, 2])
+                    
+                    with btn_col1:
+                        if st.button("✅ Select All", key="bulk_crypto_select_all", use_container_width=True):
+                            st.session_state.bulk_crypto_selected = all_crypto_symbols[:20]
+                            st.rerun()
+                    
+                    with btn_col2:
+                        if st.button("❌ Clear All", key="bulk_crypto_clear_all", use_container_width=True):
+                            st.session_state.bulk_crypto_selected = []
+                            st.rerun()
+                    
+                    with btn_col3:
+                        top_n = min(10, len(all_crypto_symbols))
+                        if st.button(f"🔝 Top {top_n}", key="bulk_crypto_top_n", use_container_width=True):
+                            st.session_state.bulk_crypto_selected = all_crypto_symbols[:top_n]
+                            st.rerun()
+                    
+                    with btn_col4:
+                        st.caption(f"📊 {len(st.session_state.bulk_crypto_selected)}/{len(all_crypto_symbols)} selected")
+                    
+                    selected_for_analysis = st.multiselect(
+                        "Select cryptos to analyze",
+                        options=all_crypto_symbols,
+                        default=st.session_state.bulk_crypto_selected,
+                        key="bulk_crypto_multiselect",
+                        help="Select cryptos from your watchlist for bulk analysis",
+                        max_selections=20
+                    )
+                    st.session_state.bulk_crypto_selected = selected_for_analysis
+                    
+                    if selected_for_analysis:
+                        st.info(f"🔬 Ready to analyze **{len(selected_for_analysis)} cryptos**")
+                        
+                        if st.button("🚀 Run Bulk Analysis", type="primary", key="run_bulk_crypto_analysis"):
+                            st.info("💡 Navigate to **🔍 Daily Scanner** tab for comprehensive crypto analysis with AI")
+                            st.session_state.active_crypto_tab = "🔍 Daily Scanner"
+                    else:
+                        st.warning("Select at least one crypto to analyze")
+                else:
+                    st.info("Add cryptos to your watchlist to use bulk analysis")
             
             st.divider()
             

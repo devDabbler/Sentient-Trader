@@ -910,8 +910,8 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     tp_pct_config = st.number_input(
                         "Take Profit %",
                         min_value=1.0,
-                        max_value=20.0,
-                        value=5.0,
+                        max_value=50.0,  # Increased for volatile crypto
+                        value=10.0,
                         step=0.5,
                         help="Take profit percentage from entry"
                     )
@@ -1323,34 +1323,36 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                         st.text(f"MACD Diff: {macd_diff:.6f}")
                         st.text(f"Volume Spike: {'Yes ✅' if signals.get('volume_spike') else 'No'}")
 
-                # Action button
+                # Action button - Use on_click callback for reliable session state setting in expanders
                 st.markdown("---")
-                if st.button("✅ Use This Setup", key=f"use_{analysis['symbol']}", use_container_width=True, type="primary"):
+                
+                def set_analysis_setup(analysis_data):
+                    logger.info(f"🔘 ANALYSIS SETUP CALLBACK! Setting up {analysis_data['symbol']}")
                     # Store in crypto_scanner_opportunity format for Execute Trade tab
                     st.session_state.crypto_scanner_opportunity = {
-                        'symbol': analysis['symbol'],
-                        'strategy': analysis['strategy'],
-                        'confidence': analysis['confidence'],
-                        'risk_level': analysis['risk_level'],
-                        'score': analysis.get('score', 75),
-                        'current_price': analysis['current_price'],
-                        'change_24h': analysis.get('change_24h', 0),
-                        'volume_ratio': analysis.get('volume_ratio', 1.0),
-                        'volatility': analysis.get('volatility', 0),
-                        'reason': analysis.get('reason', f"{analysis['action']} signal detected"),
-                        'ai_reasoning': analysis.get('ai_reasoning', ''),
-                        'ai_confidence': analysis.get('confidence', 'Medium'),
-                        'ai_rating': analysis.get('confidence_pct', 50) / 10,
-                        'ai_risks': analysis.get('risks', ['Standard market risks'])
+                        'symbol': analysis_data['symbol'],
+                        'strategy': analysis_data['strategy'],
+                        'confidence': analysis_data['confidence'],
+                        'risk_level': analysis_data['risk_level'],
+                        'score': analysis_data.get('score', 75),
+                        'current_price': analysis_data['current_price'],
+                        'change_24h': analysis_data.get('change_24h', 0),
+                        'volume_ratio': analysis_data.get('volume_ratio', 1.0),
+                        'volatility': analysis_data.get('volatility', 0),
+                        'reason': analysis_data.get('reason', f"{analysis_data['action']} signal detected"),
+                        'ai_reasoning': analysis_data.get('ai_reasoning', ''),
+                        'ai_confidence': analysis_data.get('confidence', 'Medium'),
+                        'ai_rating': analysis_data.get('confidence_pct', 50) / 10,
+                        'ai_risks': analysis_data.get('risks', ['Standard market risks'])
                     }
                     
                     # Also set quick trade values for compatibility
-                    st.session_state.crypto_quick_pair = analysis['symbol']
-                    st.session_state.crypto_quick_trade_pair = analysis['symbol']  # Fixed: Also set the key that Execute Trade reads
-                    st.session_state.crypto_quick_direction = analysis['action'].upper()
-                    st.session_state.crypto_quick_stop_pct = abs((analysis['stop_loss'] - analysis['current_price']) / analysis['current_price'] * 100)
-                    if analysis['roi_targets']:
-                        st.session_state.crypto_quick_target_pct = analysis['roi_targets'][0]['gain_percent']
+                    st.session_state.crypto_quick_pair = analysis_data['symbol']
+                    st.session_state.crypto_quick_trade_pair = analysis_data['symbol']
+                    st.session_state.crypto_quick_direction = analysis_data['action'].upper()
+                    st.session_state.crypto_quick_stop_pct = abs((analysis_data['stop_loss'] - analysis_data['current_price']) / analysis_data['current_price'] * 100)
+                    if analysis_data['roi_targets']:
+                        st.session_state.crypto_quick_target_pct = analysis_data['roi_targets'][0]['gain_percent']
                     
                     # CRITICAL FIX: Set missing required fields for Execute Trade form
                     st.session_state.crypto_quick_leverage = 1.0  # Default to spot trading (no leverage)
@@ -1358,10 +1360,16 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Applied {analysis['symbol']} to 'Execute Trade' tab! Switching now...")
-                    st.balloons()
-                    st.rerun()
+                    st.session_state.show_analysis_setup_success = {'symbol': analysis_data['symbol']}
+                
+                st.button(
+                    "✅ Use This Setup", 
+                    key=f"use_{analysis['symbol']}", 
+                    use_container_width=True, 
+                    type="primary",
+                    on_click=set_analysis_setup,
+                    args=(analysis,)
+                )
 
 
 def render_quick_trade_tab(
@@ -1426,19 +1434,29 @@ def render_quick_trade_tab(
     tab_options = ["🔍 Ticker Management", "⚡ Execute Trade"]
     current_index = tab_options.index(st.session_state.quick_trade_subtab) if st.session_state.quick_trade_subtab in tab_options else 0
     
-    # Tab selector using radio buttons
-    subtab = st.radio(
+    # Callback to update session state when radio button is changed by user
+    def update_quick_trade_subtab():
+        st.session_state.quick_trade_subtab = st.session_state.quick_trade_subtab_selector
+    
+    # CRITICAL: Sync the radio selector key with quick_trade_subtab for programmatic navigation
+    # This ensures that when quick_trade_subtab is set programmatically (e.g., from Multi-Config),
+    # the radio button reflects the correct tab on the next render
+    if 'quick_trade_subtab_selector' not in st.session_state:
+        st.session_state.quick_trade_subtab_selector = st.session_state.quick_trade_subtab
+    elif st.session_state.quick_trade_subtab_selector != st.session_state.quick_trade_subtab:
+        # Programmatic navigation detected - sync the selector
+        st.session_state.quick_trade_subtab_selector = st.session_state.quick_trade_subtab
+    
+    # Tab selector using radio buttons with on_change callback
+    st.radio(
         "Navigation",
         options=tab_options,
         index=current_index,
         horizontal=True,
         label_visibility="collapsed",
-        key="quick_trade_subtab_selector"
+        key="quick_trade_subtab_selector",
+        on_change=update_quick_trade_subtab
     )
-    
-    # Update session state when user clicks a tab
-    if subtab != st.session_state.quick_trade_subtab:
-        st.session_state.quick_trade_subtab = subtab
     
     # Render the selected subtab
     if st.session_state.quick_trade_subtab == "🔍 Ticker Management":
@@ -1879,6 +1897,7 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
             "Conservative": {"risk": 1.0, "tp": 3.0, "leverage": 1.0, "description": "Low risk, spot only"},
             "Balanced": {"risk": 2.0, "tp": 5.0, "leverage": 1.0, "description": "Moderate risk/reward"},
             "Momentum": {"risk": 2.0, "tp": 6.0, "leverage": 1.0, "description": "Mid-cap coins with strong trends ($0.01-$1)"},
+            "Volatile Altcoin": {"risk": 4.0, "tp": 10.0, "leverage": 1.0, "description": "⚠️ Wider stops for volatile alts (PLUME, TRUMP, etc.)"},
             "Aggressive Scalp": {"risk": 2.0, "tp": 3.0, "leverage": 2.0, "description": "Quick profits, 2x leverage"},
             "Swing Trade": {"risk": 3.0, "tp": 10.0, "leverage": 1.0, "description": "Larger moves, longer holds"},
             "Scalp": {"risk": 1.0, "tp": 2.5, "leverage": 1.0, "description": "Quick scalping strategy"},
@@ -2140,11 +2159,13 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         )
     
     # Take profit uses default from scanner or template
+    # Clamp value to max if it exceeds (can happen with high-volatility coin strategies)
+    clamped_tp = min(default_tp, 50.0)
     take_profit_pct = st.number_input(
         "Take Profit %" + (" 🔒 From Scanner" if scanner_loaded else ""),
         min_value=0.1,
-        max_value=20.0,
-        value=default_tp,
+        max_value=50.0,  # Increased to support volatile crypto strategies
+        value=clamped_tp,
         step=0.1,
         key="crypto_quick_target_pct"
     )
@@ -2675,8 +2696,13 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
                 st.error(f"❌ Trade failed: Order placement returned None - check logs for details")
                 
     except Exception as e:
-        st.error(f"Trade execution error: {e}")
-        logger.error("Trade execution error: {}", str(e), exc_info=True)
+        error_msg = str(e)
+        if "Invalid permissions" in error_msg and "restricted" in error_msg:
+            st.error(f"🚫 **Restricted Asset**: Trading this pair is not allowed in your region (e.g. WA state restrictions).")
+            st.caption(f"Details: {error_msg}")
+        else:
+            st.error(f"Trade execution error: {error_msg}")
+        logger.error("Trade execution error: {}", error_msg, exc_info=True)
 
 
 def save_trade_setup(analysis: Dict, crypto_config=None):
@@ -2781,8 +2807,8 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
             take_profit_pct = st.number_input(
                 "Take Profit %",
                 min_value=0.1,
-                max_value=20.0,
-                value=5.0,
+                max_value=50.0,  # Increased for volatile crypto
+                value=10.0,
                 step=0.1,
                 key="crypto_bulk_target_pct"
             )
@@ -3037,8 +3063,11 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
                 "Conservative": {"risk": 1.0, "tp": 3.0, "leverage": 1.0, "description": "Low risk, spot only"},
                 "Balanced": {"risk": 2.0, "tp": 5.0, "leverage": 1.0, "description": "Moderate risk/reward"},
                 "Momentum": {"risk": 2.0, "tp": 6.0, "leverage": 1.0, "description": "Mid-cap coins with strong trends ($0.01-$1)"},
+                "Volatile Altcoin": {"risk": 4.0, "tp": 10.0, "leverage": 1.0, "description": "⚠️ Wider stops for volatile alts (PLUME, TRUMP, etc.)"},
                 "Aggressive Scalp": {"risk": 2.0, "tp": 3.0, "leverage": 2.0, "description": "Quick profits, 2x leverage"},
                 "Swing Trade": {"risk": 3.0, "tp": 10.0, "leverage": 1.0, "description": "Larger moves, longer holds"},
+                "Scalp": {"risk": 1.0, "tp": 2.5, "leverage": 1.0, "description": "Quick scalping strategy"},
+                "Breakout": {"risk": 2.5, "tp": 6.0, "leverage": 1.0, "description": "Breakout trading"},
                 "High Risk Penny": {"risk": 5.0, "tp": 15.0, "leverage": 1.0, "description": "Sub-penny cryptos (<$0.01) - extreme volatility"},
                 "High Risk Short": {"risk": 3.0, "tp": 8.0, "leverage": 3.0, "description": "3x leverage short selling"},
             }
@@ -3163,7 +3192,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
             take_profit_pct = st.number_input(
                 "Take Profit %",
                 min_value=0.1,
-                max_value=20.0,
+                max_value=50.0,  # Increased for volatile crypto
                 value=default_tp,
                 step=0.1,
                 key="crypto_bulk_wl_tp_pct"
@@ -4141,12 +4170,13 @@ def analyze_multi_config_bulk(
     fractional_mode = test_configs and test_configs.get('fractional_mode', False)
     
     # Default configurations
+    # NOTE: Targets increased to ensure profitability after Kraken fees (~0.52% round trip)
     if test_configs is None:
         test_configs = {
             'directions': ['BUY', 'SELL'],
             'leverage_levels': [1.0, 2.0, 3.0, 5.0],
-            'risk_pct': 2.0,
-            'take_profit_pct': 5.0,
+            'risk_pct': 3.0,  # Slightly wider stops for volatile crypto
+            'take_profit_pct': 10.0,  # Increased from 5% - must beat fees!
             'fractional_mode': False
         }
     
@@ -4206,14 +4236,38 @@ def analyze_multi_config_bulk(
             if current_price == 0:
                 logger.warning(f"Invalid price for {pair}")
                 continue
+                
+            # Calculate market metrics (moved up for strategy determination)
+            high_24h = float(ticker_info.get('h', [0])[0])
+            low_24h = float(ticker_info.get('l', [0])[0])
+            volatility = ((high_24h - low_24h) / current_price * 100) if current_price > 0 else 0
+            volume_24h = float(ticker_info.get('v', [0])[0])
+            change_24h = ((current_price - low_24h) / low_24h * 100) if low_24h > 0 else 0
             
-            # Determine base strategy for this pair
+            # Determine base strategy and params for this pair based on price and volatility
+            # This ensures each coin gets appropriate risk/reward settings
+            # NOTE: Kraken fees are ~0.26% per trade (0.52% round trip), so targets must exceed this!
+            # Minimum profitable target = 1% (to cover fees + make profit)
             if current_price < 0.01:
-                base_strategy = "HIGH_RISK_PENNY"
+                # Sub-penny coins: High volatility, aim for big moves
+                base_strategy = "High Risk Penny"
+                effective_risk_pct = 5.0
+                effective_tp_pct = 25.0  # Increased from 15% - these coins move big
+            elif volatility > 10.0:
+                # Volatile altcoins: Ride the swings
+                base_strategy = "Volatile Altcoin"
+                effective_risk_pct = 4.0
+                effective_tp_pct = 15.0  # Increased from 10%
             elif current_price < 1.0:
-                base_strategy = "MOMENTUM"
+                # Mid-cap altcoins: Good momentum plays
+                base_strategy = "Momentum"
+                effective_risk_pct = 3.0
+                effective_tp_pct = 10.0  # Increased from 6%
             else:
-                base_strategy = "SCALP"
+                # Large caps (BTC, ETH, etc): Tighter but still profitable
+                base_strategy = "Swing"
+                effective_risk_pct = 2.0
+                effective_tp_pct = 5.0  # Increased from 2.5% - must beat fees!
             
             # Test all configurations for this pair
             for direction in directions:
@@ -4241,28 +4295,20 @@ def analyze_multi_config_bulk(
                     
                     try:
                         # Calculate stop loss and take profit based on direction
+                        # Use effective percentages derived from coin strategy
                         if direction == "BUY":
-                            stop_loss = current_price * (1 - risk_pct / 100)
-                            take_profit = current_price * (1 + take_profit_pct / 100)
+                            stop_loss = current_price * (1 - effective_risk_pct / 100)
+                            take_profit = current_price * (1 + effective_tp_pct / 100)
                         else:  # SELL
-                            stop_loss = current_price * (1 + risk_pct / 100)
-                            take_profit = current_price * (1 - take_profit_pct / 100)
+                            stop_loss = current_price * (1 + effective_risk_pct / 100)
+                            take_profit = current_price * (1 - effective_tp_pct / 100)
                         
                         # Calculate quantity (accounting for leverage)
                         effective_position = position_size * leverage
                         quantity = effective_position / current_price if current_price > 0 else 0
                         
                         # Calculate risk/reward ratio
-                        risk_reward_ratio = take_profit_pct / risk_pct if risk_pct > 0 else 0
-                        
-                        # Calculate market metrics (always, not just for AI review)
-                        high_24h = float(ticker_info.get('h', [0])[0])
-                        low_24h = float(ticker_info.get('l', [0])[0])
-                        volume_24h = float(ticker_info.get('v', [0])[0])
-                        
-                        # Calculate market metrics
-                        change_24h = ((current_price - low_24h) / low_24h * 100) if low_24h > 0 else 0
-                        volatility = ((high_24h - low_24h) / current_price * 100) if current_price > 0 else 0
+                        risk_reward_ratio = effective_tp_pct / effective_risk_pct if effective_risk_pct > 0 else 0
                         
                         # Get AI review if available
                         ai_approved = None
@@ -4334,8 +4380,8 @@ def analyze_multi_config_bulk(
                             'current_price': current_price,
                             'stop_loss': stop_loss,
                             'take_profit': take_profit,
-                            'stop_pct': risk_pct,  # FIXED: Add percentage values
-                            'target_pct': take_profit_pct,  # FIXED: Add percentage values
+                            'stop_pct': effective_risk_pct,
+                            'target_pct': effective_tp_pct,
                             'position_size': position_size,
                             'effective_position': effective_position,
                             'quantity': quantity,
@@ -4346,6 +4392,7 @@ def analyze_multi_config_bulk(
                             'ai_recommendation': ai_recommendation,
                             'ai_risks': ai_risks[:3] if ai_risks else [],
                             'strategy': base_strategy,
+                            'strategy_name': base_strategy,  # Ensure consistent naming
                             # Add real market metrics for context
                             'change_24h': change_24h,
                             'volatility': volatility,
@@ -4473,6 +4520,57 @@ def analyze_multi_config_bulk(
             st.balloons()
             st.rerun()
         
+        # Also check for filtered button clicks
+        for key in list(st.session_state.keys()):
+            if key.startswith('use_filtered_') and key.endswith('_clicked') and st.session_state.get(key, False):
+                idx = key.replace('use_filtered_', '').replace('_clicked', '')
+                data_key = f'use_filtered_{idx}_data'
+                row = st.session_state.get(data_key, {})
+                if row:
+                    pair = row.get('pair', 'UNKNOWN')
+                    trade_type = row.get('trade_type', 'UNKNOWN')
+                    logger.info(f"🔘 FILTERED - Processing clicked flag for {pair} - {trade_type}")
+                    
+                    # Store complete setup
+                    st.session_state.crypto_scanner_opportunity = {
+                        'symbol': row.get('pair', 'UNKNOWN'),
+                        'strategy': row.get('strategy', 'Unknown'),
+                        'confidence': row.get('ai_approved', False),
+                        'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
+                        'score': row.get('ai_score', 0),
+                        'current_price': row.get('current_price', 0),
+                        'change_24h': row.get('change_24h', 0),
+                        'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
+                        'volatility': row.get('volatility', 0),
+                        'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
+                        'ai_reasoning': row.get('ai_recommendation', ''),
+                        'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
+                        'ai_rating': row.get('ai_confidence', 0) / 10,
+                        'ai_risks': row.get('ai_risks', [])
+                    }
+                    
+                    st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
+                    st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
+                    st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
+                    st.session_state.crypto_quick_leverage = row.get('leverage', 1)
+                    st.session_state.crypto_quick_position_size = row.get('position_size', 100)
+                    st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
+                    st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
+                    
+                    # Clear flags
+                    st.session_state[key] = False
+                    if data_key in st.session_state:
+                        del st.session_state[data_key]
+                    
+                    # Switch tabs
+                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
+                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    
+                    st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
+                    st.balloons()
+                    st.rerun()
+        
         # Render the expanders with buttons
         for idx, row_series in best_per_pair.iterrows():
             row = row_series.to_dict()  # Convert Series to dict so .get() works
@@ -4553,47 +4651,20 @@ def analyze_multi_config_bulk(
                 
                 logger.info("📊 About to render 'Use This Setup' button for {} (key=use_config_{})", str(pair), idx)
                 
-                # Action button - DIRECTLY set session state instead of using flags
-                # This fixes the Streamlit rerun timing issue where flags get lost
-                if st.button(f"✅ Use This Setup for {pair}", key=f"use_config_{idx}", use_container_width=True, type="primary"):
-                    logger.info(f"🔘 BUTTON CLICKED! Directly setting session state for {pair}")
-                    
-                    # Store complete setup with REAL market data (same as flag handler did)
-                    st.session_state.crypto_scanner_opportunity = {
-                        'symbol': row.get('pair', 'UNKNOWN'),
-                        'strategy': row.get('strategy', 'Unknown'),
-                        'confidence': row.get('ai_approved', False),
-                        'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
-                        'score': row.get('ai_score', 0),
-                        'current_price': row.get('current_price', 0),
-                        'change_24h': row.get('change_24h', 0),
-                        'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
-                        'volatility': row.get('volatility', 0),
-                        'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
-                        'ai_reasoning': row.get('ai_recommendation', ''),
-                        'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
-                        'ai_rating': row.get('ai_confidence', 0) / 10,
-                        'ai_risks': row.get('ai_risks', [])
-                    }
-                    
-                    st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
-                    st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
-                    st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
-                    st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
-                    st.session_state.crypto_quick_leverage = row.get('leverage', 1)
-                    st.session_state.crypto_quick_position_size = row.get('position_size', 100)
-                    st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
-                    st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
-                    
-                    logger.info(f"📝 Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}, position=${row.get('position_size', 100)}")
-                    
-                    # Switch to Quick Trade main tab AND Execute Trade subtab
-                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
-                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
-                    st.balloons()
-                    st.rerun()
+                # Action button - Use on_click callback to set flag BEFORE rerun
+                # This is the ONLY reliable way to handle button clicks in Streamlit expanders
+                def set_config_flag(config_idx, config_pair):
+                    logger.info(f"🔘 BUTTON CALLBACK! Setting flag use_config_{config_idx}_clicked for {config_pair}")
+                    st.session_state[f'use_config_{config_idx}_clicked'] = True
+                
+                st.button(
+                    f"✅ Use This Setup for {pair}", 
+                    key=f"use_config_{idx}", 
+                    use_container_width=True, 
+                    type="primary",
+                    on_click=set_config_flag,
+                    args=(idx, pair)
+                )
         
         # Show comparison table
         st.markdown("#### 📋 All Configurations Comparison")
@@ -4706,47 +4777,20 @@ def analyze_multi_config_bulk(
                         for risk in ai_risks:
                             st.warning(risk)
                 
-                # Action button for each config - DIRECTLY set session state instead of using flags
-                # This fixes the Streamlit rerun timing issue where flags get lost
-                if st.button(f"✅ Use This Setup", key=f"use_filtered_{idx}", use_container_width=True, type="primary"):
-                    logger.info("🔘 Use This Setup clicked for {} - {} - directly setting session state", str(pair), str(trade_type))
-                    
-                    # Store complete setup with REAL market data
-                    st.session_state.crypto_scanner_opportunity = {
-                        'symbol': row.get('pair', 'UNKNOWN'),
-                        'strategy': row.get('strategy', 'Unknown'),
-                        'confidence': row.get('ai_approved', False),
-                        'risk_level': 'Medium' if (row.get('leverage', 0) or 0) <= 2 else 'High',
-                        'score': row.get('ai_score', 0),
-                        'current_price': row.get('current_price', 0),
-                        'change_24h': row.get('change_24h', 0),
-                        'volume_ratio': (row.get('volume_24h', 0) or 0) / 1000000 if (row.get('volume_24h', 0) or 0) > 0 else 1.0,
-                        'volatility': row.get('volatility', 0),
-                        'reason': f"{row.get('trade_type', 'UNKNOWN')} recommended",
-                        'ai_reasoning': row.get('ai_recommendation', ''),
-                        'ai_confidence': 'High' if row.get('ai_confidence', 0) >= 75 else 'Medium' if row.get('ai_confidence', 0) >= 50 else 'Low',
-                        'ai_rating': row.get('ai_confidence', 0) / 10,
-                        'ai_risks': row.get('ai_risks', [])
-                    }
-                    
-                    st.session_state.crypto_quick_pair = row.get('pair', 'UNKNOWN')
-                    st.session_state.crypto_quick_trade_pair = row.get('pair', 'UNKNOWN')
-                    st.session_state.crypto_quick_direction = row.get('direction', 'BUY')
-                    st.session_state.crypto_trading_mode = row.get('trading_mode', 'Spot Trading')
-                    st.session_state.crypto_quick_leverage = row.get('leverage', 1)
-                    st.session_state.crypto_quick_position_size = row.get('position_size', 100)
-                    st.session_state.crypto_quick_stop_pct = row.get('stop_pct', 2.0)
-                    st.session_state.crypto_quick_target_pct = row.get('target_pct', 5.0)
-                    
-                    logger.info(f"📝 Filtered - Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}")
-                    
-                    # Switch to Quick Trade main tab AND Execute Trade subtab
-                    st.session_state.active_crypto_tab = "⚡ Quick Trade"
-                    st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
-                    st.balloons()
-                    st.rerun()
+                # Action button for each config - Use on_click callback for reliable flag setting
+                def set_filtered_flag(filtered_idx, filtered_pair, filtered_trade_type, row_data):
+                    logger.info(f"🔘 FILTERED CALLBACK! Setting flag use_filtered_{filtered_idx}_clicked for {filtered_pair} - {filtered_trade_type}")
+                    st.session_state[f'use_filtered_{filtered_idx}_data'] = row_data
+                    st.session_state[f'use_filtered_{filtered_idx}_clicked'] = True
+                
+                st.button(
+                    f"✅ Use This Setup", 
+                    key=f"use_filtered_{idx}", 
+                    use_container_width=True, 
+                    type="primary",
+                    on_click=set_filtered_flag,
+                    args=(idx, pair, trade_type, row)
+                )
         
         # Export option
         if st.button("📥 Export Results to CSV"):
@@ -5048,45 +5092,51 @@ def analyze_ultimate_all_strategies(
                 
                 st.info(f"{style}\n\n{reason}\n\n**Optimal Strategy:** {row['strategy_name']}")
                 
-                # Action button
-                if st.button(f"✅ Use This Setup", key=f"use_ultimate_{idx}", use_container_width=True, type="primary"):
-                    logger.info("🔘 ULTIMATE - Use This Setup clicked for {} - {row['trade_type']}", str(row['pair']))
+                # Action button - Use on_click callback for reliable flag setting in expanders
+                def set_ultimate_setup(row_data, total_configs):
+                    logger.info(f"🔘 ULTIMATE CALLBACK! Setting up {row_data['pair']} - {row_data['trade_type']}")
                     
                     # Store complete setup with REAL market data
                     st.session_state.crypto_scanner_opportunity = {
-                        'symbol': row['pair'],
-                        'strategy': row['strategy_name'],
-                        'confidence': row['recommendation'],
-                        'risk_level': row['risk_level'],
-                        'score': row['composite_score'],
-                        'current_price': row['current_price'],
-                        'change_24h': row.get('change_24h', 0),  # Use real value from analysis
-                        'volume_ratio': row.get('volume_24h', 0) / 1000000 if row.get('volume_24h', 0) > 0 else 1.0,  # Normalize volume
-                        'volatility': row.get('volatility', 0),  # Use real volatility
-                        'reason': f"{row['strategy_name']} {row['trade_type']} - Ultimate Analysis Winner",
-                        'ai_reasoning': f"Best of {len(results_df)} configs tested",
-                        'ai_confidence': row['recommendation'],
-                        'ai_rating': row['confidence_score'] / 10,
+                        'symbol': row_data['pair'],
+                        'strategy': row_data['strategy_name'],
+                        'confidence': row_data['recommendation'],
+                        'risk_level': row_data['risk_level'],
+                        'score': row_data['composite_score'],
+                        'current_price': row_data['current_price'],
+                        'change_24h': row_data.get('change_24h', 0),
+                        'volume_ratio': row_data.get('volume_24h', 0) / 1000000 if row_data.get('volume_24h', 0) > 0 else 1.0,
+                        'volatility': row_data.get('volatility', 0),
+                        'reason': f"{row_data['strategy_name']} {row_data['trade_type']} - Ultimate Analysis Winner",
+                        'ai_reasoning': f"Best of {total_configs} configs tested",
+                        'ai_confidence': row_data['recommendation'],
+                        'ai_rating': row_data['confidence_score'] / 10,
                         'ai_risks': []
                     }
                     
-                    st.session_state.crypto_quick_pair = row['pair']
-                    st.session_state.crypto_quick_trade_pair = row['pair']  # Fixed: Also set the key that Execute Trade reads
-                    st.session_state.crypto_quick_direction = row['direction']
-                    st.session_state.crypto_trading_mode = row['trading_mode']
-                    st.session_state.crypto_quick_leverage = row['leverage']
-                    st.session_state.crypto_quick_position_size = row['position_size']
-                    st.session_state.crypto_quick_stop_pct = row['stop_pct']  # FIXED: Use correct field name
-                    st.session_state.crypto_quick_target_pct = row['target_pct']  # FIXED: Use correct field name
+                    st.session_state.crypto_quick_pair = row_data['pair']
+                    st.session_state.crypto_quick_trade_pair = row_data['pair']
+                    st.session_state.crypto_quick_direction = row_data['direction']
+                    st.session_state.crypto_trading_mode = row_data['trading_mode']
+                    st.session_state.crypto_quick_leverage = row_data['leverage']
+                    st.session_state.crypto_quick_position_size = row_data['position_size']
+                    st.session_state.crypto_quick_stop_pct = row_data['stop_pct']
+                    st.session_state.crypto_quick_target_pct = row_data['target_pct']
                     
-                    logger.info("📝 ULTIMATE - Session state set: pair={}, direction={row['direction']}, leverage={row['leverage']}, position=${row['position_size']}", str(row['pair']))
+                    logger.info(f"📝 ULTIMATE - Session state set: pair={row_data['pair']}, direction={row_data['direction']}, leverage={row_data['leverage']}, position=${row_data['position_size']}")
                     
                     # Switch to Execute Trade tab
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
-                    
-                    st.success(f"✅ Optimal setup loaded for {row['pair']} ({row['trade_type']})! Switching to Execute Trade tab...")
-                    st.balloons()
-                    st.rerun()
+                    st.session_state.show_ultimate_success = {'pair': row_data['pair'], 'trade_type': row_data['trade_type']}
+                
+                st.button(
+                    f"✅ Use This Setup", 
+                    key=f"use_ultimate_{idx}", 
+                    use_container_width=True, 
+                    type="primary",
+                    on_click=set_ultimate_setup,
+                    args=(row.to_dict(), len(results_df))
+                )
         
         # Full results table with filters
         st.markdown("#### 📊 Full Results Table")
