@@ -478,19 +478,19 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
         
         # Apply sorting
         if sort_by == "Score (High→Low)":
-            filtered_df = filtered_df.sort_values(by='Score', ascending=False)
+            filtered_df = filtered_df.sort_values('Score', ascending=False)  # type: ignore
         elif sort_by == "Score (Low→High)":
-            filtered_df = filtered_df.sort_values(by='Score', ascending=True)
+            filtered_df = filtered_df.sort_values('Score', ascending=True)  # type: ignore
         elif sort_by == "Price (High→Low)":
-            filtered_df = filtered_df.sort_values(by='Price', ascending=False)
+            filtered_df = filtered_df.sort_values('Price', ascending=False)  # type: ignore
         elif sort_by == "Price (Low→High)":
-            filtered_df = filtered_df.sort_values(by='Price', ascending=True)
+            filtered_df = filtered_df.sort_values('Price', ascending=True)  # type: ignore
         elif sort_by == "Change % (High→Low)":
-            filtered_df = filtered_df.sort_values(by='Change', ascending=False)
+            filtered_df = filtered_df.sort_values('Change', ascending=False)  # type: ignore
         elif sort_by == "Change % (Low→High)":
-            filtered_df = filtered_df.sort_values(by='Change', ascending=True)
+            filtered_df = filtered_df.sort_values('Change', ascending=True)  # type: ignore
         elif sort_by == "Ticker (A→Z)":
-            filtered_df = filtered_df.sort_values(by='Ticker', ascending=True)
+            filtered_df = filtered_df.sort_values('Ticker', ascending=True)  # type: ignore
         
         # Show filter results
         if len(filtered_df) < len(df):
@@ -514,7 +514,7 @@ def display_unified_scanner(kraken_client: KrakenClient, crypto_config, scanner_
             """Select top N tickers by score"""
             def selector():
                 if 'Score' in df.columns:
-                    st.session_state.selected_tickers = df.nlargest(min(n, len(df)), 'Score')['Ticker'].tolist()
+                    st.session_state.selected_tickers = df.sort_values('Score', ascending=False).iloc[:min(n, len(df))]['Ticker'].tolist()  # type: ignore
                 else:
                     st.session_state.selected_tickers = []
             return selector
@@ -3725,6 +3725,8 @@ def execute_bulk_trades(
         trading_mode: Trading mode (Spot Trading or Margin Trading)
         leverage: Leverage amount (None for spot trading)
     """
+    import streamlit as st
+    
     if not pairs:
         st.warning("No pairs selected for trading")
         return
@@ -4712,7 +4714,7 @@ def analyze_multi_config_bulk(
             filtered_df = filtered_df[filtered_df['ai_confidence'] >= min_confidence]
         
         # Sort by AI score
-        filtered_df = filtered_df.sort_values(by='ai_score', ascending=False)
+        filtered_df = filtered_df.sort_values('ai_score', ascending=False)  # type: ignore
         
         # Display table
         display_df = filtered_df[[
@@ -5194,7 +5196,7 @@ def analyze_ultimate_all_strategies(
             filtered_df = filtered_df[filtered_df['composite_score'] >= min_score]
         
         # Sort and display
-        filtered_df = filtered_df.sort_values(by='composite_score', ascending=False)
+        filtered_df = filtered_df.sort_values('composite_score', ascending=False)  # type: ignore
         
         display_df = filtered_df[[
             'pair', 'strategy_name', 'trade_type', 'current_price', 
