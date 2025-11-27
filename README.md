@@ -1,10 +1,4 @@
-Here is a significantly condensed, production-ready version of your README. I have stripped away the heavy theoretical explanations (like the math behind Entropy or specific Fibonacci setups) and focused on **features, installation, and usage**.
-
-I recommend moving the detailed strategy guides (e.g., the specific rules for "Warrior Scalping" or "Entropy Math") into a separate `docs/` folder to keep your root README clean.
-
------
-
-### Condensed README.md
+README.md
 
 ````markdown
 # 📈 Sentient Trader Platform
@@ -72,19 +66,19 @@ KRAKEN_API_SECRET=...
 DISCORD_WEBHOOK_URL=...
 ```
 
------
+---
 
 ## ⚙️ Strategies & Automation
 
 The platform runs multiple background services for continuous analysis.
 
-| Strategy | Description | Config File |
-|:---|:---|:---|
-| **Warrior Scalping** | Momentum "Gap & Go" (9:30-10:00 AM) | `config_warrior_scalping.py` |
-| **EMA Power Zone** | Swing trading based on 8/21 EMA & DeMarker | `config_swing_trader.py` |
-| **Options Premium** | Wheel strategy and credit spreads | `config_options_premium.py` |
-| **Crypto Breakout** | 24/7 Scanner for crypto pairs | `windows_services/crypto_breakout_service.py` |
-| **DEX Hunter** | New token launch detection | `windows_services/dex_launch_service.py` |
+| Strategy                   | Description                                | Config File                                     |
+| :------------------------- | :----------------------------------------- | :---------------------------------------------- |
+| **Warrior Scalping** | Momentum "Gap & Go" (9:30-10:00 AM)        | `config_warrior_scalping.py`                  |
+| **EMA Power Zone**   | Swing trading based on 8/21 EMA & DeMarker | `config_swing_trader.py`                      |
+| **Options Premium**  | Wheel strategy and credit spreads          | `config_options_premium.py`                   |
+| **Crypto Breakout**  | 24/7 Scanner for crypto pairs              | `windows_services/crypto_breakout_service.py` |
+| **DEX Hunter**       | New token launch detection                 | `windows_services/dex_launch_service.py`      |
 
 **To run background automation:**
 
@@ -92,7 +86,7 @@ The platform runs multiple background services for continuous analysis.
 python windows_services/runners/run_autotrader_background.py
 ```
 
------
+---
 
 ## 📊 Advanced Systems
 
@@ -100,16 +94,16 @@ python windows_services/runners/run_autotrader_background.py
 
 Uses Shannon and Approximate Entropy to measure market chaos.
 
-  * **\< 30 (Structured):** Ideal for trading.
-  * **\> 70 (Noisy):** Trading is automatically blocked to prevent whipsaws.
+* **\< 30 (Structured):** Ideal for trading.
+* **\> 70 (Noisy):** Trading is automatically blocked to prevent whipsaws.
 
 ### 2\. Advanced Opportunity Scanner
 
 Finds plays before they rocket using customizable filters:
 
-  * **Buzzing Stocks:** Combines volume spikes with social sentiment.
-  * **Reverse Merger:** Detects shell companies and unusual dark pool activity.
-  * **Penny Stock Risk:** Auto-detects dilution history and reverse splits.
+* **Buzzing Stocks:** Combines volume spikes with social sentiment.
+* **Reverse Merger:** Detects shell companies and unusual dark pool activity.
+* **Penny Stock Risk:** Auto-detects dilution history and reverse splits.
 
 ### 3\. ML-Enhanced Analysis
 
@@ -122,7 +116,7 @@ scanner = MLEnhancedScanner()
 trades = scanner.scan_top_options_with_ml(min_ensemble_score=70.0)
 ```
 
------
+---
 
 ## ⚠️ Disclaimer
 
@@ -134,11 +128,5 @@ MIT
 
 ```
 
-### Summary of Changes made based on the source file:
 
-* **Consolidated Features:** Merged the "Key Features," "Latest Features," and "Background Services" tables into a concise Overview and Strategy list.
-* **Simplified Technicals:** The detailed tutorials on how to calculate Fibonacci extensions, DeMarker oscillators, and Shannon Entropy formulas were removed. These are implementation details, not high-level README content.
-* **Reduced Code Blocks:** Removed the long Python usage examples for specific classes (like `FibonacciOptionsChain` or `SetupDetector`), keeping only the essential installation and running commands.
-* **Grouped Analysis Tools:** Grouped the "Advanced Scanner," "Social Sentiment," and "ML-Enhanced" workflows under a single "Advanced Systems" header for better readability.
-* **Shortened Alerts:** Summarized the Discord alerts into a single bullet point rather than a full schedule table.
 ```
