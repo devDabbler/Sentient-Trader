@@ -8,6 +8,7 @@ import sys
 import os
 import time
 from pathlib import Path
+from datetime import datetime
 
 # CRITICAL: Set working directory FIRST
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
@@ -124,8 +125,9 @@ try:
     # ============================================================
     # Load watchlist from Control Panel config (if available)
     # ============================================================
+    save_analysis_results = None
     try:
-        from service_config_loader import load_service_watchlist, load_discord_settings
+        from service_config_loader import load_service_watchlist, load_discord_settings, save_analysis_results
         
         custom_watchlist = load_service_watchlist('sentient-stock-monitor')
         if custom_watchlist:
@@ -148,8 +150,10 @@ try:
             
     except ImportError:
         logger.debug("service_config_loader not available - using defaults")
+        save_analysis_results = None
     except Exception as e:
         logger.warning(f"Could not load Control Panel config: {e}")
+        save_analysis_results = None
     
     sys.stdout.write(f"DEBUG: About to access monitor.watchlist\n")
     sys.stdout.flush()
@@ -199,6 +203,7 @@ try:
         # Manual scan loop
         logger.info("Using manual scan loop")
         scan_count = 0
+        all_results = []
         
         while True:
             try:
@@ -206,12 +211,44 @@ try:
                 logger.info(f"Starting scan #{scan_count}...")
                 scan_start = time.time()
                 
-                if hasattr(monitor, 'scan'):
-                    monitor.scan()
+                opportunities = None
+                if hasattr(monitor, 'scan_all_tickers'):
+                    opportunities = monitor.scan_all_tickers()
+                elif hasattr(monitor, 'scan'):
+                    opportunities = monitor.scan()
                 elif hasattr(monitor, 'scan_and_alert'):
-                    monitor.scan_and_alert()
+                    opportunities = monitor.scan_and_alert()
                 else:
                     logger.warning("No scan method found - service may not be functional")
+                
+                # Save results to control panel
+                if opportunities and save_analysis_results:
+                    try:
+                        # Convert StockOpportunity objects to dicts
+                        results = []
+                        for opp in opportunities:
+                            if hasattr(opp, 'to_dict'):
+                                result = opp.to_dict()
+                            elif isinstance(opp, dict):
+                                result = opp
+                            else:
+                                result = {
+                                    'ticker': getattr(opp, 'symbol', 'N/A'),
+                                    'signal': getattr(opp, 'opportunity_type', 'SIGNAL'),
+                                    'confidence': int(getattr(opp, 'ensemble_score', 0)),
+                                    'price': getattr(opp, 'price', 0),
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                            results.append(result)
+                        
+                        all_results.extend(results)
+                        # Keep last 50 results
+                        all_results = all_results[-50:]
+                        
+                        save_analysis_results('sentient-stock-monitor', all_results)
+                        logger.debug(f"Saved {len(results)} results to control panel")
+                    except Exception as e:
+                        logger.debug(f"Could not save results: {e}")
                 
                 scan_duration = time.time() - scan_start
                 logger.info(f"Scan #{scan_count} complete ({scan_duration:.1f}s)")

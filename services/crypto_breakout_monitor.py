@@ -260,13 +260,25 @@ class CryptoBreakoutMonitor:
         
         if not breakouts:
             logger.info("   No breakouts detected above threshold")
-            return
+            return []
         
         # Filter and send alerts
         alerts_sent = 0
         added_to_watchlist = 0
+        results_for_panel = []
         
         for breakout in breakouts:
+            # Store result for control panel (even if not alerted)
+            results_for_panel.append({
+                'ticker': breakout.symbol,
+                'signal': breakout.alert_type,
+                'confidence': int(breakout.score),
+                'price': breakout.current_price,
+                'change_24h': breakout.change_24h,
+                'volume_24h': breakout.volume_24h,
+                'timestamp': datetime.now().isoformat()
+            })
+            
             if self._should_alert(breakout):
                 # Send Discord alert
                 self._send_alert(breakout)
@@ -284,6 +296,8 @@ class CryptoBreakoutMonitor:
         logger.info(f"📤 Sent {alerts_sent} new alerts")
         if added_to_watchlist > 0:
             logger.info(f"📋 Added {added_to_watchlist} new coins to watchlist")
+        
+        return results_for_panel
     
     def _detect_breakouts(self) -> List[BreakoutAlert]:
         """Detect breakout opportunities using scanner"""

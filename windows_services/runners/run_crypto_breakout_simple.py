@@ -96,8 +96,9 @@ try:
     # ============================================================
     # Load watchlist from Control Panel config (if available)
     # ============================================================
+    save_analysis_results = None
     try:
-        from service_config_loader import load_service_watchlist, load_discord_settings
+        from service_config_loader import load_service_watchlist, load_discord_settings, save_analysis_results
         
         custom_watchlist = load_service_watchlist('sentient-crypto-breakout')
         if custom_watchlist:
@@ -122,8 +123,10 @@ try:
             
     except ImportError:
         logger.debug("service_config_loader not available - using defaults")
+        save_analysis_results = None
     except Exception as e:
         logger.warning(f"Could not load Control Panel config: {e}")
+        save_analysis_results = None
     
     # Print SERVICE READY to both stdout AND logger
     logger.info("")
@@ -150,11 +153,14 @@ try:
     # Run monitoring loop - CryptoBreakoutMonitor has start() method
     if hasattr(monitor, 'start'):
         logger.info("Using monitor.start() method - this runs the full monitoring loop")
+        # Note: monitor.start() runs its own loop, so we can't intercept results easily
+        # The monitor itself should save results if needed
         monitor.start()
     else:
         # Fallback: manual loop calling internal scan method
         logger.info("Using manual scan loop")
         scan_count = 0
+        all_results = []
         
         while True:
             try:
@@ -163,7 +169,20 @@ try:
                 
                 # CryptoBreakoutMonitor has _scan_and_alert() method
                 if hasattr(monitor, '_scan_and_alert'):
-                    monitor._scan_and_alert()
+                    results = monitor._scan_and_alert()
+                    if results:
+                        all_results.extend(results)
+                        # Keep last 50 results
+                        all_results = all_results[-50:]
+                        
+                        # Save to control panel
+                        if save_analysis_results:
+                            try:
+                                save_analysis_results('sentient-crypto-breakout', all_results)
+                                logger.debug(f"Saved {len(results)} results to control panel")
+                            except Exception as e:
+                                logger.debug(f"Could not save results: {e}")
+                    
                     logger.info(f"Scan #{scan_count} complete - alerts sent if breakouts found")
                 elif hasattr(monitor, 'scan_opportunities'):
                     opportunities = monitor.scan_opportunities()
