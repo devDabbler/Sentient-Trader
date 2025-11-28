@@ -974,21 +974,32 @@ def render_watchlist_manager():
         st.caption("🚫 Manage coins permanently excluded from AI monitoring")
         st.info("ℹ️ **Note:** Pending trade approvals are managed in the main Trading App. To clear all pending approvals from here, you can **Restart** the 'AI Crypto Trader' service.")
         
-        # Debug info
-        if st.checkbox("Show Debug Info"):
-            st.text(f"File Path: {AI_POSITIONS_FILE}")
-            st.text(f"Exists: {AI_POSITIONS_FILE.exists()}")
-            if AI_POSITIONS_FILE.exists():
-                try:
-                    with open(AI_POSITIONS_FILE, 'r') as f:
-                        raw_content = f.read()
-                        st.text(f"File Content Length: {len(raw_content)}")
-                        st.text(f"First 100 chars: {raw_content[:100]}")
-                except Exception as e:
-                    st.error(f"Error reading file: {e}")
-
+        # Load exclusions
         excluded = load_ai_exclusions()
         
+        # Diagnostics Expandable
+        with st.expander("🔍 File Diagnostics (Troubleshooting)"):
+            st.text(f"File Path: {AI_POSITIONS_FILE}")
+            if AI_POSITIONS_FILE.exists():
+                st.success("✅ File exists")
+                try:
+                    with open(AI_POSITIONS_FILE, 'r') as f:
+                        raw = f.read()
+                        st.text(f"File Size: {len(raw)} bytes")
+                        
+                        import json
+                        data = json.loads(raw)
+                        st.write("JSON Keys found:", list(data.keys()))
+                        
+                        raw_excluded = data.get("excluded_pairs", [])
+                        st.write(f"Raw 'excluded_pairs' count: {len(raw_excluded)}")
+                        st.code(json.dumps(raw_excluded), language="json")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error reading/parsing file: {e}")
+            else:
+                st.error("❌ File does not exist")
+
         col1, col2 = st.columns([3, 1])
         with col1:
             new_exclude = st.text_input("Exclude Pair (e.g., BTC/USD)", key="new_exclude").upper()
