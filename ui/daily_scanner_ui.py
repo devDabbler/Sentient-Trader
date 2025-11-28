@@ -146,34 +146,64 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
     st.subheader("🏃 Tier 1: Quick Filter")
     st.markdown("""
     Lightweight scan using **only** price, volume, and momentum.
-    Multiple scan sources consolidated into one interface.
+    Choose between analyzing your **watchlist** or **discovering new coins**.
     """)
+    
+    # Mode selection - Watchlist vs Discovery
+    scan_mode = st.radio(
+        "Scan Mode",
+        ["📋 Watchlist Analysis", "🔍 New Discovery"],
+        horizontal=True,
+        key="tier1_scan_mode",
+        help="Watchlist = analyze coins you track | Discovery = find NEW coins on Kraken"
+    )
     
     col1, col2 = st.columns(2)
     
     with col1:
-        # Scan source selection - EXPANDED OPTIONS
-        scan_source = st.selectbox(
-            "Scan Source",
-            [
-                "All Categories (70+ coins)",
-                "💰 Penny Cryptos (<$1)",
-                "🔬 Sub-Penny (<$0.01)",
-                "� Potential Runners (high upside)",
-                "� CoinGecko Trending (with sentiment)",
-                "📈 Top Gainers (24h)",
-                "📊 High Volume Surge",
-                "🌐 Dynamic Discovery (CG + CMC + Reddit)",
-                "🗣️ Social Buzz (Reddit/StockTwits)",
-                "⭐ My Watchlist"
-            ],
-            key="tier1_scan_source",
-            help="Choose where to discover coins - includes sentiment analysis"
-        )
+        if scan_mode == "📋 Watchlist Analysis":
+            # Watchlist-focused options
+            scan_source = st.selectbox(
+                "Scan Source",
+                [
+                    "⭐ My Watchlist",
+                    "📈 Top Gainers (watchlist)",
+                    "📊 High Volume (watchlist)",
+                    "🗣️ Social Buzz (watchlist)",
+                ],
+                key="tier1_scan_source_watchlist",
+                help="Analyze coins from your saved watchlist"
+            )
+            
+            # Get watchlist count for info
+            try:
+                if 'crypto_watchlist_manager' in st.session_state:
+                    wl_count = len(st.session_state.crypto_watchlist_manager.get_watchlist_symbols())
+                    st.caption(f"📋 Your watchlist has {wl_count} coins")
+            except:
+                pass
+        else:
+            # Discovery-focused options  
+            scan_source = st.selectbox(
+                "Discovery Source",
+                [
+                    "🌐 All Kraken USD Pairs",
+                    "🔥 CoinGecko Trending",
+                    "💰 Penny Cryptos (<$1)",
+                    "🔬 Sub-Penny (<$0.01)",
+                    "🚀 Potential Runners",
+                    "🆕 New to Kraken (exclude watchlist)",
+                ],
+                key="tier1_scan_source_discovery",
+                help="Discover NEW coins not in your watchlist"
+            )
+            
+            # Show discovery info
+            st.caption("🔍 Discovery mode finds coins outside your watchlist")
         
         # Show sentiment indicator for sentiment-enabled sources
-        if "sentiment" in scan_source.lower() or "Trending" in scan_source or "Buzz" in scan_source or "Dynamic" in scan_source:
-            st.info("🧠 This source includes Reddit & social sentiment analysis + 🐦 X/Twitter sentiment")
+        if "sentiment" in scan_source.lower() or "Trending" in scan_source or "Buzz" in scan_source:
+            st.info("🧠 Includes Reddit & social sentiment + 🐦 X/Twitter")
     
     with col2:
         # Filter settings
@@ -184,6 +214,10 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
             value=20,
             key="tier1_max_results"
         )
+        
+        # Show estimated scan time
+        if scan_mode == "🔍 New Discovery" and "All Kraken" in scan_source:
+            st.caption("⏱️ Discovery scans may take 30-60 seconds")
     
     # Scan button
     if st.button("🚀 Start Quick Scan", key="tier1_scan", type="primary"):
@@ -220,351 +254,131 @@ def display_tier1_quick_filter(scanner, kraken_client, crypto_config):
                     st.error(f"Failed to reinitialize scanner: {reinit_error}")
                     return
             
-            if scan_source == "All Categories (70+ coins)":
-                logger.info("✅ Matched: All Categories")
-                pairs = scanner.get_all_scan_pairs()
-                logger.info(f"   Got {len(pairs)} pairs from all categories")
-            
-            elif scan_source == "💰 Penny Cryptos (<$1)" or "Penny Cryptos" in scan_source:
-                logger.info("✅ Matched: Penny Cryptos")
-                # Use penny crypto scanner
-                try:
-                    from services.penny_crypto_scanner import PennyCryptoScanner
-                    kraken = st.session_state.get('kraken_client')
-                    if kraken:
-                        penny_scanner = PennyCryptoScanner(kraken, {})
-                        penny_results = penny_scanner.scan_penny_cryptos(max_price=1.0)
-                        logger.debug("Penny scanner returned {}: {len(penny_results) if isinstance(penny_results, list) else 'not a list'}", str(type(penny_results)))
-                        if isinstance(penny_results, list):
-                            pairs = [r.pair for r in penny_results[:50]]  # Get top 50 penny
-                        else:
-                            logger.error("Penny scanner returned unexpected type: {}", type(penny_results))
-                            pairs = scanner.get_all_scan_pairs()
-                    else:
-                        pairs = scanner.get_all_scan_pairs()
-                except Exception as e:
-                    logger.error("Penny scanner error: {}", str(e), exc_info=True)
-                    st.error("Penny crypto scanner unavailable, using default")
-                    pairs = scanner.get_all_scan_pairs()
-            
-            elif scan_source == "🔬 Sub-Penny (<$0.01)" or "Sub-Penny" in scan_source:
-                logger.info("✅ Matched: Sub-Penny")
-                # Use sub-penny discovery
-                try:
-                    from services.sub_penny_discovery import SubPennyDiscovery
-                    sub_penny = SubPennyDiscovery()
-                    sub_results = asyncio.run(
-                        sub_penny.discover_sub_penny_runners(
-                            max_price=0.01,
-                            top_n=50
-                        )
-                    )
-                    # Convert CoinGecko IDs to Kraken pairs (best effort)
-                    pairs = scanner.get_all_scan_pairs()  # Fallback to all for now
-                    st.info("🔬 Sub-penny discovery integrated (filtering sub-$0.01 coins)")
-                except Exception as e:
-                    logger.error(f"Sub-penny scanner error: {e}")
-                    pairs = scanner.get_all_scan_pairs()
-            
-            elif scan_source == "🚀 Potential Runners (high upside)" or "Potential Runners" in scan_source:
-                logger.info("✅ Matched: Potential Runners")
-                # Find coins with monster runner potential
-                try:
-                    logger.info("=" * 80)
-                    logger.info("🚀 POTENTIAL RUNNERS SCAN STARTING")
-                    logger.info("=" * 80)
-                    
-                    from services.penny_crypto_scanner import PennyCryptoScanner
-                    logger.info("✅ PennyCryptoScanner imported successfully")
-                    
-                    penny_scanner = PennyCryptoScanner(kraken_client, crypto_config)
-                    logger.info(f"✅ PennyCryptoScanner initialized: {penny_scanner}")
-                    logger.info(f"   Watchlist size: {len(penny_scanner.watchlist)} pairs")
-                    
-                    st.info("🚀 Scanning for potential runners (low price + momentum + volume)...")
-                    
-                    # Get all penny cryptos with runner scoring (more lenient filters)
-                    logger.info("📞 Calling penny_scanner.scan_penny_cryptos() with:")
-                    logger.info(f"   max_price=1.0")
-                    logger.info(f"   top_n=50")
-                    logger.info(f"   min_runner_score=40")
-                    logger.info(f"   use_parallel=True")
-                    logger.info(f"   use_multi_source=False")
-                    
-                    runner_results = penny_scanner.scan_penny_cryptos(
-                        max_price=1.0,  # Under $1 for good upside potential
-                        top_n=50,
-                        min_runner_score=40,  # Lowered threshold to find more candidates
-                        use_parallel=True,  # Fast parallel processing
-                        use_multi_source=False  # Use Kraken only for speed
-                    )
-                    
-                    logger.info(f"✅ scan_penny_cryptos() returned")
-                    logger.info(f"   Type: {type(runner_results)}")
-                    logger.info("   Length: {}", str(len(runner_results) if isinstance(runner_results, list) else 'N/A'))
-                    
-                    if runner_results and len(runner_results) > 0:
-                        logger.info(f"   First result type: {type(runner_results[0])}")
-                        logger.info(f"   First result: {runner_results[0]}")
-                        logger.info(f"   Sample scores: {[r.runner_potential_score for r in runner_results[:5]]}")
-                    
-                    # Always start with all pairs as fallback
-                    pairs = scanner.get_all_scan_pairs()
-                    logger.info(f"📋 Got {len(pairs)} total pairs from scanner as fallback")
-                    
-                    if runner_results:
-                        logger.info(f"🔍 Processing {len(runner_results)} runner results...")
-                        
-                        # Extract pairs with decent runner scores
-                        try:
-                            runner_pairs = [r.symbol for r in runner_results if r.runner_potential_score >= 40]
-                            logger.info(f"✅ Filtered to {len(runner_pairs)} runner pairs with score 40+")
-                            
-                            if runner_pairs:
-                                logger.info(f"   Runner pairs: {runner_pairs[:10]}")  # Show first 10
-                                pairs = runner_pairs
-                                st.success(f"🚀 Found {len(pairs)} potential runners with high upside!")
-                                st.info(f"💡 Criteria: Price <$1.00, Runner score 40+, Active volume & momentum")
-                                logger.info(f"✅ Using {len(pairs)} runner pairs for scan")
-                            else:
-                                # Use all pairs but with info message
-                                logger.warning(f"⚠️ No high-score runners found, using all {len(pairs)} pairs")
-                                st.info(f"🔍 Found {len(runner_results)} coins but none scored 40+. Scanning all {len(pairs)} coins...")
-                        except AttributeError as attr_err:
-                            logger.error("❌ AttributeError accessing runner_potential_score: {}", str(attr_err), exc_info=True)
-                            logger.error("   Result object attributes: {}", str(dir(runner_results[0]) if runner_results else 'N/A'))
-                            raise
-                    else:
-                        # Fallback message
-                        logger.warning(f"⚠️ Empty runner results, using all {len(pairs)} pairs")
-                        st.info(f"🔍 No runner analysis available. Scanning all {len(pairs)} coins...")
-                    
-                    logger.info("=" * 80)
-                    logger.info(f"🏁 POTENTIAL RUNNERS SCAN COMPLETE - {len(pairs)} pairs to scan")
-                    logger.info("=" * 80)
-                        
-                except Exception as e:
-                    logger.error("=" * 80)
-                    logger.error(f"❌ POTENTIAL RUNNERS SCAN FAILED")
-                    logger.error("❌ Error type: {}", type(e).__name__)
-                    logger.error("❌ Error message: {}", str(e), exc_info=True)
-                    logger.error("=" * 80)
-                    pairs = scanner.get_all_scan_pairs()
-                    st.error(f"Runner scan error: {str(e)[:200]}")
-                    st.warning(f"Using default scan with {len(pairs)} pairs.")
-            
-            elif scan_source == "🔥 CoinGecko Trending (with sentiment)" or "CoinGecko Trending" in scan_source:
-                logger.info("✅ Matched: CoinGecko Trending")
-                # Use CoinGecko trending with sentiment + X/Twitter
-                try:
-                    sentiment_analyzer = CryptoSentimentAnalyzer()
-                    
-                    # Get trending with full sentiment (includes X/Twitter)
-                    status_placeholder = st.empty()
-                    status_placeholder.info("🔥 Fetching CoinGecko trending + 🐦 X sentiment...")
-                    
-                    trending_with_sentiment = asyncio.run(
-                        sentiment_analyzer.get_trending_with_sentiment(top_n=20)
-                    )
-                    
-                    # Extract symbols and try to match to Kraken pairs
-                    trending_pairs = []
-                    trending_sentiment_data = {}  # Store sentiment data by pair
-                    all_pairs = scanner.get_all_scan_pairs()
-                    
-                    for trend in trending_with_sentiment:
-                        # Try to find matching Kraken pair
-                        symbol = trend.get('symbol', '')
-                        for pair in all_pairs:
-                            if symbol in pair:
-                                trending_pairs.append(pair)
-                                # Store X sentiment data for this pair
-                                social = trend.get('social_sentiment', {})
-                                trending_sentiment_data[pair] = {
-                                    'x_tweet_count': social.get('x_tweet_count', 0),
-                                    'x_sentiment_score': social.get('x_sentiment_score', 0),
-                                    'x_bullish_count': social.get('x_bullish_count', 0),
-                                    'x_bearish_count': social.get('x_bearish_count', 0),
-                                    'trending_score': trend.get('trending_score', 0),
-                                    'runner_potential': trend.get('runner_potential', {}),
-                                }
-                                break
-                    
-                    # Store sentiment data in session for later use
-                    st.session_state.trending_sentiment_data = trending_sentiment_data
-                    
-                    if trending_pairs:
-                        pairs = trending_pairs
-                        x_count = sum(1 for p in trending_pairs if trending_sentiment_data.get(p, {}).get('x_tweet_count', 0) > 0)
-                        status_placeholder.success(f"🔥 Found {len(pairs)} CoinGecko trending coins | 🐦 X data for {x_count} coins")
-                    else:
-                        pairs = scanner.get_all_scan_pairs()
-                        status_placeholder.warning("No trending coins available on Kraken, using all pairs")
-                except Exception as e:
-                    logger.error("CoinGecko trending error: {}", str(e), exc_info=True)
-                    pairs = scanner.get_all_scan_pairs()
-                    st.warning("Trending analysis unavailable, using default scan")
-            
-            elif scan_source == "🌐 Dynamic Discovery (CG + CMC + Reddit)" or "Dynamic Discovery" in scan_source:
-                logger.info("✅ Matched: Dynamic Discovery")
-                # Dynamic multi-source discovery
-                try:
-                    status_placeholder = st.empty()
-                    status_placeholder.info("🌐 Discovering from CoinGecko + CoinMarketCap + Reddit...")
-                    
-                    # Get trending from CoinGecko
-                    sentiment_analyzer = CryptoSentimentAnalyzer()
-                    trending = asyncio.run(sentiment_analyzer.get_trending_cryptos(top_n=15))
-                    
-                    # Get sub-penny from aggregator (includes CoinGecko + CMC)
-                    sub_penny_scanner = SubPennyDiscovery()
-                    sub_penny = asyncio.run(
-                        sub_penny_scanner.discover_sub_penny_runners(
-                            max_price=0.01,
-                            top_n=30
-                        )
-                    )
-                    
-                    # Combine and deduplicate
-                    all_pairs = scanner.get_all_scan_pairs()
-                    discovered_pairs = set()
-                    
-                    # Add trending
-                    for trend in trending:
-                        for pair in all_pairs:
-                            if trend.symbol in pair:
-                                discovered_pairs.add(pair)
-                    
-                    # Add sub-penny discoveries
-                    for coin in sub_penny:
-                        for pair in all_pairs:
-                            if coin.symbol.upper() in pair:
-                                discovered_pairs.add(pair)
-                    
-                    if discovered_pairs:
-                        pairs = list(discovered_pairs)
-                        status_placeholder.success(f"🌐 Discovered {len(pairs)} coins from multiple sources with Reddit sentiment")
-                    else:
-                        pairs = scanner.get_all_scan_pairs()[:30]
-                        status_placeholder.warning("Limited discoveries on Kraken, using top 30 default")
+            # ============= WATCHLIST ANALYSIS MODE =============
+            if scan_mode == "📋 Watchlist Analysis":
+                logger.info("📋 WATCHLIST ANALYSIS MODE")
                 
-                except Exception as e:
-                    logger.error("Dynamic discovery error: {}", str(e), exc_info=True)
-                    pairs = scanner.get_all_scan_pairs()
-                    st.warning("Discovery unavailable, using default scan")
-            
-            elif scan_source == "🗣️ Social Buzz (Reddit/StockTwits)" or "Social Buzz" in scan_source:
-                logger.info("✅ Matched: Social Buzz")
-                # Social sentiment-based discovery with X/Twitter
-                try:
-                    status_placeholder = st.empty()
-                    status_placeholder.info("🗣️ Analyzing social buzz from Reddit, StockTwits & 🐦 X...")
-                    
-                    # Get coins with high social activity
-                    sentiment_analyzer = CryptoSentimentAnalyzer()
-                    
-                    # Scan social sentiment for popular crypto coins
-                    crypto_pairs = scanner.get_all_scan_pairs()
-                    buzz_pairs = []
-                    buzz_sentiment_data = {}
-                    
-                    # Analyze top coins for social buzz including X
-                    for pair in crypto_pairs[:20]:  # Check top 20 for buzz
-                        try:
-                            # Extract symbol (e.g., BTC from BTC/USD)
-                            symbol = pair.split('/')[0]
-                            
-                            # Get full sentiment including X
-                            sentiment = asyncio.run(
-                                sentiment_analyzer.analyze_crypto_sentiment(symbol, include_x=True)
-                            )
-                            
-                            # Include if has any social activity
-                            total_mentions = sentiment.get('total_mentions', 0)
-                            x_tweets = sentiment.get('x_tweet_count', 0)
-                            
-                            if total_mentions > 0 or x_tweets > 0:
-                                buzz_pairs.append(pair)
-                                buzz_sentiment_data[pair] = {
-                                    'x_tweet_count': x_tweets,
-                                    'x_sentiment_score': sentiment.get('x_sentiment_score', 0),
-                                    'x_bullish_count': sentiment.get('x_bullish_count', 0),
-                                    'x_bearish_count': sentiment.get('x_bearish_count', 0),
-                                    'reddit_mentions': sentiment.get('reddit_mentions', 0),
-                                    'overall_sentiment': sentiment.get('overall_sentiment', 'NEUTRAL'),
-                                }
-                        except Exception as e:
-                            logger.debug(f"Error getting sentiment for {pair}: {e}")
-                            buzz_pairs.append(pair)  # Still include even if sentiment fails
-                            continue
-                    
-                    # Store sentiment data for display
-                    st.session_state.trending_sentiment_data = buzz_sentiment_data
-                    
-                    if buzz_pairs:
-                        pairs = buzz_pairs
-                        x_count = sum(1 for p in buzz_pairs if buzz_sentiment_data.get(p, {}).get('x_tweet_count', 0) > 0)
-                        status_placeholder.success(f"🗣️ Found {len(pairs)} coins with social activity | 🐦 X data for {x_count} coins")
-                    else:
-                        pairs = scanner.get_all_scan_pairs()
-                        status_placeholder.warning("Social data limited, using default scan")
-                    
-                except Exception as e:
-                    logger.error("Social buzz error: {}", str(e), exc_info=True)
-                    pairs = scanner.get_all_scan_pairs()
-                    st.warning("Social analysis unavailable, using default scan")
-            
-            elif scan_source == "⭐ My Watchlist" or "My Watchlist" in scan_source or "Watchlist" in scan_source:
-                logger.info("✅ Matched: My Watchlist")
-                # Load from crypto watchlist manager
+                # Load user's watchlist
                 try:
                     if 'crypto_watchlist_manager' not in st.session_state:
                         from services.crypto_watchlist_manager import CryptoWatchlistManager
                         st.session_state.crypto_watchlist_manager = CryptoWatchlistManager()
                     
                     crypto_wl_manager = st.session_state.crypto_watchlist_manager
-                    pairs = crypto_wl_manager.get_watchlist_symbols()
+                    watchlist_pairs = crypto_wl_manager.get_watchlist_symbols()
                     
-                    if not pairs:
-                        st.warning("Your watchlist is empty. Add coins from other tabs first!")
+                    if not watchlist_pairs:
+                        st.warning("⚠️ Your watchlist is empty! Add coins from the Watchlist tab first.")
+                        st.info("💡 Or switch to Discovery mode to find new coins.")
                         return
                     
-                    st.info(f"📥 Loaded {len(pairs)} coins from your watchlist")
-                    logger.info(f"Loaded {len(pairs)} watchlist coins for scanning")
+                    pairs = watchlist_pairs
+                    logger.info(f"   Loaded {len(pairs)} pairs from user watchlist")
+                    
+                    # Apply filter based on sub-option
+                    if "Top Gainers" in scan_source:
+                        st.info(f"📈 Scanning {len(pairs)} watchlist coins, sorted by 24h gains")
+                    elif "High Volume" in scan_source:
+                        st.info(f"📊 Scanning {len(pairs)} watchlist coins, sorted by volume")
+                    elif "Social Buzz" in scan_source:
+                        st.info(f"🗣️ Scanning {len(pairs)} watchlist coins with social sentiment")
+                    else:
+                        st.info(f"⭐ Scanning {len(pairs)} coins from your watchlist")
+                        
                 except Exception as e:
-                    logger.error("Error loading watchlist: {}", str(e), exc_info=True)
+                    logger.error(f"Error loading watchlist: {e}", exc_info=True)
                     st.error(f"Failed to load watchlist: {e}")
                     return
             
-            elif scan_source == "📈 Top Gainers (24h)" or "Top Gainers" in scan_source:
-                logger.info("✅ Matched: Top Gainers")
-                # Filter for top gainers
-                pairs = scanner.get_all_scan_pairs()
-                st.info("🎯 Will prioritize coins with highest 24h gains")
-            
-            elif scan_source == "📊 High Volume Surge" or "High Volume" in scan_source:
-                logger.info("✅ Matched: High Volume Surge")
-                # Filter for volume surges
-                pairs = scanner.get_all_scan_pairs()
-                st.info("📊 Will prioritize coins with volume spikes")
-            
+            # ============= DISCOVERY MODE =============
             else:
-                # NO MATCH - This is the problem!
-                logger.error("=" * 100)
-                logger.error(f"❌ NO SCAN SOURCE MATCHED!")
-                logger.error("   scan_source = '{}'", str(scan_source))
-                logger.error(f"   Available options should be:")
-                logger.error(f"      - All Categories (70+ coins)")
-                logger.error(f"      - 💰 Penny Cryptos (<$1)")
-                logger.error(f"      - 🔬 Sub-Penny (<$0.01)")
-                logger.error(f"      - Potential Runners (high upside)")
-                logger.error(f"      - CoinGecko Trending (with sentiment)")
-                logger.error(f"      - And others...")
-                logger.error("=" * 100)
-                st.error(f"⚠️ Unknown scan source: '{scan_source}'")
-                st.warning("Falling back to All Categories scan")
-                pairs = scanner.get_all_scan_pairs()
-                logger.info(f"   Fallback got {len(pairs)} pairs")
+                logger.info("🔍 DISCOVERY MODE")
+                
+                if "All Kraken USD" in scan_source:
+                    logger.info("✅ Matched: All Kraken USD Pairs")
+                    pairs = scanner.get_all_kraken_usd_pairs()
+                    st.info(f"🌐 Scanning ALL {len(pairs)} USD pairs on Kraken")
+                
+                elif "New to Kraken" in scan_source or "exclude watchlist" in scan_source:
+                    logger.info("✅ Matched: New to Kraken (exclude watchlist)")
+                    pairs = scanner.get_discovery_pairs(exclude_watchlist=True)
+                    st.info(f"🆕 Scanning {len(pairs)} coins NOT in your watchlist")
+                
+                elif "CoinGecko Trending" in scan_source or "Trending" in scan_source:
+                    logger.info("✅ Matched: CoinGecko Trending")
+                    try:
+                        sentiment_analyzer = CryptoSentimentAnalyzer()
+                        status_placeholder = st.empty()
+                        status_placeholder.info("🔥 Fetching CoinGecko trending + sentiment...")
+                        
+                        trending_with_sentiment = asyncio.run(
+                            sentiment_analyzer.get_trending_with_sentiment(top_n=20)
+                        )
+                        
+                        # Get ALL Kraken pairs to match against (not just hardcoded 34)
+                        all_kraken_pairs = scanner.get_all_kraken_usd_pairs()
+                        trending_pairs = []
+                        
+                        for trend in trending_with_sentiment:
+                            symbol = trend.get('symbol', '').upper()
+                            # Try to find matching Kraken pair
+                            for pair in all_kraken_pairs:
+                                if symbol == pair.split('/')[0]:
+                                    trending_pairs.append(pair)
+                                    break
+                        
+                        if trending_pairs:
+                            pairs = trending_pairs
+                            status_placeholder.success(f"🔥 Found {len(pairs)} trending coins available on Kraken")
+                        else:
+                            pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                            status_placeholder.warning("No trending coins on Kraken, scanning top 50 pairs")
+                    except Exception as e:
+                        logger.error(f"CoinGecko trending error: {e}", exc_info=True)
+                        pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                        st.warning("Trending unavailable, scanning top 50 Kraken pairs")
+                
+                elif "Penny Cryptos" in scan_source:
+                    logger.info("✅ Matched: Penny Cryptos (Discovery)")
+                    # Get ALL Kraken pairs under $1
+                    try:
+                        all_kraken = scanner.get_all_kraken_usd_pairs()
+                        st.info(f"💰 Scanning {len(all_kraken)} Kraken pairs for coins under $1...")
+                        pairs = all_kraken  # Will be filtered by price in tier1_quick_filter
+                    except Exception as e:
+                        logger.error(f"Penny discovery error: {e}")
+                        pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                        st.warning("Using top 50 Kraken pairs")
+                
+                elif "Sub-Penny" in scan_source:
+                    logger.info("✅ Matched: Sub-Penny (Discovery)")
+                    # Get ALL Kraken pairs under $0.01
+                    try:
+                        all_kraken = scanner.get_all_kraken_usd_pairs()
+                        st.info(f"🔬 Scanning {len(all_kraken)} Kraken pairs for coins under $0.01...")
+                        pairs = all_kraken  # Will be filtered by price in tier1_quick_filter
+                    except Exception as e:
+                        logger.error(f"Sub-penny discovery error: {e}")
+                        pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                        st.warning("Using top 50 Kraken pairs")
+                
+                elif "Potential Runners" in scan_source:
+                    logger.info("✅ Matched: Potential Runners (Discovery)")
+                    # Get ALL Kraken pairs and find runners
+                    try:
+                        all_kraken = scanner.get_all_kraken_usd_pairs()
+                        st.info(f"🚀 Scanning {len(all_kraken)} Kraken pairs for potential runners...")
+                        pairs = all_kraken
+                    except Exception as e:
+                        logger.error(f"Runner discovery error: {e}")
+                        pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                        st.warning("Using top 50 Kraken pairs")
+                
+                else:
+                    # Fallback for discovery mode
+                    logger.warning(f"⚠️ Unknown discovery source: {scan_source}, using all Kraken pairs")
+                    pairs = scanner.get_all_kraken_usd_pairs()[:50]
+                    st.info(f"🔍 Scanning top 50 Kraken USD pairs")
             
             # Defensive check: ensure pairs is a list
             if not isinstance(pairs, list):

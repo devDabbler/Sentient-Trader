@@ -62,6 +62,7 @@ SERVICE_DISCORD_FILE = Path(__file__).parent / "data" / "service_discord_setting
 ACTIVE_STRATEGY_FILE = Path(__file__).parent / "active_strategy.json"
 ANALYSIS_REQUESTS_FILE = Path(__file__).parent / "data" / "analysis_requests.json"
 ANALYSIS_RESULTS_FILE = Path(__file__).parent / "data" / "analysis_results.json"
+AI_POSITIONS_FILE = Path(__file__).parent / "data" / "ai_crypto_positions.json"
 
 # Default watchlists for each service type
 DEFAULT_WATCHLISTS = {
@@ -448,6 +449,43 @@ def clear_analysis_results() -> bool:
 
 
 # ============================================================
+# AI MONITOR EXCLUSIONS
+# ============================================================
+
+def load_ai_exclusions() -> list:
+    """Load excluded pairs from AI position manager state"""
+    try:
+        if AI_POSITIONS_FILE.exists():
+            with open(AI_POSITIONS_FILE, 'r') as f:
+                state = json.load(f)
+                return state.get("excluded_pairs", [])
+    except Exception as e:
+        print(f"Error loading AI exclusions: {e}")
+    return []
+
+
+def save_ai_exclusions(excluded_pairs: list) -> bool:
+    """Save excluded pairs to AI position manager state"""
+    try:
+        state = {}
+        if AI_POSITIONS_FILE.exists():
+            with open(AI_POSITIONS_FILE, 'r') as f:
+                state = json.load(f)
+        
+        state["excluded_pairs"] = excluded_pairs
+        
+        # Ensure directory exists
+        AI_POSITIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(AI_POSITIONS_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving AI exclusions: {e}")
+        return False
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -827,7 +865,7 @@ def render_watchlist_manager():
         supabase_available = False
         tm = None
 
-    tab1, tab2 = st.tabs(["My Tickers (Supabase)", "Service Watchlists (Local)"])
+    tab1, tab2, tab3 = st.tabs(["My Tickers (Supabase)", "Service Watchlists (Local)", "🚫 AI Exclusions"])
     
     # Tab 1: Global "My Tickers" (Supabase)
     with tab1:
@@ -930,6 +968,52 @@ def render_watchlist_manager():
                 st.toast("Watchlist updated!")
                 time.sleep(0.5)
                 st.rerun()
+
+    # Tab 3: AI Monitor Exclusions
+    with tab3:
+        st.caption("🚫 Manage coins permanently excluded from AI monitoring")
+        
+        excluded = load_ai_exclusions()
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            new_exclude = st.text_input("Exclude Pair (e.g., BTC/USD)", key="new_exclude").upper()
+        with col2:
+            if st.button("Add Exclusion", type="primary"):
+                if new_exclude and new_exclude not in excluded:
+                    excluded.append(new_exclude)
+                    if save_ai_exclusions(excluded):
+                        st.success(f"Excluded {new_exclude}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to save exclusion")
+        
+        if excluded:
+            st.write("### Excluded Pairs")
+            
+            # Display as removable tags/multiselect
+            to_keep = st.multiselect(
+                "Currently Excluded",
+                options=excluded,
+                default=excluded,
+                key="excluded_multiselect",
+                help="Deselect to re-include pair in monitoring"
+            )
+            
+            # Detect changes
+            if set(to_keep) != set(excluded):
+                if st.button("Apply Changes"):
+                    if save_ai_exclusions(to_keep):
+                        st.success("Updated exclusions list")
+                        # Offer to restart service
+                        if st.button("Restart AI Trader Service?"):
+                            control_service("sentient-crypto-ai-trader", "restart")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Failed to save changes")
+        else:
+            st.info("No pairs currently excluded.")
 
 
 # ============================================================

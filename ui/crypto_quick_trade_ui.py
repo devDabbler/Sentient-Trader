@@ -1430,33 +1430,28 @@ def render_quick_trade_tab(
     if 'quick_trade_subtab' not in st.session_state:
         st.session_state.quick_trade_subtab = "🔍 Ticker Management"
     
+    # Clean up old widget key if it exists (migration from old code)
+    if 'quick_trade_subtab_selector' in st.session_state:
+        del st.session_state.quick_trade_subtab_selector
+    
     # Use index-based selection to allow programmatic tab switching
     tab_options = ["🔍 Ticker Management", "⚡ Execute Trade"]
     current_index = tab_options.index(st.session_state.quick_trade_subtab) if st.session_state.quick_trade_subtab in tab_options else 0
     
-    # Callback to update session state when radio button is changed by user
-    def update_quick_trade_subtab():
-        st.session_state.quick_trade_subtab = st.session_state.quick_trade_subtab_selector
-    
-    # CRITICAL: Sync the radio selector key with quick_trade_subtab for programmatic navigation
-    # This ensures that when quick_trade_subtab is set programmatically (e.g., from Multi-Config),
-    # the radio button reflects the correct tab on the next render
-    if 'quick_trade_subtab_selector' not in st.session_state:
-        st.session_state.quick_trade_subtab_selector = st.session_state.quick_trade_subtab
-    elif st.session_state.quick_trade_subtab_selector != st.session_state.quick_trade_subtab:
-        # Programmatic navigation detected - sync the selector
-        st.session_state.quick_trade_subtab_selector = st.session_state.quick_trade_subtab
-    
-    # Tab selector using radio buttons with on_change callback
-    st.radio(
+    # Tab selector - use index to control which tab is shown
+    # Streamlit will automatically sync the widget with session state
+    selected_subtab = st.radio(
         "Navigation",
         options=tab_options,
         index=current_index,
         horizontal=True,
         label_visibility="collapsed",
-        key="quick_trade_subtab_selector",
-        on_change=update_quick_trade_subtab
+        key="_quick_trade_subtab_widget"  # Internal widget key
     )
+    
+    # Update our state if user changed the selection
+    if selected_subtab != st.session_state.quick_trade_subtab:
+        st.session_state.quick_trade_subtab = selected_subtab
     
     # Render the selected subtab
     if st.session_state.quick_trade_subtab == "🔍 Ticker Management":
@@ -1470,6 +1465,11 @@ def display_trade_setup(kraken_client: KrakenClient, crypto_config, watchlist_ma
     Display the trade execution form with AI analysis
     Supports single trade, bulk custom selection, and bulk watchlist trading
     """
+    # CRITICAL: If AI analysis is triggered, force Single Trade mode BEFORE widget renders
+    if st.session_state.get('trigger_ai_analysis', False):
+        st.session_state.crypto_trade_mode = "Single Trade"
+        st.session_state['_crypto_trade_mode_widget'] = "Single Trade"  # Force widget sync
+    
     st.markdown("### ⚡ Execute Trade")
     
     # Show success message if we just switched here from a button click
@@ -1479,13 +1479,37 @@ def display_trade_setup(kraken_client: KrakenClient, crypto_config, watchlist_ma
         st.balloons()
         del st.session_state.show_setup_success
     
-    # Trade mode selector
-    trade_mode = st.radio(
-        "Trade Mode",
-        options=["Single Trade", "Bulk Custom Selection", "Bulk Watchlist"],
-        horizontal=True,
-        key="crypto_trade_mode"
-    )
+    # Debug logging for mode transitions
+    logger.info(f"⚡ DISPLAY TRADE SETUP - Mode: {st.session_state.get('crypto_trade_mode', 'Not Set')}")
+
+    # Trade mode selector - manually manage state to avoid Streamlit widget key conflicts
+    mode_options = ["Single Trade", "Bulk Custom Selection", "Bulk Watchlist"]
+    
+    # Initialize if not present
+    if 'crypto_trade_mode' not in st.session_state:
+        st.session_state.crypto_trade_mode = "Single Trade"
+    
+    current_mode = st.session_state.crypto_trade_mode
+    current_index = mode_options.index(current_mode) if current_mode in mode_options else 0
+    
+    # Use internal widget key that doesn't conflict with our state variable
+    # Only pass index if the key is NOT in session state to avoid warnings
+    # since we manually set the session state key to force updates
+    radio_args = {
+        "options": mode_options,
+        "horizontal": True,
+        "key": "_crypto_trade_mode_widget"
+    }
+    
+    if "_crypto_trade_mode_widget" not in st.session_state:
+        radio_args["index"] = current_index
+        
+    trade_mode = st.radio("Trade Mode", **radio_args)
+    
+    # Update our state based on widget selection
+    if trade_mode != st.session_state.crypto_trade_mode:
+        st.session_state.crypto_trade_mode = trade_mode
+        logger.info(f"🔄 Trade mode changed to: {trade_mode}")
     
     st.divider()
     
@@ -1505,6 +1529,19 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     """
     Display single trade execution form
     """
+    # Apply pending config from multi-config selection (must be done before widgets are created)
+    if st.session_state.get('apply_pending_config', False):
+        if 'pending_direction' in st.session_state:
+            st.session_state.crypto_quick_direction = st.session_state.pending_direction
+            del st.session_state.pending_direction
+        if 'pending_leverage' in st.session_state:
+            st.session_state.crypto_quick_leverage = st.session_state.pending_leverage
+            del st.session_state.pending_leverage
+        if 'pending_trading_mode' in st.session_state:
+            st.session_state.crypto_trading_mode = st.session_state.pending_trading_mode
+            del st.session_state.pending_trading_mode
+        st.session_state.apply_pending_config = False
+    
     # Display scanner opportunity if one was copied
     if 'crypto_scanner_opportunity' in st.session_state:
         opp = st.session_state.crypto_scanner_opportunity
@@ -1575,23 +1612,31 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
             st.metric("Direction", direction)
         
         # Add quick action buttons
-        action_col1, action_col2, action_col3 = st.columns(3)
+        action_col1, action_col2, action_col3, action_col4 = st.columns(4)
         
         with action_col1:
             if st.button("🤖 Run AI Analysis", key="quick_ai_analysis", type="primary", use_container_width=True):
-                logger.info(f"🔘 Quick AI Analysis button clicked for {selected_pair}")
                 # Set flag to trigger analysis in the AI Analysis section below
                 st.session_state.trigger_ai_analysis = True
-                st.info("⏳ Triggering AI analysis... scroll down to see results")
+                # CRITICAL: Ensure trade mode stays on Single Trade so display_single_trade is called on rerun
+                st.session_state.crypto_trade_mode = "Single Trade"
+                st.session_state['_crypto_trade_mode_widget'] = "Single Trade"  # Force widget sync
                 st.rerun()
         
         with action_col2:
+            if st.button("🔬 Multi-Config Analysis", key="quick_multi_config", use_container_width=True, help="Test BUY/SELL with multiple leverage levels"):
+                logger.info(f"🔘 Multi-Config Analysis button clicked for {selected_pair}")
+                st.session_state.trigger_multi_config_analysis = True
+                st.session_state.multi_config_single_pair = selected_pair
+                st.rerun()
+        
+        with action_col3:
             if st.button("✏️ Modify Setup", key="modify_scanner_setup", use_container_width=True):
                 # Clear scanner data to allow manual entry
                 del st.session_state.crypto_scanner_opportunity
                 st.rerun()
         
-        with action_col3:
+        with action_col4:
             if st.button("🗑️ Clear & Start Fresh", key="clear_and_restart", use_container_width=True):
                 # Clear everything
                 if 'crypto_scanner_opportunity' in st.session_state:
@@ -2110,30 +2155,47 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
         default_leverage = 1.0
     
     with pos_col1:
-        position_size = st.number_input(
-            "Position Size (USD)",
-            min_value=10.0,
-            max_value=10000.0,
-            value=default_position_size,
-            step=10.0,
-            key="crypto_quick_position_size"
-        )
+        # Conditional value passing to avoid widget warnings
+        # If key is in session state, don't pass value (Streamlit uses session state)
+        # If key is NOT in session state, pass default value
+        pos_size_args = {
+            "label": "Position Size (USD)",
+            "min_value": 10.0,
+            "max_value": 10000.0,
+            "step": 10.0,
+            "key": "crypto_quick_position_size"
+        }
+        if "crypto_quick_position_size" not in st.session_state:
+            pos_size_args["value"] = default_position_size
+        
+        position_size = st.number_input(**pos_size_args)
     
     with pos_col2:
         # Disable leverage input if Spot Trading mode selected
         leverage_disabled = (trading_mode == "Spot Trading")
         leverage_max = 5.0 if not leverage_disabled else 1.0
         
-        leverage = st.number_input(
-            "Leverage" + (" (Disabled in Spot Mode)" if leverage_disabled else " (Margin Trading)"),
-            min_value=1.0,
-            max_value=leverage_max,
-            value=default_leverage,
-            step=1.0,
-            key="crypto_quick_leverage",
-            disabled=leverage_disabled,
-            help="1 = Spot trading (no leverage). 2-5 = Margin trading with leverage. SELL with leverage > 1 = SHORT SELLING"
-        )
+        # Same conditional value logic for leverage
+        leverage_args = {
+            "label": "Leverage" + (" (Disabled in Spot Mode)" if leverage_disabled else " (Margin Trading)"),
+            "min_value": 1.0,
+            "max_value": leverage_max,
+            "step": 1.0,
+            "key": "crypto_quick_leverage",
+            "disabled": leverage_disabled,
+            "help": "1 = Spot trading (no leverage). 2-5 = Margin trading with leverage. SELL with leverage > 1 = SHORT SELLING"
+        }
+        
+        if "crypto_quick_leverage" not in st.session_state:
+            leverage_args["value"] = default_leverage
+        else:
+            # Ensure session state value is valid given constraints (e.g. if switching to Spot)
+            if leverage_disabled and st.session_state.crypto_quick_leverage > 1.0:
+                st.session_state.crypto_quick_leverage = 1.0
+            elif st.session_state.crypto_quick_leverage > leverage_max:
+                 st.session_state.crypto_quick_leverage = leverage_max
+                 
+        leverage = st.number_input(**leverage_args)
         
         # Show margin trading warning
         if leverage > 1 and not leverage_disabled:
@@ -2172,105 +2234,103 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
     
     # AI Analysis section
     st.markdown("#### 🤖 AI Analysis")
-    logger.info(f"📍 Rendering AI Analysis section for {selected_pair}")
     
-    # Check if analysis was triggered from quick button
-    auto_trigger = st.session_state.get('trigger_ai_analysis', False)
-    if auto_trigger:
-        logger.info(f"🤖 Auto-triggering AI analysis from quick button")
-        # Clear the flag to prevent repeated triggers
+    # Check if analysis was triggered (from button click on previous render)
+    should_run_ai_analysis = st.session_state.get('trigger_ai_analysis', False)
+    if should_run_ai_analysis:
+        # Clear the flag immediately to prevent re-triggering on next render
         st.session_state.trigger_ai_analysis = False
     
-    analysis_col1, analysis_col2, analysis_col3 = st.columns([2, 1, 1])
+    analysis_col1, analysis_col2, analysis_col3, analysis_col4 = st.columns([2, 1, 1, 1])
     
     with analysis_col1:
-        button_clicked = st.button("🤖 AI Entry Analysis", key="crypto_ai_entry_analysis_btn", use_container_width=True, type="primary")
-        if button_clicked or auto_trigger:
-            logger.info(f"🔘 AI Entry Analysis button clicked for {selected_pair} ({direction})")
-            with st.spinner("🤖 AI analyzing entry timing..."):
-                try:
-                    logger.info(f"📋 Starting AI entry analysis: pair={selected_pair}, side={direction}, position=${position_size}, risk={risk_pct}%, tp={take_profit_pct}%")
-                    # Initialize AI Entry Assistant
-                    from services.ai_entry_assistant import get_ai_entry_assistant
-                    from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-                    
-                    if 'ai_entry_assistant' not in st.session_state:
-                        llm_analyzer = LLMStrategyAnalyzer()
-                        entry_assistant = get_ai_entry_assistant(
-                            kraken_client=kraken_client,
-                            llm_analyzer=llm_analyzer,
-                            check_interval_seconds=60,
-                            enable_auto_entry=False  # Manual approval required by default
-                        )
-                        st.session_state.ai_entry_assistant = entry_assistant
-                        # Start monitoring if not running
-                        if not entry_assistant.is_running:
-                            entry_assistant.start_monitoring()
-                    else:
-                        entry_assistant = st.session_state.ai_entry_assistant
-                    
-                    # Get AI entry analysis - include scanner context if available
-                    if scanner_loaded:
-                        # Add scanner context to help AI understand the original recommendation
-                        scanner_context = f"""
-                        SCANNER RECOMMENDATION CONTEXT:
-                        - Original Strategy: {opp['strategy'].upper()}
-                        - Scanner Score: {opp['score']:.1f}/100
-                        - Scanner Confidence: {opp['confidence']}
-                        - Risk Level: {opp['risk_level']}
-                        - Original Reasoning: {opp['reason']}
-                        - 24h Price Change: {opp['change_24h']:.2f}%
-                        - Volume Ratio: {opp['volume_ratio']:.2f}x (vs avg)
-                        - Volatility: {opp['volatility']:.2f}%
-                        
-                        NOTE: If current market conditions differ from scanner findings, 
-                        explain WHY (e.g., volume dried up, trend reversed, etc.)
-                        """
-                        st.info("🔍 Including scanner analysis context for AI review...")
-                    else:
-                        scanner_context = None
-                    
-                    entry_analysis = entry_assistant.analyze_entry(
-                        pair=selected_pair or "",
-                        side=direction,
-                        position_size=position_size,
-                        risk_pct=risk_pct,
-                        take_profit_pct=take_profit_pct,
-                        additional_context=scanner_context or ""
+        if st.button("🤖 AI Entry Analysis", key="crypto_ai_entry_analysis_btn", use_container_width=True, type="primary"):
+            st.session_state.trigger_ai_analysis = True
+            # CRITICAL: Ensure trade mode stays on Single Trade so this function is called on rerun
+            st.session_state.crypto_trade_mode = "Single Trade"
+            st.rerun()
+    
+    # Run AI analysis if triggered
+    if should_run_ai_analysis:
+        logger.info(f"🤖 AI Entry Analysis triggered for {selected_pair} ({direction})")
+        with st.spinner("🤖 AI analyzing entry timing..."):
+            try:
+                # Initialize AI Entry Assistant
+                from services.ai_entry_assistant import get_ai_entry_assistant
+                from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+                
+                if 'ai_entry_assistant' not in st.session_state:
+                    llm_analyzer = LLMStrategyAnalyzer()
+                    entry_assistant = get_ai_entry_assistant(
+                        kraken_client=kraken_client,
+                        llm_analyzer=llm_analyzer,
+                        check_interval_seconds=60,
+                        enable_auto_entry=False  # Manual approval required by default
                     )
+                    st.session_state.ai_entry_assistant = entry_assistant
+                    # Start monitoring if not running
+                    if not entry_assistant.is_running:
+                        entry_assistant.start_monitoring()
+                else:
+                    entry_assistant = st.session_state.ai_entry_assistant
+                
+                # Get AI entry analysis - include scanner context if available
+                if scanner_loaded:
+                    # Add scanner context to help AI understand the original recommendation
+                    scanner_context = f"""
+                    SCANNER RECOMMENDATION CONTEXT:
+                    - Original Strategy: {opp['strategy'].upper()}
+                    - Scanner Score: {opp['score']:.1f}/100
+                    - Scanner Confidence: {opp['confidence']}
+                    - Risk Level: {opp['risk_level']}
+                    - Original Reasoning: {opp['reason']}
+                    - 24h Price Change: {opp['change_24h']:.2f}%
+                    - Volume Ratio: {opp['volume_ratio']:.2f}x (vs avg)
+                    - Volatility: {opp['volatility']:.2f}%
                     
-                    # Store in session state
-                    st.session_state.crypto_entry_analysis = entry_analysis
-                    st.session_state.crypto_analysis = {
-                        'pair': selected_pair,
-                        'direction': direction,
-                        'current_price': entry_analysis.current_price,
-                        'stop_loss': entry_analysis.suggested_stop or (entry_analysis.current_price * (1 - risk_pct / 100)),
-                        'take_profit': entry_analysis.suggested_target or (entry_analysis.current_price * (1 + take_profit_pct / 100)),
-                        'position_size': position_size,
-                        'leverage': leverage if trading_mode == "Margin Trading" else None,
-                        'risk_reward_ratio': entry_analysis.risk_reward_ratio if entry_analysis.risk_reward_ratio > 0 else (take_profit_pct / risk_pct),
-                        'order_type': order_type,
-                        'limit_price': limit_price if order_type == "LIMIT" else None,
-                        'trading_mode': trading_mode
-                    }
-                    
-                    logger.info(f"🤖 AI Entry Analysis: {entry_analysis.action} (Confidence: {entry_analysis.confidence:.1f}%)")
-                    
-                    # Show success message
-                    if entry_analysis.action == "DO_NOT_ENTER" and entry_analysis.confidence == 0.0:
-                        st.warning("⚠️ AI analysis completed but API call failed. Showing fallback analysis based on technical indicators.")
-                    else:
-                        st.success(f"✅ AI analysis complete! Scroll down to see results.")
-                    
-                    # Rerun to display results
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"AI analysis failed: {e}")
-                    logger.error("❌ AI entry analysis error: {type(e).__name__)}: {}", str(e), exc_info=True)
-                    # Still rerun to show any partial results or error message
-                    st.rerun()
+                    NOTE: If current market conditions differ from scanner findings, 
+                    explain WHY (e.g., volume dried up, trend reversed, etc.)
+                    """
+                    st.info("🔍 Including scanner analysis context for AI review...")
+                else:
+                    scanner_context = None
+                
+                entry_analysis = entry_assistant.analyze_entry(
+                    pair=selected_pair or "",
+                    side=direction,
+                    position_size=position_size,
+                    risk_pct=risk_pct,
+                    take_profit_pct=take_profit_pct,
+                    additional_context=scanner_context or ""
+                )
+                
+                # Store in session state
+                st.session_state.crypto_entry_analysis = entry_analysis
+                st.session_state.crypto_analysis = {
+                    'pair': selected_pair,
+                    'direction': direction,
+                    'current_price': entry_analysis.current_price,
+                    'stop_loss': entry_analysis.suggested_stop or (entry_analysis.current_price * (1 - risk_pct / 100)),
+                    'take_profit': entry_analysis.suggested_target or (entry_analysis.current_price * (1 + take_profit_pct / 100)),
+                    'position_size': position_size,
+                    'leverage': leverage if trading_mode == "Margin Trading" else None,
+                    'risk_reward_ratio': entry_analysis.risk_reward_ratio if entry_analysis.risk_reward_ratio > 0 else (take_profit_pct / risk_pct),
+                    'order_type': order_type,
+                    'limit_price': limit_price if order_type == "LIMIT" else None,
+                    'trading_mode': trading_mode
+                }
+                
+                logger.info(f"🤖 AI Entry Analysis: {entry_analysis.action} (Confidence: {entry_analysis.confidence:.1f}%)")
+                
+                # Show success message
+                if entry_analysis.action == "DO_NOT_ENTER" and entry_analysis.confidence == 0.0:
+                    st.warning("⚠️ AI analysis completed but API call failed. Showing fallback analysis based on technical indicators.")
+                else:
+                    st.success(f"✅ AI analysis complete! Scroll down to see results.")
+                
+            except Exception as e:
+                st.error(f"AI analysis failed: {e}")
+                logger.error("❌ AI entry analysis error: {}", str(e), exc_info=True)
     
     with analysis_col2:
         if st.button("📝 Manual Setup", key="crypto_manual_setup_btn", use_container_width=True):
@@ -2317,6 +2377,16 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
                     st.json(ticker_info)
                 except Exception as e:
                     st.error(f"Failed to fetch market data: {e}")
+    
+    with analysis_col4:
+        if st.button("🔬 Multi-Config", key="crypto_multi_config_btn", use_container_width=True, help="Test BUY/SELL × multiple leverage levels"):
+            if selected_pair:
+                logger.info(f"🔘 Multi-Config Analysis button clicked for {selected_pair}")
+                st.session_state.trigger_multi_config_analysis = True
+                st.session_state.multi_config_single_pair = selected_pair
+                st.rerun()
+            else:
+                st.warning("Please select a trading pair first")
     
     # Display AI entry analysis if available
     if 'crypto_entry_analysis' in st.session_state:
@@ -2368,6 +2438,127 @@ def display_single_trade(kraken_client: KrakenClient, crypto_config):
             st.info(f"📝 **AI suggests LIMIT ORDER** at ${entry_analysis.suggested_entry:,.6f}")
         else:  # DO_NOT_ENTER
             st.error("❌ **AI says DO NOT ENTER** - Poor setup, avoid this trade")
+    
+    # ========== MULTI-CONFIG ANALYSIS SECTION ==========
+    # Check if multi-config analysis was triggered
+    if st.session_state.get('trigger_multi_config_analysis', False):
+        st.session_state.trigger_multi_config_analysis = False
+        single_pair = st.session_state.get('multi_config_single_pair', selected_pair)
+        
+        if single_pair:
+            st.markdown("---")
+            st.markdown("#### 🔬 Multi-Config Analysis")
+            st.info(f"Testing **{single_pair}** with multiple configurations (BUY/SELL × leverage levels)")
+            
+            with st.spinner(f"🔬 Analyzing {single_pair} with 8 configurations..."):
+                try:
+                    # Run multi-config analysis for single pair
+                    test_configs = {
+                        'directions': ['BUY', 'SELL'],
+                        'leverage_levels': [1.0, 2.0, 3.0, 5.0],
+                        'risk_pct': risk_pct,
+                        'take_profit_pct': take_profit_pct
+                    }
+                    
+                    analyze_multi_config_bulk(
+                        kraken_client=kraken_client,
+                        pairs=[single_pair],
+                        position_size=position_size,
+                        test_configs=test_configs
+                    )
+                    
+                    # Results stored in session state by analyze_multi_config_bulk
+                    if 'multi_config_results' in st.session_state:
+                        st.session_state.single_pair_multi_config_results = st.session_state.multi_config_results
+                        result_count = len(st.session_state.multi_config_results)
+                        # Clear multi_config_results to prevent global handler from picking it up
+                        # Single-pair results are stored in single_pair_multi_config_results
+                        del st.session_state.multi_config_results
+                        st.success(f"✅ Multi-config analysis complete! Found {result_count} configurations.")
+                    
+                except Exception as e:
+                    st.error(f"Multi-config analysis failed: {e}")
+                    logger.error("Multi-config analysis error: {}", str(e), exc_info=True)
+    
+    # Display multi-config results if available
+    if 'single_pair_multi_config_results' in st.session_state:
+        results = st.session_state.single_pair_multi_config_results
+        
+        # Handle both DataFrame and list results
+        if isinstance(results, pd.DataFrame):
+            results_df = results
+        else:
+            results_df = pd.DataFrame(results) if results else pd.DataFrame()
+        
+        if not results_df.empty:
+            st.markdown("---")
+            st.markdown("#### 🔬 Multi-Config Results")
+            
+            # Sort by AI score
+            if 'ai_score' in results_df.columns:
+                results_df = results_df.sort_values('ai_score', ascending=False)
+            
+            # Display summary metrics
+            summary_cols = st.columns(4)
+            summary_cols[0].metric("Configurations Tested", len(results_df))
+            
+            approved_count = len(results_df[results_df['ai_approved'] == True]) if 'ai_approved' in results_df.columns else 0
+            summary_cols[1].metric("AI Approved", approved_count)
+            
+            if 'ai_score' in results_df.columns:
+                best_score = results_df['ai_score'].max()
+                summary_cols[2].metric("Best Score", f"{best_score:.0f}/100")
+            
+            if 'ai_confidence' in results_df.columns:
+                avg_confidence = results_df['ai_confidence'].mean()
+                summary_cols[3].metric("Avg Confidence", f"{avg_confidence:.0f}%")
+            
+            # Display results table
+            display_cols = ['trade_type', 'direction', 'leverage', 'ai_score', 'ai_confidence', 'ai_approved', 'ai_recommendation']
+            available_cols = [c for c in display_cols if c in results_df.columns]
+            
+            if available_cols:
+                st.dataframe(
+                    results_df[available_cols].head(10),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            
+            # Best configuration selector
+            if len(results_df) > 0:
+                st.markdown("##### 🎯 Select Best Configuration")
+                
+                # Get top 3 by AI score
+                top_configs = results_df.head(3)
+                
+                for idx, row in top_configs.iterrows():
+                    trade_type = row.get('trade_type', 'Unknown')
+                    ai_score = row.get('ai_score', 0)
+                    ai_approved = row.get('ai_approved', False)
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        approval_badge = "✅" if ai_approved else "⚠️"
+                        st.write(f"{approval_badge} **{trade_type}** - Score: {ai_score:.0f}/100")
+                    
+                    with col2:
+                        if st.button(f"Use This", key=f"use_single_config_{idx}", use_container_width=True):
+                            # Use pending keys to avoid widget key conflicts
+                            st.session_state.pending_direction = row.get('direction', 'BUY')
+                            leverage_val = row.get('leverage', 1.0) or 1.0
+                            st.session_state.pending_leverage = leverage_val
+                            st.session_state.pending_trading_mode = "Margin Trading" if leverage_val > 1 else "Spot Trading"
+                            st.session_state.apply_pending_config = True
+                            
+                            st.success(f"✅ Configuration loaded: {trade_type}")
+                            st.rerun()
+            
+            # Clear results button
+            if st.button("🗑️ Clear Multi-Config Results", key="clear_single_multi_config"):
+                del st.session_state.single_pair_multi_config_results
+                if 'multi_config_results' in st.session_state:
+                    del st.session_state.multi_config_results
+                st.rerun()
     
     # Display analysis results if available
     if 'crypto_analysis' in st.session_state:
@@ -2698,8 +2889,11 @@ def execute_crypto_trade(kraken_client: KrakenClient, analysis: Dict):
     except Exception as e:
         error_msg = str(e)
         if "Invalid permissions" in error_msg and "restricted" in error_msg:
-            st.error(f"🚫 **Restricted Asset**: Trading this pair is not allowed in your region (e.g. WA state restrictions).")
-            st.caption(f"Details: {error_msg}")
+            if "US:WA" in error_msg:
+                st.error(f"🚫 **Region Restricted**: PERP (Perpetual Protocol) is not allowed for trading in Washington State (US:WA) due to local regulations.")
+            else:
+                st.error(f"🚫 **Restricted Asset**: Trading this pair is not allowed in your region.")
+            st.caption(f"Kraken Message: {error_msg}")
         else:
             st.error(f"Trade execution error: {error_msg}")
         logger.error("Trade execution error: {}", error_msg, exc_info=True)
@@ -2817,13 +3011,30 @@ def display_bulk_custom_trade(kraken_client: KrakenClient, crypto_config):
         st.divider()
         st.markdown("#### 🤖 Analyze Selected Pairs")
         
-        analysis_col1, analysis_col2 = st.columns([2, 1])
+        analysis_col1, analysis_col2, analysis_col3 = st.columns([2, 1, 1])
         
         with analysis_col1:
             if st.button("🔍 Analyze All Selected Pairs", width='stretch', type="primary"):
                 analyze_bulk_pairs(kraken_client, selected_pairs, direction, position_size, risk_pct, take_profit_pct, "bulk_custom")
         
         with analysis_col2:
+            if st.button("🔬 Multi-Config", width='stretch', help="Test BUY/SELL × multiple leverage levels"):
+                if selected_pairs:
+                    logger.info(f"🔘 Multi-Config Analysis for {len(selected_pairs)} pairs")
+                    test_configs = {
+                        'directions': ['BUY', 'SELL'],
+                        'leverage_levels': [1.0, 2.0, 3.0, 5.0],
+                        'risk_pct': risk_pct,
+                        'take_profit_pct': take_profit_pct
+                    }
+                    analyze_multi_config_bulk(
+                        kraken_client=kraken_client,
+                        pairs=selected_pairs,
+                        position_size=position_size,
+                        test_configs=test_configs
+                    )
+        
+        with analysis_col3:
             if st.button("📊 Get Market Data", width='stretch'):
                 with st.spinner("Fetching market data..."):
                     try:
@@ -3211,7 +3422,7 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
         st.markdown("---")
         st.markdown("### 🤖 Analysis & Execution")
         
-        analysis_btn_col1, analysis_btn_col2 = st.columns(2)
+        analysis_btn_col1, analysis_btn_col2, analysis_btn_col3 = st.columns(3)
         
         with analysis_btn_col1:
             if st.button("📊 Analyze All Symbols", width='stretch', type="secondary"):
@@ -3228,6 +3439,24 @@ def display_bulk_watchlist_trade(kraken_client: KrakenClient, crypto_config, wat
                 )
         
         with analysis_btn_col2:
+            if st.button("🔬 Multi-Config", width='stretch', help="Test BUY/SELL × multiple leverage levels"):
+                if selected_symbols:
+                    logger.info(f"🔘 Multi-Config Analysis for {len(selected_symbols)} watchlist symbols")
+                    formatted_pairs = [f"{symbol}/USD" if '/' not in symbol else symbol for symbol in selected_symbols]
+                    test_configs = {
+                        'directions': ['BUY', 'SELL'],
+                        'leverage_levels': [1.0, 2.0, 3.0, 5.0],
+                        'risk_pct': risk_pct,
+                        'take_profit_pct': take_profit_pct
+                    }
+                    analyze_multi_config_bulk(
+                        kraken_client=kraken_client,
+                        pairs=formatted_pairs,
+                        position_size=position_size,
+                        test_configs=test_configs
+                    )
+        
+        with analysis_btn_col3:
             # Manual setup without analysis
             if st.button("📝 Manual Setup (Skip Analysis)", width='stretch'):
                 # Create basic setup for all pairs
@@ -4514,9 +4743,11 @@ def analyze_multi_config_bulk(
             
             logger.info("📝 BEST CONFIG - Session state set: pair={}, direction={}, leverage={}, position=${}", str(pair), str(row.get('direction', 'BUY')), str(row.get('leverage', 1)), str(row.get('position_size', 100)))
             
-            # Switch to Quick Trade main tab AND Execute Trade subtab
+            # Switch to Quick Trade main tab AND Execute Trade subtab AND Single Trade mode
             st.session_state.active_crypto_tab = "⚡ Quick Trade"
             st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+            st.session_state.crypto_trade_mode = "Single Trade"
+            st.session_state['_crypto_trade_mode_widget'] = "Single Trade"  # Force widget sync
             
             st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
             st.balloons()
@@ -4565,9 +4796,11 @@ def analyze_multi_config_bulk(
                     if data_key in st.session_state:
                         del st.session_state[data_key]
                     
-                    # Switch tabs
+                    # Switch tabs and mode
                     st.session_state.active_crypto_tab = "⚡ Quick Trade"
                     st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+                    st.session_state.crypto_trade_mode = "Single Trade"
+                    st.session_state['_crypto_trade_mode_widget'] = "Single Trade"  # Force widget sync
                     
                     st.success(f"✅ Trade setup loaded for {pair} ({trade_type})! Switching to Execute Trade tab...")
                     st.balloons()

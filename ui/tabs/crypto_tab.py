@@ -201,31 +201,34 @@ def render_tab():
     # ========== CHECK FOR MULTI-CONFIG BUTTON CLICKS (GLOBAL HANDLER) ==========
     # This catches button clicks from Daily Scanner and transfers setup to Quick Trade
     # Runs BEFORE tab rendering so it works regardless of which tab you navigate to
+    # IMPORTANT: Only process if a click flag is actually set - don't just check for results existing
     
-    # Debug: Log clicked flags in session state
-    clicked_flags = [k for k in st.session_state.keys() if '_clicked' in str(k)]
-    if clicked_flags:
-        logger.info(f"🔘 CRYPTO TAB GLOBAL - Found clicked flags: {clicked_flags}")
+    # First, check if any click flags exist
+    clicked_flags = [k for k in st.session_state.keys() if k.endswith('_clicked') and st.session_state.get(k, False)]
     
-    if 'multi_config_results' in st.session_state and st.session_state.multi_config_results is not None:
+    # Only process multi_config_results if there's an actual click to handle
+    if clicked_flags and 'multi_config_results' in st.session_state and st.session_state.multi_config_results is not None:
+        logger.info(f"🔘 CRYPTO TAB GLOBAL - Found active clicked flags: {clicked_flags}")
         results_df = st.session_state.multi_config_results
-        logger.info(f"🔘 CRYPTO TAB GLOBAL - multi_config_results found with {len(results_df)} rows, index: {list(results_df.index)}")
+        logger.info(f"🔘 CRYPTO TAB GLOBAL - multi_config_results found with {len(results_df)} rows")
         
         # Check if any "Use This Setup" button was clicked
         selected_config_idx = None
         for idx in results_df.index:
             # Check both button types: use_config_{idx} (best-per-pair) and use_filtered_{idx} (filtered results)
             flag_key = f'use_config_{idx}_clicked'
-            flag_value = st.session_state.get(flag_key, False)
-            logger.debug(f"🔘 CRYPTO TAB GLOBAL - Checking {flag_key} = {flag_value}")
-            if flag_value:
+            if st.session_state.get(flag_key, False):
                 selected_config_idx = idx
-                st.session_state[flag_key] = False  # Reset flag
+                # Delete flag entirely to prevent re-detection
+                del st.session_state[flag_key]
                 logger.info(f"🔘 CRYPTO TAB - Detected button click for config {idx} (best-per-pair)")
                 break
-            elif st.session_state.get(f'use_filtered_{idx}_clicked', False):
+            
+            filtered_flag_key = f'use_filtered_{idx}_clicked'
+            if st.session_state.get(filtered_flag_key, False):
                 selected_config_idx = idx
-                st.session_state[f'use_filtered_{idx}_clicked'] = False  # Reset flag
+                # Delete flag entirely to prevent re-detection
+                del st.session_state[filtered_flag_key]
                 logger.info(f"🔘 CRYPTO TAB - Detected button click for filtered {idx} (filtered results)")
                 break
         
@@ -266,12 +269,26 @@ def render_tab():
             
             logger.info(f"📝 CRYPTO TAB - Session state set: pair={pair}, direction={row.get('direction', 'BUY')}, leverage={row.get('leverage', 1)}, position=${row.get('position_size', 100)}")
             
-            # Switch to Quick Trade main tab AND Execute Trade subtab
+            # Switch to Quick Trade main tab AND Execute Trade subtab AND Single Trade mode
             st.session_state.active_crypto_tab = "⚡ Quick Trade"
             st.session_state.quick_trade_subtab = "⚡ Execute Trade"
+            st.session_state.crypto_trade_mode = "Single Trade"
+            st.session_state['_crypto_trade_mode_widget'] = "Single Trade"  # Force widget sync
+            logger.info("✅ CRYPTO TAB - Mode forced to Single Trade to prevent redirect loop")
             
             # Set flag to show success message after rerun
             st.session_state.show_setup_success = {'pair': pair, 'trade_type': trade_type}
+            
+            # Clear multi_config_results after successful transfer to prevent interference
+            # with other operations like AI Entry Analysis
+            if 'multi_config_results' in st.session_state:
+                del st.session_state.multi_config_results
+            
+            # Clear ALL _clicked flags to prevent any interference with subsequent operations
+            clicked_keys_to_delete = [k for k in st.session_state.keys() if k.endswith('_clicked')]
+            for key in clicked_keys_to_delete:
+                del st.session_state[key]
+            logger.info(f"🧹 CRYPTO TAB - Cleared {len(clicked_keys_to_delete)} _clicked flags")
             
             logger.info(f"🔄 CRYPTO TAB - About to rerun with quick_trade_subtab set to: {st.session_state.quick_trade_subtab}")
             st.rerun()

@@ -27,7 +27,7 @@ def display_entry_monitors():
         return
     
     # Summary stats
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Active Monitors", len(opportunities))
     
     # Count by action type
@@ -35,6 +35,55 @@ def display_entry_monitors():
     wait_breakout = sum(1 for opp in opportunities if opp.original_analysis.action == "WAIT_FOR_BREAKOUT")
     col2.metric("Waiting for Pullback", wait_pullback)
     col3.metric("Waiting for Breakout", wait_breakout)
+    
+    with col4:
+        if st.button("🔄 Refresh All", use_container_width=True, type="primary"):
+            with st.spinner(f"Re-analyzing {len(opportunities)} monitors..."):
+                progress_bar = st.progress(0)
+                updated_count = 0
+                ready_count = 0
+                
+                for i, opp in enumerate(opportunities):
+                    progress_bar.progress((i + 1) / len(opportunities))
+                    try:
+                        # Re-analyze
+                        new_analysis = entry_assistant.analyze_entry(
+                            pair=opp.pair,
+                            side=opp.side,
+                            position_size=opp.position_size,
+                            risk_pct=opp.risk_pct,
+                            take_profit_pct=opp.take_profit_pct
+                        )
+                        
+                        # Find ID
+                        opp_id = None
+                        for oid, opportunity in entry_assistant.opportunities.items():
+                            if opportunity.pair == opp.pair:
+                                opp_id = oid
+                                break
+                        
+                        if opp_id:
+                            if new_analysis.action == "ENTER_NOW":
+                                entry_assistant.remove_opportunity(opp_id)
+                                ready_count += 1
+                                st.toast(f"🚀 {opp.pair} is READY TO ENTER!", icon="🚀")
+                            elif new_analysis.action != "ERROR":
+                                entry_assistant.opportunities[opp_id].original_analysis = new_analysis
+                                entry_assistant.opportunities[opp_id].last_check_time = datetime.now()
+                                updated_count += 1
+                                
+                    except Exception as e:
+                        logger.error(f"Failed to refresh {opp.pair}: {e}")
+                
+                entry_assistant._save_state()
+                progress_bar.empty()
+                
+                if ready_count > 0:
+                    st.success(f"✅ Refresh complete! {ready_count} pairs are READY TO ENTER!")
+                    st.balloons()
+                else:
+                    st.success(f"✅ Refreshed {updated_count} monitors")
+                st.rerun()
     
     st.markdown("---")
     

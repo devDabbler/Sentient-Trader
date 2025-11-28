@@ -79,7 +79,7 @@ def display_ai_position_monitor():
                             ai_manager = get_ai_position_manager(
                                 kraken_client=kraken_client,
                                 llm_analyzer=llm_analyzer,
-                                check_interval_seconds=60,
+                                check_interval_seconds=None,  # Load from config (120s)
                                 enable_ai_decisions=True,
                                 enable_trailing_stops=True,
                                 enable_breakeven_moves=True,
@@ -251,7 +251,14 @@ def display_ai_position_monitor():
     
     # 🚨 SAFETY: Show pending approvals first
     if hasattr(ai_manager, 'pending_approvals') and ai_manager.pending_approvals:
-        st.markdown("#### 🚨 Pending Trade Approvals")
+        col_head, col_btn = st.columns([3, 1])
+        with col_head:
+            st.markdown("#### 🚨 Pending Trade Approvals")
+        with col_btn:
+            if st.button("🗑️ Clear All Approvals", key="clear_all_approvals", help="Remove all pending trade proposals"):
+                ai_manager.clear_all_pending_approvals()
+                st.rerun()
+                
         st.warning(f"⚠️ **{len(ai_manager.pending_approvals)} trade(s) awaiting your approval!** AI will NOT execute without your explicit confirmation.")
         
         for approval_id, approval_data in list(ai_manager.pending_approvals.items()):
@@ -366,7 +373,7 @@ def display_ai_position_monitor():
                     
                     # Manual controls
                     st.markdown("**Manual Controls:**")
-                    manual_col1, manual_col2 = st.columns(2)
+                    manual_col1, manual_col2, manual_col3 = st.columns(3)
                     
                     with manual_col1:
                         if st.button(f"🚨 Close Position", key=f"close_{trade_id}"):
@@ -415,6 +422,14 @@ def display_ai_position_monitor():
                                     st.error("❌ Failed to move stop")
                             except Exception as e:
                                 st.error(f"Error: {e}")
+                                
+                    with manual_col3:
+                        if st.button(f"🚫 Exclude Pair", key=f"exclude_{trade_id}", help="Stop monitoring this pair completely"):
+                            if ai_manager.exclude_pair(pos['pair']):
+                                st.success(f"✅ {pos['pair']} excluded from monitoring")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to exclude {pos['pair']}")
         
         else:
             st.info("No active positions")
@@ -461,6 +476,24 @@ def display_ai_position_monitor():
         - **CLOSE_NOW**: Clear reversal or target reached
         """)
     
+    # Excluded pairs management
+    excluded_pairs = status.get('excluded_pairs', [])
+    if excluded_pairs:
+        with st.expander(f"🚫 Excluded Pairs ({len(excluded_pairs)})"):
+            st.write("These pairs are permanently ignored by the AI monitor.")
+            
+            for pair in excluded_pairs:
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"**{pair}**")
+                with col2:
+                    if st.button(f"✅ Include", key=f"include_{pair}"):
+                        if ai_manager.include_pair(pair):
+                            st.success(f"✅ {pair} re-included for monitoring")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to include {pair}")
+
     # Control buttons
     st.markdown("---")
     control_col1, control_col2, control_col3, control_col4 = st.columns(4)

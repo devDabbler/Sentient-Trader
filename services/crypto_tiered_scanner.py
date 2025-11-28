@@ -335,11 +335,96 @@ class TieredCryptoScanner:
         return results
     
     def get_all_scan_pairs(self) -> List[str]:
-        """Get complete list of pairs to scan across all categories"""
+        """Get complete list of pairs to scan across all categories (curated watchlist)"""
         all_pairs = []
         for category, pairs in self.scan_categories.items():
             all_pairs.extend(pairs)
         return list(set(all_pairs))  # Remove duplicates
+    
+    def get_all_kraken_usd_pairs(self, cache_duration_minutes: int = 60) -> List[str]:
+        """
+        Get ALL tradeable USD pairs from Kraken dynamically.
+        Used for discovery mode to find coins outside the curated watchlist.
+        
+        Returns:
+            List of pairs like ['BTC/USD', 'ETH/USD', 'SOL/USD', ...]
+        """
+        # Check cache first
+        cache_key = '_kraken_usd_pairs_cache'
+        cache_time_key = '_kraken_usd_pairs_cache_time'
+        
+        if hasattr(self, cache_key) and hasattr(self, cache_time_key):
+            cache_age = (datetime.now() - getattr(self, cache_time_key)).total_seconds() / 60
+            if cache_age < cache_duration_minutes:
+                return getattr(self, cache_key)
+        
+        try:
+            # Get all tradeable pairs from Kraken
+            all_pairs_data = self.kraken_client.get_tradable_asset_pairs()
+            
+            # Filter to USD pairs only and normalize format
+            usd_pairs = []
+            for pair_info in all_pairs_data:
+                altname = pair_info.get('altname', '')
+                wsname = pair_info.get('wsname', '')
+                quote = pair_info.get('quote', '')
+                
+                # Check if it's a USD pair
+                if 'USD' in quote or altname.endswith('USD') or wsname.endswith('/USD'):
+                    # Normalize to BASE/USD format
+                    if '/' in wsname:
+                        normalized = wsname
+                    elif '/' in altname:
+                        normalized = altname
+                    else:
+                        # Extract base from altname (e.g., BTCUSD -> BTC/USD)
+                        base = altname.replace('USD', '').replace('ZUSD', '')
+                        if base:
+                            normalized = f"{base}/USD"
+                        else:
+                            continue
+                    
+                    # Skip stablecoins and wrapped versions
+                    skip_tokens = ['USDT', 'USDC', 'DAI', 'TUSD', 'BUSD', 'USDP', 'GUSD', 'WBTC', 'WETH']
+                    base_symbol = normalized.split('/')[0]
+                    if base_symbol not in skip_tokens:
+                        usd_pairs.append(normalized)
+            
+            # Cache results
+            setattr(self, cache_key, usd_pairs)
+            setattr(self, cache_time_key, datetime.now())
+            
+            logger.info(f"📊 Fetched {len(usd_pairs)} USD pairs from Kraken")
+            return usd_pairs
+            
+        except Exception as e:
+            logger.error(f"Error fetching Kraken pairs: {e}")
+            # Fallback to curated list
+            return self.get_all_scan_pairs()
+    
+    def is_pair_in_watchlist(self, pair: str) -> bool:
+        """Check if a pair is in the curated watchlist"""
+        return pair in self.get_all_scan_pairs()
+    
+    def get_discovery_pairs(self, exclude_watchlist: bool = True) -> List[str]:
+        """
+        Get pairs for discovery mode - coins NOT in the curated watchlist.
+        
+        Args:
+            exclude_watchlist: If True, exclude pairs already in watchlist
+            
+        Returns:
+            List of pairs available on Kraken but not in watchlist
+        """
+        all_kraken = set(self.get_all_kraken_usd_pairs())
+        
+        if exclude_watchlist:
+            watchlist = set(self.get_all_scan_pairs())
+            discovery_pairs = list(all_kraken - watchlist)
+            logger.info(f"🔍 Discovery mode: {len(discovery_pairs)} pairs (excluded {len(watchlist)} watchlist pairs)")
+            return discovery_pairs
+        
+        return list(all_kraken)
     
     # ============= HELPER METHODS =============
     

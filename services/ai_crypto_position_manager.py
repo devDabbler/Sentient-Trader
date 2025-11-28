@@ -59,6 +59,7 @@ class PositionStatus(Enum):
     CLOSING = "CLOSING"
     CLOSED = "CLOSED"
     ERROR = "ERROR"
+    EXCLUDED = "EXCLUDED"
 
 
 @dataclass
@@ -191,8 +192,22 @@ class AICryptoPositionManager:
         self.state_file = state_file
         self.require_manual_approval = require_manual_approval
         
+        # Use absolute path for state file to ensure persistence
+        if state_file == "data/ai_crypto_positions.json":
+            from pathlib import Path
+            # Calculate absolute path: services/.. -> data/ai_crypto_positions.json
+            # This works regardless of where the script is run from
+            base_dir = Path(__file__).parent.parent
+            self.state_file = str(base_dir / "data" / "ai_crypto_positions.json")
+            logger.info(f"📂 Using absolute state file path: {self.state_file}")
+        else:
+            self.state_file = state_file
+            
         # Monitored positions
         self.positions: Dict[str, MonitoredCryptoPosition] = {}
+        
+        # Excluded pairs (user opted out of monitoring)
+        self.excluded_pairs: set = set()
         
         # SAFETY: Pending approvals queue
         self.pending_approvals: Dict[str, Dict] = {}  # {approval_id: {trade_id, decision, timestamp}}
@@ -335,6 +350,11 @@ class AICryptoPositionManager:
             # Validate
             if not trade_id or not pair:
                 logger.error("Invalid position parameters")
+                return False
+            
+            # Check if excluded
+            if pair in self.excluded_pairs:
+                logger.warning(f"Cannot add {pair} - it is in the excluded list")
                 return False
             
             if len(self.positions) >= self.max_positions:
@@ -1082,6 +1102,12 @@ Analyze the position using these factors:
         
         # 🚨 SAFETY CHECK: Require manual approval unless explicitly skipped
         if self.require_manual_approval and not skip_approval:
+            # Check for existing pending approval for this trade_id and action
+            for pid, pending in self.pending_approvals.items():
+                if pending['trade_id'] == trade_id and pending['decision'].action == decision.action:
+                    # Already pending, don't create a duplicate
+                    return False
+
             # Add to pending approvals queue instead of executing
             approval_id = f"{trade_id}_{int(time.time())}"
             position = self.positions[trade_id]
@@ -1426,6 +1452,45 @@ Analyze the position using these factors:
         except Exception as e:
             logger.debug(f"Failed to send Discord notification: {e}")
     
+    def exclude_pair(self, pair: str) -> bool:
+        """Exclude a pair from monitoring and close if active"""
+        try:
+            # Always ensure it's in the set
+            if pair not in self.excluded_pairs:
+                self.excluded_pairs.add(pair)
+                log_and_print(f"🚫 Added {pair} to excluded list")
+            
+            # ALWAYS clean up active positions, even if already excluded
+            positions_to_remove = []
+            for trade_id, pos in self.positions.items():
+                if pos.pair == pair:
+                    positions_to_remove.append(trade_id)
+            
+            if positions_to_remove:
+                log_and_print(f"   Cleaning up {len(positions_to_remove)} lingering positions for excluded pair {pair}")
+                for trade_id in positions_to_remove:
+                    self.remove_position(trade_id, reason="Pair excluded by user")
+            
+            self._save_state()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error excluding pair {pair}: {e}")
+            return False
+
+    def include_pair(self, pair: str) -> bool:
+        """Re-include a pair for monitoring"""
+        try:
+            if pair in self.excluded_pairs:
+                self.excluded_pairs.remove(pair)
+                log_and_print(f"✅ Removed {pair} from excluded list")
+                self._save_state()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error including pair {pair}: {e}")
+            return False
+    
     def _save_state(self):
         """Save position state to file"""
         try:
@@ -1433,6 +1498,7 @@ Analyze the position using these factors:
                 'positions': {
                     trade_id: asdict(pos) for trade_id, pos in self.positions.items()
                 },
+                'excluded_pairs': list(self.excluded_pairs),
                 'statistics': {
                     'total_ai_adjustments': self.total_ai_adjustments,
                     'trailing_stop_activations': self.trailing_stop_activations,
@@ -1465,8 +1531,18 @@ Analyze the position using these factors:
             with open(self.state_file, 'r') as f:
                 state = json.load(f)
             
-            # Restore positions
+            # Restore excluded pairs
+            self.excluded_pairs = set(state.get('excluded_pairs', []))
+            
+            # Restore positions, skipping those in excluded list
+            self.positions = {}
+            skipped_count = 0
             for trade_id, pos_data in state.get('positions', {}).items():
+                pair = pos_data.get('pair')
+                if pair in self.excluded_pairs:
+                    skipped_count += 1
+                    continue
+                    
                 # Convert ISO strings back to datetime
                 if 'entry_time' in pos_data:
                     pos_data['entry_time'] = datetime.fromisoformat(pos_data['entry_time'])
@@ -1474,6 +1550,9 @@ Analyze the position using these factors:
                     pos_data['last_check_time'] = datetime.fromisoformat(pos_data['last_check_time'])
                 
                 self.positions[trade_id] = MonitoredCryptoPosition(**pos_data)
+            
+            if skipped_count > 0:
+                logger.info(f"   Skipped {skipped_count} positions that are in excluded list")
             
             # Restore statistics
             stats = state.get('statistics', {})
@@ -1781,6 +1860,11 @@ Analyze the position using these factors:
             added_count = 0
             import time
             for pair, kraken_pos_list in kraken_pairs.items():
+                # Check if pair is excluded
+                if pair in self.excluded_pairs:
+                    # log_and_print(f"   🚫 Skipping {pair} (in exclusion list)")
+                    continue
+
                 # Check if we're already monitoring this pair
                 already_monitored = any(p.pair == pair for p in self.positions.values())
                 
@@ -1831,6 +1915,7 @@ Analyze the position using these factors:
             'is_running': self.is_running,
             'active_positions': len([p for p in self.positions.values() if p.status == PositionStatus.ACTIVE.value]),
             'total_positions': len(self.positions),
+            'excluded_pairs': list(self.excluded_pairs),
             'positions': {
                 trade_id: {
                     'pair': pos.pair,
