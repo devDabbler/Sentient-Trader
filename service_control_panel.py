@@ -56,13 +56,13 @@ TOTP_SECRET = os.getenv("CONTROL_PANEL_TOTP_SECRET")
 TOTP_ENABLED = TOTP_AVAILABLE and TOTP_SECRET and len(TOTP_SECRET) >= 16
 
 # Service intervals config file path
-SERVICE_INTERVALS_FILE = Path(__file__).parent / "data" / "service_intervals.json"
-SERVICE_WATCHLISTS_FILE = Path(__file__).parent / "data" / "service_watchlists.json"
-SERVICE_DISCORD_FILE = Path(__file__).parent / "data" / "service_discord_settings.json"
-ACTIVE_STRATEGY_FILE = Path(__file__).parent / "active_strategy.json"
-ANALYSIS_REQUESTS_FILE = Path(__file__).parent / "data" / "analysis_requests.json"
-ANALYSIS_RESULTS_FILE = Path(__file__).parent / "data" / "analysis_results.json"
-AI_POSITIONS_FILE = Path(__file__).parent / "data" / "ai_crypto_positions.json"
+SERVICE_INTERVALS_FILE = Path(__file__).resolve().parent / "data" / "service_intervals.json"
+SERVICE_WATCHLISTS_FILE = Path(__file__).resolve().parent / "data" / "service_watchlists.json"
+SERVICE_DISCORD_FILE = Path(__file__).resolve().parent / "data" / "service_discord_settings.json"
+ACTIVE_STRATEGY_FILE = Path(__file__).resolve().parent / "active_strategy.json"
+ANALYSIS_REQUESTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_requests.json"
+ANALYSIS_RESULTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_results.json"
+AI_POSITIONS_FILE = Path(__file__).resolve().parent / "data" / "ai_crypto_positions.json"
 
 # Default watchlists for each service type
 DEFAULT_WATCHLISTS = {
@@ -602,7 +602,7 @@ def control_service(service_name: str, action: str) -> tuple:
 
 def get_service_logs(service_name: str, lines: int = 100) -> str:
     """Get recent logs for a service. Reads from log files first (both Windows and Linux), falls back to journalctl on Linux."""
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parent
     
     # Map service to likely log filenames - MUST match systemd StandardOutput/StandardError paths
     log_map = {
@@ -691,7 +691,7 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
 
 def clear_service_logs(service_name: str) -> tuple:
     """Clear/reset log files for a service. Returns (success, message)."""
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parent
     
     # Map service to log filenames - MUST match systemd StandardOutput/StandardError paths
     log_map = {
@@ -972,7 +972,21 @@ def render_watchlist_manager():
     # Tab 3: AI Monitor Exclusions
     with tab3:
         st.caption("🚫 Manage coins permanently excluded from AI monitoring")
+        st.info("ℹ️ **Note:** Pending trade approvals are managed in the main Trading App. To clear all pending approvals from here, you can **Restart** the 'AI Crypto Trader' service.")
         
+        # Debug info
+        if st.checkbox("Show Debug Info"):
+            st.text(f"File Path: {AI_POSITIONS_FILE}")
+            st.text(f"Exists: {AI_POSITIONS_FILE.exists()}")
+            if AI_POSITIONS_FILE.exists():
+                try:
+                    with open(AI_POSITIONS_FILE, 'r') as f:
+                        raw_content = f.read()
+                        st.text(f"File Content Length: {len(raw_content)}")
+                        st.text(f"First 100 chars: {raw_content[:100]}")
+                except Exception as e:
+                    st.error(f"Error reading file: {e}")
+
         excluded = load_ai_exclusions()
         
         col1, col2 = st.columns([3, 1])
@@ -996,7 +1010,7 @@ def render_watchlist_manager():
                 "Currently Excluded",
                 options=excluded,
                 default=excluded,
-                key="excluded_multiselect",
+                key="excluded_multiselect_v2",
                 help="Deselect to re-include pair in monitoring"
             )
             
