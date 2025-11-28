@@ -1587,10 +1587,13 @@ def main():
                                 st.rerun()
                         
                         # Multiselect for tickers
+                        # Combine all_tickers with current_watchlist to ensure custom additions are available as options
+                        available_options = list(set(all_tickers + current_watchlist))
+                        
                         selected_tickers = st.multiselect(
                             "Select tickers to monitor",
-                            options=all_tickers,
-                            default=[t for t in current_watchlist if t in all_tickers],
+                            options=available_options,
+                            default=[t for t in current_watchlist if t in available_options],
                             key=f"main_watchlist_select_{service_name}",
                             help="Select which tickers this service should scan"
                         )
@@ -1610,7 +1613,24 @@ def main():
                                 custom_list = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
                                 final_tickers.extend([t for t in custom_list if t not in final_tickers])
                             
+                            # 1. Save to Local JSON
                             if set_service_watchlist(service_name, final_tickers):
+                                
+                                # 2. Sync to Supabase (if available)
+                                try:
+                                    from services.ticker_manager import TickerManager
+                                    tm = TickerManager()
+                                    if tm.test_connection():
+                                        sup_watchlist_name = f"service_{service_name}"
+                                        # Recreate watchlist to match exact state
+                                        tm.delete_watchlist(sup_watchlist_name)
+                                        tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {svc_label}")
+                                        for t in final_tickers:
+                                            tm.add_to_watchlist(sup_watchlist_name, t)
+                                        st.toast("✅ Synced to Supabase!")
+                                except Exception as e:
+                                    print(f"Failed to sync to Supabase: {e}")
+                                
                                 st.toast(f"✅ Saved {len(final_tickers)} tickers!")
                                 # Restart service to apply
                                 control_service(service_name, "restart")
