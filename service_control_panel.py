@@ -890,7 +890,7 @@ def render_watchlist_manager():
             
             # List/Manage tickers
             if tm:
-                tickers = tm.get_all_tickers()
+                tickers = tm.get_all_tickers(limit=1000)
             else:
                 tickers = []
             if tickers:
@@ -917,9 +917,9 @@ def render_watchlist_manager():
             st.warning("⚠️ Supabase connection not available. Ensure credentials are in .env")
             st.info("Use 'Service Watchlists' tab for local configuration.")
 
-    # Tab 2: Local Service Watchlists (JSON)
+    # Tab 2: Service Watchlists (Synced)
     with tab2:
-        st.caption("Local JSON watchlists used by services if Supabase is unavailable")
+        st.caption("Service watchlists (Synced with Supabase + Local JSON backup)")
         
         service_names = list(SERVICES.keys())
         selected_service = st.selectbox("Select Service", service_names)
@@ -927,8 +927,28 @@ def render_watchlist_manager():
         if selected_service:
             svc_info = SERVICES[selected_service]
             svc_key = svc_info['name']
+            # Define Supabase watchlist name for this service
+            sup_watchlist_name = f"service_{svc_key}"
             
-            current_watchlist = get_service_watchlist(svc_key, svc_info.get('category', 'stocks'))
+            # 1. Load current watchlist (Try Supabase first, then Local)
+            current_watchlist = []
+            source = "Local"
+            
+            if tm and supabase_available:
+                # Try to get from Supabase
+                sup_tickers = tm.get_watchlist_tickers(sup_watchlist_name)
+                if sup_tickers:
+                    current_watchlist = sup_tickers
+                    source = "Supabase ☁️"
+                else:
+                    # Fallback to local if Supabase empty (first time sync?)
+                    current_watchlist = get_service_watchlist(svc_key, svc_info.get('category', 'stocks'))
+                    if current_watchlist:
+                        source = "Local 📂 (Will sync to Supabase on save)"
+            else:
+                current_watchlist = get_service_watchlist(svc_key, svc_info.get('category', 'stocks'))
+            
+            st.caption(f"Source: {source}")
             
             # Custom input
             col1, col2 = st.columns([3, 1])
@@ -938,7 +958,16 @@ def render_watchlist_manager():
                 if st.button("Add", key=f"btn_add_{svc_key}"):
                     if custom_add and custom_add not in current_watchlist:
                         current_watchlist.append(custom_add)
+                        
+                        # Save to Local
                         set_service_watchlist(svc_key, current_watchlist)
+                        
+                        # Save to Supabase
+                        if tm and supabase_available:
+                            # Ensure watchlist exists
+                            tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                            tm.add_to_watchlist(sup_watchlist_name, custom_add)
+                            
                         st.success(f"Added {custom_add}")
                         st.rerun()
             
@@ -947,25 +976,65 @@ def render_watchlist_manager():
             with col_act1:
                 if st.button("Select All Default", key=f"all_{svc_key}"):
                     default = DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])
-                    current_watchlist = list(set(current_watchlist + default))
-                    set_service_watchlist(svc_key, current_watchlist)
+                    new_list = list(set(current_watchlist + default))
+                    
+                    # Save Local
+                    set_service_watchlist(svc_key, new_list)
+                    
+                    # Save Supabase (Bulk add)
+                    if tm and supabase_available:
+                        tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                        for t in new_list:
+                            if t not in current_watchlist:
+                                tm.add_to_watchlist(sup_watchlist_name, t)
+                                
                     st.rerun()
             with col_act2:
                 if st.button("Clear All", key=f"clear_{svc_key}"):
+                    # Save Local
                     set_service_watchlist(svc_key, [])
+                    
+                    # Save Supabase (Delete and Recreate empty)
+                    if tm and supabase_available:
+                         tm.delete_watchlist(sup_watchlist_name)
+                         tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                         
                     st.rerun()
 
+            # Combine with defaults for options, but selection is current_watchlist
+            options = list(set(current_watchlist + DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])))
+            
             updated_list = st.multiselect(
                 f"Watchlist for {selected_service}",
-                options=list(set(current_watchlist + DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), []))),
+                options=options,
                 default=current_watchlist,
                 key=f"multi_{svc_key}"
             )
             
             # Save changes if different
             if set(updated_list) != set(current_watchlist):
+                # 1. Update Local JSON (Source of Truth for running services)
                 set_service_watchlist(svc_key, updated_list)
-                st.toast("Watchlist updated!")
+                
+                # 2. Update Supabase (Sync for other devices)
+                if tm and supabase_available:
+                    # Ensure watchlist exists
+                    tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                    
+                    # Calculate diff
+                    to_add = set(updated_list) - set(current_watchlist)
+                    to_remove = set(current_watchlist) - set(updated_list)
+                    
+                    # Apply diff
+                    for t in to_add:
+                        tm.add_to_watchlist(sup_watchlist_name, t)
+                    for t in to_remove:
+                        tm.remove_from_watchlist(sup_watchlist_name, t)
+                        
+                    st.toast(f"Watchlist updated & synced to Supabase! (+{len(to_add)} / -{len(to_remove)})")
+                else:
+                    st.toast("Watchlist updated locally!")
+                    
                 time.sleep(0.5)
                 st.rerun()
 
