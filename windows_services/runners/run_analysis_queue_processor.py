@@ -38,8 +38,14 @@ LOG_FILE = PROJECT_ROOT / "logs" / "analysis_queue_processor.log"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
-logger.add(sys.stderr, level="DEBUG", format="{time:HH:mm:ss} | {level} | {message}")
+# Force unbuffered/immediate output for systemd compatibility
+logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level} | {message}")
 logger.add(str(LOG_FILE), rotation="10 MB", retention="7 days", level="DEBUG")
+
+# Force stdout to be unbuffered
+import sys
+sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure') else None
 
 # Files
 ANALYSIS_REQUESTS_FILE = PROJECT_ROOT / "data" / "analysis_requests.json"
