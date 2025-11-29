@@ -26,6 +26,18 @@ from services.discord_trade_approval import get_discord_approval_manager
 # Get approval manager (this will auto-start the bot)
 approval_manager = get_discord_approval_manager()
 
+# ALSO Start the Alert Pipeline (for incoming alerts)
+try:
+    from services.discord_alert_pipeline import get_discord_pipeline
+    alert_pipeline = get_discord_pipeline()
+    if alert_pipeline:
+        logger.info("🚀 Starting Discord Alert Pipeline...")
+        alert_pipeline.start()
+    else:
+        logger.warning("⚠️ Discord Alert Pipeline could not be created")
+except Exception as e:
+    logger.error(f"❌ Failed to start Alert Pipeline: {e}")
+
 if not approval_manager or not approval_manager.enabled:
     logger.error("❌ Discord approval manager not configured!")
     logger.error("   Check .env for DISCORD_BOT_TOKEN and DISCORD_CHANNEL_IDS")

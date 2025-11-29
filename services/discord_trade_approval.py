@@ -9,8 +9,10 @@ Handles two-way Discord communication for trade approvals:
 from loguru import logger
 import discord
 from discord.ext import commands
+from discord.ui import View, Button
 import asyncio
 import os
+import time
 from datetime import datetime
 from typing import Dict, Optional, Callable
 from dataclasses import dataclass, asdict
@@ -63,6 +65,48 @@ class PendingTradeApproval:
             return f"{price:.6f}"
         else:
             return f"{price:.8f}"
+
+
+class TradeActionView(View):
+    """Interactive buttons for Trade Approval"""
+    def __init__(self, bot, approval_id: str):
+        super().__init__(timeout=3600)  # 1 hour timeout
+        self.bot = bot
+        self.approval_id = approval_id
+
+    @discord.ui.button(label="✅ Approve", style=discord.ButtonStyle.green, custom_id="btn_approve")
+    async def approve_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.bot._handle_button_click(interaction, self.approval_id, True)
+
+    @discord.ui.button(label="❌ Reject", style=discord.ButtonStyle.red, custom_id="btn_reject")
+    async def reject_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.defer()
+        await self.bot._handle_button_click(interaction, self.approval_id, False)
+
+
+class AlertActionView(View):
+    """Interactive buttons for General Alerts (Watch/Analyze/Dismiss)"""
+    def __init__(self, bot, symbol: str, asset_type: str = "crypto"):
+        super().__init__(timeout=7200)  # 2 hour timeout
+        self.bot = bot
+        self.symbol = symbol
+        self.asset_type = asset_type
+
+    @discord.ui.button(label="👀 Watch", style=discord.ButtonStyle.primary, custom_id="btn_watch")
+    async def watch_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(f"👀 Adding **{self.symbol}** to watchlist...", ephemeral=True)
+        await self.bot._handle_watch_command(interaction.message, self.symbol)
+
+    @discord.ui.button(label="🔍 Analyze", style=discord.ButtonStyle.secondary, custom_id="btn_analyze")
+    async def analyze_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(f"🔍 Queuing analysis for **{self.symbol}**...", ephemeral=True)
+        await self.bot._handle_analyze_command(interaction.message, self.symbol)
+
+    @discord.ui.button(label="🗑️ Dismiss", style=discord.ButtonStyle.gray, custom_id="btn_dismiss")
+    async def dismiss_button(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_message(f"🗑️ Dismissing alert for **{self.symbol}**...", ephemeral=True)
+        await self.bot._handle_dismiss_command(interaction.message, self.symbol)
 
 
 class DiscordTradeApprovalBot(commands.Bot):
@@ -149,9 +193,9 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
         import re
         
-        # Generic Alert Commands: WATCH, ANALYZE, DISMISS
+        # Generic Alert Commands: WATCH, ANALYZE, DISMISS, MULTI, ULTIMATE
         # Pattern: CMD SYMBOL (e.g., "WATCH BTC", "ANALYZE AAPL")
-        alert_match = re.match(r'(WATCH|ANALYZE|DISMISS|REMOVE)\s+([A-Z0-9/]+)', content)
+        alert_match = re.match(r'(WATCH|ANALYZE|DISMISS|REMOVE|MULTI|ULTIMATE)\s+([A-Z0-9/]+)', content)
         if alert_match:
             action = alert_match.group(1)
             symbol = alert_match.group(2).replace('/', '').upper()
@@ -159,7 +203,11 @@ class DiscordTradeApprovalBot(commands.Bot):
             if action == 'WATCH':
                 await self._handle_watch_command(message, symbol)
             elif action == 'ANALYZE':
-                await self._handle_analyze_command(message, symbol)
+                await self._handle_analyze_command(message, symbol, mode="standard")
+            elif action == 'MULTI':
+                await self._handle_analyze_command(message, symbol, mode="multi")
+            elif action == 'ULTIMATE':
+                await self._handle_analyze_command(message, symbol, mode="ultimate")
             elif action in ['DISMISS', 'REMOVE']:
                 await self._handle_dismiss_command(message, symbol)
             return
@@ -198,6 +246,46 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Process commands
         await self.process_commands(message)
 
+    async def _handle_button_click(self, interaction: discord.Interaction, approval_id: str, approve: bool):
+        """Handle button click on trade approval"""
+        approval = self.pending_approvals.get(approval_id)
+        
+        if not approval:
+            await interaction.followup.send("❌ This approval request has expired or was already processed.", ephemeral=True)
+            return
+
+        if approval.approved or approval.rejected:
+            await interaction.followup.send(f"⚠️ This trade ({approval.pair}) has already been processed.", ephemeral=True)
+            return
+            
+        # Mark as approved/rejected
+        if approve:
+            approval.approved = True
+            await interaction.followup.send(
+                f"✅ **APPROVED:** {approval.pair} {approval.side} trade\n🚀 Executing trade now..."
+            )
+            logger.info(f"✅ User approved trade via button: {approval_id} ({approval.pair})")
+        else:
+            approval.rejected = True
+            await interaction.followup.send(
+                f"❌ **REJECTED:** {approval.pair} {approval.side} trade\nTrade cancelled."
+            )
+            logger.info(f"❌ User rejected trade via button: {approval_id} ({approval.pair})")
+            
+        # Disable buttons on the message
+        try:
+            if interaction.message:
+                await interaction.message.edit(view=None)
+        except:
+            pass
+
+        # Call approval callback
+        if self.approval_callback:
+            try:
+                self.approval_callback(approval_id, approve)
+            except Exception as e:
+                logger.error(f"Error in approval callback: {e}", exc_info=True)
+
     async def _handle_alert_reply(self, message: discord.Message, content: str):
         """Handle replies to generic alerts (from Orchestrator queue)"""
         from services.service_orchestrator import get_orchestrator
@@ -224,7 +312,6 @@ class DiscordTradeApprovalBot(commands.Bot):
             return
 
         # Extract symbol from the referenced message embed or content
-        # Embed title usually has: "💥 BREAKOUT DETECTED: BTC/USD"
         target_symbol = None
         if ref_msg.embeds:
             for embed in ref_msg.embeds:
@@ -247,9 +334,6 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send("⚠️ Could not determine symbol from the message you replied to.")
             return
             
-        # Find matching alert in queue (optional, but good for validation)
-        # If not in queue, we can still perform actions like WATCH or ANALYZE on the symbol directly
-        
         target_symbol = target_symbol.upper()
         
         if content in ['WATCH', 'ADD', 'TRACK']:
@@ -261,7 +345,13 @@ class DiscordTradeApprovalBot(commands.Bot):
                     orch.approve_alert(alert.id, add_to_watchlist=True)
             
         elif content in ['ANALYZE', 'SCAN', 'CHECK']:
-            await self._handle_analyze_command(message, target_symbol)
+            await self._handle_analyze_command(message, target_symbol, mode="standard")
+            
+        elif content in ['MULTI']:
+            await self._handle_analyze_command(message, target_symbol, mode="multi")
+
+        elif content in ['ULTIMATE']:
+            await self._handle_analyze_command(message, target_symbol, mode="ultimate")
             
         elif content in ['DISMISS', 'REMOVE', 'DELETE']:
             # Reject in orchestrator
@@ -278,13 +368,7 @@ class DiscordTradeApprovalBot(commands.Bot):
 
     async def _handle_watch_command(self, message: discord.Message, symbol: str):
         """Handle WATCH command"""
-        from services.service_orchestrator import get_orchestrator
-        orch = get_orchestrator()
-        
         # Add to watchlist via orchestrator helper (handles both crypto and stock)
-        # We create a dummy alert item to reuse the _add_to_watchlist logic or implement new logic
-        # Simplest: Add to crypto watchlist directly if it has /
-        
         try:
             if "/" in symbol:
                 # Crypto
@@ -296,8 +380,6 @@ class DiscordTradeApprovalBot(commands.Bot):
                     await message.channel.send(f"⚠️ Failed to add {symbol} (duplicate?)")
             else:
                 # Stock or Crypto without /
-                # Assume crypto if looks like it, else stock? 
-                # Safer to check TickerManager
                 from services.ticker_manager import TickerManager
                 tm = TickerManager()
                 tm.add_ticker(symbol)
@@ -307,17 +389,23 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.error(f"Error processing WATCH {symbol}: {e}")
             await message.channel.send(f"❌ Error adding {symbol}: {str(e)}")
 
-    async def _handle_analyze_command(self, message: discord.Message, symbol: str):
+    async def _handle_analyze_command(self, message: discord.Message, symbol: str, mode: str = "standard"):
         """Handle ANALYZE command"""
         from windows_services.runners.service_config_loader import queue_analysis_request
         
         try:
             # Determine asset type
             asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL"] else "stock"
-            preset = "crypto_standard" if asset_type == "crypto" else "stock_momentum"
+            
+            preset_map = {
+                "standard": "crypto_standard" if asset_type == "crypto" else "stock_momentum",
+                "multi": "crypto_multi",
+                "ultimate": "crypto_ultimate"
+            }
+            preset = preset_map.get(mode, "crypto_standard")
             
             if queue_analysis_request(preset, [symbol]):
-                 await message.channel.send(f"🔍 Analysis queued for **{symbol}** ({asset_type}). Check Control Panel.")
+                 await message.channel.send(f"🔍 **{mode.upper()}** Analysis queued for **{symbol}** ({asset_type}). Check Control Panel.")
             else:
                  await message.channel.send(f"❌ Failed to queue analysis for {symbol}")
                  
@@ -369,7 +457,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         lines.append("• `REJECT 2` or `2 NO` - Reject specific trade")
         lines.append("• `APPROVE BTC/USD` - Approve by symbol")
         lines.append("• `APPROVE ALL` - Approve all pending")
-        lines.append("• `APPROVE` - Approve most recent")
+        lines.append("• `ANALYZE BTC` - Run analysis")
+        lines.append("• `MULTI BTC` - Run Multi-Config Analysis")
         
         await message.channel.send("\n".join(lines))
     
@@ -664,22 +753,21 @@ class DiscordTradeApprovalBot(commands.Bot):
             embed.add_field(
                 name="⏰ How to Approve/Reject",
                 value=(
-                    "**Option 1: Reply to THIS message**\n"
-                    "↩️ Reply with `YES` or `NO`\n\n"
-                    "**Option 2: Type in channel**\n"
-                    "• `APPROVE` or `YES` → Execute ✅\n"
-                    "• `REJECT` or `NO` → Cancel ❌\n"
-                    "• `APPROVE BTC/USD` → Approve by symbol\n"
-                    "• `LIST` → Show all pending\n\n"
-                    "⏱️ *Expires in 60 minutes*"
+                    "**Option 1: Use Buttons (Preferred)**\n"
+                    "Click ✅ Approve or ❌ Reject below\n\n"
+                    "**Option 2: Reply to THIS message**\n"
+                    "↩️ Reply with `YES` or `NO`"
                 ),
                 inline=False
             )
             
             embed.set_footer(text=f"Approval ID: {approval_id}")
             
+            # Add Interactive Buttons
+            view = TradeActionView(self, approval_id)
+            
             # Send message
-            message = await channel.send(embed=embed)
+            message = await channel.send(embed=embed, view=view)
             
             # Create pending approval
             approval = PendingTradeApproval(
@@ -708,6 +796,38 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.error(f"Error sending approval request to Discord: {e}", exc_info=True)
             return False
     
+    async def send_alert_notification(
+        self,
+        symbol: str,
+        alert_type: str,
+        message_text: str,
+        confidence: str = "MEDIUM",
+        color: int = 3447003
+    ) -> bool:
+        """Send a generic alert notification with action buttons"""
+        try:
+            if not self.bot_ready:
+                return False
+                
+            channel = self.get_channel(self.channel_id)
+            if not channel:
+                return False
+                
+            embed = discord.Embed(
+                title=f"🔔 {alert_type}: {symbol}",
+                description=message_text,
+                color=color,
+                timestamp=datetime.now()
+            )
+            
+            view = AlertActionView(self, symbol)
+            await channel.send(embed=embed, view=view)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending alert notification: {e}")
+            return False
+
     def get_approval_status(self, approval_id: str) -> Optional[PendingTradeApproval]:
         """Get status of pending approval"""
         return self.pending_approvals.get(approval_id)
@@ -786,149 +906,92 @@ class DiscordApprovalManager:
                     # Fix for Windows + Python 3.11+ asyncio/aiohttp issue
                     import sys
                     if sys.platform == 'win32':
-                        try:
-                            # Use SelectorEventLoop instead of ProactorEventLoop on Windows
-                            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-                            logger.info("Set WindowsSelectorEventLoopPolicy for Windows compatibility")
-                        except AttributeError:
-                            logger.warning("WindowsSelectorEventLoopPolicy not available, using default")
+                        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
                     
-                    # Create and set new event loop for this thread
-                    self.loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(self.loop)
-                    logger.info("Event loop created and set")
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    self.loop = loop
                     
-                    # Start the Discord bot
-                    logger.info("Connecting to Discord...")
-                    # At this point, self.token is guaranteed to be a string since we checked enabled status
-                    assert self.token is not None, "Token should not be None when manager is enabled"
-                    if self.bot:
-                        self.loop.run_until_complete(self.bot.start(self.token))
+                    # Run bot
+                    logger.info("Running bot.start()...")
+                    if self.token and self.bot:
+                        loop.run_until_complete(self.bot.start(self.token))
                     
-                except KeyboardInterrupt:
-                    logger.info("Bot thread received keyboard interrupt")
                 except Exception as e:
-                    logger.error(f"❌ Error in Discord bot thread: {e}", exc_info=True)
-                finally:
-                    if self.loop:
-                        try:
-                            self.loop.close()
-                            logger.info("Event loop closed")
-                        except Exception as e:
-                            logger.error(f"Error closing event loop: {e}")
+                    logger.error(f"Discord bot thread crashed: {e}", exc_info=True)
             
-            self.thread = threading.Thread(target=run_bot, daemon=True, name="DiscordBot")
+            self.thread = threading.Thread(target=run_bot, daemon=True)
             self.thread.start()
-            logger.info("Discord bot thread started, waiting for connection...")
             
-            # Wait for bot to be ready
-            import time as time_module
-            for i in range(30):
-                if self.bot.bot_ready:
-                    logger.info("✅ Discord approval bot connected and ready!")
-                    return True
-                time_module.sleep(0.5)
-            
-            logger.warning("⚠️ Discord bot thread started but not ready yet (may still be connecting)")
+            # Wait a bit for bot to be ready
+            time.sleep(3)
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error starting Discord approval manager: {e}", exc_info=True)
+            logger.error(f"Failed to start Discord bot: {e}", exc_info=True)
             return False
     
-    def send_approval_request(
-        self,
-        approval_id: str,
-        pair: str,
-        side: str,
-        entry_price: float,
-        position_size: float,
-        stop_loss: float,
-        take_profit: float,
-        strategy: str,
-        confidence: float,
-        reasoning: str,
-        additional_info: Optional[str] = None
-    ) -> bool:
-        """Send approval request to Discord"""
-        if not self.enabled or not self.bot:
-            logger.debug("Discord approval manager not enabled")
+    def stop(self):
+        """Stop Discord bot"""
+        if self.loop and self.bot:
+            asyncio.run_coroutine_threadsafe(self.bot.close(), self.loop)
+    
+    def send_approval_request(self, **kwargs) -> bool:
+        """Send trade approval request (thread-safe)"""
+        if not self.enabled or not self.loop or not self.bot:
             return False
-        
-        if not self.bot.bot_ready:
-            logger.warning("Discord bot not ready")
-            return False
-        
+            
+        future = asyncio.run_coroutine_threadsafe(
+            self.bot.send_approval_request(**kwargs), 
+            self.loop
+        )
         try:
-            # Schedule coroutine in bot's event loop
-            future = asyncio.run_coroutine_threadsafe(
-                self.bot.send_approval_request(
-                    approval_id=approval_id,
-                    pair=pair,
-                    side=side,
-                    entry_price=entry_price,
-                    position_size=position_size,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    strategy=strategy,
-                    confidence=confidence,
-                    reasoning=reasoning,
-                    additional_info=additional_info
-                ),
-                self.loop or asyncio.new_event_loop()
-            )
-            
-            # Wait for result with timeout
-            return future.result(timeout=10)
-            
+            return future.result(timeout=5)
         except Exception as e:
-            logger.error(f"Error sending approval request: {e}", exc_info=True)
+            logger.error(f"Error sending approval request: {e}")
             return False
-    
-    def get_approval_status(self, approval_id: str) -> Optional[PendingTradeApproval]:
-        """Get status of pending approval"""
-        if not self.enabled or not self.bot:
-            return None
-        return self.bot.get_approval_status(approval_id)
-    
-    def get_pending_approvals(self) -> Dict[str, PendingTradeApproval]:
-        """Get all pending approvals"""
-        if not self.enabled or not self.bot:
-            return {}
-        return self.bot.pending_approvals
-    
-    def cleanup_expired(self) -> int:
-        """Remove expired approvals"""
-        if not self.enabled or not self.bot:
-            return 0
-        return self.bot.cleanup_expired()
-    
+            
+    def send_notification(self, message: str, color: int = 3447003) -> bool:
+        """Send generic notification to approval channel"""
+        if not self.enabled or not self.loop or not self.bot:
+            return False
+        
+        async def _send():
+            try:
+                if self.bot and hasattr(self.bot, 'channel_id'):
+                    channel = self.bot.get_channel(self.bot.channel_id)
+                    if channel:
+                        embed = discord.Embed(description=message, color=color)
+                        await channel.send(embed=embed)
+                        return True
+                return False
+            except Exception as e:
+                logger.error(f"Error sending notification: {e}")
+                return False
+                
+        future = asyncio.run_coroutine_threadsafe(_send(), self.loop)
+        try:
+            return future.result(timeout=5)
+        except Exception as e:
+            logger.error(f"Error sending notification: {e}")
+            return False
+
     def is_running(self) -> bool:
-        """Check if bot is running"""
-        return bool(self.enabled and self.bot and getattr(self.bot, 'bot_ready', False))
+        """Check if bot is running and connected"""
+        return bool(self.bot and self.bot.bot_ready)
 
-
-# Global singleton instance
-_approval_manager_instance: Optional[DiscordApprovalManager] = None
-
+# Global instance
+_approval_manager: Optional[DiscordApprovalManager] = None
 
 def get_discord_approval_manager(approval_callback: Optional[Callable] = None) -> Optional[DiscordApprovalManager]:
-    """
-    Get or create Discord approval manager singleton
+    """Get or create global Discord approval manager"""
+    global _approval_manager
     
-    Args:
-        approval_callback: Function to call when trade approved (trade_id, approved: bool)
-    
-    Returns:
-        DiscordApprovalManager instance or None if not configured
-    """
-    global _approval_manager_instance
-    
-    if _approval_manager_instance is None:
-        _approval_manager_instance = DiscordApprovalManager(approval_callback=approval_callback)
+    if _approval_manager is None:
+        _approval_manager = DiscordApprovalManager(approval_callback=approval_callback)
         
-        # Auto-start if configured
-        if _approval_manager_instance.enabled:
-            _approval_manager_instance.start()
-    
-    return _approval_manager_instance if _approval_manager_instance.enabled else None
+        # Auto-start if created
+        if _approval_manager.enabled:
+            _approval_manager.start()
+            
+    return _approval_manager
