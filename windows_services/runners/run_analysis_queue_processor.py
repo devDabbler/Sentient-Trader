@@ -48,47 +48,54 @@ ANALYSIS_RESULTS_FILE = PROJECT_ROOT / "data" / "analysis_results.json"
 # Check interval
 CHECK_INTERVAL = 10  # seconds
 
+# LLM Analysis Mode:
+# - "primary" = use AI_ANALYZER_MODEL only (default)
+# - "compare" = run both Ollama and OpenRouter, return both results  
+# - "fallback" = use primary, fall back to secondary if primary times out
+ANALYSIS_LLM_MODE = os.getenv("ANALYSIS_LLM_MODE", "primary")
+ANALYSIS_TIMEOUT = int(os.getenv("ANALYSIS_TIMEOUT", "120"))  # seconds
 
-def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
-    """Run crypto AI analysis and return results"""
+
+def create_llm_analyzer(provider: str = None, model: str = None):
+    """Create LLM analyzer with specific provider/model"""
     try:
-        import os
-        from clients.kraken_client import KrakenClient
-        from services.ai_entry_assistant import AIEntryAssistant
+        from services.llm_strategy_analyzer import LLMStrategyAnalyzer
         
-        # Normalize ticker format
-        if "/" not in ticker:
-            ticker = f"{ticker}/USD"
-        
-        # Get Kraken credentials from environment
-        api_key = os.getenv("KRAKEN_API_KEY", "")
-        api_secret = os.getenv("KRAKEN_API_SECRET", "")
-        
-        kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
-        
-        # Initialize LLM analyzer for AI-powered analysis
-        llm_analyzer = None
-        try:
-            from services.llm_strategy_analyzer import LLMStrategyAnalyzer
-            llm_analyzer = LLMStrategyAnalyzer()
-            logger.debug(f"LLM analyzer initialized for {ticker}")
-        except Exception as e:
-            logger.warning(f"LLM analyzer not available: {e} - using fallback analysis")
-        
+        if provider and model:
+            return LLMStrategyAnalyzer(provider=provider, model=model)
+        else:
+            return LLMStrategyAnalyzer()  # Uses AI_ANALYZER_MODEL from env
+    except Exception as e:
+        logger.warning(f"Failed to create LLM analyzer ({provider}/{model}): {e}")
+        return None
+
+
+def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: str = "primary") -> dict:
+    """Run analysis with a specific LLM analyzer"""
+    from services.ai_entry_assistant import AIEntryAssistant
+    import signal
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+    
+    def _analyze():
         assistant = AIEntryAssistant(kraken_client=kraken, llm_analyzer=llm_analyzer)
-        
-        # Run analysis
-        analysis = assistant.analyze_entry(
+        return assistant.analyze_entry(
             pair=ticker,
-            side="BUY",  # Default to BUY for discovery
+            side="BUY",
             position_size=1000,
             risk_pct=2.0,
             take_profit_pct=6.0
         )
+    
+    try:
+        # Run with timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_analyze)
+            analysis = future.result(timeout=ANALYSIS_TIMEOUT)
         
         if analysis:
             return {
                 "ticker": ticker,
+                "llm": llm_name,
                 "action": analysis.action,
                 "confidence": analysis.confidence,
                 "reasoning": analysis.reasoning,
@@ -108,13 +115,126 @@ def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
         else:
             return {
                 "ticker": ticker,
-                "action": "ERROR",
+                "llm": llm_name,
+                "action": "NO_RESULT",
                 "confidence": 0,
                 "reasoning": "Analysis returned no result",
                 "analysis_time": datetime.now().isoformat(),
                 "mode": mode,
                 "asset_type": "crypto"
             }
+    except FuturesTimeout:
+        logger.warning(f"⏰ {llm_name} analysis timed out after {ANALYSIS_TIMEOUT}s for {ticker}")
+        return {
+            "ticker": ticker,
+            "llm": llm_name,
+            "action": "TIMEOUT",
+            "confidence": 0,
+            "reasoning": f"Analysis timed out after {ANALYSIS_TIMEOUT}s",
+            "analysis_time": datetime.now().isoformat(),
+            "mode": mode,
+            "asset_type": "crypto"
+        }
+    except Exception as e:
+        logger.error(f"Error in {llm_name} analysis for {ticker}: {e}")
+        return {
+            "ticker": ticker,
+            "llm": llm_name,
+            "action": "ERROR",
+            "confidence": 0,
+            "reasoning": str(e),
+            "analysis_time": datetime.now().isoformat(),
+            "mode": mode,
+            "asset_type": "crypto"
+        }
+
+
+def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
+    """Run crypto AI analysis and return results"""
+    try:
+        import os
+        from clients.kraken_client import KrakenClient
+        
+        # Normalize ticker format
+        if "/" not in ticker:
+            ticker = f"{ticker}/USD"
+        
+        # Get Kraken credentials from environment
+        api_key = os.getenv("KRAKEN_API_KEY", "")
+        api_secret = os.getenv("KRAKEN_API_SECRET", "")
+        
+        kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
+        
+        # Check analysis mode
+        llm_mode = ANALYSIS_LLM_MODE
+        logger.info(f"   LLM mode: {llm_mode}, timeout: {ANALYSIS_TIMEOUT}s")
+        
+        if llm_mode == "compare":
+            # Run BOTH Ollama and OpenRouter, return comparison
+            results = {"ticker": ticker, "mode": mode, "comparison": []}
+            
+            # Ollama analysis
+            logger.info(f"   Running Ollama analysis...")
+            ollama_llm = create_llm_analyzer(provider="ollama", model="qwen2.5:7b")
+            if ollama_llm:
+                ollama_result = run_single_analysis(ticker, kraken, ollama_llm, mode, "ollama")
+                results["comparison"].append(ollama_result)
+                logger.info(f"   Ollama: {ollama_result.get('action')} ({ollama_result.get('confidence', 0):.0f}%)")
+            
+            # OpenRouter analysis  
+            logger.info(f"   Running OpenRouter analysis...")
+            openrouter_llm = create_llm_analyzer(provider="openrouter", model="google/gemini-2.0-flash-exp:free")
+            if openrouter_llm:
+                openrouter_result = run_single_analysis(ticker, kraken, openrouter_llm, mode, "openrouter")
+                results["comparison"].append(openrouter_result)
+                logger.info(f"   OpenRouter: {openrouter_result.get('action')} ({openrouter_result.get('confidence', 0):.0f}%)")
+            
+            # Use the best result as primary
+            valid_results = [r for r in results["comparison"] if r.get("action") not in ["ERROR", "TIMEOUT", "NO_RESULT"]]
+            if valid_results:
+                best = max(valid_results, key=lambda x: x.get("confidence", 0))
+                results.update(best)
+                results["comparison_note"] = f"Best of {len(valid_results)} LLMs"
+            else:
+                results["action"] = "ERROR"
+                results["confidence"] = 0
+                results["reasoning"] = "All LLMs failed or timed out"
+            
+            results["analysis_time"] = datetime.now().isoformat()
+            results["asset_type"] = "crypto"
+            return results
+            
+        elif llm_mode == "fallback":
+            # Try primary, fall back to secondary on failure
+            primary_llm = create_llm_analyzer()  # Uses AI_ANALYZER_MODEL
+            if primary_llm:
+                result = run_single_analysis(ticker, kraken, primary_llm, mode, "primary")
+                if result.get("action") not in ["ERROR", "TIMEOUT", "NO_RESULT"]:
+                    return result
+                logger.warning(f"   Primary LLM failed, trying fallback...")
+            
+            # Fallback to OpenRouter
+            fallback_llm = create_llm_analyzer(provider="openrouter", model="google/gemini-2.0-flash-exp:free")
+            if fallback_llm:
+                result = run_single_analysis(ticker, kraken, fallback_llm, mode, "fallback")
+                result["fallback_used"] = True
+                return result
+            
+            return {
+                "ticker": ticker,
+                "action": "ERROR",
+                "confidence": 0,
+                "reasoning": "All LLMs failed",
+                "analysis_time": datetime.now().isoformat(),
+                "mode": mode,
+                "asset_type": "crypto"
+            }
+        
+        else:
+            # Primary mode - use AI_ANALYZER_MODEL only
+            llm_analyzer = create_llm_analyzer()
+            result = run_single_analysis(ticker, kraken, llm_analyzer, mode, "primary")
+            return result
             
     except Exception as e:
         logger.error(f"Error analyzing {ticker}: {e}")
