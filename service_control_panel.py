@@ -188,6 +188,16 @@ SERVICES = {
         "description": "Discord bot for trade approvals (recommended: keep auto-start)",
         "emoji": "💬",
         "category": "infrastructure"
+    },
+    "Analysis Queue Processor": {
+        "name": "sentient-analysis-queue",
+        "description": "Processes queued analysis requests from Control Panel/Discord",
+        "emoji": "🧠",
+        "category": "infrastructure",
+        "interval_key": "check_interval_seconds",
+        "interval_default": 10,
+        "interval_min": 5,
+        "interval_max": 60
     }
 }
 
