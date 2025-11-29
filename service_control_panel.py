@@ -2230,7 +2230,7 @@ def main():
             status_emoji = "⏳" if req.get("status") == "pending" else "✅"
             preset = ANALYSIS_PRESETS.get(req.get("preset", ""), {})
             preset_name = preset.get("name", req.get("preset", "Custom"))
-            tickers = req.get("tickers", [])
+            tickers = req.get("tickers") or []
             ticker_display = ", ".join(tickers[:3]) + (f" +{len(tickers)-3}" if len(tickers) > 3 else "")
             
             col1, col2, col3 = st.columns([2, 2, 1])
