@@ -1,18 +1,18 @@
 [Unit]
-Description=Sentient Trader - Analysis Queue Processor
+Description=Sentient Trader Analysis Queue Processor
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/sentient-trader
-Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="PYTHONUNBUFFERED=1"
-EnvironmentFile=-/root/sentient-trader/.env.systemd
+Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/root/sentient-trader"
+EnvironmentFile=/root/sentient-trader/.env
 ExecStart=/root/sentient-trader/venv/bin/python3 windows_services/runners/run_analysis_queue_processor.py
 Restart=always
 RestartSec=10
-StandardOutput=append:/root/sentient-trader/logs/analysis_queue.log
+StandardOutput=append:/root/sentient-trader/logs/analysis_queue_service.log
 StandardError=append:/root/sentient-trader/logs/analysis_queue_error.log
 
 [Install]
