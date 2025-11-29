@@ -38,7 +38,7 @@ LOG_FILE = PROJECT_ROOT / "logs" / "analysis_queue_processor.log"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
-logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level} | {message}")
+logger.add(sys.stderr, level="DEBUG", format="{time:HH:mm:ss} | {level} | {message}")
 logger.add(str(LOG_FILE), rotation="10 MB", retention="7 days", level="DEBUG")
 
 # Files
