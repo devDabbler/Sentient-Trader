@@ -1489,55 +1489,93 @@ def main():
             
             alert_tab1, alert_tab2 = st.tabs([f"🪙 Crypto ({len(pending_crypto)})", f"📈 Stocks ({len(pending_stocks)})"])
             
+            def render_alert_actions(alert, asset_type):
+                """Render action buttons for an alert"""
+                col_acts = st.columns(4)
+                
+                with col_acts[0]:
+                    if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
+                        if approve_alert(alert['id']):
+                            st.toast(f"✅ {alert['symbol']} added to watchlist")
+                            time.sleep(1)
+                            st.rerun()
+                
+                with col_acts[1]:
+                    if st.button("🔍 Analyze", key=f"analyze_{alert['id']}", use_container_width=True, help="Run AI Analysis"):
+                        preset = "crypto_standard" if asset_type == "crypto" else "stock_momentum"
+                        if queue_analysis_request(preset, [alert['symbol']]):
+                            st.toast(f"🔍 Analysis queued for {alert['symbol']}")
+                        else:
+                            st.error("Failed to queue analysis")
+                
+                with col_acts[2]:
+                    # Placeholder for trade execution - could be linked to a trade queue later
+                    if st.button("🚀 Trade", key=f"trade_{alert['id']}", use_container_width=True, help="Open Trade Setup"):
+                         st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
+                
+                with col_acts[3]:
+                    if st.button("🗑️ Dismiss", key=f"reject_{alert['id']}", use_container_width=True, help="Reject Alert"):
+                        if reject_alert(alert['id']):
+                            st.toast(f"❌ {alert['symbol']} dismissed")
+                            time.sleep(0.5)
+                            st.rerun()
+
             with alert_tab1:
                 if pending_crypto:
                     for alert in pending_crypto:
-                        with st.container():
-                            col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
-                            with col1:
-                                st.markdown(f"**{alert['symbol']}** ({alert['alert_type']})")
-                                st.caption(f"Source: {alert['source']} | {alert['confidence']}")
-                            with col2:
-                                if alert.get('price'):
-                                    st.metric("Price", f"${alert['price']:.4f}")
-                            with col3:
-                                if st.button("✅", key=f"approve_{alert['id']}", help="Approve & add to watchlist"):
-                                    if approve_alert(alert['id']):
-                                        st.toast(f"✅ Approved {alert['symbol']}")
-                                        st.rerun()
-                                if st.button("❌", key=f"reject_{alert['id']}", help="Reject"):
-                                    if reject_alert(alert['id']):
-                                        st.toast(f"❌ Rejected {alert['symbol']}")
-                                        st.rerun()
-                            with col4:
-                                st.caption(alert['reasoning'][:50] + "..." if len(alert.get('reasoning', '')) > 50 else alert.get('reasoning', ''))
+                        # Determine color/icon
+                        conf = alert.get('confidence', 'MEDIUM')
+                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
+                        color = "red" if conf == "LOW" else "orange" if conf == "MEDIUM" else "green"
+                        
+                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
+                            # Alert Details
+                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                            
+                            # Price Info
+                            cols = st.columns(3)
+                            with cols[0]:
+                                price = alert.get('price')
+                                st.write(f"**Price:** {f'${price:.4f}' if price else 'N/A'}")
+                            with cols[1]:
+                                target = alert.get('target')
+                                st.write(f"**Target:** {f'${target:.4f}' if target else 'N/A'}")
+                            with cols[2]:
+                                stop = alert.get('stop_loss')
+                                st.write(f"**Stop:** {f'${stop:.4f}' if stop else 'N/A'}")
+                            
+                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
+                            
+                            # Actions
                             st.markdown("---")
+                            render_alert_actions(alert, "crypto")
                 else:
                     st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
             
             with alert_tab2:
                 if pending_stocks:
                     for alert in pending_stocks:
-                        with st.container():
-                            col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
-                            with col1:
-                                st.markdown(f"**{alert['symbol']}** ({alert['alert_type']})")
-                                st.caption(f"Source: {alert['source']} | {alert['confidence']}")
-                            with col2:
-                                if alert.get('price'):
-                                    st.metric("Price", f"${alert['price']:.2f}")
-                            with col3:
-                                if st.button("✅", key=f"approve_s_{alert['id']}", help="Approve & add to watchlist"):
-                                    if approve_alert(alert['id']):
-                                        st.toast(f"✅ Approved {alert['symbol']}")
-                                        st.rerun()
-                                if st.button("❌", key=f"reject_s_{alert['id']}", help="Reject"):
-                                    if reject_alert(alert['id']):
-                                        st.toast(f"❌ Rejected {alert['symbol']}")
-                                        st.rerun()
-                            with col4:
-                                st.caption(alert['reasoning'][:50] + "..." if len(alert.get('reasoning', '')) > 50 else alert.get('reasoning', ''))
+                        conf = alert.get('confidence', 'MEDIUM')
+                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
+                        
+                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
+                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                            
+                            cols = st.columns(3)
+                            with cols[0]:
+                                price = alert.get('price')
+                                st.write(f"**Price:** {f'${price:.2f}' if price else 'N/A'}")
+                            with cols[1]:
+                                target = alert.get('target')
+                                st.write(f"**Target:** {f'${target:.2f}' if target else 'N/A'}")
+                            with cols[2]:
+                                stop = alert.get('stop_loss')
+                                st.write(f"**Stop:** {f'${stop:.2f}' if stop else 'N/A'}")
+                                
+                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
+                            
                             st.markdown("---")
+                            render_alert_actions(alert, "stock")
                 else:
                     st.info("No pending stock alerts.")
             

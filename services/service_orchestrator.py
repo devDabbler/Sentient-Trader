@@ -260,6 +260,10 @@ class ServiceOrchestrator:
                 depends_on=config.get("depends_on", [])
             )
     
+    def refresh_state(self):
+        """Manually refresh state from disk (useful for cross-process sync)"""
+        self._load_state()
+
     def _load_state(self):
         """Load persisted orchestrator state"""
         try:

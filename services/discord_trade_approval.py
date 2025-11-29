@@ -18,6 +18,8 @@ import json
 import threading
 
 
+from windows_services.runners.service_config_loader import queue_analysis_request
+
 @dataclass
 class PendingTradeApproval:
     """Trade awaiting user approval"""
@@ -118,7 +120,7 @@ class DiscordTradeApprovalBot(commands.Bot):
         if message.reference and message.reference.message_id:
             replied_to_id = str(message.reference.message_id)
             
-            # Find the approval that matches this message ID
+            # 1. Check pending trade approvals (internal memory)
             for approval_id, approval in self.pending_approvals.items():
                 if approval.discord_message_id == replied_to_id:
                     # Found the approval - check if it's approve or reject
@@ -135,9 +137,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
-            # Replied to a message but it's not a pending approval (maybe expired or already handled)
-            # Continue to normal processing
-        
+            # 2. Check Orchestrator Alert Queue (Generic Alerts)
+            await self._handle_alert_reply(message, content)
+            return
+            
         # Check for LIST command to show pending trades
         if content in ['LIST', 'PENDING', 'TRADES', 'STATUS']:
             await self._list_pending_trades(message)
@@ -146,6 +149,21 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
         import re
         
+        # Generic Alert Commands: WATCH, ANALYZE, DISMISS
+        # Pattern: CMD SYMBOL (e.g., "WATCH BTC", "ANALYZE AAPL")
+        alert_match = re.match(r'(WATCH|ANALYZE|DISMISS|REMOVE)\s+([A-Z0-9/]+)', content)
+        if alert_match:
+            action = alert_match.group(1)
+            symbol = alert_match.group(2).replace('/', '').upper()
+            
+            if action == 'WATCH':
+                await self._handle_watch_command(message, symbol)
+            elif action == 'ANALYZE':
+                await self._handle_analyze_command(message, symbol)
+            elif action in ['DISMISS', 'REMOVE']:
+                await self._handle_dismiss_command(message, symbol)
+            return
+
         # Pattern: APPROVE/REJECT followed by number or symbol
         specific_match = re.match(r'(APPROVE|YES|REJECT|NO)\s+(\d+|[A-Z0-9/]+)', content)
         if not specific_match:
@@ -179,6 +197,152 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         # Process commands
         await self.process_commands(message)
+
+    async def _handle_alert_reply(self, message: discord.Message, content: str):
+        """Handle replies to generic alerts (from Orchestrator queue)"""
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        orch.refresh_state()  # Sync with other processes
+        
+        # Get recent pending alerts
+        pending = orch.get_pending_alerts()
+        
+        if not message.reference:
+            await message.channel.send("⚠️ This command requires a reply to a message.")
+            return
+
+        ref_msg = message.reference.cached_message
+        if not ref_msg and message.reference.message_id:
+             # Fetch message if not cached
+            try:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            except:
+                pass
+        
+        if not ref_msg:
+            await message.channel.send("⚠️ Could not retrieve original message context.")
+            return
+
+        # Extract symbol from the referenced message embed or content
+        # Embed title usually has: "💥 BREAKOUT DETECTED: BTC/USD"
+        target_symbol = None
+        if ref_msg.embeds:
+            for embed in ref_msg.embeds:
+                if embed.title and ":" in embed.title:
+                    # Try extracting after colon
+                    parts = embed.title.split(":")
+                    if len(parts) > 1:
+                        possible_symbol = parts[-1].strip().split(' ')[0]
+                        target_symbol = possible_symbol
+                        break
+        
+        if not target_symbol:
+            # Try content
+            if ":" in ref_msg.content:
+                 parts = ref_msg.content.split(":")
+                 if len(parts) > 1:
+                     target_symbol = parts[-1].strip().split(' ')[0]
+
+        if not target_symbol:
+            await message.channel.send("⚠️ Could not determine symbol from the message you replied to.")
+            return
+            
+        # Find matching alert in queue (optional, but good for validation)
+        # If not in queue, we can still perform actions like WATCH or ANALYZE on the symbol directly
+        
+        target_symbol = target_symbol.upper()
+        
+        if content in ['WATCH', 'ADD', 'TRACK']:
+            await self._handle_watch_command(message, target_symbol)
+            
+            # Also auto-approve in orchestrator if it exists
+            for alert in pending:
+                if alert.symbol == target_symbol:
+                    orch.approve_alert(alert.id, add_to_watchlist=True)
+            
+        elif content in ['ANALYZE', 'SCAN', 'CHECK']:
+            await self._handle_analyze_command(message, target_symbol)
+            
+        elif content in ['DISMISS', 'REMOVE', 'DELETE']:
+            # Reject in orchestrator
+            found = False
+            for alert in pending:
+                if alert.symbol == target_symbol:
+                    orch.reject_alert(alert.id)
+                    found = True
+            
+            if found:
+                await message.channel.send(f"🗑️ Dismissed alert for {target_symbol}")
+            else:
+                await message.channel.send(f"⚠️ No pending alert found for {target_symbol} to dismiss, but noted.")
+
+    async def _handle_watch_command(self, message: discord.Message, symbol: str):
+        """Handle WATCH command"""
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        
+        # Add to watchlist via orchestrator helper (handles both crypto and stock)
+        # We create a dummy alert item to reuse the _add_to_watchlist logic or implement new logic
+        # Simplest: Add to crypto watchlist directly if it has /
+        
+        try:
+            if "/" in symbol:
+                # Crypto
+                from services.crypto_watchlist_manager import CryptoWatchlistManager
+                wm = CryptoWatchlistManager()
+                if wm.add_to_watchlist(symbol):
+                    await message.channel.send(f"✅ **{symbol}** added to Crypto Watchlist")
+                else:
+                    await message.channel.send(f"⚠️ Failed to add {symbol} (duplicate?)")
+            else:
+                # Stock or Crypto without /
+                # Assume crypto if looks like it, else stock? 
+                # Safer to check TickerManager
+                from services.ticker_manager import TickerManager
+                tm = TickerManager()
+                tm.add_ticker(symbol)
+                await message.channel.send(f"✅ **{symbol}** added to Watchlist (TickerManager)")
+                
+        except Exception as e:
+            logger.error(f"Error processing WATCH {symbol}: {e}")
+            await message.channel.send(f"❌ Error adding {symbol}: {str(e)}")
+
+    async def _handle_analyze_command(self, message: discord.Message, symbol: str):
+        """Handle ANALYZE command"""
+        from windows_services.runners.service_config_loader import queue_analysis_request
+        
+        try:
+            # Determine asset type
+            asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL"] else "stock"
+            preset = "crypto_standard" if asset_type == "crypto" else "stock_momentum"
+            
+            if queue_analysis_request(preset, [symbol]):
+                 await message.channel.send(f"🔍 Analysis queued for **{symbol}** ({asset_type}). Check Control Panel.")
+            else:
+                 await message.channel.send(f"❌ Failed to queue analysis for {symbol}")
+                 
+        except Exception as e:
+            logger.error(f"Error processing ANALYZE {symbol}: {e}")
+            await message.channel.send(f"❌ Error analyzing {symbol}: {str(e)}")
+
+    async def _handle_dismiss_command(self, message: discord.Message, symbol: str):
+        """Handle DISMISS command"""
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        orch.refresh_state()
+        
+        pending = orch.get_pending_alerts()
+        rejected_count = 0
+        
+        for alert in pending:
+            if alert.symbol == symbol:
+                orch.reject_alert(alert.id)
+                rejected_count += 1
+        
+        if rejected_count > 0:
+            await message.channel.send(f"🗑️ Dismissed {rejected_count} alert(s) for **{symbol}**")
+        else:
+             await message.channel.send(f"ℹ️ No pending alerts found for **{symbol}**")
     
     async def _list_pending_trades(self, message: discord.Message):
         """List all pending trade approvals with numbers"""
