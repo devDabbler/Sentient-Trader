@@ -24,6 +24,7 @@ feedparser>=6.0.0  # Fast RSS feed parsing for Reddit (no rate limits!)
 httpx>=0.24.0  # Modern async HTTP client for RSS feeds
 apscheduler>=3.10.0  # Scheduled event detection
 selenium>=4.38.0  # Web browser automation for human-like behavior
+psutil>=5.9.0  # System and process utilities for resource monitoring
 
 # PHASE 1 ENHANCEMENTS: FinBERT for Financial Sentiment Analysis
 transformers>=4.30.0  # Hugging Face transformers for FinBERT model

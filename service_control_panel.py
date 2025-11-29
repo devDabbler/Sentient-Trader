@@ -546,7 +546,12 @@ def get_analysis_results() -> dict:
     try:
         if ANALYSIS_RESULTS_FILE.exists():
             with open(ANALYSIS_RESULTS_FILE, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+                elif isinstance(data, list):
+                    # Handle legacy list format if it exists
+                    return {"legacy": {"results": data, "updated": datetime.now().isoformat()}}
     except Exception as e:
         print(f"Error loading analysis results: {e}")
     return {}
@@ -2220,8 +2225,16 @@ def main():
         
         for i, (service, data) in enumerate(analysis_results.items()):
             with result_tabs[i]:
+                if not isinstance(data, dict):
+                    st.error(f"Invalid data format for {service}")
+                    continue
+                    
                 results = data.get('results', [])
-                updated = data.get('updated', 'Unknown')[:16].replace('T', ' ')
+                updated = str(data.get('updated', 'Unknown'))[:16].replace('T', ' ')
+                
+                if not isinstance(results, list):
+                    st.warning(f"Invalid results list for {service}")
+                    results = []
                 
                 st.caption(f"Last updated: {updated} | {len(results)} result(s)")
                 
@@ -2261,9 +2274,17 @@ def main():
         with result_tabs[-1]:
             all_results = []
             for service, data in analysis_results.items():
-                for result in data.get('results', []):
-                    result['_service'] = service
-                    all_results.append(result)
+                if not isinstance(data, dict):
+                    continue
+                
+                results = data.get('results', [])
+                if not isinstance(results, list):
+                    continue
+                    
+                for result in results:
+                    if isinstance(result, dict):
+                        result['_service'] = service
+                        all_results.append(result)
             
             if all_results:
                 st.caption(f"Total: {len(all_results)} results across all services")
@@ -2302,12 +2323,30 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            success, uptime = run_command("uptime -p")
-            st.metric("Server Uptime", uptime if success else "N/A")
+            if platform.system() == "Windows":
+                # Windows uptime (boot time)
+                try:
+                    import psutil
+                    boot_time = datetime.fromtimestamp(psutil.boot_time())
+                    uptime = datetime.now() - boot_time
+                    st.metric("Server Uptime", str(uptime).split('.')[0])
+                except ImportError:
+                    st.metric("Server Uptime", "N/A (install psutil)")
+            else:
+                success, uptime = run_command("uptime -p")
+                st.metric("Server Uptime", uptime if success else "N/A")
         
         with col2:
-            success, memory = run_command("free -h | grep Mem | awk '{print $3\"/\"$2}'")
-            st.metric("Memory Usage", memory if success else "N/A")
+            if platform.system() == "Windows":
+                 try:
+                    import psutil
+                    mem = psutil.virtual_memory()
+                    st.metric("Memory Usage", f"{mem.percent}%")
+                 except ImportError:
+                    st.metric("Memory Usage", "N/A (install psutil)")
+            else:
+                success, memory = run_command("free -h | grep Mem | awk '{print $3\"/\"$2}'")
+                st.metric("Memory Usage", memory if success else "N/A")
 
 
 if __name__ == "__main__":
