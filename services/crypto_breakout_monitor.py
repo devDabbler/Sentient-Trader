@@ -36,6 +36,7 @@ from services.crypto_watchlist_manager import CryptoWatchlistManager
 from services.ticker_manager import TickerManager
 from utils.crypto_pair_utils import normalize_crypto_pair, extract_base_asset
 from clients.supabase_client import get_supabase_client
+from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
 
 
 load_dotenv()
@@ -238,6 +239,105 @@ class CryptoBreakoutMonitor:
             self._print_final_stats()
             raise
     
+    def scan_and_alert(self):
+        """Public method to run a single scan cycle with queue processing"""
+        # First process any pending queue requests
+        self._process_analysis_queue()
+        
+        # Then run the regular scan
+        return self._scan_and_alert()
+
+    def _process_analysis_queue(self):
+        """Process pending analysis requests from control panel"""
+        try:
+            requests = get_pending_analysis_requests()
+            
+            # Filter for crypto requests
+            # 'quick_crypto' or 'full_crypto' or 'custom' with USD pairs
+            my_requests = []
+            for req in requests:
+                preset = req.get('preset', '')
+                tickers = req.get('tickers', [])
+                
+                is_crypto_preset = preset in ['quick_crypto', 'full_crypto']
+                is_custom_crypto = preset == 'custom' and tickers and any('USD' in t.upper() for t in tickers)
+                
+                if is_crypto_preset or is_custom_crypto:
+                    my_requests.append(req)
+            
+            if not my_requests:
+                return
+
+            logger.info(f"📋 Processing {len(my_requests)} on-demand analysis requests...")
+            
+            for req in my_requests:
+                try:
+                    tickers = req.get('tickers', [])
+                    
+                    # If full scan requested but no tickers provided, use watchlist
+                    if not tickers and req.get('preset') == 'full_crypto':
+                        if self.watchlist_manager:
+                            tickers = self.watchlist_manager.get_watchlist_symbols()
+                        else:
+                            # Fallback to some defaults if no watchlist manager
+                            tickers = ['BTC/USD', 'ETH/USD', 'SOL/USD']
+                    
+                    if not tickers:
+                        logger.warning(f"   Skipping request {req['id']} - no tickers")
+                        mark_analysis_complete(req['id'], {'error': 'No tickers provided'})
+                        continue
+                        
+                    logger.info(f"   Analyzing {len(tickers)} tickers for request {req['id']}...")
+                    
+                    results = []
+                    
+                    # access the base scanner to analyze specific pairs
+                    base_scanner = None
+                    if hasattr(self.scanner, 'base_scanner'):
+                        base_scanner = self.scanner.base_scanner
+                    elif isinstance(self.scanner, CryptoOpportunityScanner):
+                        base_scanner = self.scanner
+                    
+                    if base_scanner:
+                        for ticker in tickers:
+                            try:
+                                # Normalize ticker (ensure /USD)
+                                pair = normalize_crypto_pair(ticker)
+                                
+                                # Analyze
+                                # Note: _analyze_crypto_pair is technically internal but we need it here
+                                # Or we can use public API if available. 
+                                # CryptoOpportunityScanner doesn't expose single pair scan publicly except via _analyze_crypto_pair
+                                if hasattr(base_scanner, '_analyze_crypto_pair'):
+                                    opp = base_scanner._analyze_crypto_pair(pair, 'ALL')
+                                    
+                                    if opp:
+                                        results.append({
+                                            'ticker': opp.symbol,
+                                            'signal': opp.reason if hasattr(opp, 'reason') else 'ANALYSIS',
+                                            'confidence': int(opp.score),
+                                            'price': opp.current_price,
+                                            'change_24h': opp.change_pct_24h,
+                                            'volume_24h': getattr(opp, 'volume_ratio', 0),
+                                            'timestamp': datetime.now().isoformat()
+                                        })
+                            except Exception as e:
+                                logger.error(f"Error analyzing {ticker}: {e}")
+                    
+                    # Save specific results for this request
+                    save_analysis_results('Crypto Breakout (On-Demand)', results)
+                    
+                    # Mark complete
+                    mark_analysis_complete(req['id'], {'count': len(results)})
+                    logger.info(f"   ✅ Request {req['id']} complete - {len(results)} results")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing request {req['id']}: {e}")
+                    mark_analysis_complete(req['id'], {'error': str(e)})
+                    
+        except Exception as e:
+            logger.error(f"Error processing analysis queue: {e}")
+
     def _scan_and_alert(self):
         """Perform a single scan and send alerts for breakouts"""
         logger.info("=" * 80)
@@ -273,9 +373,9 @@ class CryptoBreakoutMonitor:
                 'ticker': breakout.symbol,
                 'signal': breakout.alert_type,
                 'confidence': int(breakout.score),
-                'price': breakout.current_price,
+                'price': breakout.price,
                 'change_24h': breakout.change_24h,
-                'volume_24h': breakout.volume_24h,
+                'volume_24h': breakout.volume_ratio,  # Using volume_ratio as proxy
                 'timestamp': datetime.now().isoformat()
             })
             
@@ -296,6 +396,14 @@ class CryptoBreakoutMonitor:
         logger.info(f"📤 Sent {alerts_sent} new alerts")
         if added_to_watchlist > 0:
             logger.info(f"📋 Added {added_to_watchlist} new coins to watchlist")
+        
+        # Save results to control panel
+        if results_for_panel:
+            try:
+                save_analysis_results('Crypto Breakout Monitor', results_for_panel)
+                logger.debug(f"💾 Saved {len(results_for_panel)} results to control panel")
+            except Exception as e:
+                logger.warning(f"Failed to save results to control panel: {e}")
         
         return results_for_panel
     

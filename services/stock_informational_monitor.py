@@ -28,6 +28,7 @@ _debug_file.flush()
 from services.ai_confidence_scanner import AIConfidenceScanner
 _debug_file.write("[TRACE] stock_informational_monitor.py: Imported AIConfidenceScanner\n")
 _debug_file.flush()
+from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
 
 _debug_file.write("[TRACE] stock_informational_monitor.py: About to import config_stock_informational\n")
 _debug_file.flush()
@@ -317,6 +318,26 @@ class StockInformationalMonitor(LLMServiceMixin):
         self.opportunities = opportunities
         self.last_scan_time = datetime.now()
         
+        # Save results to control panel
+        if opportunities:
+            try:
+                results_for_panel = []
+                for opp in opportunities:
+                    results_for_panel.append({
+                        'ticker': opp.symbol,
+                        'signal': f"{opp.opportunity_type}",
+                        'confidence': int(opp.ensemble_score),
+                        'price': opp.price,
+                        'change_24h': 0.0, # Not readily available
+                        'volume_24h': 0.0, # Not readily available
+                        'timestamp': datetime.now().isoformat()
+                    })
+                
+                save_analysis_results('Stock Info Monitor', results_for_panel)
+                logger.debug(f"💾 Saved {len(results_for_panel)} results to control panel")
+            except Exception as e:
+                logger.warning(f"Failed to save results to control panel: {e}")
+        
         return opportunities
     
     def _send_alert(self, opportunity: StockOpportunity):
@@ -379,6 +400,53 @@ class StockInformationalMonitor(LLMServiceMixin):
         except Exception as e:
             logger.error(f"Error logging opportunity: {e}")
     
+    def _process_analysis_queue(self):
+        """Process pending analysis requests"""
+        try:
+            requests = get_pending_analysis_requests()
+            
+            # Filter for stock requests
+            my_requests = []
+            for req in requests:
+                preset = req.get('preset', '')
+                tickers = req.get('tickers', [])
+                is_stock = preset == 'stock_momentum'
+                is_custom_stock = preset == 'custom' and tickers and not any('/' in t for t in tickers)
+                
+                if (is_stock or is_custom_stock) and tickers:
+                    my_requests.append(req)
+            
+            if not my_requests:
+                return
+                
+            for req in my_requests:
+                logger.info(f"Processing request {req['id']}...")
+                tickers = req.get('tickers', [])
+                results = []
+                
+                for ticker in tickers:
+                    try:
+                        opp = self.scan_ticker(ticker)
+                        if opp:
+                            results.append({
+                                'ticker': opp.symbol,
+                                'signal': f"{opp.opportunity_type}",
+                                'confidence': int(opp.ensemble_score),
+                                'price': opp.price,
+                                'change_24h': 0.0,
+                                'volume_24h': 0.0,
+                                'timestamp': datetime.now().isoformat()
+                            })
+                    except Exception as e:
+                        logger.error(f"Error scanning {ticker}: {e}")
+                
+                save_analysis_results('Stock Info Monitor (On-Demand)', results)
+                mark_analysis_complete(req['id'], {'count': len(results)})
+                logger.info(f"Completed request {req['id']}")
+                
+        except Exception as e:
+            logger.error(f"Error processing analysis queue: {e}")
+
     def run_continuous(self):
         """Run continuous monitoring loop"""
         self.is_running = True
@@ -386,6 +454,9 @@ class StockInformationalMonitor(LLMServiceMixin):
         
         try:
             while self.is_running:
+                # Check analysis queue
+                self._process_analysis_queue()
+                
                 # Scan all tickers
                 opportunities = self.scan_all_tickers()
                 

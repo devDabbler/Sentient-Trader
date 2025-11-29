@@ -26,6 +26,7 @@ from models.dex_models import (
 from clients.dexscreener_client import DexScreenerClient
 from services.token_safety_analyzer import TokenSafetyAnalyzer
 from services.smart_money_tracker import SmartMoneyTracker
+from windows_services.runners.service_config_loader import save_analysis_results
 
 # Optional X Sentiment integration
 try:
@@ -146,6 +147,9 @@ class DexLaunchHunter:
             
             logger.info(f"Found {len(new_pairs)} new pairs to analyze")
             
+            # Collect results for control panel
+            results_for_panel = []
+            
             # Analyze each new pair
             for pair in new_pairs:
                 try:
@@ -168,6 +172,17 @@ class DexLaunchHunter:
                             f"Score: {token.composite_score:.1f}, "
                             f"Risk: {token.risk_level.value}"
                         )
+                        
+                        # Add to results for panel
+                        results_for_panel.append({
+                            'ticker': token.symbol,
+                            'signal': f"LAUNCH ({token.risk_level.value})",
+                            'confidence': int(token.composite_score),
+                            'price': token.price_usd,
+                            'change_24h': token.price_change_24h,
+                            'volume_24h': token.volume_24h,
+                            'timestamp': datetime.now().isoformat()
+                        })
                     
                     # Small delay to avoid rate limits
                     await asyncio.sleep(1)
@@ -175,6 +190,14 @@ class DexLaunchHunter:
                 except Exception as e:
                     logger.error(f"Error analyzing pair {pair.base_token_symbol}: {e}")
                     continue
+            
+            # Save results to control panel
+            if results_for_panel:
+                try:
+                    save_analysis_results('DEX Launch Hunter', results_for_panel)
+                    logger.debug(f"💾 Saved {len(results_for_panel)} results to control panel")
+                except Exception as e:
+                    logger.warning(f"Failed to save results to control panel: {e}")
                     
         except Exception as e:
             logger.error(f"Error in scan loop: {e}", exc_info=True)

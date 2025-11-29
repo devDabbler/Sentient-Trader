@@ -37,6 +37,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from services.windows_service_base import WindowsServiceBase, install_service, check_pywin32_installed
+from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
 from loguru import logger
 
 
@@ -88,6 +89,50 @@ class ORBFVGService(WindowsServiceBase):
                     current_hour = current_time.hour
                     current_minute = current_time.minute
                     
+                    # Check for on-demand analysis requests
+                    try:
+                        pending_requests = get_pending_analysis_requests()
+                        # Filter for ORB FVG requests or custom requests with stock tickers (heuristic: no '/')
+                        my_requests = []
+                        for r in pending_requests:
+                            preset = r.get('preset', '')
+                            tickers = r.get('tickers', [])
+                            is_orb = preset == 'orb_fvg_scan'
+                            is_custom_stock = preset == 'custom' and tickers and not any('/' in t for t in tickers)
+                            
+                            if (is_orb or is_custom_stock) and tickers:
+                                my_requests.append(r)
+                        
+                        for req in my_requests:
+                            logger.info(f"📋 Processing on-demand request {req['id']}...")
+                            req_tickers = req.get('tickers', [])
+                            req_results = []
+                            
+                            for ticker in req_tickers:
+                                try:
+                                    # Force analyze even if outside hours? Maybe better to try.
+                                    # strategy.analyze_ticker checks hours.
+                                    signal = strategy.analyze_ticker(ticker, current_time)
+                                    if signal:
+                                        req_results.append({
+                                            'ticker': signal.symbol,
+                                            'signal': f"{signal.signal_type} (ORB+FVG)",
+                                            'confidence': int(signal.confidence),
+                                            'price': signal.entry_price,
+                                            'change_24h': 0.0,
+                                            'volume_24h': signal.volume_ratio,
+                                            'timestamp': datetime.now().isoformat()
+                                        })
+                                except Exception as e:
+                                    logger.error(f"Error analyzing {ticker}: {e}")
+                            
+                            save_analysis_results('ORB FVG (On-Demand)', req_results)
+                            mark_analysis_complete(req['id'], {'count': len(req_results)})
+                            logger.info(f"   ✅ Request {req['id']} complete")
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing analysis queue: {e}")
+                    
                     # Only scan during market hours (9:30 AM - 4:00 PM ET)
                     market_open = (current_hour == 9 and current_minute >= 30) or (current_hour > 9)
                     market_close = current_hour < 16
@@ -106,23 +151,45 @@ class ORBFVGService(WindowsServiceBase):
                         logger.info(f"Scanning {len(tickers)} tickers for ORB+FVG setups...")
                         
                         signals_found = 0
+                        results_for_panel = []
+                        
                         for ticker in tickers:
                             try:
                                 signal = strategy.analyze_ticker(ticker, current_time)
                                 
-                                if signal and signal.confidence >= 70:
-                                    signals_found += 1
-                                    logger.info(
-                                        f"🎯 SIGNAL: {signal.symbol} {signal.signal_type} "
-                                        f"@ ${signal.entry_price:.2f} (Conf: {signal.confidence:.1f}%)"
-                                    )
+                                if signal:
+                                    # Add to results for panel
+                                    results_for_panel.append({
+                                        'ticker': signal.symbol,
+                                        'signal': f"{signal.signal_type} (ORB+FVG)",
+                                        'confidence': int(signal.confidence),
+                                        'price': signal.entry_price,
+                                        'change_24h': 0.0,
+                                        'volume_24h': signal.volume_ratio,
+                                        'timestamp': datetime.now().isoformat()
+                                    })
                                     
-                                    # Send alert
-                                    alert_manager.send_signal_alert(signal)
+                                    if signal.confidence >= 70:
+                                        signals_found += 1
+                                        logger.info(
+                                            f"🎯 SIGNAL: {signal.symbol} {signal.signal_type} "
+                                            f"@ ${signal.entry_price:.2f} (Conf: {signal.confidence:.1f}%)"
+                                        )
+                                        
+                                        # Send alert
+                                        alert_manager.send_signal_alert(signal)
                                     
                             except Exception as e:
                                 logger.error(f"Error analyzing {ticker}: {e}")
                                 continue
+                        
+                        # Save results to control panel
+                        if results_for_panel:
+                            try:
+                                save_analysis_results('ORB FVG Scanner', results_for_panel)
+                                logger.debug(f"💾 Saved {len(results_for_panel)} results to control panel")
+                            except Exception as e:
+                                logger.warning(f"Failed to save results to control panel: {e}")
                         
                         if signals_found > 0:
                             logger.info(f"✅ Found {signals_found} ORB+FVG signals this scan")
