@@ -517,6 +517,36 @@ def reject_alert(alert_id: str) -> bool:
         return False
 
 
+def bulk_clear_alerts(asset_type: Optional[str] = None) -> int:
+    """Clear all alerts (or by asset type) in one operation. Returns count cleared."""
+    try:
+        alert_queue_file = Path(__file__).resolve().parent / "data" / "alert_queue.json"
+        if not alert_queue_file.exists():
+            return 0
+        
+        with open(alert_queue_file, 'r') as f:
+            alerts = json.load(f)
+        
+        original_count = len(alerts)
+        
+        if asset_type:
+            # Filter out only the specified asset type
+            alerts = [a for a in alerts if a.get('asset_type') != asset_type]
+            cleared = original_count - len(alerts)
+        else:
+            # Clear all
+            cleared = original_count
+            alerts = []
+        
+        with open(alert_queue_file, 'w') as f:
+            json.dump(alerts, f, indent=2)
+        
+        return cleared
+    except Exception as e:
+        print(f"Failed to bulk clear alerts: {e}")
+        return 0
+
+
 def add_manual_alert(symbol: str, alert_type: str = "WATCH", asset_type: str = "crypto",
                      reasoning: str = "Manually added") -> bool:
     """Add a manual alert to the queue"""
@@ -1491,17 +1521,15 @@ def main():
             bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
             with bulk_col1:
                 if st.button("🗑️ Clear All Crypto", key="clear_all_crypto", use_container_width=True, disabled=len(pending_crypto)==0):
-                    for alert in pending_crypto:
-                        reject_alert(alert['id'])
-                    st.toast(f"❌ Cleared {len(pending_crypto)} crypto alerts")
-                    time.sleep(0.5)
+                    cleared = bulk_clear_alerts("crypto")
+                    st.toast(f"❌ Cleared {cleared} crypto alerts")
+                    time.sleep(0.3)
                     st.rerun()
             with bulk_col2:
                 if st.button("🗑️ Clear All Stocks", key="clear_all_stocks", use_container_width=True, disabled=len(pending_stocks)==0):
-                    for alert in pending_stocks:
-                        reject_alert(alert['id'])
-                    st.toast(f"❌ Cleared {len(pending_stocks)} stock alerts")
-                    time.sleep(0.5)
+                    cleared = bulk_clear_alerts("stock")
+                    st.toast(f"❌ Cleared {cleared} stock alerts")
+                    time.sleep(0.3)
                     st.rerun()
             with bulk_col3:
                 st.caption(f"Total: {len(pending_crypto) + len(pending_stocks)} pending alerts")
