@@ -73,24 +73,20 @@ def create_llm_analyzer(provider: str = None, model: str = None):
 def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: str = "primary") -> dict:
     """Run analysis with a specific LLM analyzer"""
     from services.ai_entry_assistant import AIEntryAssistant
-    import signal
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
     
-    def _analyze():
+    try:
+        logger.info(f"   [{llm_name}] Creating AIEntryAssistant...")
         assistant = AIEntryAssistant(kraken_client=kraken, llm_analyzer=llm_analyzer)
-        return assistant.analyze_entry(
+        
+        logger.info(f"   [{llm_name}] Running analyze_entry...")
+        analysis = assistant.analyze_entry(
             pair=ticker,
             side="BUY",
             position_size=1000,
             risk_pct=2.0,
             take_profit_pct=6.0
         )
-    
-    try:
-        # Run with timeout
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_analyze)
-            analysis = future.result(timeout=ANALYSIS_TIMEOUT)
+        logger.info(f"   [{llm_name}] Analysis complete")
         
         if analysis:
             return {
@@ -123,18 +119,6 @@ def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: 
                 "mode": mode,
                 "asset_type": "crypto"
             }
-    except FuturesTimeout:
-        logger.warning(f"⏰ {llm_name} analysis timed out after {ANALYSIS_TIMEOUT}s for {ticker}")
-        return {
-            "ticker": ticker,
-            "llm": llm_name,
-            "action": "TIMEOUT",
-            "confidence": 0,
-            "reasoning": f"Analysis timed out after {ANALYSIS_TIMEOUT}s",
-            "analysis_time": datetime.now().isoformat(),
-            "mode": mode,
-            "asset_type": "crypto"
-        }
     except Exception as e:
         logger.error(f"Error in {llm_name} analysis for {ticker}: {e}")
         return {
