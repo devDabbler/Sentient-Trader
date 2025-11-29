@@ -73,24 +73,20 @@ def create_llm_analyzer(provider: str = None, model: str = None):
 def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: str = "primary") -> dict:
     """Run analysis with a specific LLM analyzer"""
     from services.ai_entry_assistant import AIEntryAssistant
-    import signal
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
     
-    def _analyze():
+    try:
+        logger.info(f"   [{llm_name}] Creating AIEntryAssistant...")
         assistant = AIEntryAssistant(kraken_client=kraken, llm_analyzer=llm_analyzer)
-        return assistant.analyze_entry(
+        
+        logger.info(f"   [{llm_name}] Running analyze_entry...")
+        analysis = assistant.analyze_entry(
             pair=ticker,
             side="BUY",
             position_size=1000,
             risk_pct=2.0,
             take_profit_pct=6.0
         )
-    
-    try:
-        # Run with timeout
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_analyze)
-            analysis = future.result(timeout=ANALYSIS_TIMEOUT)
+        logger.info(f"   [{llm_name}] Analysis complete")
         
         if analysis:
             return {
@@ -123,18 +119,6 @@ def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: 
                 "mode": mode,
                 "asset_type": "crypto"
             }
-    except FuturesTimeout:
-        logger.warning(f"⏰ {llm_name} analysis timed out after {ANALYSIS_TIMEOUT}s for {ticker}")
-        return {
-            "ticker": ticker,
-            "llm": llm_name,
-            "action": "TIMEOUT",
-            "confidence": 0,
-            "reasoning": f"Analysis timed out after {ANALYSIS_TIMEOUT}s",
-            "analysis_time": datetime.now().isoformat(),
-            "mode": mode,
-            "asset_type": "crypto"
-        }
     except Exception as e:
         logger.error(f"Error in {llm_name} analysis for {ticker}: {e}")
         return {
@@ -151,24 +135,25 @@ def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: 
 
 def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
     """Run crypto AI analysis and return results"""
+    logger.info(f"   [1] Starting analysis for {ticker}")  # INFO so it always shows
     try:
-        logger.debug(f"   [1] Starting analysis for {ticker}")
         import os
+        logger.info(f"   [2] os imported")
         from clients.kraken_client import KrakenClient
-        logger.debug(f"   [2] Imports done")
+        logger.info(f"   [3] KrakenClient imported")
         
         # Normalize ticker format
         if "/" not in ticker:
             ticker = f"{ticker}/USD"
-        logger.debug(f"   [3] Ticker normalized: {ticker}")
+        logger.info(f"   [4] Ticker normalized: {ticker}")
         
         # Get Kraken credentials from environment
         api_key = os.getenv("KRAKEN_API_KEY", "")
         api_secret = os.getenv("KRAKEN_API_SECRET", "")
-        logger.debug(f"   [4] Kraken credentials loaded (key present: {bool(api_key)})")
+        logger.info(f"   [5] Kraken credentials loaded (key present: {bool(api_key)})")
         
         kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
-        logger.debug(f"   [5] Kraken client created")
+        logger.info(f"   [6] Kraken client created")
         
         # Check analysis mode
         llm_mode = ANALYSIS_LLM_MODE
