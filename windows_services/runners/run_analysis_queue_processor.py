@@ -152,18 +152,23 @@ def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: 
 def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
     """Run crypto AI analysis and return results"""
     try:
+        logger.debug(f"   [1] Starting analysis for {ticker}")
         import os
         from clients.kraken_client import KrakenClient
+        logger.debug(f"   [2] Imports done")
         
         # Normalize ticker format
         if "/" not in ticker:
             ticker = f"{ticker}/USD"
+        logger.debug(f"   [3] Ticker normalized: {ticker}")
         
         # Get Kraken credentials from environment
         api_key = os.getenv("KRAKEN_API_KEY", "")
         api_secret = os.getenv("KRAKEN_API_SECRET", "")
+        logger.debug(f"   [4] Kraken credentials loaded (key present: {bool(api_key)})")
         
         kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
+        logger.debug(f"   [5] Kraken client created")
         
         # Check analysis mode
         llm_mode = ANALYSIS_LLM_MODE
