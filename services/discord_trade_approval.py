@@ -336,24 +336,25 @@ class DiscordTradeApprovalBot(commands.Bot):
             
         target_symbol = target_symbol.upper()
         
-        if content in ['WATCH', 'ADD', 'TRACK']:
+        if content in ['WATCH', 'ADD', 'TRACK', 'W']:
             await self._handle_watch_command(message, target_symbol)
             
             # Also auto-approve in orchestrator if it exists
             for alert in pending:
                 if alert.symbol == target_symbol:
                     orch.approve_alert(alert.id, add_to_watchlist=True)
-            
-        elif content in ['ANALYZE', 'SCAN', 'CHECK']:
+        
+        # Analysis commands with shortcuts
+        elif content in ['1', 'S', 'STD', 'STANDARD', 'ANALYZE', 'SCAN', 'CHECK']:
             await self._handle_analyze_command(message, target_symbol, mode="standard")
             
-        elif content in ['MULTI']:
+        elif content in ['2', 'M', 'MULTI']:
             await self._handle_analyze_command(message, target_symbol, mode="multi")
 
-        elif content in ['ULTIMATE']:
+        elif content in ['3', 'U', 'ULT', 'ULTIMATE']:
             await self._handle_analyze_command(message, target_symbol, mode="ultimate")
             
-        elif content in ['DISMISS', 'REMOVE', 'DELETE']:
+        elif content in ['DISMISS', 'REMOVE', 'DELETE', 'X', 'D']:
             # Reject in orchestrator
             found = False
             for alert in pending:
@@ -365,6 +366,23 @@ class DiscordTradeApprovalBot(commands.Bot):
                 await message.channel.send(f"🗑️ Dismissed alert for {target_symbol}")
             else:
                 await message.channel.send(f"⚠️ No pending alert found for {target_symbol} to dismiss, but noted.")
+        
+        elif content in ['?', 'HELP', 'H']:
+            # Show available commands
+            help_text = f"""📋 **Commands for {target_symbol}:**
+
+**Watchlist:**
+`W` or `WATCH` - Add to watchlist
+
+**Analysis (reply with):**
+`1` or `S` - 🔬 Standard (single strategy)
+`2` or `M` - 🎯 Multi (Long/Short + leverage)
+`3` or `U` - 🚀 Ultimate (ALL combinations)
+
+**Other:**
+`X` or `D` - Dismiss alert
+"""
+            await message.channel.send(help_text)
 
     async def _handle_watch_command(self, message: discord.Message, symbol: str):
         """Handle WATCH command"""

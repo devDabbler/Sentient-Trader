@@ -1487,11 +1487,36 @@ def main():
             pending_crypto = get_pending_alerts("crypto")
             pending_stocks = get_pending_alerts("stock")
             
+            # Bulk actions row
+            bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
+            with bulk_col1:
+                if st.button("🗑️ Clear All Crypto", key="clear_all_crypto", use_container_width=True, disabled=len(pending_crypto)==0):
+                    for alert in pending_crypto:
+                        reject_alert(alert['id'])
+                    st.toast(f"❌ Cleared {len(pending_crypto)} crypto alerts")
+                    time.sleep(0.5)
+                    st.rerun()
+            with bulk_col2:
+                if st.button("🗑️ Clear All Stocks", key="clear_all_stocks", use_container_width=True, disabled=len(pending_stocks)==0):
+                    for alert in pending_stocks:
+                        reject_alert(alert['id'])
+                    st.toast(f"❌ Cleared {len(pending_stocks)} stock alerts")
+                    time.sleep(0.5)
+                    st.rerun()
+            with bulk_col3:
+                st.caption(f"Total: {len(pending_crypto) + len(pending_stocks)} pending alerts")
+            
             alert_tab1, alert_tab2 = st.tabs([f"🪙 Crypto ({len(pending_crypto)})", f"📈 Stocks ({len(pending_stocks)})"])
             
             def render_alert_actions(alert, asset_type):
                 """Render action buttons for an alert"""
-                col_acts = st.columns(4)
+                # Analysis mode selector
+                analysis_modes = {
+                    "crypto": [("🔬 Standard", "crypto_standard"), ("🎯 Multi", "crypto_multi"), ("🚀 Ultimate", "crypto_ultimate")],
+                    "stock": [("📈 Momentum", "stock_momentum"), ("🎯 ORB+FVG", "orb_fvg_scan")]
+                }
+                
+                col_acts = st.columns(5)
                 
                 with col_acts[0]:
                     if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
@@ -1500,21 +1525,36 @@ def main():
                             time.sleep(1)
                             st.rerun()
                 
+                # Analysis buttons - show mode options
+                modes = analysis_modes.get(asset_type, analysis_modes["crypto"])
                 with col_acts[1]:
-                    if st.button("🔍 Analyze", key=f"analyze_{alert['id']}", use_container_width=True, help="Run AI Analysis"):
-                        preset = "crypto_standard" if asset_type == "crypto" else "stock_momentum"
-                        if queue_analysis_request(preset, [alert['symbol']]):
-                            st.toast(f"🔍 Analysis queued for {alert['symbol']}")
+                    if st.button(modes[0][0], key=f"analyze_std_{alert['id']}", use_container_width=True, help="Standard analysis"):
+                        if queue_analysis_request(modes[0][1], [alert['symbol']]):
+                            st.toast(f"🔬 Standard analysis queued for {alert['symbol']}")
                         else:
                             st.error("Failed to queue analysis")
                 
                 with col_acts[2]:
-                    # Placeholder for trade execution - could be linked to a trade queue later
-                    if st.button("🚀 Trade", key=f"trade_{alert['id']}", use_container_width=True, help="Open Trade Setup"):
-                         st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
+                    if st.button(modes[1][0], key=f"analyze_multi_{alert['id']}", use_container_width=True, help="Multi-config analysis"):
+                        if queue_analysis_request(modes[1][1], [alert['symbol']]):
+                            st.toast(f"🎯 Multi analysis queued for {alert['symbol']}")
+                        else:
+                            st.error("Failed to queue analysis")
                 
                 with col_acts[3]:
-                    if st.button("🗑️ Dismiss", key=f"reject_{alert['id']}", use_container_width=True, help="Reject Alert"):
+                    if asset_type == "crypto" and len(modes) > 2:
+                        if st.button(modes[2][0], key=f"analyze_ult_{alert['id']}", use_container_width=True, help="Ultimate analysis"):
+                            if queue_analysis_request(modes[2][1], [alert['symbol']]):
+                                st.toast(f"🚀 Ultimate analysis queued for {alert['symbol']}")
+                            else:
+                                st.error("Failed to queue analysis")
+                    else:
+                        # Trade button for stocks or placeholder
+                        if st.button("🚀 Trade", key=f"trade_{alert['id']}", use_container_width=True, help="Open Trade Setup"):
+                            st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
+                
+                with col_acts[4]:
+                    if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss Alert"):
                         if reject_alert(alert['id']):
                             st.toast(f"❌ {alert['symbol']} dismissed")
                             time.sleep(0.5)
