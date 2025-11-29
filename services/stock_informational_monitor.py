@@ -341,8 +341,11 @@ class StockInformationalMonitor(LLMServiceMixin):
         return opportunities
     
     def _send_alert(self, opportunity: StockOpportunity):
-        """Send Discord alert for opportunity"""
+        """Send Discord alert for opportunity and queue to orchestrator"""
         try:
+            # Queue to Service Orchestrator for review in Control Panel
+            self._queue_to_orchestrator(opportunity)
+            
             alert_title = f"📊 {opportunity.symbol} - {opportunity.opportunity_type}"
             
             alert_message = f"""
@@ -371,6 +374,42 @@ class StockInformationalMonitor(LLMServiceMixin):
         
         except Exception as e:
             logger.error(f"Error sending alert for {opportunity.symbol}: {e}")
+    
+    def _queue_to_orchestrator(self, opportunity: StockOpportunity):
+        """Queue stock opportunity to Service Orchestrator for review in Control Panel"""
+        try:
+            from services.service_orchestrator import get_orchestrator
+            orch = get_orchestrator()
+            
+            # Map priority to confidence
+            priority_to_confidence = {
+                "CRITICAL": "HIGH",
+                "HIGH": "HIGH",
+                "MEDIUM": "MEDIUM",
+                "LOW": "LOW"
+            }
+            
+            orch.add_alert(
+                symbol=opportunity.symbol,
+                alert_type=opportunity.opportunity_type,
+                source="stock_monitor",
+                asset_type="stock",
+                price=opportunity.price,
+                reasoning=f"Score {opportunity.ensemble_score}/100 | {opportunity.timeframe_alignment} | {opportunity.reasoning[:100]}",
+                confidence=priority_to_confidence.get(opportunity.alert_priority, "MEDIUM"),
+                expires_minutes=240,  # 4 hour expiry for stocks
+                metadata={
+                    "ensemble_score": opportunity.ensemble_score,
+                    "confidence": opportunity.confidence,
+                    "timeframe_alignment": opportunity.timeframe_alignment,
+                    "alert_priority": opportunity.alert_priority,
+                    "technical_summary": opportunity.technical_summary[:200] if opportunity.technical_summary else "",
+                    **opportunity.metadata
+                }
+            )
+            logger.info(f"   📥 {opportunity.symbol} queued to Control Panel alert queue")
+        except Exception as e:
+            logger.debug(f"   Could not queue to orchestrator: {e}")
     
     def _log_opportunity(self, opportunity: StockOpportunity):
         """Log opportunity to file"""

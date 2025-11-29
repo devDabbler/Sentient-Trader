@@ -206,6 +206,9 @@ class CryptoBreakoutMonitor:
                 scan_start = time.time()
                 
                 try:
+                    # Process any pending analysis requests from Control Panel
+                    self._process_analysis_queue()
+                    
                     # Perform scan
                     self._scan_and_alert()
                     self.stats['scans_completed'] += 1
@@ -253,16 +256,23 @@ class CryptoBreakoutMonitor:
             requests = get_pending_analysis_requests()
             
             # Filter for crypto requests
-            # 'quick_crypto' or 'full_crypto' or 'custom' with USD pairs
+            # New presets: 'crypto_standard', 'crypto_multi', 'crypto_ultimate', 'quick_crypto'
+            # Legacy: 'full_crypto', 'custom' with USD pairs
             my_requests = []
             for req in requests:
                 preset = req.get('preset', '')
                 tickers = req.get('tickers', [])
+                asset_type = req.get('asset_type', 'crypto')
                 
-                is_crypto_preset = preset in ['quick_crypto', 'full_crypto']
-                is_custom_crypto = preset == 'custom' and tickers and any('USD' in t.upper() for t in tickers)
+                # New crypto analysis modes
+                is_new_crypto = preset in ['crypto_standard', 'crypto_multi', 'crypto_ultimate', 'quick_crypto']
+                # Legacy presets
+                is_legacy_crypto = preset in ['full_crypto']
+                # Custom with crypto tickers
+                is_custom_crypto = preset == 'custom' and asset_type == 'crypto'
+                is_custom_usd = preset == 'custom' and tickers and any('USD' in t.upper() for t in tickers)
                 
-                if is_crypto_preset or is_custom_crypto:
+                if is_new_crypto or is_legacy_crypto or is_custom_crypto or is_custom_usd:
                     my_requests.append(req)
             
             if not my_requests:
@@ -273,21 +283,33 @@ class CryptoBreakoutMonitor:
             for req in my_requests:
                 try:
                     tickers = req.get('tickers', [])
+                    preset = req.get('preset', '')
+                    analysis_mode = req.get('analysis_mode', 'standard')
                     
-                    # If full scan requested but no tickers provided, use watchlist
-                    if not tickers and req.get('preset') == 'full_crypto':
+                    # Get tickers from watchlist for presets that don't specify tickers
+                    if not tickers and preset in ['crypto_standard', 'crypto_multi', 'crypto_ultimate', 'full_crypto']:
                         if self.watchlist_manager:
                             tickers = self.watchlist_manager.get_watchlist_symbols()
                         else:
-                            # Fallback to some defaults if no watchlist manager
-                            tickers = ['BTC/USD', 'ETH/USD', 'SOL/USD']
+                            # Try to get from service watchlist config
+                            try:
+                                from windows_services.runners.service_config_loader import load_service_watchlist
+                                tickers = load_service_watchlist('sentient-crypto-breakout') or []
+                            except:
+                                pass
+                        
+                        # Fallback to some defaults if still empty
+                        if not tickers:
+                            tickers = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD']
                     
                     if not tickers:
                         logger.warning(f"   Skipping request {req['id']} - no tickers")
                         mark_analysis_complete(req['id'], {'error': 'No tickers provided'})
                         continue
-                        
-                    logger.info(f"   Analyzing {len(tickers)} tickers for request {req['id']}...")
+                    
+                    # Log analysis mode
+                    mode_emoji = {'standard': '🔬', 'multi_config': '🎯', 'ultimate': '🚀'}.get(analysis_mode, '📊')
+                    logger.info(f"   {mode_emoji} {analysis_mode.upper()} analysis: {len(tickers)} tickers for request {req['id']}...")
                     
                     results = []
                     
@@ -604,7 +626,7 @@ class CryptoBreakoutMonitor:
         return True
     
     def _send_alert(self, breakout: BreakoutAlert):
-        """Send Discord alert for breakout"""
+        """Send Discord alert for breakout and queue to orchestrator"""
         
         # Log alert
         logger.info(f"\n🚨 BREAKOUT ALERT: {breakout.symbol}")
@@ -613,6 +635,9 @@ class CryptoBreakoutMonitor:
         logger.info(f"   Confidence: {breakout.confidence} (AI: {breakout.ai_confidence or 'N/A'})")
         logger.info(f"   Price: ${breakout.price:,.4f}")
         logger.info(f"   24h Change: {breakout.change_24h:+.2f}%")
+        
+        # Queue to Service Orchestrator for review in Control Panel
+        self._queue_to_orchestrator(breakout)
         
         if not self.discord_webhook:
             logger.warning("   ⚠️ Discord webhook not configured - alert logged only\n")
@@ -818,6 +843,42 @@ class CryptoBreakoutMonitor:
             suggestions.append("⚠️ MACD bearish - caution advised")
         
         return "\n".join(suggestions)
+    
+    def _queue_to_orchestrator(self, breakout: BreakoutAlert):
+        """Queue breakout alert to Service Orchestrator for review in Control Panel"""
+        try:
+            from services.service_orchestrator import get_orchestrator
+            orch = get_orchestrator()
+            
+            # Build reasoning from available data
+            reasoning_parts = [f"{breakout.alert_type}: Score {breakout.score:.0f}"]
+            if breakout.ai_reasoning:
+                reasoning_parts.append(breakout.ai_reasoning[:150])
+            else:
+                reasoning_parts.append(f"24h: {breakout.change_24h:+.1f}%, Vol: {breakout.volume_ratio:.1f}x")
+            
+            orch.add_alert(
+                symbol=breakout.symbol,
+                alert_type=breakout.alert_type,
+                source="crypto_breakout_scanner",
+                asset_type="crypto",
+                price=breakout.price,
+                reasoning=" | ".join(reasoning_parts),
+                confidence=breakout.confidence,
+                expires_minutes=120,  # 2 hour expiry
+                metadata={
+                    "score": breakout.score,
+                    "change_24h": breakout.change_24h,
+                    "volume_ratio": breakout.volume_ratio,
+                    "rsi": breakout.rsi,
+                    "macd_signal": breakout.macd_signal,
+                    "ai_confidence": breakout.ai_confidence,
+                    "ai_rating": breakout.ai_rating
+                }
+            )
+            logger.info(f"   📥 Queued to Control Panel alert queue")
+        except Exception as e:
+            logger.debug(f"   Could not queue to orchestrator: {e}")
     
     def _add_to_watchlist(self, breakout: BreakoutAlert) -> bool:
         """

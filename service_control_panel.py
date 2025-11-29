@@ -73,29 +73,62 @@ DEFAULT_WATCHLISTS = {
 
 # Analysis presets for quick mobile access
 ANALYSIS_PRESETS = {
-    "quick_crypto": {
-        "name": "Quick Crypto Scan",
-        "emoji": "⚡",
-        "tickers": ['BTC/USD', 'ETH/USD', 'SOL/USD'],
-        "depth": "quick"
-    },
-    "full_crypto": {
-        "name": "Full Crypto Analysis",
+    # Crypto Analysis Modes (matches Quick Trade UI)
+    "crypto_standard": {
+        "name": "🔬 Crypto Standard",
         "emoji": "🔬",
         "tickers": None,  # Use watchlist
-        "depth": "deep"
+        "depth": "standard",
+        "asset_type": "crypto",
+        "analysis_mode": "standard",
+        "description": "Single strategy + timeframe analysis"
     },
-    "stock_momentum": {
-        "name": "Stock Momentum Scan",
+    "crypto_multi": {
+        "name": "🎯 Crypto Multi-Config",
+        "emoji": "🎯",
+        "tickers": None,  # Use watchlist
+        "depth": "multi",
+        "asset_type": "crypto",
+        "analysis_mode": "multi_config",
+        "description": "Test Long/Short + all leverage levels"
+    },
+    "crypto_ultimate": {
+        "name": "🚀 Crypto Ultimate",
         "emoji": "🚀",
+        "tickers": None,  # Use watchlist
+        "depth": "ultimate",
+        "asset_type": "crypto",
+        "analysis_mode": "ultimate",
+        "description": "ALL strategies + directions + leverages"
+    },
+    # Quick scans
+    "quick_crypto": {
+        "name": "⚡ Quick Crypto (Top 3)",
+        "emoji": "⚡",
+        "tickers": ['BTC/USD', 'ETH/USD', 'SOL/USD'],
+        "depth": "quick",
+        "asset_type": "crypto",
+        "analysis_mode": "standard",
+        "description": "Fast scan of BTC, ETH, SOL"
+    },
+    # Stock presets
+    "stock_momentum": {
+        "name": "📈 Stock Momentum",
+        "emoji": "📈",
         "tickers": ['NVDA', 'TSLA', 'AMD', 'PLTR', 'COIN', 'MARA'],
-        "depth": "medium"
+        "depth": "medium",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+        "description": "Momentum scan for popular stocks"
     },
     "orb_fvg_scan": {
-        "name": "ORB+FVG Day Trade",
+        "name": "🎯 ORB+FVG Day Trade",
         "emoji": "🎯",
         "tickers": ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AMD'],
-        "depth": "deep"
+        "depth": "deep",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+        "description": "Opening Range Breakout + Fair Value Gap"
     },
 }
 
@@ -338,6 +371,8 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = Non
             "preset": preset_key,
             "tickers": custom_tickers or preset.get("tickers", []),
             "depth": preset.get("depth", "medium"),
+            "asset_type": preset.get("asset_type", "crypto"),
+            "analysis_mode": preset.get("analysis_mode", "standard"),
             "status": "pending",
             "created": datetime.now().isoformat(),
         }
@@ -420,6 +455,86 @@ def set_service_discord_settings(service_name: str, new_settings: dict) -> bool:
     all_settings = load_discord_settings()
     all_settings[service_name] = new_settings
     return save_discord_settings(all_settings)
+
+
+# ============================================================
+# ORCHESTRATOR INTEGRATION
+# ============================================================
+
+def get_orchestrator_dashboard() -> Optional[dict]:
+    """Get orchestrator dashboard data (safe import)"""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.get_dashboard_data()
+    except Exception as e:
+        print(f"Orchestrator not available: {e}")
+        return None
+
+
+def set_workflow_mode(mode: str) -> bool:
+    """Set orchestrator workflow mode"""
+    try:
+        from services.service_orchestrator import get_orchestrator, WorkflowMode
+        orch = get_orchestrator()
+        return orch.set_mode(WorkflowMode(mode))
+    except Exception as e:
+        print(f"Failed to set mode: {e}")
+        return False
+
+
+def get_pending_alerts(asset_type: Optional[str] = None) -> list:
+    """Get pending alerts from orchestrator"""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        alerts = orch.get_pending_alerts(asset_type)
+        return [a.to_dict() for a in alerts]
+    except Exception as e:
+        print(f"Failed to get alerts: {e}")
+        return []
+
+
+def approve_alert(alert_id: str, add_to_watchlist: bool = True) -> bool:
+    """Approve an alert"""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.approve_alert(alert_id, add_to_watchlist)
+    except Exception as e:
+        print(f"Failed to approve alert: {e}")
+        return False
+
+
+def reject_alert(alert_id: str) -> bool:
+    """Reject an alert"""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.reject_alert(alert_id)
+    except Exception as e:
+        print(f"Failed to reject alert: {e}")
+        return False
+
+
+def add_manual_alert(symbol: str, alert_type: str = "WATCH", asset_type: str = "crypto",
+                     reasoning: str = "Manually added") -> bool:
+    """Add a manual alert to the queue"""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        orch.add_alert(
+            symbol=symbol,
+            alert_type=alert_type,
+            source="manual",
+            asset_type=asset_type,
+            reasoning=reasoning,
+            confidence="MEDIUM"
+        )
+        return True
+    except Exception as e:
+        print(f"Failed to add alert: {e}")
+        return False
 
 
 # ============================================================
@@ -747,10 +862,74 @@ def clear_service_logs(service_name: str) -> tuple:
         return False, "No log files found to clear"
 
 
+# ============================================================
+# AUTHENTICATION HELPERS
+# ============================================================
+
+AUTH_TOKENS_FILE = Path(__file__).resolve().parent / "data" / ".auth_tokens.json"
+
+def load_auth_tokens() -> dict:
+    """Load valid auth tokens"""
+    try:
+        if AUTH_TOKENS_FILE.exists():
+            with open(AUTH_TOKENS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading auth tokens: {e}")
+    return {}
+
+def save_auth_tokens(tokens: dict):
+    """Save auth tokens"""
+    try:
+        # Clean up expired tokens
+        now = time.time()
+        valid_tokens = {k: v for k, v in tokens.items() if v.get("expires", 0) > now}
+        
+        AUTH_TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(AUTH_TOKENS_FILE, 'w') as f:
+            json.dump(valid_tokens, f)
+    except Exception as e:
+        print(f"Error saving auth tokens: {e}")
+
+def generate_auth_token() -> str:
+    """Generate a secure random token"""
+    import secrets
+    return secrets.token_urlsafe(32)
+
 def check_password():
-    """Password + TOTP authentication"""
+    """Password + TOTP authentication with Persistence"""
+    
+    # Check for persistent session via URL token
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
+        
+        # Check query params for token
+        # Streamlit 1.30+ uses st.query_params
+        try:
+            query_params = st.query_params
+        except:
+            # Fallback for older versions
+            query_params = st.experimental_get_query_params()
+            
+        auth_token = query_params.get("auth_token")
+        if isinstance(auth_token, list):
+            auth_token = auth_token[0]
+            
+        if auth_token:
+            tokens = load_auth_tokens()
+            token_data = tokens.get(auth_token)
+            
+            if token_data:
+                if token_data.get("expires", 0) > time.time():
+                    st.session_state.authenticated = True
+                    st.session_state.auth_token = auth_token
+                    # Update last used
+                    token_data["last_used"] = time.time()
+                    save_auth_tokens(tokens)
+                    st.toast("✅ Auto-logged in via persistent session")
+                else:
+                    st.warning("⚠️ Session expired. Please log in again.")
+    
     if "password_verified" not in st.session_state:
         st.session_state.password_verified = False
     
@@ -767,7 +946,9 @@ def check_password():
                     st.session_state.password_verified = True
                     if not TOTP_ENABLED:
                         st.session_state.authenticated = True
-                    st.rerun()
+                        st.rerun()
+                    else:
+                        st.rerun()
                 else:
                     st.error("❌ Incorrect password")
                     print(f"[SECURITY] Failed login attempt at {datetime.now()}")
@@ -803,7 +984,13 @@ def check_password():
                 st.image(f"data:image/png;base64,{img_str}", caption="Scan with Google Authenticator / Authy")
                 st.caption(f"Or enter manually: `{TOTP_SECRET}`")
             
-            totp_code = st.text_input("📲 Enter 6-digit code from Authenticator", max_chars=6, key="totp_input")
+            col_code, col_chk = st.columns([3, 1])
+            with col_code:
+                totp_code = st.text_input("📲 Enter 6-digit code from Authenticator", max_chars=6, key="totp_input")
+            with col_chk:
+                st.write("")
+                st.write("")
+                remember_me = st.checkbox("Remember Me (30 days)", value=True)
             
             if st.button("Verify Code", type="primary"):
                 # runtime guard for static type checkers
@@ -811,6 +998,28 @@ def check_password():
                 totp = pyotp.TOTP(TOTP_SECRET)
                 if totp.verify(totp_code, valid_window=1):
                     st.session_state.authenticated = True
+                    
+                    # Handle Remember Me
+                    if remember_me:
+                        token = generate_auth_token()
+                        tokens = load_auth_tokens()
+                        tokens[token] = {
+                            "created": time.time(),
+                            "expires": time.time() + (30 * 24 * 3600),  # 30 days
+                            "user_agent": "user"
+                        }
+                        save_auth_tokens(tokens)
+                        
+                        # Set query param for bookmarking
+                        try:
+                            st.query_params["auth_token"] = token
+                        except:
+                            st.experimental_set_query_params(auth_token=token)
+                            
+                        st.session_state.auth_token = token
+                        st.success("✅ Login successful! Bookmark this URL to stay logged in.")
+                        time.sleep(1)
+                    
                     st.rerun()
                 else:
                     st.error("❌ Invalid code. Try again.")
@@ -844,6 +1053,16 @@ def check_password():
         
         return False
     
+    # Already authenticated
+    # Ensure token is in URL if we have one in session (for bookmarking)
+    if "auth_token" in st.session_state:
+        try:
+            if st.query_params.get("auth_token") != st.session_state.auth_token:
+                st.query_params["auth_token"] = st.session_state.auth_token
+        except:
+            # Fallback
+            pass
+            
     return True
 
 
@@ -1109,7 +1328,26 @@ def main():
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
         if st.button("🚪 Logout"):
+            # Clear session state
             st.session_state.authenticated = False
+            st.session_state.password_verified = False
+            
+            # Clear auth token if present
+            if "auth_token" in st.session_state:
+                token = st.session_state.auth_token
+                # Remove from file
+                tokens = load_auth_tokens()
+                if token in tokens:
+                    del tokens[token]
+                    save_auth_tokens(tokens)
+                del st.session_state.auth_token
+            
+            # Clear query params
+            try:
+                st.query_params.clear()
+            except:
+                st.experimental_set_query_params()
+                
             st.rerun()
         
         st.markdown("---")
@@ -1127,7 +1365,8 @@ def main():
             st.rerun()
 
     # Tabs
-    tab_status, tab_watchlist, tab_analysis, tab_discord, tab_logs = st.tabs([
+    tab_workflow, tab_status, tab_watchlist, tab_analysis, tab_discord, tab_logs = st.tabs([
+        "🎯 Workflow",
         "📊 Service Status", 
         "📋 Watchlists",
         "🔍 Analysis", 
@@ -1135,9 +1374,206 @@ def main():
         "📝 Logs"
     ])
     
+    # ============================================================
+    # WORKFLOW TAB - New unified control center
+    # ============================================================
+    with tab_workflow:
+        st.markdown("### 🎯 Workflow Control Center")
+        st.caption("One-click modes to manage all services safely")
+        
+        # Get orchestrator data
+        orch_data = get_orchestrator_dashboard()
+        
+        if orch_data:
+            current_mode = orch_data.get("mode", "stopped")
+            
+            # Mode indicator
+            mode_colors = {
+                "stopped": "🔴",
+                "safe": "🟡",
+                "discovery": "🟢",
+                "active": "🔵",
+                "aggressive": "🟣"
+            }
+            st.info(f"{mode_colors.get(current_mode, '⚪')} **Current Mode: {current_mode.upper()}**")
+            
+            # Mode buttons
+            st.markdown("#### Quick Modes")
+            mode_cols = st.columns(5)
+            
+            modes = [
+                ("stopped", "⏹️ Stop All", "All services stopped"),
+                ("safe", "🛡️ Safe", "Only AI Position Manager (monitor existing)"),
+                ("discovery", "🔍 Discovery", "Scanners ON, alerts queue for review"),
+                ("active", "🚀 Active", "Full crypto automation with approvals"),
+                ("aggressive", "⚡ Aggressive", "Fast intervals, all services")
+            ]
+            
+            for i, (mode_key, label, desc) in enumerate(modes):
+                with mode_cols[i]:
+                    is_current = current_mode == mode_key
+                    if st.button(
+                        label,
+                        key=f"mode_{mode_key}",
+                        type="primary" if is_current else "secondary",
+                        use_container_width=True,
+                        disabled=is_current
+                    ):
+                        if set_workflow_mode(mode_key):
+                            st.toast(f"✅ Switched to {label}")
+                            # Apply mode to actual services
+                            if mode_key == "stopped":
+                                for svc in SERVICES.values():
+                                    control_service(svc["name"], "stop")
+                            elif mode_key == "safe":
+                                for svc_name, svc in SERVICES.items():
+                                    if svc["name"] in ["sentient-crypto-ai-trader", "sentient-discord-approval"]:
+                                        control_service(svc["name"], "start")
+                                    else:
+                                        control_service(svc["name"], "stop")
+                            elif mode_key == "discovery":
+                                for svc_name, svc in SERVICES.items():
+                                    if svc.get("category") == "crypto" or svc["name"] == "sentient-discord-approval":
+                                        control_service(svc["name"], "start")
+                                    else:
+                                        control_service(svc["name"], "stop")
+                            elif mode_key == "active":
+                                for svc_name, svc in SERVICES.items():
+                                    if svc.get("category") in ["crypto", "infrastructure"]:
+                                        control_service(svc["name"], "start")
+                            elif mode_key == "aggressive":
+                                for svc in SERVICES.values():
+                                    control_service(svc["name"], "start")
+                            time.sleep(1)
+                            st.rerun()
+                    st.caption(desc)
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # ALERT QUEUE
+            # ============================================================
+            st.markdown("### 📥 Alert Queue")
+            st.caption("Alerts from Discord and scanners waiting for your review")
+            
+            # Add manual alert
+            with st.expander("➕ Add Alert Manually"):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    manual_symbol = st.text_input("Symbol", placeholder="BTC, ETH, NVDA", key="manual_alert_symbol").upper()
+                with col2:
+                    manual_type = st.selectbox("Type", ["WATCH", "ENTRY", "BREAKOUT"], key="manual_alert_type")
+                with col3:
+                    manual_asset = st.selectbox("Asset", ["crypto", "stock"], key="manual_alert_asset")
+                
+                manual_reason = st.text_input("Reasoning (optional)", placeholder="Saw on Twitter...", key="manual_alert_reason")
+                
+                if st.button("Add to Queue", type="primary", key="add_manual_alert"):
+                    if manual_symbol:
+                        if add_manual_alert(manual_symbol, manual_type, manual_asset, manual_reason or "Manually added"):
+                            st.toast(f"✅ Added {manual_symbol} to queue")
+                            st.rerun()
+                        else:
+                            st.error("Failed to add alert")
+                    else:
+                        st.warning("Enter a symbol")
+            
+            # Get pending alerts
+            pending_crypto = get_pending_alerts("crypto")
+            pending_stocks = get_pending_alerts("stock")
+            
+            alert_tab1, alert_tab2 = st.tabs([f"🪙 Crypto ({len(pending_crypto)})", f"📈 Stocks ({len(pending_stocks)})"])
+            
+            with alert_tab1:
+                if pending_crypto:
+                    for alert in pending_crypto:
+                        with st.container():
+                            col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+                            with col1:
+                                st.markdown(f"**{alert['symbol']}** ({alert['alert_type']})")
+                                st.caption(f"Source: {alert['source']} | {alert['confidence']}")
+                            with col2:
+                                if alert.get('price'):
+                                    st.metric("Price", f"${alert['price']:.4f}")
+                            with col3:
+                                if st.button("✅", key=f"approve_{alert['id']}", help="Approve & add to watchlist"):
+                                    if approve_alert(alert['id']):
+                                        st.toast(f"✅ Approved {alert['symbol']}")
+                                        st.rerun()
+                                if st.button("❌", key=f"reject_{alert['id']}", help="Reject"):
+                                    if reject_alert(alert['id']):
+                                        st.toast(f"❌ Rejected {alert['symbol']}")
+                                        st.rerun()
+                            with col4:
+                                st.caption(alert['reasoning'][:50] + "..." if len(alert.get('reasoning', '')) > 50 else alert.get('reasoning', ''))
+                            st.markdown("---")
+                else:
+                    st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
+            
+            with alert_tab2:
+                if pending_stocks:
+                    for alert in pending_stocks:
+                        with st.container():
+                            col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+                            with col1:
+                                st.markdown(f"**{alert['symbol']}** ({alert['alert_type']})")
+                                st.caption(f"Source: {alert['source']} | {alert['confidence']}")
+                            with col2:
+                                if alert.get('price'):
+                                    st.metric("Price", f"${alert['price']:.2f}")
+                            with col3:
+                                if st.button("✅", key=f"approve_s_{alert['id']}", help="Approve & add to watchlist"):
+                                    if approve_alert(alert['id']):
+                                        st.toast(f"✅ Approved {alert['symbol']}")
+                                        st.rerun()
+                                if st.button("❌", key=f"reject_s_{alert['id']}", help="Reject"):
+                                    if reject_alert(alert['id']):
+                                        st.toast(f"❌ Rejected {alert['symbol']}")
+                                        st.rerun()
+                            with col4:
+                                st.caption(alert['reasoning'][:50] + "..." if len(alert.get('reasoning', '')) > 50 else alert.get('reasoning', ''))
+                            st.markdown("---")
+                else:
+                    st.info("No pending stock alerts.")
+            
+            st.markdown("---")
+            
+            # ============================================================
+            # SERVICE HEALTH SUMMARY
+            # ============================================================
+            st.markdown("### 🏥 Service Health")
+            
+            svc_data = orch_data.get("services", {})
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Running", f"{svc_data.get('running', 0)}/{svc_data.get('total', 0)}")
+            with col2:
+                st.metric("Errors", svc_data.get('error', 0))
+            with col3:
+                alerts_data = orch_data.get("alerts", {})
+                st.metric("Pending Alerts", alerts_data.get('pending_total', 0))
+            
+            # Quick service status
+            with st.expander("📊 Service Details"):
+                for svc_name, svc_info in svc_data.get("details", {}).items():
+                    state = svc_info.get("state", "unknown")
+                    state_emoji = "🟢" if state == "running" else "🔴" if state == "stopped" else "🟡"
+                    health = svc_info.get("health", {})
+                    
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write(f"{state_emoji} **{svc_info.get('display_name', svc_name)}**")
+                    with col2:
+                        st.caption(f"✅ {health.get('success_count', 0)} runs")
+                    with col3:
+                        st.caption(f"❌ {health.get('error_count', 0)} errors")
+        else:
+            st.warning("⚠️ Orchestrator not available. Using legacy service control.")
+            st.info("The orchestrator provides unified service management. Check if `services/service_orchestrator.py` exists.")
+    
     with tab_watchlist:
         render_watchlist_manager()
-
+    
     with tab_status:
         st.markdown("### Service Status")
         
@@ -1278,34 +1714,62 @@ def main():
         # ============================================================
         st.markdown("---")
         st.markdown("### 🔬 Quick Analysis")
-        st.caption("Trigger on-demand scans")
+        st.caption("Trigger on-demand scans from your phone!")
         
-        # Analysis preset buttons (big, mobile-friendly)
-        for preset_key, preset_info in ANALYSIS_PRESETS.items():
-            if st.button(
-                f"{preset_info['emoji']} {preset_info['name']}", 
-                key=f"analysis_{preset_key}",
-                use_container_width=True
-            ):
-                if queue_analysis_request(preset_key):
-                    st.toast(f"✅ {preset_info['name']} queued!")
-                else:
-                    st.error("Failed to queue analysis")
+        # Crypto Analysis Modes - THE BIG 3
+        st.markdown("#### 🪙 Crypto Analysis")
+        crypto_col1, crypto_col2, crypto_col3 = st.columns(3)
+        
+        with crypto_col1:
+            if st.button("🔬 Standard", key="crypto_standard_btn", use_container_width=True, type="primary"):
+                if queue_analysis_request("crypto_standard"):
+                    st.toast("✅ Standard crypto analysis queued!")
+            st.caption("Single strategy")
+        
+        with crypto_col2:
+            if st.button("🎯 Multi", key="crypto_multi_btn", use_container_width=True):
+                if queue_analysis_request("crypto_multi"):
+                    st.toast("✅ Multi-config analysis queued!")
+            st.caption("Long/Short + Leverage")
+        
+        with crypto_col3:
+            if st.button("🚀 Ultimate", key="crypto_ultimate_btn", use_container_width=True):
+                if queue_analysis_request("crypto_ultimate"):
+                    st.toast("✅ Ultimate analysis queued!")
+            st.caption("ALL combinations")
+        
+        # Quick scan button
+        if st.button("⚡ Quick Scan (BTC/ETH/SOL)", key="quick_crypto_btn", use_container_width=True):
+            if queue_analysis_request("quick_crypto"):
+                st.toast("✅ Quick crypto scan queued!")
+        
+        st.markdown("#### 📈 Stock Analysis")
+        stock_col1, stock_col2 = st.columns(2)
+        
+        with stock_col1:
+            if st.button("📈 Momentum Scan", key="stock_momentum_btn", use_container_width=True):
+                if queue_analysis_request("stock_momentum"):
+                    st.toast("✅ Stock momentum scan queued!")
+        
+        with stock_col2:
+            if st.button("🎯 ORB+FVG", key="orb_fvg_btn", use_container_width=True):
+                if queue_analysis_request("orb_fvg_scan"):
+                    st.toast("✅ ORB+FVG scan queued!")
         
         # Custom analysis input
         with st.expander("📝 Custom Analysis"):
             custom_tickers = st.text_input(
                 "Tickers (comma-separated)",
-                placeholder="NVDA, TSLA, AMD",
+                placeholder="BTC/USD, ETH/USD or NVDA, TSLA",
                 key="custom_analysis_tickers"
             )
-            depth = st.select_slider(
-                "Depth",
-                options=["quick", "medium", "deep"],
-                value="medium",
-                key="custom_analysis_depth"
-            )
-            if st.button("🚀 Run Custom", use_container_width=True):
+            custom_col1, custom_col2 = st.columns(2)
+            with custom_col1:
+                custom_asset = st.selectbox("Asset Type", ["crypto", "stock"], key="custom_asset_type")
+            with custom_col2:
+                custom_mode = st.selectbox("Analysis Mode", ["standard", "multi_config", "ultimate"], key="custom_analysis_mode")
+            
+            if st.button("🚀 Run Custom", use_container_width=True, type="primary"):
                 tickers = [t.strip().upper() for t in custom_tickers.split(",") if t.strip()]
                 if tickers:
                     if queue_analysis_request("custom", tickers):
