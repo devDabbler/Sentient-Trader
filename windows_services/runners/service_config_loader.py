@@ -197,3 +197,98 @@ def get_analysis_results(service_name: Optional[str] = None) -> Dict:
         print(f"[service_config_loader] Error loading analysis results: {e}")
     
     return {}
+
+
+# Analysis presets (shared with service_control_panel.py)
+ANALYSIS_PRESETS = {
+    "crypto_standard": {
+        "name": "🔬 Crypto Standard",
+        "tickers": None,
+        "depth": "standard",
+        "asset_type": "crypto",
+        "analysis_mode": "standard",
+    },
+    "crypto_multi": {
+        "name": "🎯 Crypto Multi-Config",
+        "tickers": None,
+        "depth": "multi",
+        "asset_type": "crypto",
+        "analysis_mode": "multi_config",
+    },
+    "crypto_ultimate": {
+        "name": "🚀 Crypto Ultimate",
+        "tickers": None,
+        "depth": "ultimate",
+        "asset_type": "crypto",
+        "analysis_mode": "ultimate",
+    },
+    "quick_crypto": {
+        "name": "⚡ Quick Crypto",
+        "tickers": ['BTC/USD', 'ETH/USD', 'SOL/USD'],
+        "depth": "quick",
+        "asset_type": "crypto",
+        "analysis_mode": "standard",
+    },
+    "stock_momentum": {
+        "name": "📈 Stock Momentum",
+        "tickers": ['NVDA', 'TSLA', 'AMD', 'PLTR', 'COIN', 'MARA'],
+        "depth": "medium",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+    },
+    "orb_fvg_scan": {
+        "name": "🎯 ORB+FVG Day Trade",
+        "tickers": ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AMD'],
+        "depth": "deep",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+    },
+}
+
+
+def queue_analysis_request(preset_key: str, custom_tickers: Optional[List[str]] = None) -> bool:
+    """
+    Queue an analysis request for services to pick up.
+    
+    Args:
+        preset_key: Key from ANALYSIS_PRESETS or 'custom'
+        custom_tickers: Optional list of tickers (overrides preset)
+        
+    Returns:
+        True if successful
+    """
+    requests_file = PROJECT_ROOT / 'data' / 'analysis_requests.json'
+    
+    try:
+        requests_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Load existing requests
+        requests = []
+        if requests_file.exists():
+            with open(requests_file, 'r') as f:
+                requests = json.load(f)
+        
+        # Add new request
+        preset = ANALYSIS_PRESETS.get(preset_key, {})
+        request = {
+            "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "preset": preset_key,
+            "tickers": custom_tickers or preset.get("tickers", []),
+            "depth": preset.get("depth", "medium"),
+            "asset_type": preset.get("asset_type", "crypto"),
+            "analysis_mode": preset.get("analysis_mode", "standard"),
+            "status": "pending",
+            "created": datetime.now().isoformat(),
+        }
+        requests.append(request)
+        
+        # Keep only last 20 requests
+        requests = requests[-20:]
+        
+        with open(requests_file, 'w') as f:
+            json.dump(requests, f, indent=2)
+        return True
+        
+    except Exception as e:
+        print(f"[service_config_loader] Error queuing analysis: {e}")
+        return False
