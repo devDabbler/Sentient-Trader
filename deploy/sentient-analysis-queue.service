@@ -9,11 +9,9 @@ WorkingDirectory=/root/sentient-trader
 Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONPATH=/root/sentient-trader"
 EnvironmentFile=/root/sentient-trader/.env
-ExecStart=/root/sentient-trader/venv/bin/python3 windows_services/runners/run_analysis_queue_processor.py
+ExecStart=/bin/bash -c '/root/sentient-trader/venv/bin/python3 -u windows_services/runners/run_analysis_queue_processor.py 2>&1 | tee -a /root/sentient-trader/logs/analysis_queue_service.log'
 Restart=always
 RestartSec=10
-StandardOutput=append:/root/sentient-trader/logs/analysis_queue_service.log
-StandardError=append:/root/sentient-trader/logs/analysis_queue_error.log
 
 [Install]
 WantedBy=multi-user.target

@@ -22,6 +22,10 @@ from loguru import logger
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / ".env")
+
 from windows_services.runners.service_config_loader import (
     get_pending_analysis_requests,
     mark_analysis_complete,
@@ -61,7 +65,17 @@ def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
         api_secret = os.getenv("KRAKEN_API_SECRET", "")
         
         kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
-        assistant = AIEntryAssistant(kraken_client=kraken)
+        
+        # Initialize LLM analyzer for AI-powered analysis
+        llm_analyzer = None
+        try:
+            from services.llm_strategy_analyzer import LLMStrategyAnalyzer
+            llm_analyzer = LLMStrategyAnalyzer()
+            logger.debug(f"LLM analyzer initialized for {ticker}")
+        except Exception as e:
+            logger.warning(f"LLM analyzer not available: {e} - using fallback analysis")
+        
+        assistant = AIEntryAssistant(kraken_client=kraken, llm_analyzer=llm_analyzer)
         
         # Run analysis
         analysis = assistant.analyze_entry(
