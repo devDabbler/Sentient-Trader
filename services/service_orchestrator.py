@@ -468,8 +468,43 @@ class ServiceOrchestrator:
         self._save_state()
         return alert
     
+    def reload_alerts_from_file(self):
+        """Reload alert queue from file (for cross-process sync)"""
+        try:
+            if self.alert_queue_file.exists():
+                with open(self.alert_queue_file, 'r') as f:
+                    queue_data = json.load(f)
+                
+                with self.alert_queue_lock:
+                    # Build set of existing IDs to avoid duplicates
+                    existing_ids = {a.id for a in self.alert_queue}
+                    
+                    for item in queue_data:
+                        if item["id"] not in existing_ids:
+                            self.alert_queue.append(AlertQueueItem(
+                                id=item["id"],
+                                source=item["source"],
+                                symbol=item["symbol"],
+                                asset_type=item["asset_type"],
+                                alert_type=item["alert_type"],
+                                price=item.get("price"),
+                                target=item.get("target"),
+                                stop_loss=item.get("stop_loss"),
+                                reasoning=item["reasoning"],
+                                confidence=item["confidence"],
+                                timestamp=datetime.fromisoformat(item["timestamp"]),
+                                status=item.get("status", "pending"),
+                                expires_at=datetime.fromisoformat(item["expires_at"]) if item.get("expires_at") else None,
+                                metadata=item.get("metadata", {})
+                            ))
+        except Exception as e:
+            logger.debug(f"Could not reload alerts from file: {e}")
+    
     def get_pending_alerts(self, asset_type: Optional[str] = None) -> List[AlertQueueItem]:
         """Get all pending alerts, optionally filtered by asset type"""
+        # Reload from file to pick up alerts from other processes
+        self.reload_alerts_from_file()
+        
         with self.alert_queue_lock:
             pending = [a for a in self.alert_queue if a.status == "pending"]
             

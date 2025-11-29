@@ -121,10 +121,24 @@ class CryptoBreakoutMonitor:
         # Track coins added to watchlist in this session
         self.watchlist_added: Set[str] = set()
         
-        # Discord webhook
+        # Discord webhook (for simple embeds)
         self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
         if not self.discord_webhook:
             logger.warning("⚠️ DISCORD_WEBHOOK_URL not set - alerts will be logged only")
+        
+        # Discord bot for interactive buttons (Watch/Analyze/Dismiss)
+        self.discord_bot_manager = None
+        try:
+            from services.discord_trade_approval import get_discord_approval_manager
+            self.discord_bot_manager = get_discord_approval_manager()
+            if self.discord_bot_manager and self.discord_bot_manager.enabled:
+                logger.info("✅ Discord bot enabled - alerts will have interactive buttons")
+            else:
+                logger.info("ℹ️ Discord bot not configured - using webhook only (no buttons)")
+                self.discord_bot_manager = None
+        except Exception as e:
+            logger.debug(f"Discord bot not available: {e}")
+            self.discord_bot_manager = None
         
         # Initialize Kraken client
         api_key = os.getenv('KRAKEN_API_KEY')
@@ -639,35 +653,95 @@ class CryptoBreakoutMonitor:
         # Queue to Service Orchestrator for review in Control Panel
         self._queue_to_orchestrator(breakout)
         
-        if not self.discord_webhook:
-            logger.warning("   ⚠️ Discord webhook not configured - alert logged only\n")
-            logger.warning("   Set DISCORD_WEBHOOK_URL environment variable to enable Discord alerts")
-            return
+        # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
+        bot_sent = False
+        if self.discord_bot_manager and self.discord_bot_manager.is_running():
+            try:
+                import asyncio
+                
+                # Build message for bot
+                type_emoji = {
+                    'BREAKOUT': '💥', 'BUZZING': '🔥', 'HOTTEST': '🌶️',
+                    'PRE_LISTING': '🚀', 'PRE_IPO_BUZZ': '⚡', 'RUNNING': '🏃', 'MOONING': '🌙'
+                }
+                emoji = type_emoji.get(breakout.alert_type, '📊')
+                
+                message_text = (
+                    f"**Score:** {breakout.score:.0f}/100 | **Confidence:** {breakout.confidence}\n"
+                    f"**Price:** ${breakout.price:,.4f} | **24h:** {breakout.change_24h:+.2f}%\n"
+                    f"**Volume:** {breakout.volume_ratio:.1f}x avg"
+                )
+                if breakout.ai_reasoning:
+                    message_text += f"\n\n🤖 **AI:** {breakout.ai_reasoning[:200]}"
+                
+                message_text += "\n\n**Reply with:** `1`=Standard `2`=Multi `3`=Ultimate | `W`=Watch | `X`=Dismiss"
+                
+                # Color based on score
+                if breakout.score >= 90:
+                    color = 0x00FF00  # Green
+                elif breakout.score >= 80:
+                    color = 0x32CD32  # Lime
+                elif breakout.score >= 70:
+                    color = 0xFFD700  # Gold
+                else:
+                    color = 0xFFA500  # Orange
+                
+                # Send via bot (has buttons)
+                async def send_bot_alert():
+                    return await self.discord_bot_manager.bot.send_alert_notification(
+                        symbol=breakout.symbol,
+                        alert_type=f"{emoji} {breakout.alert_type}",
+                        message_text=message_text,
+                        confidence=breakout.confidence,
+                        color=color
+                    )
+                
+                if self.discord_bot_manager.loop:
+                    future = asyncio.run_coroutine_threadsafe(
+                        send_bot_alert(),
+                        self.discord_bot_manager.loop
+                    )
+                    bot_sent = future.result(timeout=10)
+                    
+                if bot_sent:
+                    logger.info(f"   ✅ Discord alert sent via BOT (with buttons)")
+                else:
+                    logger.debug("   Bot send returned False, falling back to webhook")
+                    
+            except Exception as e:
+                logger.debug(f"   Bot alert failed ({type(e).__name__}), falling back to webhook: {e}")
         
-        try:
-            # Build Discord embed
-            embed = self._build_discord_embed(breakout)
+        # Fallback to webhook (no buttons, but still shows embed)
+        if not bot_sent:
+            if not self.discord_webhook:
+                logger.warning("   ⚠️ Discord not configured - alert logged only\n")
+                return
             
-            payload = {
-                'embeds': [embed],
-                'username': 'Crypto Breakout Monitor',
-                'avatar_url': 'https://cdn-icons-png.flaticon.com/512/6001/6001368.png'
-            }
+            try:
+                # Build Discord embed
+                embed = self._build_discord_embed(breakout)
+                
+                payload = {
+                    'embeds': [embed],
+                    'username': 'Crypto Breakout Monitor',
+                    'avatar_url': 'https://cdn-icons-png.flaticon.com/512/6001/6001368.png'
+                }
+                
+                logger.debug(f"   📤 Sending Discord webhook to: {self.discord_webhook[:50]}...")
+                response = requests.post(self.discord_webhook, json=payload, timeout=15)
+                response.raise_for_status()
+                
+                logger.info(f"   ✅ Discord alert sent via WEBHOOK (HTTP {response.status_code})")
+                logger.info(f"      ⚠️ No buttons - reply with 1/2/3/W/X or configure Discord bot")
             
-            logger.debug(f"   📤 Sending Discord webhook to: {self.discord_webhook[:50]}...")
-            response = requests.post(self.discord_webhook, json=payload, timeout=15)
-            response.raise_for_status()
-            
-            logger.info(f"   ✅ Discord alert sent successfully (HTTP {response.status_code})\n")
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"   ❌ Discord webhook timeout (15s) - webhook may be slow or unreachable\n")
-        except requests.exceptions.ConnectionError as e:
-            logger.error(f"   ❌ Discord connection error: {e}\n")
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"   ❌ Discord HTTP error: {e} - Response: {e.response.text if hasattr(e, 'response') else 'N/A'}\n")
-        except Exception as e:
-            logger.error(f"   ❌ Failed to send Discord alert: {type(e).__name__}: {e}\n")
+            except requests.exceptions.Timeout:
+                logger.error(f"   ❌ Discord webhook timeout (15s)\n")
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"   ❌ Discord connection error: {e}\n")
+            except requests.exceptions.HTTPError as e:
+                logger.error(f"   ❌ Discord HTTP error: {e}\n")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to send Discord alert: {type(e).__name__}: {e}\n")
     
     def _build_discord_embed(self, breakout: BreakoutAlert) -> Dict:
         """Build Discord embed message for breakout alert"""
