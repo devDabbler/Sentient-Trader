@@ -560,30 +560,22 @@ def reject_alert(alert_id: str) -> bool:
 def bulk_clear_alerts(asset_type: Optional[str] = None) -> int:
     """Clear all alerts (or by asset type) in one operation. Returns count cleared."""
     try:
-        alert_queue_file = Path(__file__).resolve().parent / "data" / "alert_queue.json"
-        if not alert_queue_file.exists():
-            return 0
-        
-        with open(alert_queue_file, 'r') as f:
-            alerts = json.load(f)
-        
-        original_count = len(alerts)
-        
-        if asset_type:
-            # Filter out only the specified asset type
-            alerts = [a for a in alerts if a.get('asset_type') != asset_type]
-            cleared = original_count - len(alerts)
-        else:
-            # Clear all
-            cleared = original_count
-            alerts = []
-        
-        with open(alert_queue_file, 'w') as f:
-            json.dump(alerts, f, indent=2)
-        
-        return cleared
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.bulk_clear_alerts(asset_type)
     except Exception as e:
         print(f"Failed to bulk clear alerts: {e}")
+        return 0
+
+
+def reject_all_alerts_for_symbol(symbol: str) -> int:
+    """Reject all pending alerts for a specific symbol. Returns count rejected."""
+    try:
+        from services.service_orchestrator import get_orchestrator
+        orch = get_orchestrator()
+        return orch.reject_all_alerts_for_symbol(symbol)
+    except Exception as e:
+        print(f"Failed to reject alerts for {symbol}: {e}")
         return 0
 
 
@@ -1595,7 +1587,12 @@ def main():
                     "stock": [("📈 Momentum", "stock_momentum"), ("🎯 ORB+FVG", "orb_fvg_scan")]
                 }
                 
-                col_acts = st.columns(5)
+                # Count how many alerts exist for this symbol
+                symbol = alert['symbol']
+                all_pending = get_pending_alerts(asset_type)
+                symbol_alert_count = sum(1 for a in all_pending if a['symbol'].upper() == symbol.upper())
+                
+                col_acts = st.columns(6)
                 
                 with col_acts[0]:
                     if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
@@ -1633,11 +1630,26 @@ def main():
                             st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
                 
                 with col_acts[4]:
-                    if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss Alert"):
+                    if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss This Alert"):
                         if reject_alert(alert['id']):
                             st.toast(f"❌ {alert['symbol']} dismissed")
                             time.sleep(0.5)
                             st.rerun()
+                
+                with col_acts[5]:
+                    # Show button to remove all alerts for this symbol if there are multiple
+                    if symbol_alert_count > 1:
+                        help_text = f"Remove all {symbol_alert_count} alerts for {symbol}"
+                        if st.button("🗑️ All", key=f"reject_all_{alert['id']}", use_container_width=True, help=help_text):
+                            count = reject_all_alerts_for_symbol(symbol)
+                            if count > 0:
+                                st.toast(f"❌ Removed {count} alert(s) for {symbol}")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error("Failed to remove alerts")
+                    else:
+                        st.empty()  # Empty space if only one alert
 
             with alert_tab1:
                 if pending_crypto:
