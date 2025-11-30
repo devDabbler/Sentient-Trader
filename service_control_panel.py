@@ -1598,7 +1598,6 @@ def main():
                     if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
                         if approve_alert(alert['id']):
                             st.toast(f"✅ {alert['symbol']} added to watchlist")
-                            time.sleep(1)
                             st.rerun()
                 
                 # Analysis buttons - show mode options
