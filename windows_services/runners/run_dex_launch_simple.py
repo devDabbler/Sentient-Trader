@@ -129,6 +129,8 @@ try:
     # Write status file for batch script verification
     status_file = PROJECT_ROOT / "logs" / ".dex_launch_ready"
     status_file.write_text(f"SERVICE READY at {time.time()}")
+    logger.info("DEBUG: Status file written, about to define monitor_loop()...")
+    sys.stdout.flush()
     
     # Async monitoring loop
     async def monitor_loop():
@@ -265,6 +267,8 @@ try:
             monitor_task.cancel()
     
     # Run the async loop
+    logger.info("DEBUG: monitor_loop() function defined, about to call asyncio.run()...")
+    sys.stdout.flush()
     logger.info("DEBUG: About to start async monitor_loop()...")
     logger.info("DEBUG: Calling asyncio.run(monitor_loop()) now...")
     sys.stdout.flush()  # Force flush before async call
