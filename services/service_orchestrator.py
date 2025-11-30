@@ -613,7 +613,40 @@ class ServiceOrchestrator:
         """Add approved alert to appropriate watchlist"""
         try:
             if alert.asset_type == "crypto":
-                # Add to crypto watchlist
+                # Format symbol for Kraken (e.g., BTC -> BTC/USD)
+                symbol = alert.symbol
+                if "/" not in symbol:
+                    symbol = f"{symbol}/USD"
+                
+                # Add to Supabase crypto watchlist via CryptoWatchlistManager
+                try:
+                    from services.crypto_watchlist_manager import CryptoWatchlistManager
+                    wm = CryptoWatchlistManager()
+                    
+                    # Prepare opportunity data from alert
+                    opportunity_data = {
+                        'current_price': alert.price,
+                        'score': 75.0,  # Default score for approved alerts
+                        'confidence': alert.confidence or 'MEDIUM',
+                        'risk_level': 'MEDIUM',
+                        'strategy': alert.alert_type.lower() if alert.alert_type else 'approved',
+                        'reason': alert.reasoning[:500] if alert.reasoning else f"Approved from {alert.source}"
+                    }
+                    
+                    # Add extra data if available
+                    if alert.target:
+                        opportunity_data['target_price'] = alert.target
+                    if alert.stop_loss:
+                        opportunity_data['stop_loss'] = alert.stop_loss
+                    
+                    if wm.add_crypto(symbol, opportunity_data):
+                        logger.info(f"📋 Added {symbol} to crypto watchlist (Supabase)")
+                    else:
+                        logger.warning(f"⚠️ Failed to add {symbol} to Supabase (may already exist)")
+                except Exception as e:
+                    logger.warning(f"Could not add to Supabase crypto watchlist: {e}")
+                
+                # Also add to local JSON for backwards compatibility
                 watchlist_file = self.state_file.parent / "service_watchlists.json"
                 watchlists = {}
                 if watchlist_file.exists():
@@ -625,11 +658,6 @@ class ServiceOrchestrator:
                 if service_name not in watchlists:
                     watchlists[service_name] = {"tickers": []}
                 
-                # Format symbol for Kraken (e.g., BTC -> BTC/USD)
-                symbol = alert.symbol
-                if "/" not in symbol:
-                    symbol = f"{symbol}/USD"
-                
                 if symbol not in watchlists[service_name]["tickers"]:
                     watchlists[service_name]["tickers"].append(symbol)
                     watchlists[service_name]["updated"] = datetime.now().isoformat()
@@ -637,7 +665,7 @@ class ServiceOrchestrator:
                     with open(watchlist_file, 'w') as f:
                         json.dump(watchlists, f, indent=2)
                     
-                    logger.info(f"📋 Added {symbol} to crypto watchlist")
+                    logger.info(f"📋 Added {symbol} to local crypto watchlist")
             else:
                 # Add to stock watchlist via TickerManager
                 try:
