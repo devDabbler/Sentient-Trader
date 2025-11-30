@@ -1577,7 +1577,8 @@ def main():
             with bulk_col3:
                 st.caption(f"Total: {len(pending_crypto) + len(pending_stocks)} pending alerts")
             
-            alert_tab1, alert_tab2 = st.tabs([f"🪙 Crypto ({len(pending_crypto)})", f"📈 Stocks ({len(pending_stocks)})"])
+            # Use stable tab labels (counts shown inside tabs, not in labels)
+            alert_tab1, alert_tab2 = st.tabs(["🪙 Crypto", "📈 Stocks"])
             
             def render_alert_actions(alert, asset_type):
                 """Render action buttons for an alert"""
@@ -1654,6 +1655,8 @@ def main():
                         st.empty()  # Empty space if only one alert
 
             with alert_tab1:
+                # Show count inside the tab
+                st.caption(f"**{len(pending_crypto)}** pending crypto alert(s)")
                 if pending_crypto:
                     for alert in pending_crypto:
                         alert_container = st.empty()
@@ -1688,6 +1691,8 @@ def main():
                     st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
             
             with alert_tab2:
+                # Show count inside the tab
+                st.caption(f"**{len(pending_stocks)}** pending stock alert(s)")
                 if pending_stocks:
                     for alert in pending_stocks:
                         conf = alert.get('confidence', 'MEDIUM')
@@ -2393,11 +2398,30 @@ def main():
     analysis_results = get_analysis_results()
     
     if analysis_results:
-        # Show results by service
-        result_tabs = st.tabs(list(analysis_results.keys()) + ["📋 All"])
+        # Initialize session state for stable tab keys
+        if 'analysis_tab_keys' not in st.session_state:
+            st.session_state.analysis_tab_keys = list(analysis_results.keys())
         
-        for i, (service, data) in enumerate(analysis_results.items()):
+        # Update keys if they've changed, but maintain order
+        current_keys = list(analysis_results.keys())
+        if set(current_keys) != set(st.session_state.analysis_tab_keys):
+            # Merge: keep existing order, add new keys at end
+            existing_keys = [k for k in st.session_state.analysis_tab_keys if k in current_keys]
+            new_keys = [k for k in current_keys if k not in st.session_state.analysis_tab_keys]
+            st.session_state.analysis_tab_keys = existing_keys + new_keys
+        
+        # Use stable tab labels (without dynamic content)
+        tab_labels = [f"📊 {key}" for key in st.session_state.analysis_tab_keys] + ["📋 All"]
+        result_tabs = st.tabs(tab_labels)
+        
+        # Map services to tabs (show message if service has no current data)
+        for i, service in enumerate(st.session_state.analysis_tab_keys):
             with result_tabs[i]:
+                if service not in analysis_results:
+                    st.info(f"No current results for {service}. Results will appear here when available.")
+                    continue
+                
+                data = analysis_results[service]
                 if not isinstance(data, dict):
                     st.error(f"Invalid data format for {service}")
                     continue
@@ -2409,7 +2433,9 @@ def main():
                     st.warning(f"Invalid results list for {service}")
                     results = []
                 
-                st.caption(f"Last updated: {updated} | {len(results)} result(s)")
+                # Show count in caption
+                count_badge = f"**{len(results)}**" if results else "0"
+                st.caption(f"Last updated: {updated} | {count_badge} result(s)")
                 
                 if results:
                     # Show last 10 results
