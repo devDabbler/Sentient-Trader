@@ -1656,32 +1656,34 @@ def main():
             with alert_tab1:
                 if pending_crypto:
                     for alert in pending_crypto:
-                        # Determine color/icon
-                        conf = alert.get('confidence', 'MEDIUM')
-                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
-                        color = "red" if conf == "LOW" else "orange" if conf == "MEDIUM" else "green"
-                        
-                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
-                            # Alert Details
-                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                        alert_container = st.empty()
+                        with alert_container.container():
+                            # Determine color/icon
+                            conf = alert.get('confidence', 'MEDIUM')
+                            icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
+                            color = "red" if conf == "LOW" else "orange" if conf == "MEDIUM" else "green"
                             
-                            # Price Info
-                            cols = st.columns(3)
-                            with cols[0]:
-                                price = alert.get('price')
-                                st.write(f"**Price:** {f'${price:.4f}' if price else 'N/A'}")
-                            with cols[1]:
-                                target = alert.get('target')
-                                st.write(f"**Target:** {f'${target:.4f}' if target else 'N/A'}")
-                            with cols[2]:
-                                stop = alert.get('stop_loss')
-                                st.write(f"**Stop:** {f'${stop:.4f}' if stop else 'N/A'}")
-                            
-                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
-                            
-                            # Actions
-                            st.markdown("---")
-                            render_alert_actions(alert, "crypto")
+                            with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
+                                # Alert Details
+                                st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                                
+                                # Price Info
+                                cols = st.columns(3)
+                                with cols[0]:
+                                    price = alert.get('price')
+                                    st.write(f"**Price:** {f'${price:.4f}' if price else 'N/A'}")
+                                with cols[1]:
+                                    target = alert.get('target')
+                                    st.write(f"**Target:** {f'${target:.4f}' if target else 'N/A'}")
+                                with cols[2]:
+                                    stop = alert.get('stop_loss')
+                                    st.write(f"**Stop:** {f'${stop:.4f}' if stop else 'N/A'}")
+                                
+                                st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
+                                
+                                # Actions
+                                st.markdown("---")
+                                render_alert_actions(alert, "crypto")
                 else:
                     st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
             
