@@ -261,14 +261,19 @@ try:
                         dex_hunter._scan_for_launches(),
                         timeout=120  # 2 minute timeout
                     )
+                    print("DEBUG: _scan_for_launches() returned successfully!", file=sys.stdout, flush=True)
                     logger.info("DEBUG: Active DEX scan completed")
                     
                     # Check for high-score tokens from active scan
+                    discovered_count = len(dex_hunter.discovered_tokens)
+                    print(f"DEBUG: Checking {discovered_count} discovered tokens for high scores...", file=sys.stdout, flush=True)
+                    
                     for addr, token in dex_hunter.discovered_tokens.items():
                         if hasattr(token, '_alerted'):
                             continue  # Already alerted
                         
                         if token.composite_score >= 60:
+                            print(f"DEBUG: High score token found: {token.symbol} ({token.composite_score})", file=sys.stdout, flush=True)
                             alert_msg = (
                                 f"🚀 NEW TOKEN DISCOVERED!\n\n"
                                 f"Token: {token.symbol}\n"
@@ -289,15 +294,21 @@ try:
                             )
                             token._alerted = True
                             logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
+                    
+                    print("DEBUG: High score check complete", file=sys.stdout, flush=True)
                 
                 except asyncio.TimeoutError:
+                    print("DEBUG: _scan_for_launches() TIMEOUT!", file=sys.stdout, flush=True)
                     logger.warning("⚠️ Active DEX scan timed out after 120s, continuing...")
                 except Exception as e:
+                    print(f"DEBUG: _scan_for_launches() ERROR: {e}", file=sys.stdout, flush=True)
                     logger.error(f"Active scan error: {e}")
                 
                 # ===== PART 2: Process Announcements =====
+                print("DEBUG: Getting recent announcements...", file=sys.stdout, flush=True)
                 # Get recent announcements from various sources
                 recent = monitor.get_recent_announcements(minutes=10)
+                print(f"DEBUG: Got {len(recent) if recent else 0} recent announcements", file=sys.stdout, flush=True)
                 
                 if recent:
                     logger.info(f"📢 Processing {len(recent)} announcements...")
@@ -338,18 +349,22 @@ try:
                             logger.error(f"Error analyzing {announcement.token_symbol}: {e}")
                 
                 # ===== Show Stats =====
+                print("DEBUG: Gathering stats...", file=sys.stdout, flush=True)
                 stats = monitor.get_stats()
                 discovered_count = len(dex_hunter.discovered_tokens)
                 high_score_count = sum(1 for t in dex_hunter.discovered_tokens.values() if t.composite_score >= 60)
                 
+                print(f"DEBUG: Stats - discovered={discovered_count}, high_score={high_score_count}", file=sys.stdout, flush=True)
                 logger.info(
                     f"📊 Stats: {discovered_count} tokens discovered, "
                     f"{high_score_count} high-score, "
                     f"{stats.get('total_announcements', 0)} announcements"
                 )
                 
+                print("DEBUG: 🎉 SCAN CYCLE COMPLETE! Sleeping 5 minutes...", file=sys.stdout, flush=True)
                 logger.info(f"💤 Sleeping 5 minutes until next scan...")
                 await asyncio.sleep(300)  # 5 minutes
+                print("DEBUG: Woke up from sleep, starting next cycle...", file=sys.stdout, flush=True)
                 
         except Exception as e:
             logger.error(f"Monitor loop error: {e}", exc_info=True)
