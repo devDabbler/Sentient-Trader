@@ -156,11 +156,50 @@ try:
     
     async def monitor_loop():
         print("DEBUG: Inside monitor_loop() - first line executed!", file=sys.stdout, flush=True)
-        logger.info("=" * 70)
+        sys.stdout.flush()
+        
+        # Quick heartbeat to verify async is working
+        print("DEBUG: Starting heartbeat task to verify event loop...", file=sys.stdout, flush=True)
+        
+        async def heartbeat():
+            for i in range(3):
+                print(f"DEBUG: Heartbeat {i+1}/3", file=sys.stdout, flush=True)
+                await asyncio.sleep(0.5)
+            print("DEBUG: Heartbeat complete!", file=sys.stdout, flush=True)
+        
+        # Test simple async operation first
+        print("DEBUG: Calling heartbeat()...", file=sys.stdout, flush=True)
+        await heartbeat()
+        print("DEBUG: Heartbeat finished, continuing...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        
+        # Test if we can continue executing
+        print("DEBUG: Testing basic print after first line...", file=sys.stdout, flush=True)
+        
+        # Test if logger works in async context
+        print("DEBUG: About to call logger.info('=' * 70)...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        try:
+            # Use print first to see if we even get here
+            print("=" * 70, file=sys.stdout, flush=True)
+            logger.info("=" * 70)
+            print("DEBUG: First logger.info completed!", file=sys.stdout, flush=True)
+        except Exception as e:
+            import traceback
+            print(f"DEBUG: logger.info FAILED with: {e}", file=sys.stdout, flush=True)
+            traceback.print_exc()
+        sys.stdout.flush()
+        
+        print("DEBUG: About to log 'Starting DEX launch monitoring...'", file=sys.stdout, flush=True)
+        print("Starting DEX launch monitoring (announcements + active scanning)...", flush=True)
         logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
+        print("DEBUG: Second logger.info completed!", file=sys.stdout, flush=True)
         logger.info("=" * 70)
+        print("DEBUG: Third logger.info completed!", file=sys.stdout, flush=True)
+        sys.stdout.flush()
         
         # Start announcement monitoring in background
+        print("DEBUG: About to create monitor_task...", file=sys.stdout, flush=True)
         logger.info("DEBUG: Creating monitor_task...")
         try:
             # Wrap in timeout to catch hangs
