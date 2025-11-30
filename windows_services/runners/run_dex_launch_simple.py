@@ -150,7 +150,12 @@ try:
     sys.stdout.flush()
     
     # Async monitoring loop
+    print("DEBUG: About to define monitor_loop() function...", file=sys.stdout, flush=True)
+    logger.info("DEBUG: About to define monitor_loop() function...")
+    sys.stdout.flush()
+    
     async def monitor_loop():
+        print("DEBUG: Inside monitor_loop() - first line executed!", file=sys.stdout, flush=True)
         logger.info("=" * 70)
         logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
         logger.info("=" * 70)
@@ -284,23 +289,31 @@ try:
             monitor_task.cancel()
     
     # Run the async loop
+    print("DEBUG: monitor_loop() function defined, about to call asyncio.run()...", file=sys.stdout, flush=True)
     logger.info("DEBUG: monitor_loop() function defined, about to call asyncio.run()...")
     sys.stdout.flush()
     
     # Test if asyncio works at all
+    print("DEBUG: Testing asyncio with simple function...", file=sys.stdout, flush=True)
     async def test_async():
+        print("DEBUG: Test async function executed!", file=sys.stdout, flush=True)
         logger.info("DEBUG: Test async function executed!")
         return True
     
     logger.info("DEBUG: Testing asyncio with simple function...")
     try:
+        print("DEBUG: Calling asyncio.run(test_async())...", file=sys.stdout, flush=True)
         result = asyncio.run(test_async())
+        print(f"DEBUG: Async test passed: {result}", file=sys.stdout, flush=True)
         logger.info(f"DEBUG: Async test passed: {result}")
     except Exception as e:
+        print(f"DEBUG: Async test failed: {e}", file=sys.stdout, flush=True)
         logger.error(f"DEBUG: Async test failed: {e}", exc_info=True)
         raise
     
+    print("DEBUG: About to start async monitor_loop()...", file=sys.stdout, flush=True)
     logger.info("DEBUG: About to start async monitor_loop()...")
+    print("DEBUG: Calling asyncio.run(monitor_loop()) now...", file=sys.stdout, flush=True)
     logger.info("DEBUG: Calling asyncio.run(monitor_loop()) now...")
     sys.stdout.flush()  # Force flush before async call
     
