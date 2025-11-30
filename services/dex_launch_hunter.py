@@ -13,7 +13,6 @@ This is the core engine for catching pump opportunities early.
 """
 
 import asyncio
-import sys
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 from loguru import logger
@@ -132,18 +131,13 @@ class DexLaunchHunter:
     async def _scan_for_launches(self):
         """Scan for new token launches across enabled chains using FREE DexScreener API"""
         import sys
-        print("DEBUG [_scan_for_launches]: Method entered!", file=sys.stdout, flush=True)
         logger.info("Scanning for new launches...")
-        print("DEBUG [_scan_for_launches]: After first logger.info", file=sys.stdout, flush=True)
         
         try:
             # Get chains to scan
-            print("DEBUG [_scan_for_launches]: Getting chain_ids...", file=sys.stdout, flush=True)
             chain_ids = [chain.value for chain in self.config.enabled_chains]
-            print(f"DEBUG [_scan_for_launches]: chain_ids = {chain_ids}", file=sys.stdout, flush=True)
             
             # Scan using FREE DexScreener API endpoints
-            print("DEBUG [_scan_for_launches]: Calling dex_client.get_new_pairs()...", file=sys.stdout, flush=True)
             success, new_pairs = await self.dex_client.get_new_pairs(
                 chains=chain_ids,
                 min_liquidity=self.config.min_liquidity_usd,
@@ -156,7 +150,6 @@ class DexLaunchHunter:
                 logger.warning("Failed to fetch new pairs from DexScreener")
                 return
             
-            print(f"DEBUG [_scan_for_launches]: Found {len(new_pairs)} pairs to analyze", file=sys.stdout, flush=True)
             logger.info(f"Found {len(new_pairs)} new pairs to analyze")
             
             # Collect results for control panel
@@ -165,30 +158,20 @@ class DexLaunchHunter:
             # Limit pairs to analyze per cycle (prevent slow cycles)
             max_pairs_per_cycle = 20
             pairs_to_analyze = new_pairs[:max_pairs_per_cycle]
-            print(f"DEBUG [_scan_for_launches]: Limiting to {len(pairs_to_analyze)} pairs this cycle", file=sys.stdout, flush=True)
-            
-            analyzed_count = 0
-            skipped_count = 0
             
             # Analyze each new pair
-            for idx, pair in enumerate(pairs_to_analyze):
+            for pair in pairs_to_analyze:
                 try:
                     # Skip if already discovered
                     if pair.base_token_address.lower() in self.discovered_tokens:
-                        skipped_count += 1
                         continue
                     
                     # Skip if blacklisted
                     if pair.base_token_address.lower() in self.blacklisted_tokens:
-                        skipped_count += 1
                         continue
                     
                     self.total_scanned += 1
-                    analyzed_count += 1
                     
-                    print(f"DEBUG [_scan_for_launches]: Analyzing {idx+1}/{len(pairs_to_analyze)}: {pair.base_token_symbol}...", file=sys.stdout, flush=True)
-                    
-                    # We already have the pair from search, use it directly for faster analysis
                     # Add timeout to prevent hanging on individual token analysis
                     try:
                         success, token = await asyncio.wait_for(
@@ -196,11 +179,10 @@ class DexLaunchHunter:
                             timeout=30.0
                         )
                     except asyncio.TimeoutError:
-                        print(f"DEBUG [_scan_for_launches]: Analysis TIMEOUT for {pair.base_token_symbol}", file=sys.stdout, flush=True)
+                        logger.warning(f"Analysis timeout for {pair.base_token_symbol}")
                         continue
                     
                     if success and token:
-                        print(f"DEBUG [_scan_for_launches]: SUCCESS - {token.symbol} score={token.composite_score:.1f}", file=sys.stdout, flush=True)
                         logger.info(
                             f"Discovered: {token.symbol} - "
                             f"Score: {token.composite_score:.1f}, "
@@ -217,18 +199,13 @@ class DexLaunchHunter:
                             'volume_24h': token.volume_24h,
                             'timestamp': datetime.now().isoformat()
                         })
-                    else:
-                        print(f"DEBUG [_scan_for_launches]: No token returned for {pair.base_token_symbol}", file=sys.stdout, flush=True)
                     
                     # Small delay to avoid rate limits
                     await asyncio.sleep(0.5)
                     
                 except Exception as e:
-                    print(f"DEBUG [_scan_for_launches]: ERROR analyzing {pair.base_token_symbol}: {e}", file=sys.stdout, flush=True)
                     logger.error(f"Error analyzing pair {pair.base_token_symbol}: {e}")
                     continue
-            
-            print(f"DEBUG [_scan_for_launches]: Analysis complete. Analyzed={analyzed_count}, Skipped={skipped_count}, Results={len(results_for_panel)}", file=sys.stdout, flush=True)
             
             # Save results to control panel
             if results_for_panel:
@@ -431,8 +408,7 @@ class DexLaunchHunter:
             if contract_address.lower() in self.blacklisted_tokens:
                 return False, None
             
-            #  Safety analysis (pass pool address for Solana LP analysis)
-            print(f"DEBUG [_analyze_pair_directly]: Running safety analysis for {pair.base_token_symbol}...", file=sys.stdout, flush=True)
+            # Safety analysis (pass pool address for Solana LP analysis)
             pool_address = pair.pair_address if pair.chain == Chain.SOLANA else None
             try:
                 success, safety = await asyncio.wait_for(
@@ -443,9 +419,7 @@ class DexLaunchHunter:
                     ),
                     timeout=15.0
                 )
-                print(f"DEBUG [_analyze_pair_directly]: Safety analysis complete for {pair.base_token_symbol}", file=sys.stdout, flush=True)
             except asyncio.TimeoutError:
-                print(f"DEBUG [_analyze_pair_directly]: Safety analysis TIMEOUT for {pair.base_token_symbol}", file=sys.stdout, flush=True)
                 success = False
                 safety = ContractSafety()
             
