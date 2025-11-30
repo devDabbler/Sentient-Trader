@@ -1,0 +1,59 @@
+[server]
+# Allow connections from any IP (required for remote access)
+address = "0.0.0.0"
+port = 8501
+
+# Headless mode (no browser auto-launch on server)
+headless = true
+
+# Enable CORS for mobile/external access
+enableCORS = false
+enableXsrfProtection = false
+
+# WebSocket settings - CRITICAL FOR MOBILE
+# Mobile connections are slower, need longer timeouts
+enableWebsocketCompression = true
+
+# Max upload size (100MB)
+maxUploadSize = 100
+
+# Max message size for websockets (200MB) - prevents disconnects on large data
+maxMessageSize = 200
+
+[browser]
+# Don't collect usage stats
+gatherUsageStats = false
+
+# Server address for the browser (your public IP)
+# This helps with WebSocket connections on mobile
+serverAddress = "157.245.233.229"
+serverPort = 8501
+
+[client]
+# Show error details (helpful for debugging)
+showErrorDetails = true
+
+# Caching - reduces reload time
+caching = true
+
+# Toolbar mode - collapsed saves space on mobile
+toolbarMode = "minimal"
+
+[runner]
+# Fast reruns - improves responsiveness
+fastReruns = true
+
+# Magic commands enabled
+magicEnabled = true
+
+[theme]
+# Optional: Set a theme that works well on mobile
+# primaryColor = "#FF6B6B"
+# backgroundColor = "#0E1117"
+# secondaryBackgroundColor = "#262730"
+# textColor = "#FAFAFA"
+
+[logger]
+# Reduce log verbosity for production
+level = "warning"
+

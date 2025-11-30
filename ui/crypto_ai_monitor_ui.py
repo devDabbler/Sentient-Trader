@@ -306,12 +306,51 @@ def display_ai_position_monitor():
     if status['active_positions'] > 0:
         st.markdown("#### 🎯 Active Positions")
         
+        # Bulk intent controls
+        with st.expander("🎯 Set Intent for All Positions", expanded=False):
+            st.markdown("""
+            **Position Intent** controls how aggressively the AI suggests exits:
+            - 💎 **HODL** - Reduces sell alerts significantly. Only exits on catastrophic moves.
+            - 🔄 **SWING** - Standard swing trade rules (default).
+            - ⚡ **SCALP** - Tight stops, aggressive profit-taking.
+            """)
+            
+            bulk_col1, bulk_col2, bulk_col3 = st.columns(3)
+            
+            with bulk_col1:
+                if st.button("💎 Set All to HODL", key="bulk_hodl", use_container_width=True,
+                           help="Mark all positions as long-term holds"):
+                    count = ai_manager.set_all_positions_intent("HODL")
+                    if count > 0:
+                        st.success(f"✅ Set {count} position(s) to HODL")
+                        st.rerun()
+            
+            with bulk_col2:
+                if st.button("🔄 Set All to SWING", key="bulk_swing", use_container_width=True,
+                           help="Standard swing trade rules"):
+                    count = ai_manager.set_all_positions_intent("SWING")
+                    if count > 0:
+                        st.success(f"✅ Set {count} position(s) to SWING")
+                        st.rerun()
+            
+            with bulk_col3:
+                if st.button("⚡ Set All to SCALP", key="bulk_scalp", use_container_width=True,
+                           help="Quick trades with tight stops"):
+                    count = ai_manager.set_all_positions_intent("SCALP")
+                    if count > 0:
+                        st.success(f"✅ Set {count} position(s) to SCALP")
+                        st.rerun()
+        
         positions_data = []
         for trade_id, pos in status['positions'].items():
             if pos['status'] == 'ACTIVE':
                 # Calculate colors based on P&L
                 pnl = pos['pnl_pct']
                 pnl_color = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+                
+                # Intent emoji
+                intent = pos.get('position_intent', 'SWING')
+                intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(intent, "🔄")
                 
                 # Time formatting
                 hold_time = pos['hold_time_minutes']
@@ -324,6 +363,7 @@ def display_ai_position_monitor():
                 
                 positions_data.append({
                     'Pair': pos['pair'],
+                    'Intent': f"{intent_emoji} {intent}",
                     'Side': pos['side'],
                     'Entry': f"${pos['entry_price']:,.6f}",
                     'Current': f"${pos['current_price']:,.6f}",
@@ -332,9 +372,7 @@ def display_ai_position_monitor():
                     'Target': f"${pos['take_profit']:,.6f}",
                     'Hold Time': time_str,
                     'AI Action': pos['last_ai_action'],
-                    'AI Confidence': f"{pos['last_ai_confidence']:.0f}%",
-                    'BE': "✅" if pos['moved_to_breakeven'] else "❌",
-                    'Partial': "✅" if pos['partial_exit_taken'] else "❌"
+                    'BE': "✅" if pos['moved_to_breakeven'] else "❌"
                 })
         
         if positions_data:
@@ -348,7 +386,11 @@ def display_ai_position_monitor():
                 if pos['status'] != 'ACTIVE':
                     continue
                 
-                with st.expander(f"{pos['pair']} - {pos['side']} ({pos['pnl_pct']:+.2f}%)"):
+                # Intent info for header
+                intent = pos.get('position_intent', 'SWING')
+                intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(intent, "🔄")
+                
+                with st.expander(f"{intent_emoji} {pos['pair']} - {pos['side']} ({pos['pnl_pct']:+.2f}%)"):
                     detail_col1, detail_col2, detail_col3 = st.columns(3)
                     
                     with detail_col1:
@@ -367,9 +409,46 @@ def display_ai_position_monitor():
                     
                     with detail_col3:
                         st.markdown("**AI Analysis:**")
+                        st.write(f"- Intent: {intent_emoji} {intent}")
                         st.write(f"- Last Action: {pos['last_ai_action']}")
                         st.write(f"- Confidence: {pos['last_ai_confidence']:.0f}%")
                         st.write(f"- Status: {pos['status']}")
+                    
+                    # 💎 Position Intent Controls
+                    st.markdown("---")
+                    st.markdown("**🎯 Holding Strategy (Intent):**")
+                    intent_help = {
+                        "HODL": "💎 **HODL** - Long-term hold. Very tolerant of losses, minimal sell alerts. Only exits on catastrophic moves (>30% crash).",
+                        "SWING": "🔄 **SWING** - Standard swing trade. Balanced risk management with normal exit rules.",
+                        "SCALP": "⚡ **SCALP** - Quick trade. Tight stops, aggressive exits, low loss tolerance."
+                    }
+                    st.caption(intent_help.get(intent, ""))
+                    
+                    intent_col1, intent_col2, intent_col3 = st.columns(3)
+                    
+                    with intent_col1:
+                        hodl_type = "primary" if intent == "HODL" else "secondary"
+                        if st.button(f"💎 HODL", key=f"hodl_{trade_id}", type=hodl_type, 
+                                   help="Long-term hold - reduces sell alerts significantly"):
+                            if ai_manager.set_position_intent(pos['pair'], "HODL"):
+                                st.success(f"✅ {pos['pair']} set to HODL - sell alerts reduced")
+                                st.rerun()
+                    
+                    with intent_col2:
+                        swing_type = "primary" if intent == "SWING" else "secondary"
+                        if st.button(f"🔄 SWING", key=f"swing_{trade_id}", type=swing_type,
+                                   help="Standard swing trade rules"):
+                            if ai_manager.set_position_intent(pos['pair'], "SWING"):
+                                st.success(f"✅ {pos['pair']} set to SWING")
+                                st.rerun()
+                    
+                    with intent_col3:
+                        scalp_type = "primary" if intent == "SCALP" else "secondary"
+                        if st.button(f"⚡ SCALP", key=f"scalp_{trade_id}", type=scalp_type,
+                                   help="Quick trade with tight risk management"):
+                            if ai_manager.set_position_intent(pos['pair'], "SCALP"):
+                                st.success(f"✅ {pos['pair']} set to SCALP")
+                                st.rerun()
                     
                     # Manual controls
                     st.markdown("**Manual Controls:**")
@@ -467,6 +546,12 @@ def display_ai_position_monitor():
         4. **Risk/Reward**: Current R:R still favorable?
         5. **Time Factor**: Position duration and time-based momentum
         6. **Position Progress**: Near entry or near target?
+        7. **Position Intent**: Your chosen holding strategy (HODL/SWING/SCALP)
+        
+        **Position Intents:**
+        - 💎 **HODL**: Very tolerant of losses, minimal sell alerts, only exits on catastrophic moves (>30% crash)
+        - 🔄 **SWING**: Standard swing trade rules with balanced alerts (default)
+        - ⚡ **SCALP**: Tight stops, aggressive exits, quick profit-taking
         
         **AI Actions:**
         - **HOLD**: Trend intact, continue monitoring
@@ -481,15 +566,28 @@ def display_ai_position_monitor():
     if excluded_pairs:
         with st.expander(f"🚫 Excluded Pairs ({len(excluded_pairs)})"):
             st.write("These pairs are permanently ignored by the AI monitor.")
+            st.info("💡 **Tip:** When you re-include a pair, you can set its intent (HODL/SWING/SCALP) to control how aggressively AI suggests exits.")
             
             for pair in excluded_pairs:
-                col1, col2 = st.columns([3, 1])
+                col1, col2, col3 = st.columns([2, 1, 1])
                 with col1:
                     st.write(f"**{pair}**")
                 with col2:
+                    # Default intent selection for when re-including
+                    default_intent = st.selectbox(
+                        "Intent",
+                        options=["SWING", "HODL", "SCALP"],
+                        key=f"intent_select_{pair}",
+                        label_visibility="collapsed"
+                    )
+                with col3:
                     if st.button(f"✅ Include", key=f"include_{pair}"):
                         if ai_manager.include_pair(pair):
-                            st.success(f"✅ {pair} re-included for monitoring")
+                            # Store the selected intent for when position is synced
+                            if 'default_intents' not in st.session_state:
+                                st.session_state.default_intents = {}
+                            st.session_state.default_intents[pair] = default_intent
+                            st.success(f"✅ {pair} re-included (will sync with {default_intent} intent)")
                             st.rerun()
                         else:
                             st.error(f"Failed to include {pair}")
