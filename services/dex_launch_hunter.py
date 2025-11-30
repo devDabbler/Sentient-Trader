@@ -26,6 +26,8 @@ from models.dex_models import (
 from clients.dexscreener_client import DexScreenerClient
 from services.token_safety_analyzer import TokenSafetyAnalyzer
 from services.smart_money_tracker import SmartMoneyTracker
+from services.price_validator import PriceValidator
+from services.crypto_whale_tracker import CryptoWhaleTracker
 from windows_services.runners.service_config_loader import save_analysis_results
 
 # Optional X Sentiment integration
@@ -54,6 +56,8 @@ class DexLaunchHunter:
         self.dex_client = DexScreenerClient()
         self.safety_analyzer = TokenSafetyAnalyzer()
         self.smart_money_tracker = SmartMoneyTracker()
+        self.price_validator = PriceValidator()
+        self.whale_tracker = CryptoWhaleTracker()
         
         # X Sentiment integration (optional - catches early pump coins)
         # Uses local LLM (Ollama) - no budget limits needed
@@ -260,8 +264,13 @@ class DexLaunchHunter:
             
             primary_pair = pairs[0]  # Use highest liquidity pair
             
-            # 2. Safety analysis
-            success, safety = await self.safety_analyzer.analyze_token(contract_address, chain)
+            # 2. Safety analysis (pass pool address for Solana LP analysis)
+            pool_address = primary_pair.pair_address if chain == Chain.SOLANA else None
+            success, safety = await self.safety_analyzer.analyze_token(
+                contract_address, 
+                chain,
+                pool_address=pool_address
+            )
             
             if not success:
                 logger.warning(f"Safety analysis failed for {contract_address}")
@@ -272,17 +281,39 @@ class DexLaunchHunter:
             
             # 4. Check if it passes minimum safety requirements
             if self.config.verify_contract_before_alert:
+                # HARD REJECT: Solana on-chain checks failed (mint/freeze authority or LP in EOA)
+                if safety.safety_score == 0.0 and chain == Chain.SOLANA:
+                    logger.warning(f"🚨 Blacklisting Solana token (on-chain check failed): {contract_address}")
+                    # Log the specific reason
+                    if not safety.solana_mint_authority_revoked:
+                        logger.warning(f"   Reason: Mint authority retained")
+                    if not safety.solana_freeze_authority_revoked:
+                        logger.warning(f"   Reason: Freeze authority retained")
+                    if safety.solana_lp_owner_type == 'EOA_unknown':
+                        logger.warning(f"   Reason: LP tokens in EOA wallet (rug risk)")
+                    self.blacklisted_tokens.add(contract_address.lower())
+                    return False, None
+                
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
                     logger.warning(f"Blacklisting honeypot: {contract_address}")
                     self.blacklisted_tokens.add(contract_address.lower())
                     return False, None
                 
                 if (safety.buy_tax > 15 or safety.sell_tax > 15) and self.config.auto_blacklist_high_tax:
-                    logger.warning(f"Blacklisting high tax token: {contract_address}")
+                    logger.warning(f"Blacklisting high tax token: {contract_address} (buy: {safety.buy_tax}%, sell: {safety.sell_tax}%)")
                     self.blacklisted_tokens.add(contract_address.lower())
                     return False, None
             
-            # 5. Build TokenLaunch object
+            # 5. Validate price data across sources (for Solana, compare with Birdeye)
+            price_validation = await self.price_validator.validate_price_data(
+                contract_address=contract_address,
+                chain=chain,
+                dexscreener_price=primary_pair.price_usd,
+                dexscreener_liquidity=primary_pair.liquidity_usd,
+                dexscreener_volume_24h=primary_pair.volume_24h
+            )
+            
+            # 6. Build TokenLaunch object
             token = TokenLaunch(
                 symbol=primary_pair.base_token_symbol,
                 name=primary_pair.base_token_symbol,  # DexScreener might not have full name
@@ -299,16 +330,28 @@ class DexLaunchHunter:
                 contract_safety=safety,
                 risk_level=risk_level,
                 age_hours=primary_pair.pair_age_hours,
-                launched_at=primary_pair.created_at
+                launched_at=primary_pair.created_at,
+                holder_distribution=safety.solana_holder_distribution if chain == Chain.SOLANA else None,
+                price_consistency_score=price_validation.get('consistency_score'),
+                price_validation_warnings=price_validation.get('warnings', [])
             )
             
-            # 6. Determine launch stage
+            # Add price validation warnings to alert reasons
+            if price_validation.get('warnings'):
+                # Store warnings in token's alert reasons (if exists) or safety flags
+                if safety:
+                    safety.solana_risk_flags.extend(price_validation.get('warnings', []))
+            
+            # 7. Check smart money/whale activity for this token
+            await self._enrich_with_whale_activity(token)
+            
+            # 8. Determine launch stage
             token.launch_stage = self._get_launch_stage(token.age_hours)
             
-            # 7. Score the token
+            # 9. Score the token
             token = self._score_token(token)
             
-            # 8. Store in discovered tokens
+            # 10. Store in discovered tokens
             self.discovered_tokens[contract_address.lower()] = token
             
             logger.info(
@@ -352,8 +395,13 @@ class DexLaunchHunter:
             if contract_address.lower() in self.blacklisted_tokens:
                 return False, None
             
-            #  Safety analysis
-            success, safety = await self.safety_analyzer.analyze_token(contract_address, pair.chain)
+            #  Safety analysis (pass pool address for Solana LP analysis)
+            pool_address = pair.pair_address if pair.chain == Chain.SOLANA else None
+            success, safety = await self.safety_analyzer.analyze_token(
+                contract_address, 
+                pair.chain,
+                pool_address=pool_address
+            )
             
             if not success:
                 logger.warning(f"Safety analysis failed for {contract_address}")
@@ -364,6 +412,12 @@ class DexLaunchHunter:
             
             # Check minimum safety requirements
             if self.config.verify_contract_before_alert:
+                # HARD REJECT: Solana on-chain checks failed (mint/freeze authority or LP in EOA)
+                if safety.safety_score == 0.0 and pair.chain == Chain.SOLANA:
+                    logger.warning(f"🚨 Blacklisting Solana token (on-chain check failed): {contract_address}")
+                    self.blacklisted_tokens.add(contract_address.lower())
+                    return False, None
+                
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
                     logger.warning(f"Blacklisting honeypot: {contract_address}")
                     self.blacklisted_tokens.add(contract_address.lower())
@@ -391,8 +445,12 @@ class DexLaunchHunter:
                 contract_safety=safety,
                 risk_level=risk_level,
                 age_hours=pair.pair_age_hours,
-                launched_at=pair.created_at
+                launched_at=pair.created_at,
+                holder_distribution=safety.solana_holder_distribution if pair.chain == Chain.SOLANA else None
             )
+            
+            # Check smart money/whale activity for this token
+            await self._enrich_with_whale_activity(token)
             
             # Determine launch stage
             token.launch_stage = self._get_launch_stage(token.age_hours)
@@ -447,6 +505,100 @@ class DexLaunchHunter:
         except Exception as e:
             logger.debug(f"Error verifying token {address}: {e}")
             return False
+    
+    async def _enrich_with_whale_activity(self, token: TokenLaunch):
+        """
+        Enrich token with whale activity and smart money data
+        
+        Combines:
+        1. Smart money tracker (specific wallets buying this token)
+        2. CryptoWhaleTracker (general whale transaction insights)
+        
+        Updates:
+        - token.smart_money: List of SmartMoneyActivity
+        - token.whale_activity_score: Combined score 0-100
+        """
+        try:
+            smart_money_activities = []
+            whale_score = 0.0
+            
+            # 1. Check if tracked wallets are buying this token
+            # Look through recent smart money activities to find this token
+            recent_activities = self.smart_money_tracker.recent_activities
+            
+            # Filter activities that might relate to this token
+            # Note: SmartMoneyActivity doesn't store token address directly,
+            # so we'd need to check transaction details (would require parsing tx data)
+            # For now, we'll use a simplified approach: check all recent BUY activities
+            # In production, you'd parse transaction data to extract token addresses
+            
+            # Count recent smart money buy activities as a signal
+            recent_buy_activities = [
+                a for a in recent_activities
+                if a.action == "BUY" and a.amount_usd >= self.config.min_whale_buy_usd
+            ]
+            
+            if recent_buy_activities:
+                # Smart money is active (even if we can't confirm it's this exact token)
+                # This boosts confidence that whales are active in the market
+                smart_money_boost = min(len(recent_buy_activities) * 5, 30)  # Max 30 points
+                whale_score += smart_money_boost
+                logger.debug(f"🐋 Smart money activity detected: {len(recent_buy_activities)} recent buys")
+            
+            # 2. Get general whale activity insights via CryptoWhaleTracker
+            try:
+                # Convert chain enum to string for whale tracker
+                chain_str = token.chain.value if hasattr(token.chain, 'value') else str(token.chain)
+                
+                # Get whale insights (last 24 hours)
+                whale_insights = await self.whale_tracker.get_whale_insights(
+                    symbol=token.symbol,
+                    chain=chain_str,
+                    hours=24
+                )
+                
+                if whale_insights and whale_insights.get('whale_activity_score', 0) > 0:
+                    # Combine general whale activity score
+                    general_whale_score = whale_insights.get('whale_activity_score', 0)
+                    
+                    # Weight: 70% general whale activity, 30% smart money boost
+                    if whale_score > 0:
+                        whale_score = (general_whale_score * 0.7) + (whale_score * 0.3)
+                    else:
+                        whale_score = general_whale_score
+                    
+                    # Store smart money activities if any found
+                    if whale_insights.get('total_transactions', 0) > 0:
+                        logger.info(
+                            f"🐋 Whale activity for {token.symbol}: "
+                            f"score={whale_score:.1f}, "
+                            f"txns={whale_insights.get('total_transactions', 0)}"
+                        )
+                        
+                        # Add alert reason if significant whale activity
+                        if whale_score >= 50:
+                            token.alert_reasons.append(
+                                f"🐋 High whale activity (score: {whale_score:.0f})"
+                            )
+                            
+            except Exception as e:
+                logger.debug(f"Could not get whale insights for {token.symbol}: {e}")
+            
+            # Store results
+            token.smart_money = recent_buy_activities[:10]  # Store top 10
+            token.whale_activity_score = min(whale_score, 100.0)
+            
+            if token.whale_activity_score > 0:
+                logger.debug(
+                    f"📊 {token.symbol} whale activity score: {token.whale_activity_score:.1f}/100"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error enriching whale activity for {token.symbol}: {e}", exc_info=True)
+            # Set defaults on error
+            if not hasattr(token, 'smart_money') or not token.smart_money:
+                token.smart_money = []
+            token.whale_activity_score = 0.0
     
     def _score_token(self, token: TokenLaunch) -> TokenLaunch:
         """Calculate scoring for token launch potential"""
@@ -505,8 +657,10 @@ class DexLaunchHunter:
         if not hasattr(token, 'social_buzz_score') or token.social_buzz_score is None:
             token.social_buzz_score = 0.0
         
-        # 4. Whale Activity Score (placeholder - implement with smart money tracker)
-        token.whale_activity_score = 0.0
+        # 4. Whale Activity Score (calculated in _enrich_with_whale_activity)
+        # If not set yet, default to 0.0
+        if not hasattr(token, 'whale_activity_score') or token.whale_activity_score is None:
+            token.whale_activity_score = 0.0
         
         # 2.5. VOLUME SPIKE DETECTION (NEW - Catch early momentum!)
         volume_spike_score = 0.0
@@ -548,18 +702,42 @@ class DexLaunchHunter:
         # 5. Composite Score (weighted average with X sentiment)
         safety_score = token.contract_safety.safety_score if token.contract_safety else 0
         
-        # If we have X sentiment data, include it in scoring
-        if token.social_buzz_score > 0:
+        # Calculate composite score with available data
+        # Weight adjustments based on what data we have
+        has_social = token.social_buzz_score > 0
+        has_whale = token.whale_activity_score > 0
+        
+        if has_social and has_whale:
+            # Full scoring with all signals
+            token.composite_score = (
+                token.pump_potential_score * 0.20 +    # 20% pump potential
+                token.velocity_score * 0.15 +          # 15% momentum
+                token.volume_spike_score * 0.15 +      # 15% volume surge
+                token.social_buzz_score * 0.15 +       # 15% X sentiment
+                token.whale_activity_score * 0.15 +    # 15% whale activity
+                safety_score * 0.20                    # 20% safety
+            )
+            logger.debug(f"📊 {token.symbol} full score: social={token.social_buzz_score:.1f}, whale={token.whale_activity_score:.1f}")
+        elif has_social:
+            # X sentiment but no whale data
             token.composite_score = (
                 token.pump_potential_score * 0.25 +    # 25% pump potential
                 token.velocity_score * 0.20 +          # 20% momentum
                 token.volume_spike_score * 0.15 +      # 15% volume surge
-                token.social_buzz_score * 0.20 +       # 20% X sentiment (NEW!)
+                token.social_buzz_score * 0.20 +       # 20% X sentiment
                 safety_score * 0.20                    # 20% safety
             )
-            logger.debug(f"\U0001F426 {token.symbol} score includes X sentiment: {token.social_buzz_score:.1f}")
+        elif has_whale:
+            # Whale activity but no social data
+            token.composite_score = (
+                token.pump_potential_score * 0.25 +    # 25% pump potential
+                token.velocity_score * 0.20 +          # 20% momentum
+                token.volume_spike_score * 0.15 +      # 15% volume surge
+                token.whale_activity_score * 0.15 +    # 15% whale activity
+                safety_score * 0.25                    # 25% safety
+            )
         else:
-            # No X data yet, use original weights
+            # No X or whale data, use original weights
             token.composite_score = (
                 token.pump_potential_score * 0.30 +    # 30% pump potential
                 token.velocity_score * 0.25 +          # 25% momentum
