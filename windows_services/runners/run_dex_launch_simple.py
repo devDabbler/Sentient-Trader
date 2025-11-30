@@ -126,18 +126,27 @@ try:
     logger.info("=" * 70)
     logger.info("")
     
+    # CRITICAL DEBUG: Verify we're still executing
+    logger.info("DEBUG: After SERVICE READY print - execution continuing...")
+    print("DEBUG: After SERVICE READY print - execution continuing...", file=sys.stdout, flush=True)
+    sys.stdout.flush()
+    
     # Write status file for batch script verification
     logger.info("DEBUG: About to write status file...")
+    print("DEBUG: About to write status file...", file=sys.stdout, flush=True)
     sys.stdout.flush()
     try:
         status_file = PROJECT_ROOT / "logs" / ".dex_launch_ready"
         status_file.write_text(f"SERVICE READY at {time.time()}")
         logger.info("DEBUG: Status file written successfully")
+        print("DEBUG: Status file written successfully", file=sys.stdout, flush=True)
     except Exception as e:
         logger.error(f"DEBUG: Error writing status file: {e}", exc_info=True)
+        print(f"DEBUG: Error writing status file: {e}", file=sys.stdout, flush=True)
     sys.stdout.flush()
     
     logger.info("DEBUG: Status file written, about to define monitor_loop()...")
+    print("DEBUG: Status file written, about to define monitor_loop()...", file=sys.stdout, flush=True)
     sys.stdout.flush()
     
     # Async monitoring loop
