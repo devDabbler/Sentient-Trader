@@ -62,6 +62,25 @@ class PositionStatus(Enum):
     EXCLUDED = "EXCLUDED"
 
 
+class PositionIntent(Enum):
+    """
+    User's intended holding strategy for a position.
+    This affects how aggressively the AI suggests exits.
+    """
+    HODL = "HODL"          # Long-term hold - very tolerant of losses, minimal sell alerts
+    SWING = "SWING"        # Medium-term trade - standard exit rules
+    SCALP = "SCALP"        # Quick trade - tight stops, aggressive exits
+    
+    @classmethod
+    def get_description(cls, intent: str) -> str:
+        descriptions = {
+            "HODL": "Long-term hold - Will ride through volatility. Only alert on catastrophic moves.",
+            "SWING": "Swing trade - Standard risk management with balanced alerts.",
+            "SCALP": "Quick trade - Tight stops, aggressive profit-taking."
+        }
+        return descriptions.get(intent, "Unknown intent")
+
+
 @dataclass
 class MonitoredCryptoPosition:
     """Tracked crypto position with AI management"""
@@ -87,6 +106,10 @@ class MonitoredCryptoPosition:
     moved_to_breakeven: bool = False
     partial_exit_taken: bool = False
     partial_exit_pct: float = 0.0
+    
+    # Position Intent - Controls how aggressive AI is with sell alerts
+    # HODL = very tolerant, SWING = balanced, SCALP = aggressive exits
+    position_intent: str = PositionIntent.SWING.value
     
     # Status
     status: str = PositionStatus.ACTIVE.value
@@ -615,9 +638,41 @@ class AICryptoPositionManager:
         current_price: float,
         pnl_pct: float
     ) -> Optional[AITradeDecision]:
-        """Check if stop loss or take profit hit"""
+        """Check if stop loss or take profit hit, respecting position intent"""
         
-        # Stop loss check
+        intent = position.position_intent
+        
+        # HODL intent: Much more lenient - only exit on catastrophic moves
+        # Skip normal stop loss for HODL positions, only emergency exits
+        if intent == PositionIntent.HODL.value:
+            # For HODL, only trigger stop if it's a TRUE emergency (>30% crash)
+            catastrophic_threshold = 0.30  # 30% loss threshold for HODL
+            
+            if pnl_pct <= -catastrophic_threshold * 100:
+                log_and_print(f"   ⚠️ HODL position {position.pair} hit catastrophic loss ({pnl_pct:.1f}%)", "WARNING")
+                return AITradeDecision(
+                    action=PositionAction.CLOSE_NOW.value,
+                    confidence=90.0,
+                    reasoning=f"HODL position hit catastrophic loss of {pnl_pct:.1f}% - this exceeds normal volatility",
+                    urgency="HIGH"
+                )
+            
+            # For HODL, still check take profit but log that we're respecting intent
+            if position.side == 'BUY' and current_price >= position.take_profit:
+                return AITradeDecision(
+                    action=PositionAction.CLOSE_NOW.value,
+                    confidence=100.0,
+                    reasoning=f"Take profit target reached at ${current_price:,.2f} - HODL goal achieved!",
+                    urgency="MEDIUM"
+                )
+            
+            # HODL positions ignore normal stop loss
+            if current_price <= position.stop_loss:
+                log_and_print(f"   💎 {position.pair}: Stop loss level reached but HODL intent active - holding through volatility")
+            
+            return None
+        
+        # Standard stop loss check for SWING/SCALP
         if position.side == 'BUY':
             if current_price <= position.stop_loss:
                 return AITradeDecision(
@@ -960,11 +1015,50 @@ class AICryptoPositionManager:
             sentiment_score: Aggregate sentiment score (0-100)
         """
         
+        # Get position intent and build intent-specific context
+        intent = position.position_intent
+        intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(intent, "📊")
+        
+        # Intent-specific instructions that dramatically change AI behavior
+        if intent == PositionIntent.HODL.value:
+            intent_context = f"""
+🚨 **CRITICAL: USER INTENT = {intent_emoji} HODL (LONG-TERM HOLD)** 🚨
+The user has explicitly marked this as a LONG-TERM HOLD position. They are:
+- INTENTIONALLY holding through volatility and temporary losses
+- NOT interested in frequent sell/exit alerts
+- Willing to wait for recovery rather than realize losses
+- Only wants alerts for CATASTROPHIC situations (>30% crash, project failure, etc.)
+
+**YOU MUST:**
+- Default to HOLD unless there is a CRITICAL reason to exit
+- Do NOT suggest CLOSE_NOW for normal market volatility
+- Do NOT suggest CLOSE_NOW just because the position is in the red
+- Only suggest exit if: major security breach, rug pull warning, extreme market crash (>25% in hours)
+- Be supportive of their hold strategy, not alarming
+"""
+        elif intent == PositionIntent.SCALP.value:
+            intent_context = f"""
+**USER INTENT = {intent_emoji} SCALP (QUICK TRADE)**
+The user is actively trading this position for quick profits. They want:
+- Tight risk management and quick exits
+- Aggressive profit-taking suggestions
+- Low tolerance for drawdowns
+- Fast action recommendations
+"""
+        else:  # SWING (default)
+            intent_context = f"""
+**USER INTENT = {intent_emoji} SWING (STANDARD TRADE)**
+The user is swing trading this position with standard risk management.
+Apply balanced analysis with normal exit rules.
+"""
+        
         prompt = f"""
 Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend the BEST action.
 
+{intent_context}
+
 **Position Details:**
-- Asset: {position.pair} ({position.side} position)
+- Asset: {position.pair} ({position.side} LONG position)
 - Entry: ${position.entry_price:,.2f} at {position.entry_time.strftime('%Y-%m-%d %H:%M:%S')}
 - Current: ${current_price:,.2f} (P&L: {pnl_pct:+.2f}%)
 - Stop Loss: ${position.stop_loss:,.2f} | Take Profit: ${position.take_profit:,.2f}
@@ -974,6 +1068,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
 - Max Drawdown: {position.max_adverse_pct:+.2f}%
 - Breakeven Moved: {position.moved_to_breakeven}
 - Partial Exit Taken: {position.partial_exit_taken}
+- **Position Intent: {intent_emoji} {intent}**
 
 **Technical Indicators:**"""
         
@@ -1020,14 +1115,44 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
 **News Context:** No significant news in last 2 hours (market quiet)
 """
         
-        prompt += """
-**Decision Framework:**
+        # Build intent-specific decision rules
+        if intent == PositionIntent.HODL.value:
+            decision_rules = """
+**🛡️ HODL-SPECIFIC DECISION RULES (RESPECT USER'S LONG-TERM INTENT):**
+- **DEFAULT ACTION = HOLD** - The user is intentionally holding long-term
+- Only recommend CLOSE_NOW if: rug pull detected, exchange hack, project abandoned, or >30% crash in hours
+- Do NOT recommend exit just because position is down 5-15% - this is NORMAL volatility
+- If in loss: Suggest HOLD with supportive reasoning about potential recovery
+- Loss threshold for exit suggestion: Only if >25% loss AND clear fundamental breakdown
+- For news: Only react to CATASTROPHIC news (security breaches, regulatory shutdown)
+- Normal market FUD should result in HOLD, not exit
+- Your job is to SUPPORT their holding strategy, not second-guess it
+
+**When position is in LOSS and intent is HODL:**
+- Acknowledge the current loss but emphasize the long-term view
+- Do NOT suggest cutting losses unless truly catastrophic
+- Confidence for HOLD should be HIGH (75-90%) for normal volatility"""
+        elif intent == PositionIntent.SCALP.value:
+            decision_rules = """
+**⚡ SCALP-SPECIFIC DECISION RULES:**
+- Be aggressive with exits - quick trades should have tight risk management
+- Any loss >3% should trigger exit consideration
+- Any profit >5% should trigger partial profit taking
+- High urgency on all recommendations
+- Quick action is key - don't wait for confirmation"""
+        else:  # SWING
+            decision_rules = """
+**🔄 SWING TRADE DECISION RULES (STANDARD):**
 Analyze the position using these factors:
 1. **Trend Strength**: Is momentum building or weakening?
 2. **News Impact**: How does recent sentiment affect this position?
 3. **Risk/Reward**: Is current R:R still favorable given market context?
 4. **Technical Signals**: What do indicators suggest?
-5. **Position Progress**: Are we near entry or near target?
+5. **Position Progress**: Are we near entry or near target?"""
+
+        prompt += f"""
+**Decision Framework:**
+{decision_rules}
 
 **Available Actions:**
 1. **HOLD** - Continue monitoring, no changes needed
@@ -1042,12 +1167,13 @@ Analyze the position using these factors:
 - If sentiment contradicts technicals → Prioritize recent news (sentiment often leads price)
 - If HIGH impact news (regulation, hacks, partnerships) → Increase URGENCY
 - If no news and technicals favorable → Trust the technical setup
+- **RESPECT THE USER'S INTENT: {intent}** - This is their chosen strategy!
 
 **Respond ONLY with valid JSON (no other text):**
-{
+{{
     "action": "HOLD|TIGHTEN_STOP|EXTEND_TARGET|TAKE_PARTIAL|CLOSE_NOW",
     "confidence": 0-100,
-    "reasoning": "Brief 1-2 sentence explanation citing news/technical factors",
+    "reasoning": "Brief 1-2 sentence explanation citing news/technical factors AND respecting {intent} intent",
     "urgency": "LOW|MEDIUM|HIGH",
     "new_stop": price_value_or_null,
     "new_target": price_value_or_null,
@@ -1055,7 +1181,7 @@ Analyze the position using these factors:
     "technical_score": 0-100,
     "trend_score": 0-100,
     "risk_score": 0-100
-}
+}}
 """
         
         return prompt
@@ -1491,6 +1617,83 @@ Analyze the position using these factors:
             logger.error(f"Error including pair {pair}: {e}")
             return False
     
+    def set_position_intent(self, pair: str, intent: str) -> bool:
+        """
+        Set the holding intent for a position.
+        
+        Args:
+            pair: Trading pair (e.g., 'BILLY/USD')
+            intent: 'HODL', 'SWING', or 'SCALP'
+                - HODL: Long-term hold, very tolerant of losses, minimal sell alerts
+                - SWING: Standard swing trade rules (default)
+                - SCALP: Quick trade, tight stops, aggressive exit suggestions
+        
+        Returns:
+            True if intent was set successfully
+        """
+        # Validate intent
+        valid_intents = [i.value for i in PositionIntent]
+        intent = intent.upper()
+        if intent not in valid_intents:
+            log_and_print(f"❌ Invalid intent '{intent}'. Must be one of: {valid_intents}", "ERROR")
+            return False
+        
+        # Find positions for this pair
+        updated_count = 0
+        for trade_id, position in self.positions.items():
+            if position.pair == pair:
+                old_intent = position.position_intent
+                position.position_intent = intent
+                updated_count += 1
+                
+                intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(intent, "📊")
+                log_and_print(f"{intent_emoji} Set {pair} intent: {old_intent} → {intent}")
+                log_and_print(f"   {PositionIntent.get_description(intent)}")
+        
+        if updated_count == 0:
+            log_and_print(f"⚠️ No active positions found for {pair}", "WARNING")
+            return False
+        
+        self._save_state()
+        return True
+    
+    def set_all_positions_intent(self, intent: str) -> int:
+        """
+        Set the holding intent for ALL active positions.
+        
+        Args:
+            intent: 'HODL', 'SWING', or 'SCALP'
+        
+        Returns:
+            Number of positions updated
+        """
+        valid_intents = [i.value for i in PositionIntent]
+        intent = intent.upper()
+        if intent not in valid_intents:
+            log_and_print(f"❌ Invalid intent '{intent}'. Must be one of: {valid_intents}", "ERROR")
+            return 0
+        
+        updated_count = 0
+        for trade_id, position in self.positions.items():
+            if position.status == PositionStatus.ACTIVE.value:
+                position.position_intent = intent
+                updated_count += 1
+        
+        if updated_count > 0:
+            intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(intent, "📊")
+            log_and_print(f"{intent_emoji} Set ALL {updated_count} positions to {intent} intent")
+            log_and_print(f"   {PositionIntent.get_description(intent)}")
+            self._save_state()
+        
+        return updated_count
+    
+    def get_position_intent(self, pair: str) -> Optional[str]:
+        """Get the current intent for a position"""
+        for position in self.positions.values():
+            if position.pair == pair:
+                return position.position_intent
+        return None
+    
     def _save_state(self):
         """Save position state to file"""
         try:
@@ -1609,9 +1812,10 @@ Analyze the position using these factors:
                             if pos.current_price and pos.entry_price:
                                 pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
                             pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                            intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(pos.position_intent, "📊")
                             hold_hours = (datetime.now() - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
-                            log_and_print(f"   {pnl_emoji} {pos.pair}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
-                            log_and_print(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f}")
+                            log_and_print(f"   {pnl_emoji} {pos.pair} {intent_emoji}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
+                            log_and_print(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f} | Intent: {pos.position_intent}")
                     
                     # Monitor all positions
                     log_and_print("")
@@ -1936,7 +2140,8 @@ Analyze the position using these factors:
                     'last_ai_confidence': pos.last_ai_confidence,
                     'moved_to_breakeven': pos.moved_to_breakeven,
                     'partial_exit_taken': pos.partial_exit_taken,
-                    'status': pos.status
+                    'status': pos.status,
+                    'position_intent': pos.position_intent  # HODL, SWING, or SCALP
                 }
                 for trade_id, pos in self.positions.items()
             },
