@@ -132,11 +132,24 @@ try:
     
     # Async monitoring loop
     async def monitor_loop():
+        logger.info("=" * 70)
         logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
+        logger.info("=" * 70)
         
         # Start announcement monitoring in background
         logger.info("DEBUG: Creating monitor_task...")
-        monitor_task = asyncio.create_task(monitor.start_monitoring())
+        try:
+            # Wrap in timeout to catch hangs
+            async def start_monitor_with_timeout():
+                logger.info("DEBUG: Calling monitor.start_monitoring()...")
+                await monitor.start_monitoring()
+            
+            monitor_task = asyncio.create_task(start_monitor_with_timeout())
+            logger.info("DEBUG: monitor_task created successfully")
+        except Exception as e:
+            logger.error(f"ERROR creating monitor_task: {e}", exc_info=True)
+            raise
+        
         logger.info("DEBUG: monitor_task created, entering main loop...")
         
         scan_counter = 0
@@ -252,7 +265,16 @@ try:
             monitor_task.cancel()
     
     # Run the async loop
-    asyncio.run(monitor_loop())
+    logger.info("DEBUG: About to start async monitor_loop()...")
+    logger.info("DEBUG: Calling asyncio.run(monitor_loop()) now...")
+    sys.stdout.flush()  # Force flush before async call
+    
+    try:
+        asyncio.run(monitor_loop())
+    except Exception as e:
+        logger.error(f"ERROR in asyncio.run(): {e}", exc_info=True)
+        sys.stdout.flush()
+        raise
 
 except KeyboardInterrupt:
     logger.info("Service stopped by user")
