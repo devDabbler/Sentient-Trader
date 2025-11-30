@@ -26,6 +26,7 @@ from datetime import datetime
 import importlib
 from typing import Any, Optional
 import platform
+import binascii
 
 # Try to import TOTP library dynamically to avoid static linter errors when dev env
 # doesn't have these optional dependencies installed.  Uses importlib so Pylance
@@ -52,7 +53,36 @@ except Exception:
 ADMIN_PASSWORD = os.getenv("CONTROL_PANEL_PASSWORD", "admin")  # Set your own
 
 # TOTP Secret for 2FA (generate with: python -c "import pyotp; print(pyotp.random_base32())")
-TOTP_SECRET = os.getenv("CONTROL_PANEL_TOTP_SECRET")
+def sanitize_totp_secret(secret: Optional[str]) -> Optional[str]:
+    """Sanitize and validate TOTP secret from environment variable."""
+    if not secret:
+        return None
+    
+    # Strip whitespace and quotes
+    secret = secret.strip().strip('"').strip("'")
+    
+    # Validate it's valid base32 (only A-Z, 2-7 allowed)
+    if not secret:
+        return None
+    
+    # Check if it contains only valid base32 characters
+    valid_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZ234567')
+    if not all(c.upper() in valid_chars for c in secret):
+        print(f"[WARNING] TOTP_SECRET contains invalid characters. Only A-Z and 2-7 are allowed in base32.")
+        return None
+    
+    # Convert to uppercase (base32 is case-insensitive but pyotp expects uppercase)
+    secret = secret.upper()
+    
+    # Validate length (should be at least 16 characters for TOTP)
+    if len(secret) < 16:
+        print(f"[WARNING] TOTP_SECRET is too short (minimum 16 characters).")
+        return None
+    
+    return secret
+
+_raw_totp_secret = os.getenv("CONTROL_PANEL_TOTP_SECRET")
+TOTP_SECRET = sanitize_totp_secret(_raw_totp_secret)
 TOTP_ENABLED = TOTP_AVAILABLE and TOTP_SECRET and len(TOTP_SECRET) >= 16
 
 # Service intervals config file path
@@ -1008,26 +1038,31 @@ def check_password():
                 # pyotp and qrcode were loaded dynamically above; assert for static checkers
                 assert pyotp is not None, "pyotp module is required for TOTP functionality"
                 assert qrcode is not None, "qrcode module is required for QR generation"
-                totp = pyotp.TOTP(TOTP_SECRET)
-                provisioning_uri = totp.provisioning_uri(
-                    name="admin",
-                    issuer_name="Sentient Trader"
-                )
-                
-                # Generate QR code
-                qr = qrcode.QRCode(version=1, box_size=5, border=2)
-                qr.add_data(provisioning_uri)
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                
-                # Convert to base64 for display
-                buffer = io.BytesIO()
-                img.save(buffer)
-                buffer.seek(0)
-                img_str = base64.b64encode(buffer.getvalue()).decode()
-                
-                st.image(f"data:image/png;base64,{img_str}", caption="Scan with Google Authenticator / Authy")
-                st.caption(f"Or enter manually: `{TOTP_SECRET}`")
+                try:
+                    totp = pyotp.TOTP(TOTP_SECRET)
+                    provisioning_uri = totp.provisioning_uri(
+                        name="admin",
+                        issuer_name="Sentient Trader"
+                    )
+                    
+                    # Generate QR code
+                    qr = qrcode.QRCode(version=1, box_size=5, border=2)
+                    qr.add_data(provisioning_uri)
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    
+                    # Convert to base64 for display
+                    buffer = io.BytesIO()
+                    img.save(buffer)
+                    buffer.seek(0)
+                    img_str = base64.b64encode(buffer.getvalue()).decode()
+                    
+                    st.image(f"data:image/png;base64,{img_str}", caption="Scan with Google Authenticator / Authy")
+                    st.caption(f"Or enter manually: `{TOTP_SECRET}`")
+                except (binascii.Error, ValueError) as e:
+                    st.error(f"❌ Invalid TOTP secret in configuration. Error: {str(e)}")
+                    st.warning("Please regenerate your TOTP secret using: `python -c \"import pyotp; print(pyotp.random_base32())\"`")
+                    st.caption(f"Current secret (first 20 chars): `{TOTP_SECRET[:20] if TOTP_SECRET else 'None'}...`")
             
             col_code, col_chk = st.columns([3, 1])
             with col_code:
@@ -1040,35 +1075,41 @@ def check_password():
             if st.button("Verify Code", type="primary"):
                 # runtime guard for static type checkers
                 assert pyotp is not None, "pyotp module is required for TOTP functionality"
-                totp = pyotp.TOTP(TOTP_SECRET)
-                if totp.verify(totp_code, valid_window=1):
-                    st.session_state.authenticated = True
-                    
-                    # Handle Remember Me
-                    if remember_me:
-                        token = generate_auth_token()
-                        tokens = load_auth_tokens()
-                        tokens[token] = {
-                            "created": time.time(),
-                            "expires": time.time() + (30 * 24 * 3600),  # 30 days
-                            "user_agent": "user"
-                        }
-                        save_auth_tokens(tokens)
+                try:
+                    totp = pyotp.TOTP(TOTP_SECRET)
+                    if totp.verify(totp_code, valid_window=1):
+                        st.session_state.authenticated = True
                         
-                        # Set query param for bookmarking
-                        try:
-                            st.query_params["auth_token"] = token
-                        except:
-                            st.experimental_set_query_params(auth_token=token)
+                        # Handle Remember Me
+                        if remember_me:
+                            token = generate_auth_token()
+                            tokens = load_auth_tokens()
+                            tokens[token] = {
+                                "created": time.time(),
+                                "expires": time.time() + (30 * 24 * 3600),  # 30 days
+                                "user_agent": "user"
+                            }
+                            save_auth_tokens(tokens)
                             
-                        st.session_state.auth_token = token
-                        st.success("✅ Login successful! Bookmark this URL to stay logged in.")
-                        time.sleep(1)
-                    
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid code. Try again.")
-                    print(f"[SECURITY] Failed TOTP attempt at {datetime.now()}")
+                            # Set query param for bookmarking
+                            try:
+                                st.query_params["auth_token"] = token
+                            except:
+                                st.experimental_set_query_params(auth_token=token)
+                                
+                            st.session_state.auth_token = token
+                            st.success("✅ Login successful! Bookmark this URL to stay logged in.")
+                            time.sleep(1)
+                        
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid code. Try again.")
+                        print(f"[SECURITY] Failed TOTP attempt at {datetime.now()}")
+                except (binascii.Error, ValueError) as e:
+                    st.error(f"❌ Configuration Error: Invalid TOTP secret. {str(e)}")
+                    st.warning("The TOTP secret in your .env file is not valid base32 format.")
+                    st.info("To fix: Regenerate a new secret using: `python -c \"import pyotp; print(pyotp.random_base32())\"`")
+                    print(f"[ERROR] TOTP secret validation failed: {str(e)}")
         
         # No TOTP, password was enough
         elif st.session_state.password_verified and not TOTP_ENABLED:
