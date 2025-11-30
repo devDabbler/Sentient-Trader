@@ -130,13 +130,19 @@ class DexLaunchHunter:
     
     async def _scan_for_launches(self):
         """Scan for new token launches across enabled chains using FREE DexScreener API"""
+        import sys
+        print("DEBUG [_scan_for_launches]: Method entered!", file=sys.stdout, flush=True)
         logger.info("Scanning for new launches...")
+        print("DEBUG [_scan_for_launches]: After first logger.info", file=sys.stdout, flush=True)
         
         try:
             # Get chains to scan
+            print("DEBUG [_scan_for_launches]: Getting chain_ids...", file=sys.stdout, flush=True)
             chain_ids = [chain.value for chain in self.config.enabled_chains]
+            print(f"DEBUG [_scan_for_launches]: chain_ids = {chain_ids}", file=sys.stdout, flush=True)
             
             # Scan using FREE DexScreener API endpoints
+            print("DEBUG [_scan_for_launches]: Calling dex_client.get_new_pairs()...", file=sys.stdout, flush=True)
             success, new_pairs = await self.dex_client.get_new_pairs(
                 chains=chain_ids,
                 min_liquidity=self.config.min_liquidity_usd,
