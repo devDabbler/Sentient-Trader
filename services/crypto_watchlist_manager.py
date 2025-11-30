@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from loguru import logger
+from postgrest import CountMethod
 from clients.supabase_client import get_supabase_client
 
 
@@ -427,6 +428,22 @@ class CryptoWatchlistManager:
         """
         return self.get_all_cryptos()
     
+    def add_to_watchlist(self, symbol: str, opportunity_data: Optional[Dict] = None) -> bool:
+        """
+        Add a crypto to watchlist (alias for add_crypto for compatibility)
+        
+        This method exists for compatibility with code that expects a unified
+        watchlist interface. It simply delegates to add_crypto().
+        
+        Args:
+            symbol: Crypto pair symbol (e.g., 'BTC/USD')
+            opportunity_data: Optional CryptoOpportunity data dict
+            
+        Returns:
+            True if added successfully, False otherwise
+        """
+        return self.add_crypto(symbol, opportunity_data)
+    
     def get_watchlist_symbols(self) -> List[str]:
         """Get list of all watchlist symbols"""
         if not self._check_client():
@@ -451,7 +468,7 @@ class CryptoWatchlistManager:
         
         try:
             response = self.supabase.table('crypto_watchlist')\
-                .select('symbol', count='exact')\
+                .select('symbol', count=CountMethod.exact)\
                 .eq('symbol', symbol)\
                 .execute()
             
@@ -468,7 +485,7 @@ class CryptoWatchlistManager:
         
         try:
             response = self.supabase.table('crypto_watchlist')\
-                .select('*', count='exact')\
+                .select('*', count=CountMethod.exact)\
                 .execute()
             
             return response.count if response.count is not None else 0
