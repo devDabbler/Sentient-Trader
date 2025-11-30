@@ -1595,10 +1595,10 @@ def main():
                 col_acts = st.columns(6)
                 
                 with col_acts[0]:
-                    if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
-                        if approve_alert(alert['id']):
-                            st.toast(f"✅ {alert['symbol']} added to watchlist")
-                            st.rerun()
+                        if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
+                            with st.spinner("Adding..."):
+                                if approve_alert(alert['id']):
+                                    st.rerun()
                 
                 # Analysis buttons - show mode options
                 modes = analysis_modes.get(asset_type, analysis_modes["crypto"])
