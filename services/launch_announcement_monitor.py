@@ -80,18 +80,13 @@ class LaunchAnnouncementMonitor:
     
     async def start_monitoring(self):
         """Start continuous monitoring loop"""
-        import sys
-        print("DEBUG [start_monitoring]: Method entered!", file=sys.stdout, flush=True)
         self.is_running = True
         logger.info("🔍 Starting launch announcement monitoring...")
-        print("DEBUG [start_monitoring]: After logger.info, entering loop...", file=sys.stdout, flush=True)
         
         while self.is_running:
             try:
                 # Check all sources
-                print("DEBUG [start_monitoring]: Calling _check_all_sources()...", file=sys.stdout, flush=True)
                 announcements = await self._check_all_sources()
-                print(f"DEBUG [start_monitoring]: _check_all_sources returned {len(announcements) if announcements else 0} items", file=sys.stdout, flush=True)
                 
                 if announcements:
                     logger.info(f"📢 Found {len(announcements)} new launch announcements!")
@@ -124,28 +119,20 @@ class LaunchAnnouncementMonitor:
     
     async def _check_all_sources(self) -> List[LaunchAnnouncement]:
         """Check all configured sources for new announcements"""
-        import sys
-        print("DEBUG [_check_all_sources]: Method entered!", file=sys.stdout, flush=True)
         announcements = []
         
         # 1. Pump.fun (Solana) - Always available, no auth!
         try:
-            print("DEBUG [_check_all_sources]: Checking Pump.fun...", file=sys.stdout, flush=True)
             pumpfun_launches = await self._check_pumpfun()
-            print(f"DEBUG [_check_all_sources]: Pump.fun returned {len(pumpfun_launches)} items", file=sys.stdout, flush=True)
             announcements.extend(pumpfun_launches)
         except Exception as e:
-            print(f"DEBUG [_check_all_sources]: Pump.fun FAILED: {e}", file=sys.stdout, flush=True)
             logger.debug(f"Pump.fun check failed: {e}")
         
         # 2. DexScreener boosted tokens
         try:
-            print("DEBUG [_check_all_sources]: Checking DexScreener boosted...", file=sys.stdout, flush=True)
             boosted_tokens = await self._check_dexscreener_boosted()
-            print(f"DEBUG [_check_all_sources]: DexScreener returned {len(boosted_tokens)} items", file=sys.stdout, flush=True)
             announcements.extend(boosted_tokens)
         except Exception as e:
-            print(f"DEBUG [_check_all_sources]: DexScreener FAILED: {e}", file=sys.stdout, flush=True)
             logger.debug(f"DexScreener boosted check failed: {e}")
         
         # 3. Twitter (if configured)
