@@ -70,13 +70,26 @@ class DexScreenerClient:
                     logger.warning("DexScreener rate limit hit, waiting 60s")
                     await asyncio.sleep(60)
                     return False, {"error": "Rate limit exceeded"}
+                elif response.status_code == 404:
+                    logger.debug(f"Token not found on DexScreener (404)")
+                    return False, {"error": "Token not found (404)"}
                 else:
-                    logger.error(f"DexScreener API error: {response.status_code} - {response.text}")
-                    return False, {"error": f"HTTP {response.status_code}"}
+                    error_text = response.text[:200] if response.text else "No error message"
+                    logger.warning(f"DexScreener API error: {response.status_code} - {error_text}")
+                    return False, {"error": f"HTTP {response.status_code}: {error_text}"}
                     
+        except httpx.TimeoutException as e:
+            error_msg = f"Request timeout: {str(e)}"
+            logger.warning(f"DexScreener API timeout: {error_msg}")
+            return False, {"error": error_msg}
+        except httpx.NetworkError as e:
+            error_msg = f"Network error: {str(e)}"
+            logger.warning(f"DexScreener network error: {error_msg}")
+            return False, {"error": error_msg}
         except Exception as e:
-            logger.error(f"Error calling DexScreener API: {e}", exc_info=True)
-            return False, {"error": str(e)}
+            error_msg = str(e)
+            logger.error(f"Error calling DexScreener API: {error_msg}", exc_info=True)
+            return False, {"error": error_msg}
     
     async def get_token_pairs(self, token_address: str, chain: Optional[str] = None) -> Tuple[bool, List[DexPair]]:
         """
@@ -92,11 +105,38 @@ class DexScreenerClient:
         endpoint = f"/dex/tokens/{token_address}"
         success, data = await self._make_request(endpoint)
         
-        if not success or "pairs" not in data:
+        # Check if request failed or data is invalid
+        if not success:
+            error_detail = data.get("error", "Unknown error") if isinstance(data, dict) else str(data) if data else "Request failed"
+            
+            # Provide more specific error messages
+            if "404" in str(error_detail) or "not found" in str(error_detail).lower():
+                logger.debug(f"Token not found on DexScreener: {token_address}")
+            elif "timeout" in str(error_detail).lower():
+                logger.warning(f"DexScreener request timeout for token {token_address}")
+            elif "network" in str(error_detail).lower():
+                logger.warning(f"DexScreener network error for token {token_address}")
+            else:
+                logger.warning(f"DexScreener API request failed for token {token_address}: {error_detail}")
+            
+            return False, []
+        
+        # Ensure data is a dict and has pairs
+        if not data or not isinstance(data, dict):
+            logger.debug(f"Invalid data returned from DexScreener for token {token_address}")
+            return False, []
+        
+        if "pairs" not in data:
+            logger.debug(f"No 'pairs' key in DexScreener response for token {token_address}")
             return False, []
         
         pairs = []
-        for pair_data in data.get("pairs", []):
+        pairs_data = data.get("pairs", [])
+        if not pairs_data or not isinstance(pairs_data, list):
+            logger.debug(f"Invalid pairs data for token {token_address}")
+            return False, []
+        
+        for pair_data in pairs_data:
             try:
                 # Filter by chain if specified
                 if chain and pair_data.get("chainId", "").lower() != chain.lower():
@@ -130,11 +170,27 @@ class DexScreenerClient:
         params = {"q": query}
         success, data = await self._make_request(endpoint, params)
         
-        if not success or "pairs" not in data:
+        # Check if request failed or data is invalid
+        if not success:
+            logger.debug(f"DexScreener search request failed for query: {query}")
+            return False, []
+        
+        # Ensure data is a dict and has pairs
+        if not data or not isinstance(data, dict):
+            logger.debug(f"Invalid data returned from DexScreener search for query: {query}")
+            return False, []
+        
+        if "pairs" not in data:
+            logger.debug(f"No 'pairs' key in DexScreener search response for query: {query}")
             return False, []
         
         pairs = []
-        for pair_data in data.get("pairs", []):
+        pairs_data = data.get("pairs", [])
+        if not pairs_data or not isinstance(pairs_data, list):
+            logger.debug(f"Invalid pairs data from DexScreener search for query: {query}")
+            return False, []
+        
+        for pair_data in pairs_data:
             try:
                 if chain and pair_data.get("chainId", "").lower() != chain.lower():
                     continue

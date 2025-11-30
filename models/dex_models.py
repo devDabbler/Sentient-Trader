@@ -40,6 +40,23 @@ class LaunchStage(Enum):
 
 
 @dataclass
+class HolderDistribution:
+    """Token holder distribution analysis"""
+    top_holders: List[Dict] = field(default_factory=list)
+    top1_pct: float = 0.0
+    top5_pct: float = 0.0
+    top10_pct: float = 0.0
+    top20_pct: float = 0.0
+    is_centralized: bool = False
+    lp_holder_rank: Optional[int] = None  # LP wallet rank in top holders
+    deployer_balance_pct: float = 0.0
+    total_holders: int = 0
+    unique_owners: int = 0
+    risk_flags: List[str] = field(default_factory=list)
+    green_flags: List[str] = field(default_factory=list)
+
+
+@dataclass
 class ContractSafety:
     """Contract security analysis"""
     is_renounced: bool = False
@@ -56,6 +73,15 @@ class ContractSafety:
     safety_score: float = 0.0  # 0-100
     safety_checks_passed: int = 0
     safety_checks_total: int = 10
+    
+    # Solana-specific flags (from on-chain inspection)
+    solana_mint_authority_revoked: bool = False  # True if mint authority is null
+    solana_freeze_authority_revoked: bool = False  # True if freeze authority is null
+    solana_lp_owner_type: Optional[str] = None  # 'burn', 'locker', 'EOA_unknown', 'mixed'
+    solana_risk_flags: List[str] = field(default_factory=list)  # Detailed risk flags from on-chain checks
+    solana_holder_distribution: Optional[HolderDistribution] = None  # Holder concentration analysis
+    solana_metadata_immutable: Optional[bool] = None  # True if metadata update authority revoked
+    solana_metadata_update_authority: Optional[str] = None  # Update authority address (None = immutable)
 
 
 @dataclass
@@ -158,6 +184,11 @@ class TokenLaunch:
     # Security
     contract_safety: Optional[ContractSafety] = None
     risk_level: RiskLevel = RiskLevel.HIGH
+    holder_distribution: Optional[HolderDistribution] = None  # Holder concentration (for Solana)
+    
+    # Price Validation (cross-source verification)
+    price_consistency_score: Optional[float] = None  # 0-100, higher = more consistent across sources
+    price_validation_warnings: List[str] = field(default_factory=list)  # Warnings from price validation
     
     # Activity
     smart_money: List[SmartMoneyActivity] = field(default_factory=list)

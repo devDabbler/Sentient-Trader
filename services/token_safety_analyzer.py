@@ -21,9 +21,20 @@ import httpx
 from typing import Dict, Tuple, Optional
 from loguru import logger
 from dotenv import load_dotenv
-from models.dex_models import ContractSafety, Chain, RiskLevel
+from models.dex_models import ContractSafety, Chain, RiskLevel, HolderDistribution
 
 load_dotenv()
+
+# Optional Solana inspectors (only import if needed)
+try:
+    from services.solana_mint_inspector import SolanaMintInspector
+    from services.solana_lp_analyzer import SolanaLPAnalyzer
+    from services.solana_holder_analyzer import SolanaHolderAnalyzer
+    from services.solana_metadata_inspector import SolanaMetadataInspector
+    SOLANA_INSPECTORS_AVAILABLE = True
+except ImportError:
+    SOLANA_INSPECTORS_AVAILABLE = False
+    logger.warning("Solana inspectors not available - install base58 package")
 
 
 class TokenSafetyAnalyzer:
@@ -41,11 +52,27 @@ class TokenSafetyAnalyzer:
             "goplus": 1.5,
             "tokensniffer": 3.0
         }
+        
+        # Initialize Solana inspectors if available
+        self.solana_mint_inspector = None
+        self.solana_lp_analyzer = None
+        self.solana_holder_analyzer = None
+        self.solana_metadata_inspector = None
+        if SOLANA_INSPECTORS_AVAILABLE:
+            try:
+                self.solana_mint_inspector = SolanaMintInspector()
+                self.solana_lp_analyzer = SolanaLPAnalyzer()
+                self.solana_holder_analyzer = SolanaHolderAnalyzer()
+                self.solana_metadata_inspector = SolanaMetadataInspector()
+                logger.info("✅ Solana on-chain inspectors initialized (mint, LP, holder, metadata)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Solana inspectors: {e}")
     
     async def analyze_token(
         self,
         contract_address: str,
-        chain: Chain = Chain.ETH
+        chain: Chain = Chain.ETH,
+        pool_address: Optional[str] = None
     ) -> Tuple[bool, ContractSafety]:
         """
         Perform comprehensive safety analysis on a token
@@ -53,6 +80,7 @@ class TokenSafetyAnalyzer:
         Args:
             contract_address: Token contract address
             chain: Blockchain network
+            pool_address: Optional pool address (required for Solana LP analysis)
             
         Returns:
             (success, ContractSafety object)
@@ -61,7 +89,21 @@ class TokenSafetyAnalyzer:
         
         safety = ContractSafety()
         
-        # Run multiple checks in parallel
+        # For Solana: Run on-chain checks FIRST (critical for safety)
+        if chain == Chain.SOLANA and SOLANA_INSPECTORS_AVAILABLE:
+            solana_safety = await self._check_solana_onchain(contract_address, pool_address)
+            if solana_safety:
+                # Merge Solana results (these are hard red flags)
+                safety = self._merge_safety_results(safety, solana_safety)
+                
+                # HARD REJECT: If Solana checks fail (safety_score = 0), return immediately
+                # This happens when: mint authority retained, freeze authority retained, or LP in EOA
+                if solana_safety.safety_score == 0.0 and (solana_safety.is_mintable or solana_safety.is_honeypot):
+                    logger.warning(f"🚨 Solana token FAILED on-chain checks: {contract_address}")
+                    safety.safety_score = 0.0
+                    return True, safety
+        
+        # Run multiple checks in parallel (for EVM chains or as backup for Solana)
         results = await asyncio.gather(
             self._check_honeypot(contract_address, chain),
             self._check_goplus(contract_address, chain),
@@ -79,12 +121,205 @@ class TokenSafetyAnalyzer:
                 # Merge results (take worst case for safety)
                 safety = self._merge_safety_results(safety, result)
         
-        # Calculate final safety score
-        safety.safety_score = self._calculate_safety_score(safety)
+        # Calculate final safety score (preserve pre-calculated scores like native SOL = 70)
+        # Check if this is native SOL by looking for it in risk flags (green flags)
+        is_native_sol = any('Native SOL' in str(flag) or 'wrapped SOL' in str(flag).lower() for flag in safety.solana_risk_flags)
+        
+        if not is_native_sol or safety.safety_score == 0.0:
+            calculated_score = self._calculate_safety_score(safety)
+            # Preserve native SOL score of 70, otherwise use calculated
+            if is_native_sol and safety.safety_score == 70.0:
+                pass  # Keep the 70 score for native SOL
+            else:
+                safety.safety_score = calculated_score
         
         logger.info(f"Token safety score: {safety.safety_score}/100")
         
         return True, safety
+    
+    async def _check_solana_onchain(
+        self, 
+        mint_address: str, 
+        pool_address: Optional[str] = None
+    ) -> Optional[ContractSafety]:
+        """
+        Perform on-chain Solana safety checks
+        
+        Args:
+            mint_address: Solana token mint address
+            pool_address: Optional pool address for LP analysis
+            
+        Returns:
+            ContractSafety object with Solana-specific flags, or None if checks failed
+        """
+        if not self.solana_mint_inspector:
+            return None
+        
+        try:
+            # 1. Check mint authority and freeze authority
+            mint_data = await self.solana_mint_inspector.inspect_mint(mint_address)
+            
+            if mint_data.get('error'):
+                logger.warning(f"Solana mint inspection error: {mint_data['error']}")
+                return None
+            
+            # Create safety object from mint inspection
+            safety = ContractSafety()
+            
+            # Store Solana-specific flags
+            safety.solana_mint_authority_revoked = mint_data.get('mint_authority') is None
+            safety.solana_freeze_authority_revoked = mint_data.get('freeze_authority') is None
+            safety.solana_risk_flags = mint_data.get('risk_flags', [])
+            
+            # For native SOL (wrapped SOL), set defaults appropriately
+            # Native SOL accounts don't have mint/freeze authority (they're safe)
+            green_flags = mint_data.get('green_flags', [])
+            is_native_sol = any('Native SOL' in str(flag) or 'wrapped SOL' in str(flag).lower() for flag in green_flags) if green_flags else False
+            
+            if is_native_sol:
+                safety.is_mintable = False  # Native SOL can't be minted
+                safety.is_honeypot = False  # Native SOL is not a honeypot
+                safety.is_renounced = True  # Native SOL has no owner
+                safety.buy_tax = 0.0  # No taxes on native SOL
+                safety.sell_tax = 0.0
+                # Give it a decent base score for native assets (will be used by _calculate_safety_score)
+                safety.safety_score = 70.0  # Native SOL is inherently safe
+                logger.info(f"✅ Native SOL detected - setting safety score to 70")
+            
+            # HARD RED FLAGS from mint inspection
+            mint_authority = mint_data.get('mint_authority')
+            if mint_authority:
+                safety.is_mintable = True  # Can mint more = risk
+                safety.safety_score = 0.0  # Instant fail
+                safety.solana_risk_flags.append(f"MINT_AUTHORITY_RETAINED: {mint_authority[:8]}...")
+                logger.warning(f"🚨 MINT AUTHORITY RETAINED: {mint_address[:8]}...")
+                return safety
+            
+            freeze_authority = mint_data.get('freeze_authority')
+            if freeze_authority:
+                safety.is_honeypot = True  # Can freeze accounts = honeypot
+                safety.safety_score = 0.0  # Instant fail
+                safety.solana_risk_flags.append(f"FREEZE_AUTHORITY_RETAINED: {freeze_authority[:8]}... (HONEYPOT!)")
+                logger.warning(f"🚨 FREEZE AUTHORITY RETAINED: {mint_address[:8]}... (HONEYPOT!)")
+                return safety
+            
+            # Green flags
+            if not mint_data.get('mint_authority') and not mint_data.get('freeze_authority'):
+                safety.is_mintable = False  # Cannot mint more = safe
+                safety.solana_risk_flags.extend(mint_data.get('green_flags', []))
+                logger.info(f"✅ Mint and freeze authorities revoked: {mint_address[:8]}...")
+            
+            # 2. Check LP token ownership (if pool address provided)
+            if pool_address and self.solana_lp_analyzer:
+                lp_data = await self.solana_lp_analyzer.analyze_lp_status(
+                    pool_address, 
+                    mint_address
+                )
+                
+                if not lp_data.get('error'):
+                    # Store LP owner type
+                    safety.solana_lp_owner_type = lp_data.get('lp_owner_type')
+                    safety.solana_risk_flags.extend(lp_data.get('risk_flags', []))
+                    
+                    # Set LP lock status based on ownership
+                    if lp_data.get('lp_owner_type') in ['burn', 'locker']:
+                        safety.lp_locked = True
+                        logger.info(f"✅ LP tokens safe: {lp_data.get('lp_owner_type')}")
+                    elif lp_data.get('lp_owner_type') == 'EOA_unknown':
+                        # HARD RED FLAG: LP in EOA wallet = rug risk
+                        safety.safety_score = 0.0
+                        safety.solana_risk_flags.append("LP_TOKENS_IN_EOA_WALLET - RUG RISK!")
+                        logger.warning(f"🚨 LP tokens in EOA wallet - RUG RISK!")
+                        return safety
+                    
+                    # Set LP lock duration if available
+                    if lp_data.get('lp_lock_duration_days'):
+                        safety.lp_lock_duration_days = lp_data.get('lp_lock_duration_days')
+            
+            # 3. Check holder distribution (for dump risk assessment)
+            # Add delay between inspector calls to avoid rate limits
+            await asyncio.sleep(1.0)  # 1 second delay between major RPC calls
+            
+            if self.solana_holder_analyzer:
+                holder_data = await self.solana_holder_analyzer.analyze_holder_distribution(
+                    mint_address,
+                    limit=20
+                )
+                
+                if not holder_data.get('error'):
+                    concentration = holder_data.get('concentration', {})
+                    
+                    # Create HolderDistribution object
+                    holder_dist = HolderDistribution(
+                        top_holders=holder_data.get('holders', [])[:20],
+                        top1_pct=concentration.get('top1_pct', 0.0),
+                        top5_pct=concentration.get('top5_pct', 0.0),
+                        top10_pct=concentration.get('top10_pct', 0.0),
+                        top20_pct=concentration.get('top20_pct', 0.0),
+                        is_centralized=concentration.get('is_centralized', False),
+                        total_holders=concentration.get('total_holders', 0),
+                        unique_owners=concentration.get('unique_owners', 0),
+                        risk_flags=concentration.get('risk_flags', []),
+                        green_flags=concentration.get('green_flags', [])
+                    )
+                    
+                    # Store in safety object
+                    safety.solana_holder_distribution = holder_dist
+                    
+                    # Add risk flags to safety
+                    safety.solana_risk_flags.extend(concentration.get('risk_flags', []))
+                    
+                    # SOFT FLAG: High concentration raises risk (but not hard reject)
+                    if concentration.get('top1_pct', 0) > 30:
+                        # Extreme whale risk - significantly lower safety score
+                        if safety.safety_score > 0:
+                            safety.safety_score = max(0, safety.safety_score - 30)
+                        logger.warning(f"⚠️ Extreme whale concentration: {concentration.get('top1_pct', 0):.1f}%")
+                    elif concentration.get('top10_pct', 0) > 70:
+                        # Highly centralized - lower safety score
+                        if safety.safety_score > 0:
+                            safety.safety_score = max(0, safety.safety_score - 20)
+                        logger.warning(f"⚠️ Highly centralized: Top 10 hold {concentration.get('top10_pct', 0):.1f}%")
+                    elif concentration.get('top10_pct', 0) > 60:
+                        # Centralized - moderate penalty
+                        if safety.safety_score > 0:
+                            safety.safety_score = max(0, safety.safety_score - 10)
+                        logger.info(f"⚠️ Centralized: Top 10 hold {concentration.get('top10_pct', 0):.1f}%")
+                    else:
+                        # Good distribution - add green flags
+                        safety.solana_risk_flags.extend(concentration.get('green_flags', []))
+                        logger.info(f"✅ Good holder distribution: Top 10 hold {concentration.get('top10_pct', 0):.1f}%")
+            
+            # 4. Check metadata immutability (for impersonation risk)
+            # Add delay before metadata check to avoid rate limits
+            await asyncio.sleep(1.0)  # 1 second delay between major RPC calls
+            
+            if self.solana_metadata_inspector:
+                metadata_data = await self.solana_metadata_inspector.inspect_metadata_with_pda(mint_address)
+                
+                if not metadata_data.get('error'):
+                    # Store metadata immutability status
+                    safety.solana_metadata_immutable = metadata_data.get('is_immutable', False)
+                    safety.solana_metadata_update_authority = metadata_data.get('update_authority')
+                    
+                    # Add risk flags (soft flag - not hard reject, but important to know)
+                    safety.solana_risk_flags.extend(metadata_data.get('risk_flags', []))
+                    safety.solana_risk_flags.extend(metadata_data.get('green_flags', []))
+                    
+                    # Minor penalty for mutable metadata (impersonation risk, but not a rug)
+                    if not metadata_data.get('is_immutable'):
+                        # Reduce safety score by 5 points (not catastrophic, but notable)
+                        if safety.safety_score > 0:
+                            safety.safety_score = max(0, safety.safety_score - 5)
+                        logger.info(f"⚠️ Metadata is mutable: {mint_address[:8]}... (impersonation risk)")
+                    else:
+                        logger.info(f"✅ Metadata is immutable: {mint_address[:8]}...")
+            
+            return safety
+            
+        except Exception as e:
+            logger.error(f"Error in Solana on-chain check: {e}", exc_info=True)
+            return None
     
     async def _check_honeypot(self, address: str, chain: Chain) -> ContractSafety:
         """Check using Honeypot.is API (EVM chains only)"""
@@ -288,6 +523,23 @@ class TokenSafetyAnalyzer:
     
     def _merge_safety_results(self, current: ContractSafety, new: ContractSafety) -> ContractSafety:
         """Merge multiple safety check results (take worst case)"""
+        # Merge holder distribution (prefer the one with more data)
+        merged_holder_dist = None
+        if new.solana_holder_distribution:
+            merged_holder_dist = new.solana_holder_distribution
+        elif current.solana_holder_distribution:
+            merged_holder_dist = current.solana_holder_distribution
+        
+        # Merge Solana risk flags
+        merged_solana_flags = list(set(current.solana_risk_flags + new.solana_risk_flags))
+        
+        # Preserve safety_score from new (Solana) if it's higher or specifically set (like native SOL = 70)
+        # If new has a pre-calculated score (e.g., native SOL = 70), preserve it
+        merged_safety_score = max(current.safety_score, new.safety_score)
+        # If new has a specific score like 70 (native SOL), prefer it
+        if new.safety_score >= 70.0:
+            merged_safety_score = new.safety_score
+        
         return ContractSafety(
             is_renounced=current.is_renounced or new.is_renounced,
             is_honeypot=current.is_honeypot or new.is_honeypot,  # If ANY says honeypot = red flag
@@ -304,16 +556,38 @@ class TokenSafetyAnalyzer:
             owner_can_change_tax=current.owner_can_change_tax or new.owner_can_change_tax,
             hidden_owner=current.hidden_owner or new.hidden_owner,
             safety_checks_passed=current.safety_checks_passed + new.safety_checks_passed,
-            safety_checks_total=max(current.safety_checks_total, new.safety_checks_total)
+            safety_checks_total=max(current.safety_checks_total, new.safety_checks_total),
+            safety_score=merged_safety_score,  # Preserve pre-calculated scores
+            # Solana-specific fields
+            solana_mint_authority_revoked=current.solana_mint_authority_revoked or new.solana_mint_authority_revoked,
+            solana_freeze_authority_revoked=current.solana_freeze_authority_revoked or new.solana_freeze_authority_revoked,
+            solana_lp_owner_type=new.solana_lp_owner_type or current.solana_lp_owner_type,
+            solana_risk_flags=merged_solana_flags,
+            solana_holder_distribution=merged_holder_dist,
+            # Metadata fields (prefer immutable/None over mutable)
+            solana_metadata_immutable=new.solana_metadata_immutable if new.solana_metadata_immutable is not None else current.solana_metadata_immutable,
+            solana_metadata_update_authority=new.solana_metadata_update_authority or current.solana_metadata_update_authority
         )
     
     def _calculate_safety_score(self, safety: ContractSafety) -> float:
         """Calculate 0-100 safety score"""
+        # If safety_score was pre-calculated (e.g., for native SOL), use it
+        if safety.safety_score > 0.0 and safety.safety_score != 0.0:
+            return safety.safety_score
+        
+        # If already set to 0 (hard reject from Solana checks), return 0
+        if safety.safety_score == 0.0 and (safety.is_mintable or safety.is_honeypot):
+            return 0.0
+        
         score = 0.0
         
         # Honeypot = instant fail
         if safety.is_honeypot:
             return 0.0
+        
+        # Mintable = instant fail (for Solana, this means mint authority retained)
+        if safety.is_mintable and safety.safety_score == 0.0:
+            return 0.0  # Already set to 0 by Solana inspector
         
         # Critical factors (60 points)
         if not safety.is_honeypot:
@@ -351,6 +625,28 @@ class TokenSafetyAnalyzer:
                 score += 5
             elif safety.lp_lock_duration_days >= 30:
                 score += 3
+        
+        # Apply holder concentration penalties (if Solana holder data available)
+        if safety.solana_holder_distribution:
+            holder_dist = safety.solana_holder_distribution
+            if holder_dist.is_centralized:
+                # Penalize based on concentration level
+                if holder_dist.top1_pct > 30:
+                    score = max(0, score - 30)  # Extreme whale risk
+                elif holder_dist.top10_pct > 70:
+                    score = max(0, score - 20)  # Highly centralized
+                elif holder_dist.top10_pct > 60:
+                    score = max(0, score - 10)  # Centralized
+                elif holder_dist.top1_pct > 20:
+                    score = max(0, score - 5)  # Moderate whale risk
+            else:
+                # Bonus for good distribution
+                if holder_dist.top10_pct < 40 and holder_dist.unique_owners >= 50:
+                    score = min(100, score + 5)  # Well distributed
+        
+        # If safety_score was already calculated (from Solana checks), use that as base
+        if safety.safety_score > 0:
+            score = max(score, safety.safety_score)
         
         return min(score, 100.0)
     
