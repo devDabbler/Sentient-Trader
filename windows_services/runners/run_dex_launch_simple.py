@@ -200,32 +200,62 @@ try:
         
         # Start announcement monitoring in background
         print("DEBUG: About to create monitor_task...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        print("DEBUG: About to call logger.info for Creating monitor_task...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
         logger.info("DEBUG: Creating monitor_task...")
+        print("DEBUG: logger.info completed for Creating monitor_task", file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        
         try:
+            print("DEBUG: Inside try block, about to define start_monitor_with_timeout()...", file=sys.stdout, flush=True)
+            sys.stdout.flush()
+            
             # Wrap in timeout to catch hangs
             async def start_monitor_with_timeout():
+                print("DEBUG: start_monitor_with_timeout() called!", file=sys.stdout, flush=True)
                 logger.info("DEBUG: Calling monitor.start_monitoring()...")
                 await monitor.start_monitoring()
             
+            print("DEBUG: start_monitor_with_timeout defined, about to create_task()...", file=sys.stdout, flush=True)
+            sys.stdout.flush()
+            
             monitor_task = asyncio.create_task(start_monitor_with_timeout())
+            
+            print("DEBUG: create_task() completed!", file=sys.stdout, flush=True)
+            sys.stdout.flush()
             logger.info("DEBUG: monitor_task created successfully")
         except Exception as e:
+            print(f"DEBUG: ERROR in task creation: {e}", file=sys.stdout, flush=True)
+            import traceback
+            traceback.print_exc()
             logger.error(f"ERROR creating monitor_task: {e}", exc_info=True)
             raise
         
+        print("DEBUG: About to enter main loop...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
         logger.info("DEBUG: monitor_task created, entering main loop...")
         
         scan_counter = 0
         
+        print("DEBUG: About to enter while True loop...", file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        
         try:
             while True:
                 scan_counter += 1
+                print(f"DEBUG: Scan cycle #{scan_counter} starting...", file=sys.stdout, flush=True)
+                sys.stdout.flush()
                 logger.info(f"🔄 Scan cycle #{scan_counter} starting...")
                 
                 # ===== PART 1: Active DEX Scanning =====
                 # Run the DEX hunter's own scanner to find new launches
+                print("DEBUG: About to run active DEX scan...", file=sys.stdout, flush=True)
+                sys.stdout.flush()
                 logger.info("🔍 Running active DEX scan...")
                 try:
+                    print("DEBUG: Calling dex_hunter._scan_for_launches() with 120s timeout...", file=sys.stdout, flush=True)
+                    sys.stdout.flush()
                     # Add timeout to prevent hanging
                     await asyncio.wait_for(
                         dex_hunter._scan_for_launches(),
