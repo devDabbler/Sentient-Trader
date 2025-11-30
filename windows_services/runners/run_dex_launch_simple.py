@@ -127,8 +127,16 @@ try:
     logger.info("")
     
     # Write status file for batch script verification
-    status_file = PROJECT_ROOT / "logs" / ".dex_launch_ready"
-    status_file.write_text(f"SERVICE READY at {time.time()}")
+    logger.info("DEBUG: About to write status file...")
+    sys.stdout.flush()
+    try:
+        status_file = PROJECT_ROOT / "logs" / ".dex_launch_ready"
+        status_file.write_text(f"SERVICE READY at {time.time()}")
+        logger.info("DEBUG: Status file written successfully")
+    except Exception as e:
+        logger.error(f"DEBUG: Error writing status file: {e}", exc_info=True)
+    sys.stdout.flush()
+    
     logger.info("DEBUG: Status file written, about to define monitor_loop()...")
     sys.stdout.flush()
     
@@ -269,6 +277,20 @@ try:
     # Run the async loop
     logger.info("DEBUG: monitor_loop() function defined, about to call asyncio.run()...")
     sys.stdout.flush()
+    
+    # Test if asyncio works at all
+    async def test_async():
+        logger.info("DEBUG: Test async function executed!")
+        return True
+    
+    logger.info("DEBUG: Testing asyncio with simple function...")
+    try:
+        result = asyncio.run(test_async())
+        logger.info(f"DEBUG: Async test passed: {result}")
+    except Exception as e:
+        logger.error(f"DEBUG: Async test failed: {e}", exc_info=True)
+        raise
+    
     logger.info("DEBUG: About to start async monitor_loop()...")
     logger.info("DEBUG: Calling asyncio.run(monitor_loop()) now...")
     sys.stdout.flush()  # Force flush before async call
