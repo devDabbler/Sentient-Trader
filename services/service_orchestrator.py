@@ -538,6 +538,9 @@ class ServiceOrchestrator:
     
     def reject_alert(self, alert_id: str) -> bool:
         """Reject an alert"""
+        # Reload from file to sync with other processes
+        self.reload_alerts_from_file()
+        
         with self.alert_queue_lock:
             for alert in self.alert_queue:
                 if alert.id == alert_id:
@@ -562,6 +565,49 @@ class ServiceOrchestrator:
             self._save_state()
             logger.info(f"🧹 Cleared {cleared} expired alerts")
         return cleared
+    
+    def reject_all_alerts_for_symbol(self, symbol: str) -> int:
+        """Reject all pending alerts for a specific symbol. Returns count rejected."""
+        # Reload from file to sync with other processes
+        self.reload_alerts_from_file()
+        
+        symbol = symbol.upper()
+        rejected_count = 0
+        with self.alert_queue_lock:
+            for alert in self.alert_queue:
+                if alert.symbol.upper() == symbol and alert.status == "pending":
+                    alert.status = "rejected"
+                    rejected_count += 1
+        
+        if rejected_count > 0:
+            self._save_state()
+            logger.info(f"❌ Rejected {rejected_count} alert(s) for {symbol}")
+        return rejected_count
+    
+    def bulk_clear_alerts(self, asset_type: Optional[str] = None) -> int:
+        """Clear all pending alerts, optionally filtered by asset type. Returns count cleared."""
+        # Reload from file to sync with other processes
+        self.reload_alerts_from_file()
+        
+        cleared_count = 0
+        with self.alert_queue_lock:
+            if asset_type:
+                # Reject all pending alerts of the specified asset type
+                for alert in self.alert_queue:
+                    if alert.asset_type == asset_type and alert.status == "pending":
+                        alert.status = "rejected"
+                        cleared_count += 1
+            else:
+                # Reject all pending alerts
+                for alert in self.alert_queue:
+                    if alert.status == "pending":
+                        alert.status = "rejected"
+                        cleared_count += 1
+        
+        if cleared_count > 0:
+            self._save_state()
+            logger.info(f"🗑️ Cleared {cleared_count} alert(s) (asset_type={asset_type or 'all'})")
+        return cleared_count
     
     def _add_to_watchlist(self, alert: AlertQueueItem):
         """Add approved alert to appropriate watchlist"""
