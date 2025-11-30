@@ -225,7 +225,10 @@ class DexScreenerClient:
         Returns:
             (success, list of DexPair objects)
         """
+        import sys
+        print("DEBUG [get_new_pairs]: Method entered!", file=sys.stdout, flush=True)
         logger.info("Searching for new pairs via DexScreener (FREE API - MULTIPLE SOURCES)...")
+        print("DEBUG [get_new_pairs]: After first logger.info", file=sys.stdout, flush=True)
         
         all_pairs = []
         seen_addresses = set()
@@ -235,13 +238,17 @@ class DexScreenerClient:
         
         try:
             # SOURCE 1: Get latest pairs (NEW!)
+            print("DEBUG [get_new_pairs]: Source 1 - Fetching latest pairs...", file=sys.stdout, flush=True)
             logger.info("Source 1: Fetching latest pairs...")
             latest_pairs = await self._get_latest_pairs(chains)
+            print(f"DEBUG [get_new_pairs]: Source 1 returned {len(latest_pairs)} pairs", file=sys.stdout, flush=True)
             logger.info(f"Found {len(latest_pairs)} from latest pairs")
             
             # SOURCE 2: Get trending/boosted tokens (NEW!)
+            print("DEBUG [get_new_pairs]: Source 2 - Fetching trending tokens...", file=sys.stdout, flush=True)
             logger.info("Source 2: Fetching trending tokens...")
             trending_pairs = await self._get_trending_pairs(chains)
+            print(f"DEBUG [get_new_pairs]: Source 2 returned {len(trending_pairs)} pairs", file=sys.stdout, flush=True)
             logger.info(f"Found {len(trending_pairs)} from trending")
             
             # SOURCE 3: Search queries (existing)
