@@ -115,8 +115,9 @@ try:
         
         if pending_count > 0:
             logger.info(f"⏳ {pending_count} pending approval(s) waiting")
-            for p in pending[:3]:  # Show first 3
-                logger.info(f"   • {p.get('pair', 'Unknown')} {p.get('side', '')} - {p.get('confidence', 0):.0f}% conf")
+            # Iterate over first 3 pending approvals (pending is a dict of {id: approval})
+            for approval in list(pending.values())[:3]:
+                logger.info(f"   • {approval.pair} {approval.side} - {approval.confidence:.0f}% conf")
         
         # Hourly status
         if scan_count % 60 == 0:

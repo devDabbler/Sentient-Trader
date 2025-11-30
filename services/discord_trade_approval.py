@@ -392,7 +392,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 # Crypto
                 from services.crypto_watchlist_manager import CryptoWatchlistManager
                 wm = CryptoWatchlistManager()
-                if wm.add_to_watchlist(symbol):
+                if wm.add_crypto(symbol):
                     await message.channel.send(f"✅ **{symbol}** added to Crypto Watchlist")
                 else:
                     await message.channel.send(f"⚠️ Failed to add {symbol} (duplicate?)")
@@ -997,6 +997,25 @@ class DiscordApprovalManager:
     def is_running(self) -> bool:
         """Check if bot is running and connected"""
         return bool(self.bot and self.bot.bot_ready)
+    
+    def get_pending_approvals(self) -> Dict[str, 'PendingTradeApproval']:
+        """Get all pending trade approvals (thread-safe)"""
+        if not self.enabled or not self.bot:
+            return {}
+        # Direct access to bot's pending_approvals dict (read-only access is safe)
+        return self.bot.pending_approvals.copy() if self.bot.pending_approvals else {}
+    
+    def cleanup_expired(self) -> int:
+        """Remove expired approval requests (thread-safe)"""
+        if not self.enabled or not self.bot:
+            return 0
+        
+        try:
+            # Direct call to bot's cleanup_expired (it's a regular method, not async)
+            return self.bot.cleanup_expired()
+        except Exception as e:
+            logger.error(f"Error cleaning up expired approvals: {e}")
+            return 0
 
 # Global instance
 _approval_manager: Optional[DiscordApprovalManager] = None
