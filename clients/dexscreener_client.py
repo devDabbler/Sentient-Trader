@@ -49,19 +49,25 @@ class DexScreenerClient:
         Returns:
             (success, response_data)
         """
+        import sys
+        print(f"DEBUG [_make_request]: endpoint={endpoint}, params={params}", file=sys.stdout, flush=True)
         try:
             # Rate limiting
             elapsed = datetime.now().timestamp() - self.last_request_time
             if elapsed < self.rate_limit_delay:
-                await asyncio.sleep(self.rate_limit_delay - elapsed)
+                wait_time = self.rate_limit_delay - elapsed
+                print(f"DEBUG [_make_request]: Rate limiting, waiting {wait_time:.2f}s", file=sys.stdout, flush=True)
+                await asyncio.sleep(wait_time)
             
             url = f"{self.BASE_URL}{endpoint}"
             headers = {}
             if self.api_key:
                 headers["X-API-Key"] = self.api_key
             
+            print(f"DEBUG [_make_request]: Making GET request to {url}", file=sys.stdout, flush=True)
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(url, params=params, headers=headers)
+                print(f"DEBUG [_make_request]: Got response status={response.status_code}", file=sys.stdout, flush=True)
                 self.last_request_time = datetime.now().timestamp()
                 
                 if response.status_code == 200:
@@ -237,19 +243,37 @@ class DexScreenerClient:
         scam_names = {"coin", "token", "test", "scam", "rug", "fake"}
         
         try:
-            # SOURCE 1: Get latest pairs (NEW!)
+            # SOURCE 1: Get latest pairs (with timeout to prevent hangs)
             print("DEBUG [get_new_pairs]: Source 1 - Fetching latest pairs...", file=sys.stdout, flush=True)
             logger.info("Source 1: Fetching latest pairs...")
-            latest_pairs = await self._get_latest_pairs(chains)
-            print(f"DEBUG [get_new_pairs]: Source 1 returned {len(latest_pairs)} pairs", file=sys.stdout, flush=True)
-            logger.info(f"Found {len(latest_pairs)} from latest pairs")
+            try:
+                latest_pairs = await asyncio.wait_for(self._get_latest_pairs(chains), timeout=30.0)
+                print(f"DEBUG [get_new_pairs]: Source 1 returned {len(latest_pairs)} pairs", file=sys.stdout, flush=True)
+                logger.info(f"Found {len(latest_pairs)} from latest pairs")
+            except asyncio.TimeoutError:
+                print("DEBUG [get_new_pairs]: Source 1 TIMEOUT after 30s", file=sys.stdout, flush=True)
+                logger.warning("Source 1 timed out after 30s, continuing...")
+                latest_pairs = []
+            except Exception as e:
+                print(f"DEBUG [get_new_pairs]: Source 1 ERROR: {e}", file=sys.stdout, flush=True)
+                logger.warning(f"Source 1 failed: {e}")
+                latest_pairs = []
             
-            # SOURCE 2: Get trending/boosted tokens (NEW!)
+            # SOURCE 2: Get trending/boosted tokens (with timeout)
             print("DEBUG [get_new_pairs]: Source 2 - Fetching trending tokens...", file=sys.stdout, flush=True)
             logger.info("Source 2: Fetching trending tokens...")
-            trending_pairs = await self._get_trending_pairs(chains)
-            print(f"DEBUG [get_new_pairs]: Source 2 returned {len(trending_pairs)} pairs", file=sys.stdout, flush=True)
-            logger.info(f"Found {len(trending_pairs)} from trending")
+            try:
+                trending_pairs = await asyncio.wait_for(self._get_trending_pairs(chains), timeout=30.0)
+                print(f"DEBUG [get_new_pairs]: Source 2 returned {len(trending_pairs)} pairs", file=sys.stdout, flush=True)
+                logger.info(f"Found {len(trending_pairs)} from trending")
+            except asyncio.TimeoutError:
+                print("DEBUG [get_new_pairs]: Source 2 TIMEOUT after 30s", file=sys.stdout, flush=True)
+                logger.warning("Source 2 timed out after 30s, continuing...")
+                trending_pairs = []
+            except Exception as e:
+                print(f"DEBUG [get_new_pairs]: Source 2 ERROR: {e}", file=sys.stdout, flush=True)
+                logger.warning(f"Source 2 failed: {e}")
+                trending_pairs = []
             
             # SOURCE 3: Search queries (existing)
             logger.info("Source 3: Searching by keywords...")
@@ -436,24 +460,39 @@ class DexScreenerClient:
     
     async def _get_latest_pairs(self, chains: Optional[List[str]] = None) -> List[DexPair]:
         """Get latest pairs from profile pages (NEW SOURCE!)"""
+        import sys
+        print("DEBUG [_get_latest_pairs]: Method entered!", file=sys.stdout, flush=True)
         pairs = []
         try:
             # Try to get pairs from popular chains' latest listings
             # DexScreener shows latest pairs on chain-specific pages
             target_chains = chains if chains else ["solana", "ethereum", "bsc"]
+            print(f"DEBUG [_get_latest_pairs]: target_chains = {target_chains}", file=sys.stdout, flush=True)
             
             for chain in target_chains[:3]:  # Limit to 3 chains
                 try:
+                    print(f"DEBUG [_get_latest_pairs]: Searching for '{chain} launch'...", file=sys.stdout, flush=True)
                     # Search for very recent tokens with generic but recent keywords
-                    success, results = await self.search_pairs(f"{chain} launch")
+                    # Add timeout to individual search
+                    success, results = await asyncio.wait_for(
+                        self.search_pairs(f"{chain} launch"),
+                        timeout=10.0
+                    )
+                    print(f"DEBUG [_get_latest_pairs]: Search returned success={success}, {len(results) if results else 0} results", file=sys.stdout, flush=True)
                     if success and results:
                         pairs.extend(results[:20])  # Take top 20 from each
                     await asyncio.sleep(0.5)
-                except:
+                except asyncio.TimeoutError:
+                    print(f"DEBUG [_get_latest_pairs]: Search for '{chain} launch' TIMEOUT", file=sys.stdout, flush=True)
+                    continue
+                except Exception as e:
+                    print(f"DEBUG [_get_latest_pairs]: Search for '{chain} launch' ERROR: {e}", file=sys.stdout, flush=True)
                     continue
         except Exception as e:
+            print(f"DEBUG [_get_latest_pairs]: Overall error: {e}", file=sys.stdout, flush=True)
             logger.debug(f"Error getting latest pairs: {e}")
         
+        print(f"DEBUG [_get_latest_pairs]: Returning {len(pairs)} pairs", file=sys.stdout, flush=True)
         return pairs
     
     async def _get_trending_pairs(self, chains: Optional[List[str]] = None) -> List[DexPair]:
