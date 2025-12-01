@@ -33,6 +33,10 @@ from windows_services.runners.service_config_loader import (
     ANALYSIS_PRESETS
 )
 
+# Discord notifications (optional)
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+ENABLE_DISCORD_ALERTS = os.getenv("ENABLE_DISCORD_ALERTS", "false").lower() == "true"
+
 # Configure logging
 LOG_FILE = PROJECT_ROOT / "logs" / "analysis_queue_processor.log"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -422,6 +426,61 @@ def save_results_to_file(results: list, request: dict):
         logger.error(f"Error saving results: {e}", exc_info=True)
 
 
+def send_discord_notification(results: list, request: dict):
+    """Send analysis results to Discord webhook"""
+    if not ENABLE_DISCORD_ALERTS or not DISCORD_WEBHOOK_URL:
+        return
+    
+    try:
+        import requests as req_lib
+        
+        # Build summary
+        asset_type = request.get("asset_type", "crypto").upper()
+        mode = request.get("analysis_mode", "standard")
+        completed_time = datetime.now().strftime("%H:%M:%S")
+        
+        # Count results by action
+        actions = {}
+        for r in results:
+            action = r.get("action", "UNKNOWN")
+            actions[action] = actions.get(action, 0) + 1
+        
+        # Build message
+        summary = f"**Analysis Complete** ({completed_time})\n"
+        summary += f"Asset Type: {asset_type} | Mode: {mode}\n"
+        summary += f"Analyzed: {len(results)} tickers\n\n"
+        summary += "**Results:**\n"
+        for action, count in sorted(actions.items()):
+            summary += f"• {action}: {count}\n"
+        
+        # Get top result by confidence if available
+        top_result = None
+        for r in results:
+            if r.get("confidence", 0) > 0:
+                if not top_result or r.get("confidence", 0) > top_result.get("confidence", 0):
+                    top_result = r
+        
+        if top_result:
+            summary += f"\n**Top Opportunity:**\n"
+            summary += f"{top_result.get('ticker', '?')}: {top_result.get('action', '?')} ({top_result.get('confidence', 0):.0f}%)\n"
+            if top_result.get('reasoning'):
+                summary += f"*{top_result.get('reasoning')[:100]}...*"
+        
+        payload = {
+            "content": summary,
+            "username": "Analysis Queue Processor"
+        }
+        
+        response = req_lib.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+        if response.status_code in [200, 204]:
+            logger.info(f"✅ Discord notification sent")
+        else:
+            logger.warning(f"Discord notification failed: {response.status_code}")
+            
+    except Exception as e:
+        logger.warning(f"Could not send Discord notification: {e}")
+
+
 def mark_request_complete(request_id: str):
     """Mark a request as complete in the queue file"""
     try:
@@ -495,6 +554,9 @@ def main_loop():
                     
                     # Save results
                     save_results_to_file(results, request)
+                    
+                    # Send Discord notification
+                    send_discord_notification(results, request)
                     
                     # Mark complete
                     mark_request_complete(request_id)

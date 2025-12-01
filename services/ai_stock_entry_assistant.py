@@ -624,6 +624,16 @@ Evaluate these critical factors:
                 return None
             
             json_str = response[start_idx:end_idx]
+            
+            # Pre-process to fix common LLM mistakes before JSON parsing
+            # Fix bare identifiers like "current_or_better_price" -> null
+            json_str = json_str.replace(': current_or_better_price', ': null')
+            json_str = json_str.replace(': price_for_stop_loss', ': null')
+            json_str = json_str.replace(': price_for_take_profit', ': null')
+            json_str = json_str.replace(': calculated_rr_ratio', ': null')
+            json_str = json_str.replace(': price_to_wait_for_or_null', ': null')
+            json_str = json_str.replace(': rsi_level_to_wait_for_or_null', ': null')
+            
             data = json.loads(json_str)
             
             return data
