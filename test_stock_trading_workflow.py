@@ -319,8 +319,9 @@ def test_stock_monitor_initialization():
         )
         
         print_result("Monitor initialized", True)
-        print_result("Watchlist loaded", len(monitor.watchlist) > 0, 
-                    f"{len(monitor.watchlist)} tickers")
+        watchlist = monitor.watchlist or []
+        print_result("Watchlist loaded", len(watchlist) > 0, 
+                    f"{len(watchlist)} tickers")
         print_result("Discord webhook", monitor.discord_webhook is not None,
                     "Configured" if monitor.discord_webhook else "Not set")
         print_result("Discord bot", monitor.discord_bot_manager is not None,
