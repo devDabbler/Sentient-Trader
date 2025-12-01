@@ -394,10 +394,22 @@ class DiscordTradeApprovalBot(commands.Bot):
 `SHORT` - Execute SHORT/SELL trade
 `P` or `PAPER` - Paper trade (test mode)
 
+**Position Sizing:**
+`SIZE` or `SIZING` - Show recommended position size
+`RISK` - Show current risk profile
+
 **Other:**
 `X` or `D` - Dismiss alert
 """
             await message.channel.send(help_text)
+        
+        elif content in ['SIZE', 'SIZING']:
+            # Show position sizing recommendation
+            await self._handle_sizing_command(message, target_symbol)
+        
+        elif content == 'RISK':
+            # Show risk profile
+            await self._handle_risk_command(message)
 
     async def _handle_watch_command(self, message: discord.Message, symbol: str):
         """Handle WATCH command"""
@@ -421,6 +433,130 @@ class DiscordTradeApprovalBot(commands.Bot):
         except Exception as e:
             logger.error(f"Error processing WATCH {symbol}: {e}")
             await message.channel.send(f"❌ Error adding {symbol}: {str(e)}")
+    
+    async def _handle_risk_command(self, message: discord.Message):
+        """Handle RISK command - show current risk profile"""
+        try:
+            from services.risk_profile_config import get_risk_profile_manager, RISK_PRESETS
+            
+            manager = get_risk_profile_manager()
+            profile = manager.get_profile()
+            
+            # Emoji based on tolerance
+            emoji = {"Conservative": "🛡️", "Moderate": "⚖️", "Aggressive": "🚀"}.get(
+                profile.risk_tolerance, "📊"
+            )
+            
+            risk_text = f"""📊 **Current Risk Profile**
+
+{emoji} **Tolerance:** {profile.risk_tolerance}
+
+💰 **Capital:**
+   Total: ${profile.total_capital:,.2f}
+   Available: ${profile.available_capital:,.2f}
+   Usable: ${profile.get_usable_capital():,.2f}
+   Reserve: {profile.reserved_pct}%
+
+📈 **Position Limits:**
+   Max Position: {profile.max_position_pct}% (${profile.get_max_position_value():,.2f})
+   Min Position: {profile.min_position_pct}%
+   Max Positions: {profile.max_positions}
+
+⚠️ **Risk Management:**
+   Risk/Trade: {profile.risk_per_trade_pct}%
+   Max Daily Loss: {profile.max_loss_per_day_pct}%
+   Min Confidence: {profile.min_confidence_to_trade}%
+
+🤖 **AI Sizing:** {'Enabled' if profile.use_ai_sizing else 'Disabled'}
+
+💡 *Configure via Service Control Panel → Risk Profile tab*
+"""
+            await message.channel.send(risk_text)
+            
+        except Exception as e:
+            logger.error(f"Error showing risk profile: {e}")
+            await message.channel.send(f"❌ Error loading risk profile: {str(e)}")
+    
+    async def _handle_sizing_command(self, message: discord.Message, symbol: str):
+        """Handle SIZING command - calculate position size for symbol"""
+        try:
+            from services.risk_profile_config import get_risk_profile_manager
+            from services.service_orchestrator import get_orchestrator
+            
+            # Get current price from alert or market data
+            orch = get_orchestrator()
+            orch.refresh_state()
+            pending = orch.get_pending_alerts()
+            
+            # Find alert for this symbol
+            alert = None
+            for a in pending:
+                if a.symbol.upper() == symbol.upper():
+                    alert = a
+                    break
+            
+            if alert and alert.price:
+                price = alert.price
+                stop_loss = alert.stop_loss or (price * 0.95)
+                confidence = float(alert.metadata.get('score', 75)) if alert.metadata else 75.0
+            else:
+                # Try to get current price from yfinance
+                try:
+                    import yfinance as yf
+                    ticker = yf.Ticker(symbol)
+                    hist = ticker.history(period='1d')
+                    if not hist.empty:
+                        price = float(hist['Close'].iloc[-1])
+                        stop_loss = price * 0.95  # Default 5% stop
+                        confidence = 70.0  # Default confidence
+                    else:
+                        await message.channel.send(f"⚠️ Could not get price for {symbol}")
+                        return
+                except Exception as e:
+                    await message.channel.send(f"⚠️ Could not get price for {symbol}: {str(e)[:50]}")
+                    return
+            
+            # Calculate sizing
+            manager = get_risk_profile_manager()
+            sizing = manager.calculate_position_size(
+                price=price,
+                stop_loss=stop_loss,
+                confidence=confidence
+            )
+            
+            # Calculate potential targets
+            risk_per_share = price - stop_loss
+            target_1r = price + risk_per_share
+            target_2r = price + (risk_per_share * 2)
+            target_3r = price + (risk_per_share * 3)
+            
+            sizing_text = f"""📊 **Position Sizing for {symbol}**
+
+💰 **Entry:** ${price:.2f}
+🛑 **Stop Loss:** ${stop_loss:.2f} ({((price - stop_loss) / price * 100):.1f}% risk)
+
+📈 **Recommended Position:**
+   Shares: **{sizing['recommended_shares']:,}**
+   Value: **${sizing['recommended_value']:,.2f}**
+   % of Portfolio: {sizing['position_pct']:.1f}%
+
+⚠️ **Risk:**
+   Amount at Risk: ${sizing['risk_amount']:,.2f}
+   % of Capital: {sizing['risk_pct']:.1f}%
+
+🎯 **Targets (R-multiples):**
+   1R: ${target_1r:.2f} (+${sizing['recommended_shares'] * risk_per_share:,.2f})
+   2R: ${target_2r:.2f} (+${sizing['recommended_shares'] * risk_per_share * 2:,.2f})
+   3R: ${target_3r:.2f} (+${sizing['recommended_shares'] * risk_per_share * 3:,.2f})
+
+📊 Confidence: {confidence:.0f}% | Adjustment: {sizing['confidence_adjustment']:.2f}x
+🛡️ Profile: {sizing['profile_tolerance']}
+"""
+            await message.channel.send(sizing_text)
+            
+        except Exception as e:
+            logger.error(f"Error calculating position size: {e}")
+            await message.channel.send(f"❌ Error calculating size: {str(e)[:100]}")
 
     async def _handle_analyze_command(self, message: discord.Message, symbol: str, mode: str = "standard"):
         """Handle ANALYZE command - supports both crypto and stock analysis modes"""
@@ -535,30 +671,65 @@ class DiscordTradeApprovalBot(commands.Bot):
             use_paper = paper_mode or stock_manager.paper_mode
             mode_str = "📝 PAPER" if use_paper else "💰 LIVE"
             
-            # Queue trade for approval
+            # Get position sizing from risk profile
+            try:
+                from services.risk_profile_config import get_risk_profile_manager
+                risk_manager = get_risk_profile_manager()
+                
+                # Calculate position size
+                confidence_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
+                entry_price = alert_info.price or 0.0
+                stop_loss = alert_info.stop_loss or (entry_price * 0.95)  # Default 5% stop
+                
+                sizing = risk_manager.calculate_position_size(
+                    price=entry_price,
+                    stop_loss=stop_loss,
+                    confidence=confidence_score
+                )
+                
+                recommended_shares = sizing['recommended_shares']
+                recommended_value = sizing['recommended_value']
+                position_pct = sizing['position_pct']
+                risk_pct = sizing['risk_pct']
+                
+            except Exception as e:
+                logger.warning(f"Could not get position sizing: {e}")
+                # Fallback to default sizing
+                recommended_shares = int(stock_manager.default_position_size / alert_info.price) if alert_info.price else 10
+                recommended_value = stock_manager.default_position_size
+                position_pct = 10.0
+                risk_pct = 2.0
+            
+            # Queue trade for approval with sizing info
             await message.channel.send(
-                f"🚀 **{mode_str} TRADE QUEUED: {symbol}**\n"
+                f"🚀 **{mode_str} TRADE QUEUED: {symbol}**\n\n"
+                f"📊 **Position Sizing:**\n"
+                f"   Shares: **{recommended_shares:,}**\n"
+                f"   Value: **${recommended_value:,.2f}** ({position_pct:.1f}% of portfolio)\n"
+                f"   Risk: **{risk_pct:.1f}%**\n\n"
+                f"📈 **Trade Details:**\n"
                 f"   Side: **{side}**\n"
-                f"   Confidence: {alert_info.confidence}\n"
-                f"   Price: ${alert_info.price:.2f if alert_info.price else 'Market'}\n\n"
+                f"   Entry: ${entry_price:.2f if entry_price else 'Market'}\n"
+                f"   Stop: ${stop_loss:.2f}\n"
+                f"   Confidence: {alert_info.confidence}\n\n"
                 f"Reply **YES** to confirm or **NO** to cancel."
             )
             
             # Create pending trade approval
             approval_id = f"stock_{symbol}_{int(datetime.now().timestamp())}"
             
-            # Store in pending approvals with stock-specific data
+            # Store in pending approvals with stock-specific data including sizing
             self.pending_approvals[approval_id] = PendingTradeApproval(
                 approval_id=approval_id,
                 pair=symbol,
                 side=side,
-                entry_price=alert_info.price or 0.0,
-                position_size=stock_manager.default_position_size,
-                stop_loss=alert_info.stop_loss or 0.0,
-                take_profit=alert_info.target or 0.0,
+                entry_price=entry_price,
+                position_size=recommended_value,
+                stop_loss=stop_loss,
+                take_profit=alert_info.target or (entry_price * 1.10),  # Default 10% target
                 strategy=alert_info.alert_type,
-                confidence=float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0,
-                reasoning=alert_info.reasoning or "Stock opportunity detected",
+                confidence=confidence_score,
+                reasoning=f"AI-sized: {recommended_shares} shares @ ${recommended_value:,.2f} | {alert_info.reasoning or 'Stock opportunity detected'}",
                 created_time=datetime.now(),
                 discord_message_id=str(message.id)
             )

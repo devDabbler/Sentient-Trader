@@ -191,8 +191,46 @@ Trade Execution (Paper or Live via Tradier/IBKR)
 | `T` or `TRADE` | Execute BUY trade (after analysis) |
 | `SHORT` | Execute SHORT/SELL trade |
 | `P` or `PAPER` | Paper trade (test mode) |
+| `SIZE` or `SIZING` | 📊 Show AI position sizing recommendation |
+| `RISK` | 📊 Show current risk profile |
 | `X` or `D` | Dismiss alert |
 | `?` or `HELP` | Show all commands |
+
+### Risk Profile & Position Sizing
+
+AI-powered position sizing that automatically calculates optimal trade sizes based on your risk tolerance.
+
+**Features:**
+- **Risk Presets**: Conservative (5% max), Moderate (10% max), Aggressive (20% max)
+- **AI Sizing**: Adjusts position size based on signal confidence
+- **Risk-Based Sizing**: Calculates shares based on stop-loss distance and max risk per trade
+- **Portfolio Awareness**: Considers current positions and available capital
+
+**Configure via:**
+1. **Service Control Panel** → Risk Profile tab
+2. **Discord**: Reply `RISK` to see profile, `SIZE` or `SIZING` for specific calculations
+
+**Discord Position Sizing Example:**
+```
+📊 Position Sizing for NVDA
+
+💰 Entry: $450.00
+🛑 Stop Loss: $427.50 (5.0% risk)
+
+📈 Recommended Position:
+   Shares: 22
+   Value: $9,900.00
+   % of Portfolio: 9.9%
+
+⚠️ Risk:
+   Amount at Risk: $495.00
+   % of Capital: 0.5%
+
+🎯 Targets (R-multiples):
+   1R: $472.50 (+$495.00)
+   2R: $495.00 (+$990.00)
+   3R: $517.50 (+$1,485.00)
+```
 
 ### Setting Up Stock Trading
 

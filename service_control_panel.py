@@ -1481,11 +1481,12 @@ def main():
             st.rerun()
 
     # Tabs
-    tab_workflow, tab_status, tab_watchlist, tab_analysis, tab_discord, tab_logs = st.tabs([
+    tab_workflow, tab_status, tab_watchlist, tab_analysis, tab_risk, tab_discord, tab_logs = st.tabs([
         "🎯 Workflow",
         "📊 Service Status", 
         "📋 Watchlists",
-        "🔍 Analysis", 
+        "🔍 Analysis",
+        "💰 Risk Profile",
         "💬 Discord", 
         "📝 Logs"
     ])
@@ -2645,6 +2646,19 @@ def main():
             st.caption("⚠️ Use sparingly")
     else:
         st.info("📭 No analysis results yet.\n\n**To get started:**\n1. Queue an analysis from the sidebar\n2. Or wait for background services to generate results\n3. Results will appear here automatically")
+    
+    # ============================================================
+    # RISK PROFILE TAB
+    # ============================================================
+    with tab_risk:
+        try:
+            from ui.risk_profile_ui import render_risk_profile_config
+            render_risk_profile_config()
+        except ImportError as e:
+            st.error(f"Could not load Risk Profile UI: {e}")
+            st.info("Make sure ui/risk_profile_ui.py exists")
+        except Exception as e:
+            st.error(f"Error rendering Risk Profile: {e}")
     
     st.markdown("---")
     

@@ -270,6 +270,52 @@ class AIStockPositionManager:
         del self.pending_approvals[approval_id]
         logger.info("=" * 60)
     
+    def calculate_position_size(
+        self,
+        symbol: str,
+        entry_price: float,
+        stop_loss: float,
+        confidence: float = 75.0
+    ) -> Dict:
+        """
+        Calculate optimal position size based on risk profile
+        
+        Args:
+            symbol: Stock symbol
+            entry_price: Entry price
+            stop_loss: Stop loss price
+            confidence: Signal confidence (0-100)
+            
+        Returns:
+            Dict with shares, value, and risk metrics
+        """
+        try:
+            from services.risk_profile_config import get_risk_profile_manager
+            manager = get_risk_profile_manager()
+            
+            sizing = manager.calculate_position_size(
+                price=entry_price,
+                stop_loss=stop_loss,
+                confidence=confidence
+            )
+            sizing['symbol'] = symbol
+            return sizing
+            
+        except Exception as e:
+            logger.warning(f"Could not calculate position size from risk profile: {e}")
+            # Fallback to default sizing
+            shares = int(self.default_position_size / entry_price) if entry_price > 0 else 0
+            return {
+                'symbol': symbol,
+                'recommended_shares': shares,
+                'recommended_value': shares * entry_price,
+                'position_pct': (shares * entry_price / 10000) * 100,  # Assume 10k capital
+                'risk_pct': 2.0,
+                'risk_amount': shares * abs(entry_price - stop_loss),
+                'confidence_adjustment': 1.0,
+                'profile_tolerance': 'Moderate'
+            }
+    
     def queue_trade_for_approval(
         self,
         symbol: str,
@@ -280,15 +326,34 @@ class AIStockPositionManager:
         take_profit: float,
         strategy: str,
         confidence: float,
-        reasoning: str
+        reasoning: str,
+        use_risk_profile_sizing: bool = True
     ) -> Optional[str]:
         """
         Queue a trade for Discord approval
+        
+        Args:
+            use_risk_profile_sizing: If True, override quantity with risk profile calculation
         
         Returns:
             Approval ID if queued successfully, None otherwise
         """
         try:
+            # Calculate position size from risk profile if enabled
+            if use_risk_profile_sizing:
+                sizing = self.calculate_position_size(
+                    symbol=symbol,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    confidence=confidence
+                )
+                quantity = sizing['recommended_shares']
+                position_value = sizing['recommended_value']
+                risk_info = f"AI-Sized: {quantity} shares @ ${position_value:,.2f} ({sizing['position_pct']:.1f}% of portfolio, {sizing['risk_pct']:.1f}% risk)"
+            else:
+                position_value = quantity * entry_price
+                risk_info = f"Manual: {quantity} shares @ ${position_value:,.2f}"
+            
             decision = StockTradeDecision(
                 symbol=symbol,
                 side=side,
@@ -298,7 +363,7 @@ class AIStockPositionManager:
                 take_profit=take_profit,
                 strategy=strategy,
                 confidence=confidence,
-                reasoning=reasoning
+                reasoning=f"{risk_info} | {reasoning}"
             )
             
             approval_id = f"stock_{symbol}_{int(datetime.now().timestamp())}"
@@ -318,22 +383,20 @@ class AIStockPositionManager:
                 reward_pct = abs((take_profit - entry_price) / entry_price) * 100 if entry_price > 0 else 0
                 rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
                 
-                position_size = quantity * entry_price
-                
                 self.discord_approval_manager.send_approval_request(
                     approval_id=approval_id,
                     pair=symbol,
                     side=side,
                     entry_price=entry_price,
-                    position_size=position_size,
+                    position_size=position_value,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     strategy=strategy,
                     confidence=confidence,
-                    reasoning=reasoning,
+                    reasoning=decision.reasoning,
                     additional_info=f"📊 **Stock Trade** | Paper: {self.paper_mode} | R:R {rr_ratio:.2f}"
                 )
-                logger.info(f"📨 Stock trade approval sent to Discord: {symbol} {side}")
+                logger.info(f"📨 Stock trade approval sent to Discord: {symbol} {side} ({quantity} shares)")
             else:
                 logger.warning(f"⚠️ Discord not available, trade queued locally: {approval_id}")
             
