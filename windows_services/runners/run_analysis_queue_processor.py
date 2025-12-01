@@ -431,7 +431,7 @@ def save_results_to_file(results: list, request: dict):
 
 
 def send_discord_notification(results: list, request: dict):
-    """Send analysis results to Discord webhook"""
+    """Send analysis results to Discord webhook using rich embeds"""
     if not DISCORD_WEBHOOK_URL:
         logger.debug("Discord webhook not configured, skipping notification")
         return
@@ -443,7 +443,7 @@ def send_discord_notification(results: list, request: dict):
     try:
         import requests as req_lib
         
-        # Build summary
+        # Build metadata
         asset_type = request.get("asset_type", "crypto").upper()
         mode = request.get("analysis_mode", "standard")
         completed_time = datetime.now().strftime("%H:%M:%S")
@@ -454,35 +454,93 @@ def send_discord_notification(results: list, request: dict):
             action = r.get("action", "UNKNOWN")
             actions[action] = actions.get(action, 0) + 1
         
-        # Build message
-        summary = f"**Analysis Complete** ({completed_time})\n"
-        summary += f"Asset Type: {asset_type} | Mode: {mode}\n"
-        summary += f"Analyzed: {len(results)} tickers\n\n"
-        summary += "**Results:**\n"
+        # Create embeds for each result (Discord allows multiple embeds)
+        embeds = []
+        
+        # Header embed with summary
+        summary_text = "Asset Type: " + asset_type + " | Mode: " + mode + "\n"
+        summary_text += f"Analyzed: {len(results)} ticker(s)\n\n"
+        summary_text += "**Action Breakdown:**\n"
         for action, count in sorted(actions.items()):
-            summary += f"• {action}: {count}\n"
+            summary_text += f"• {action}: {count}\n"
         
-        # Get top result by confidence if available
-        top_result = None
-        for r in results:
-            if r.get("confidence", 0) > 0:
-                if not top_result or r.get("confidence", 0) > top_result.get("confidence", 0):
-                    top_result = r
+        header_embed = {
+            "title": "📊 Analysis Complete",
+            "description": summary_text,
+            "color": 3447003,  # Blue
+            "timestamp": datetime.now().isoformat(),
+            "footer": {"text": f"Completed at {completed_time}"}
+        }
+        embeds.append(header_embed)
         
-        if top_result:
-            summary += f"\n**Top Opportunity:**\n"
-            summary += f"{top_result.get('ticker', '?')}: {top_result.get('action', '?')} ({top_result.get('confidence', 0):.0f}%)\n"
-            if top_result.get('reasoning'):
-                summary += f"*{top_result.get('reasoning')[:100]}...*"
+        # Create embed for each result with full details
+        for result in results:
+            ticker = result.get('ticker', '?')
+            action = result.get('action', 'UNKNOWN')
+            confidence = result.get('confidence', 0)
+            reasoning = result.get('reasoning', 'No analysis provided')
+            
+            # Determine color based on action
+            if action in ['LONG', 'BUY', 'BULLISH', 'ENTER_NOW']:
+                color = 65280  # Green
+                emoji = "🟢"
+            elif action in ['SHORT', 'SELL', 'BEARISH', 'DO_NOT_ENTER']:
+                color = 16711680  # Red
+                emoji = "🔴"
+            else:
+                color = 16776960  # Yellow
+                emoji = "🟡"
+            
+            # Build fields with available data
+            fields = [
+                {"name": "Signal", "value": f"{emoji} {action}", "inline": True},
+                {"name": "Confidence", "value": f"{confidence:.0f}%" if isinstance(confidence, (int, float)) else str(confidence), "inline": True}
+            ]
+            
+            # Add optional detailed fields
+            if result.get('urgency'):
+                fields.append({"name": "Urgency", "value": result.get('urgency'), "inline": True})
+            
+            if result.get('suggested_entry') is not None and action not in ['DO_NOT_ENTER']:
+                entry = result.get('suggested_entry')
+                entry_str = f"${entry:.4f}" if isinstance(entry, (int, float)) else str(entry)
+                fields.append({"name": "Entry Point", "value": entry_str, "inline": True})
+            
+            if result.get('suggested_stop') is not None:
+                stop = result.get('suggested_stop')
+                stop_str = f"${stop:.4f}" if isinstance(stop, (int, float)) else str(stop)
+                fields.append({"name": "Stop Loss", "value": stop_str, "inline": True})
+            
+            if result.get('suggested_target') is not None:
+                target = result.get('suggested_target')
+                target_str = f"${target:.4f}" if isinstance(target, (int, float)) else str(target)
+                fields.append({"name": "Target", "value": target_str, "inline": True})
+            
+            if result.get('risk_reward_ratio') is not None and action not in ['DO_NOT_ENTER']:
+                rr = result.get('risk_reward_ratio')
+                rr_str = f"{rr:.2f}" if isinstance(rr, (int, float)) else str(rr)
+                fields.append({"name": "Risk/Reward", "value": rr_str, "inline": True})
+            
+            # Add reasoning as main field (Discord truncates at 2048 chars per field)
+            reasoning_text = reasoning[:1024] if len(reasoning) > 1024 else reasoning
+            fields.append({"name": "Analysis", "value": reasoning_text, "inline": False})
+            
+            result_embed = {
+                "title": f"{emoji} {ticker}",
+                "color": color,
+                "fields": fields
+            }
+            embeds.append(result_embed)
         
+        # Send via webhook (Discord allows up to 10 embeds per message)
         payload = {
-            "content": summary,
-            "username": "Analysis Queue Processor"
+            "username": "🤖 Analysis Queue Processor",
+            "embeds": embeds[:10]  # Limit to 10 embeds per message
         }
         
         response = req_lib.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
         if response.status_code in [200, 204]:
-            logger.info(f"✅ Discord notification sent")
+            logger.info(f"✅ Discord notification sent ({len(embeds)} embeds)")
         else:
             logger.warning(f"Discord notification failed: {response.status_code}")
             
@@ -494,22 +552,33 @@ def mark_request_complete(request_id: str):
     """Mark a request as complete in the queue file"""
     try:
         if not ANALYSIS_REQUESTS_FILE.exists():
+            logger.warning(f"Analysis requests file doesn't exist, can't mark {request_id} complete")
             return
         
         with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
             requests = json.load(f)
         
+        found = False
         for req in requests:
             if req.get("id") == request_id:
                 req["status"] = "complete"
                 req["completed"] = datetime.now().isoformat()
+                found = True
+                logger.info(f"✅ Marked request {request_id} as complete")
                 break
         
+        if not found:
+            logger.warning(f"Request {request_id} not found in analysis queue")
+            return
+        
+        # Write back to file - ensure it's persisted
         with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
             json.dump(requests, f, indent=2)
+        
+        logger.debug(f"✅ Request {request_id} status persisted to file")
             
     except Exception as e:
-        logger.error(f"Error marking request complete: {e}")
+        logger.error(f"Error marking request complete: {e}", exc_info=True)
 
 
 def main_loop():
@@ -540,8 +609,8 @@ def main_loop():
             with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
                 requests = json.load(f)
             
-            # Find pending requests
-            pending = [r for r in requests if r.get("status") == "pending"]
+            # Find pending requests (skip completed, failed, etc)
+            pending = [r for r in requests if r.get("status", "pending") == "pending"]
             
             if pending:
                 logger.info(f"📋 Found {len(pending)} pending request(s)")
