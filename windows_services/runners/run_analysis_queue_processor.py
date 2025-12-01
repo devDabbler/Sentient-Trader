@@ -35,7 +35,11 @@ from windows_services.runners.service_config_loader import (
 
 # Discord notifications (optional)
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-ENABLE_DISCORD_ALERTS = os.getenv("ENABLE_DISCORD_ALERTS", "false").lower() == "true"
+# Enable Discord alerts if webhook is configured, unless explicitly disabled
+ENABLE_DISCORD_ALERTS = os.getenv("ENABLE_DISCORD_ALERTS", "").lower() in ("true", "1", "yes")
+if not ENABLE_DISCORD_ALERTS and DISCORD_WEBHOOK_URL:
+    # Auto-enable if webhook exists and not explicitly disabled
+    ENABLE_DISCORD_ALERTS = os.getenv("DISABLE_DISCORD_ALERTS", "").lower() not in ("true", "1", "yes")
 
 # Configure logging
 LOG_FILE = PROJECT_ROOT / "logs" / "analysis_queue_processor.log"
@@ -428,7 +432,12 @@ def save_results_to_file(results: list, request: dict):
 
 def send_discord_notification(results: list, request: dict):
     """Send analysis results to Discord webhook"""
-    if not ENABLE_DISCORD_ALERTS or not DISCORD_WEBHOOK_URL:
+    if not DISCORD_WEBHOOK_URL:
+        logger.debug("Discord webhook not configured, skipping notification")
+        return
+    
+    if not ENABLE_DISCORD_ALERTS:
+        logger.debug("Discord alerts disabled, skipping notification")
         return
     
     try:
