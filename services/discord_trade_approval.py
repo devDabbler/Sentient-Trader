@@ -1000,10 +1000,20 @@ class DiscordApprovalManager:
     
     def get_pending_approvals(self) -> Dict[str, 'PendingTradeApproval']:
         """Get all pending trade approvals (thread-safe)"""
-        if not self.enabled or not self.bot:
+        try:
+            if not self.enabled or not self.bot:
+                return {}
+            
+            # Verify bot has the attribute and it's valid
+            if not hasattr(self.bot, 'pending_approvals'):
+                logger.warning("Discord bot missing pending_approvals attribute")
+                return {}
+            
+            # Direct access to bot's pending_approvals dict (read-only access is safe)
+            return self.bot.pending_approvals.copy() if self.bot.pending_approvals else {}
+        except Exception as e:
+            logger.error(f"Error getting pending approvals: {e}")
             return {}
-        # Direct access to bot's pending_approvals dict (read-only access is safe)
-        return self.bot.pending_approvals.copy() if self.bot.pending_approvals else {}
     
     def cleanup_expired(self) -> int:
         """Remove expired approval requests (thread-safe)"""
@@ -1020,9 +1030,20 @@ class DiscordApprovalManager:
 # Global instance
 _approval_manager: Optional[DiscordApprovalManager] = None
 
-def get_discord_approval_manager(approval_callback: Optional[Callable] = None) -> Optional[DiscordApprovalManager]:
-    """Get or create global Discord approval manager"""
+def get_discord_approval_manager(approval_callback: Optional[Callable] = None, force_new: bool = False) -> Optional[DiscordApprovalManager]:
+    """
+    Get or create global Discord approval manager
+    
+    Args:
+        approval_callback: Callback function when trade is approved/rejected
+        force_new: If True, create a new instance even if one exists (for reset scenarios)
+    """
     global _approval_manager
+    
+    # Force reset if requested or if existing manager is in bad state
+    if force_new or (_approval_manager is not None and not hasattr(_approval_manager, 'get_pending_approvals')):
+        logger.warning("Resetting Discord approval manager (invalid state or force requested)")
+        _approval_manager = None
     
     if _approval_manager is None:
         _approval_manager = DiscordApprovalManager(approval_callback=approval_callback)

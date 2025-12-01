@@ -2391,16 +2391,64 @@ def main():
     st.markdown("---")
     
     # ============================================================
-    # ANALYSIS RESULTS VIEWER
+    # ANALYSIS RESULTS VIEWER (with Auto-Refresh)
     # ============================================================
-    st.markdown("## 📈 Recent Analysis Results")
+    # Create columns for header and refresh control
+    res_col1, res_col2, res_col3 = st.columns([2, 1, 1])
+    with res_col1:
+        st.markdown("## 📈 Recent Analysis Results")
+    with res_col2:
+        if st.button("🔄 Refresh", key="refresh_results"):
+            st.rerun()
+    with res_col3:
+        # Auto-refresh toggle
+        auto_refresh = st.checkbox("Auto-refresh", value=False, key="auto_refresh_results")
+        if auto_refresh:
+            st.session_state.last_refresh_time = time.time()
+    
+    # Auto-refresh logic
+    if auto_refresh and 'last_refresh_time' in st.session_state:
+        elapsed = time.time() - st.session_state.last_refresh_time
+        if elapsed > 15:  # Refresh every 15 seconds
+            st.session_state.last_refresh_time = time.time()
+            st.rerun()
     
     analysis_results = get_analysis_results()
     
+    # Build service label map for better organization
+    SERVICE_LABELS = {
+        'latest': '⏱️ Latest Results',
+        'queue_latest': '⏱️ Latest Queue',
+        'Crypto Standard': '🔍 Crypto Standard',
+        'Crypto Multi-Config': '🎯 Crypto Multi-Config',
+        'Crypto Ultimate': '🚀 Crypto Ultimate',
+        'Stock Momentum': '📈 Stock Momentum',
+        'queue_': '📊 Queue Analysis'
+    }
+    
+    def get_service_label(service_key: str) -> str:
+        """Get a better label for the service"""
+        # Check for exact matches first
+        if service_key in SERVICE_LABELS:
+            return SERVICE_LABELS[service_key]
+        
+        # Check for partial matches
+        for pattern, label in SERVICE_LABELS.items():
+            if pattern in service_key.lower():
+                return label
+        
+        # Clean up the raw key
+        clean_label = service_key.replace('_', ' ').title()
+        return f"📊 {clean_label}"
+    
     if analysis_results:
-        # Initialize session state for stable tab keys
+        # Initialize session state for stable tab keys - prioritize special keys
         if 'analysis_tab_keys' not in st.session_state:
-            st.session_state.analysis_tab_keys = list(analysis_results.keys())
+            all_keys = list(analysis_results.keys())
+            # Sort with 'latest' first, then 'queue_latest', then others
+            special_keys = [k for k in all_keys if k in ['latest', 'queue_latest']]
+            other_keys = [k for k in all_keys if k not in ['latest', 'queue_latest']]
+            st.session_state.analysis_tab_keys = special_keys + sorted(other_keys)
         
         # Update keys if they've changed, but maintain order
         current_keys = list(analysis_results.keys())
@@ -2410,15 +2458,15 @@ def main():
             new_keys = [k for k in current_keys if k not in st.session_state.analysis_tab_keys]
             st.session_state.analysis_tab_keys = existing_keys + new_keys
         
-        # Use stable tab labels (without dynamic content)
-        tab_labels = [f"📊 {key}" for key in st.session_state.analysis_tab_keys] + ["📋 All"]
+        # Create tabs with improved labels
+        tab_labels = [get_service_label(key) for key in st.session_state.analysis_tab_keys] + ["📋 All Results"]
         result_tabs = st.tabs(tab_labels)
         
         # Map services to tabs (show message if service has no current data)
         for i, service in enumerate(st.session_state.analysis_tab_keys):
             with result_tabs[i]:
                 if service not in analysis_results:
-                    st.info(f"No current results for {service}. Results will appear here when available.")
+                    st.info(f"No current results for {get_service_label(service)}. Results will appear here when available.")
                     continue
                 
                 data = analysis_results[service]
@@ -2427,23 +2475,36 @@ def main():
                     continue
                     
                 results = data.get('results', [])
-                updated = str(data.get('updated', 'Unknown'))[:16].replace('T', ' ')
+                updated = str(data.get('updated', 'Unknown'))[:19].replace('T', ' ')
+                count = data.get('count', len(results))
                 
                 if not isinstance(results, list):
                     st.warning(f"Invalid results list for {service}")
                     results = []
                 
-                # Show count in caption
-                count_badge = f"**{len(results)}**" if results else "0"
-                st.caption(f"Last updated: {updated} | {count_badge} result(s)")
+                # Enhanced header with status indicators
+                st.markdown(f"### {get_service_label(service)}")
+                
+                # Status badges
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.caption(f"📅 Updated: {updated}")
+                with col2:
+                    st.metric("Total", len(results), f"{count if count else len(results)} stored")
+                with col3:
+                    if results:
+                        st.metric("Latest", results[-1].get('ticker', 'N/A'))
+                
+                st.divider()
                 
                 if results:
-                    # Show last 10 results
-                    for result in results[-10:]:
+                    # Display last 15 results in a better format
+                    for idx, result in enumerate(results[-15:], 1):
                         ticker = result.get('ticker', result.get('symbol', 'N/A'))
                         signal = result.get('signal', result.get('action', 'N/A'))
                         confidence = result.get('confidence', result.get('score', 0))
                         price = result.get('price', result.get('entry_price', 0))
+                        timestamp = result.get('analysis_time', '')[:19] if result.get('analysis_time') else ''
                         
                         # Color based on signal
                         if signal in ['LONG', 'BUY', 'BULLISH']:
@@ -2453,7 +2514,7 @@ def main():
                         else:
                             signal_color = "🟡"
                         
-                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                        col1, col2, col3, col4, col5 = st.columns([1.5, 1, 0.8, 0.8, 1.5])
                         with col1:
                             st.write(f"**{ticker}**")
                         with col2:
@@ -2466,13 +2527,21 @@ def main():
                         with col4:
                             if isinstance(price, (int, float)) and price > 0:
                                 st.write(f"${price:.2f}")
+                            else:
+                                st.write("N/A")
+                        with col5:
+                            st.caption(timestamp)
                 else:
-                    st.info("No results yet")
+                    st.info("📭 No results yet. Analysis requests will appear here once processed.")
         
-        # "All" tab - combined view
+        # "All Results" tab - combined view
         with result_tabs[-1]:
+            st.markdown("### 📋 All Results (Latest)")
+            
             all_results = []
             for service, data in analysis_results.items():
+                if service in ['latest', 'queue_latest']:  # Skip meta keys
+                    continue
                 if not isinstance(data, dict):
                     continue
                 
@@ -2482,18 +2551,27 @@ def main():
                     
                 for result in results:
                     if isinstance(result, dict):
-                        result['_service'] = service
+                        result['_service'] = get_service_label(service)
                         all_results.append(result)
             
             if all_results:
-                st.caption(f"Total: {len(all_results)} results across all services")
-                for result in all_results[-15:]:
+                # Sort by timestamp (most recent first)
+                try:
+                    all_results.sort(key=lambda x: x.get('analysis_time', ''), reverse=True)
+                except:
+                    pass
+                
+                st.caption(f"📊 Total: **{len(all_results)}** results across all services")
+                st.divider()
+                
+                for result in all_results[:30]:  # Show top 30 most recent
                     ticker = result.get('ticker', result.get('symbol', 'N/A'))
                     signal = result.get('signal', result.get('action', 'N/A'))
                     confidence = result.get('confidence', result.get('score', 0))
-                    service = result.get('_service', 'Unknown')[:20]
+                    service = result.get('_service', 'Unknown')
+                    timestamp = result.get('analysis_time', '')[:19] if result.get('analysis_time') else ''
                     
-                    col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+                    col1, col2, col3, col4, col5 = st.columns([1.5, 1, 0.8, 2, 1.5])
                     with col1:
                         st.write(f"**{ticker}**")
                     with col2:
@@ -2505,15 +2583,30 @@ def main():
                             st.write(str(confidence))
                     with col4:
                         st.caption(service)
+                    with col5:
+                        st.caption(timestamp)
             else:
-                st.info("No results from any service yet")
+                st.info("📭 No results from any service yet")
         
-        # Clear results button
-        if st.button("🗑️ Clear All Results", key="clear_all_results"):
-            clear_analysis_results()
-            st.rerun()
+        # Control buttons
+        st.divider()
+        button_col1, button_col2, button_col3 = st.columns(3)
+        
+        with button_col1:
+            if st.button("🔄 Force Refresh Now", key="force_refresh_results"):
+                st.rerun()
+        
+        with button_col2:
+            if st.button("🗑️ Clear All Results", key="clear_all_results"):
+                clear_analysis_results()
+                st.success("✅ All analysis results cleared!")
+                time.sleep(1)
+                st.rerun()
+        
+        with button_col3:
+            st.caption("⚠️ Use sparingly")
     else:
-        st.info("No analysis results yet. Trigger a scan from the sidebar or wait for services to generate results.")
+        st.info("📭 No analysis results yet.\n\n**To get started:**\n1. Queue an analysis from the sidebar\n2. Or wait for background services to generate results\n3. Results will appear here automatically")
     
     st.markdown("---")
     
