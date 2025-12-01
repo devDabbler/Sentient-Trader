@@ -481,11 +481,28 @@ def get_analysis_requests() -> list:
 def clear_analysis_requests() -> bool:
     """Clear all analysis requests"""
     try:
+        # Ensure parent directory exists
+        ANALYSIS_REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
             json.dump([], f)
+        print(f"[INFO] Cleared analysis requests file: {ANALYSIS_REQUESTS_FILE}")
         return True
     except Exception as e:
         print(f"Error clearing analysis requests: {e}")
+        return False
+
+
+def clear_analysis_results() -> bool:
+    """Clear all analysis results"""
+    try:
+        # Ensure parent directory exists
+        ANALYSIS_RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(ANALYSIS_RESULTS_FILE, 'w') as f:
+            json.dump({}, f)
+        print(f"[INFO] Cleared analysis results file: {ANALYSIS_RESULTS_FILE}")
+        return True
+    except Exception as e:
+        print(f"Error clearing analysis results: {e}")
         return False
 
 
@@ -655,17 +672,6 @@ def get_analysis_results() -> dict:
     except Exception as e:
         print(f"Error loading analysis results: {e}")
     return {}
-
-
-def clear_analysis_results() -> bool:
-    """Clear all analysis results"""
-    try:
-        with open(ANALYSIS_RESULTS_FILE, 'w') as f:
-            json.dump({}, f)
-        return True
-    except Exception as e:
-        print(f"Error clearing analysis results: {e}")
-        return False
 
 
 # ============================================================
@@ -2078,7 +2084,9 @@ def main():
         if pending:
             st.caption(f"📋 {len(pending)} pending request(s)")
             if st.button("🗑️ Clear Queue", key="clear_analysis_queue"):
-                clear_analysis_requests()
+                if clear_analysis_requests():
+                    st.toast("✅ Queue cleared!")
+                time.sleep(0.3)
                 st.rerun()
     
     # Main content - Service Cards by Category
@@ -2537,9 +2545,23 @@ def main():
                 created = req.get("created", "")[:16].replace("T", " ")
                 st.caption(created)
         
-        if st.button("🗑️ Clear All Requests", use_container_width=True):
-            clear_analysis_requests()
-            st.rerun()
+        col_clear1, col_clear2 = st.columns(2)
+        with col_clear1:
+            if st.button("🗑️ Clear All Requests", use_container_width=True):
+                if clear_analysis_requests():
+                    st.toast("✅ Analysis queue cleared!")
+                else:
+                    st.error("❌ Failed to clear queue")
+                time.sleep(0.3)
+                st.rerun()
+        with col_clear2:
+            if st.button("🗑️ Clear Results", use_container_width=True):
+                if clear_analysis_results():
+                    st.toast("✅ Analysis results cleared!")
+                else:
+                    st.error("❌ Failed to clear results")
+                time.sleep(0.3)
+                st.rerun()
     else:
         st.info("No analysis requests queued. Use the sidebar to trigger scans from your phone! 📱")
     
