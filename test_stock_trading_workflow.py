@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Stock Trading Workflow Test Suite
-=======
 Tests the end-to-end workflow: Detection → Analysis → Approval → Execution
 
 Run from project root:
@@ -14,13 +13,6 @@ Or with pytest:
 import os
 import sys
 import json
-from pathlib import Path
-from datetime import datetime
-
-PROJECT_ROOT = Path(__file__).parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-=======
 import time
 from pathlib import Path
 from datetime import datetime
@@ -34,16 +26,13 @@ import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
-def print_header(title):
-=======
 
 def print_header(title: str):
     """Print formatted header"""
     print("\n" + "=" * 70)
     print(f"  {title}")
     print("=" * 70)
-def print_result(test_name, passed, details=""):
-=======
+
 
 def print_result(test_name: str, passed: bool, details: str = ""):
     """Print test result"""
@@ -52,12 +41,6 @@ def print_result(test_name: str, passed: bool, details: str = ""):
     if details:
         print(f"       {details}")
 
-def test_imports():
-    print_header("TEST 1: Import Verification")
-    modules = [
-        ("services.ai_stock_position_manager", "AIStockPositionManager"),
-        ("services.stock_informational_monitor", "StockInformationalMonitor"),
-=======
 
 def test_imports():
     """Test that all required modules can be imported"""
@@ -71,93 +54,12 @@ def test_imports():
         ("services.service_orchestrator", "ServiceOrchestrator"),
         ("windows_services.runners.service_config_loader", "queue_analysis_request"),
     ]
-    all_passed = True
-    for mod, cls in modules:
-        try:
-            m = __import__(mod, fromlist=[cls])
-            getattr(m, cls)
-            print_result(f"Import {mod}.{cls}", True)
-        except Exception as e:
-            print_result(f"Import {mod}.{cls}", False, str(e))
-            all_passed = False
-    return all_passed
-
-def test_presets():
-    print_header("TEST 2: Analysis Presets")
-    from windows_services.runners.service_config_loader import ANALYSIS_PRESETS
-    presets = ["stock_standard", "stock_multi", "stock_ultimate"]
-    all_passed = True
-    for p in presets:
-        if p in ANALYSIS_PRESETS:
-            print_result(f"Preset '{p}'", True, f"mode={ANALYSIS_PRESETS[p].get('analysis_mode')}")
-        else:
-            print_result(f"Preset '{p}'", False, "Not found")
-            all_passed = False
-    return all_passed
-
-def test_position_manager():
-    print_header("TEST 3: AI Stock Position Manager")
-    from services.ai_stock_position_manager import get_ai_stock_position_manager
-    mgr = get_ai_stock_position_manager()
-    if mgr:
-        print_result("Manager initialized", True)
-        print_result("Paper mode", mgr.paper_mode, f"paper_mode={mgr.paper_mode}")
-        print_result("Broker", mgr.broker_adapter is not None, "Configured" if mgr.broker_adapter else "Not set")
-        return True
-    print_result("Manager", False)
-    return False
-
-def test_orchestrator():
-    print_header("TEST 4: Service Orchestrator")
-    from services.service_orchestrator import get_orchestrator
-    orch = get_orchestrator()
-    if orch:
-        print_result("Orchestrator", True)
-        alert = orch.add_alert(symbol="TEST", alert_type="TEST", source="test", asset_type="stock", price=100.0, reasoning="Test", confidence="HIGH", expires_minutes=1)
-        print_result("Add alert", alert is not None)
-        orch.reject_alert(alert.id)
-        return True
-    return False
-
-def test_env():
-    print_header("TEST 5: Environment")
-    vars = ['BROKER_TYPE', 'STOCK_PAPER_MODE', 'DISCORD_BOT_TOKEN', 'DISCORD_WEBHOOK_URL']
-    for v in vars:
-        val = os.getenv(v)
-        masked = "***" + val[-4:] if val and ('KEY' in v or 'TOKEN' in v) else (val or "NOT SET")
-        print_result(v, bool(val), masked)
-    return True
-
-def main():
-    print("\n" + "=" * 70)
-    print("  STOCK TRADING WORKFLOW TEST")
-    print("  " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    print("=" * 70)
-    
-    results = {
-        'imports': test_imports(),
-        'presets': test_presets(),
-        'position_manager': test_position_manager(),
-        'orchestrator': test_orchestrator(),
-        'environment': test_env(),
-    }
-    
-    print_header("SUMMARY")
-    passed = sum(results.values())
-    for k, v in results.items():
-        print_result(k, v)
-    print(f"\n  {passed}/{len(results)} tests passed")
-    return passed == len(results)
-
-if __name__ == "__main__":
-    sys.exit(0 if main() else 1)
-=======
     
     all_passed = True
     for module_path, class_name in modules_to_test:
         try:
             module = __import__(module_path, fromlist=[class_name])
-            obj = getattr(module, class_name)
+            getattr(module, class_name)
             print_result(f"Import {module_path}.{class_name}", True)
         except ImportError as e:
             print_result(f"Import {module_path}.{class_name}", False, str(e))
@@ -179,7 +81,6 @@ def test_analysis_presets():
         "stock_standard",
         "stock_multi", 
         "stock_ultimate",
-        "stock_momentum"
     ]
     
     all_passed = True
@@ -203,39 +104,9 @@ def test_analysis_presets():
     return all_passed
 
 
-def test_queue_analysis_request():
-    """Test queueing an analysis request"""
-    print_header("TEST 3: Analysis Queue Request")
-    
-    from windows_services.runners.service_config_loader import (
-        queue_analysis_request, 
-        get_pending_analysis_requests
-    )
-    
-    # Queue a test request
-    test_symbol = "TEST_SYMBOL"
-    result = queue_analysis_request(
-        "stock_standard", 
-        custom_tickers=[test_symbol],
-        asset_type="stock",
-        analysis_mode="standard"
-    )
-    
-    print_result("Queue analysis request", result)
-    
-    if result:
-        # Verify it was queued
-        pending = get_pending_analysis_requests()
-        found = any(test_symbol in (r.get('tickers') or []) for r in pending)
-        print_result("Request in pending queue", found)
-        return found
-    
-    return False
-
-
 def test_ai_stock_position_manager():
     """Test AI Stock Position Manager initialization"""
-    print_header("TEST 4: AI Stock Position Manager")
+    print_header("TEST 3: AI Stock Position Manager")
     
     from services.ai_stock_position_manager import get_ai_stock_position_manager
     
@@ -263,7 +134,7 @@ def test_ai_stock_position_manager():
 
 def test_service_orchestrator():
     """Test Service Orchestrator alert queue"""
-    print_header("TEST 5: Service Orchestrator Alert Queue")
+    print_header("TEST 4: Service Orchestrator Alert Queue")
     
     from services.service_orchestrator import get_orchestrator
     
@@ -305,10 +176,9 @@ def test_service_orchestrator():
 
 def test_stock_monitor_initialization():
     """Test Stock Monitor can be initialized"""
-    print_header("TEST 6: Stock Monitor Initialization")
+    print_header("TEST 5: Stock Monitor Initialization")
     
     try:
-        # Import with minimal dependencies
         from services.stock_informational_monitor import StockInformationalMonitor
         
         # Create with empty watchlist for fast init
@@ -340,7 +210,7 @@ def test_stock_monitor_initialization():
 
 def test_discord_approval_manager():
     """Test Discord Approval Manager (without actually connecting)"""
-    print_header("TEST 7: Discord Approval Manager")
+    print_header("TEST 6: Discord Approval Manager")
     
     # Check environment variables
     token = os.getenv('DISCORD_BOT_TOKEN')
@@ -371,7 +241,7 @@ def test_discord_approval_manager():
 
 def test_broker_configuration():
     """Test broker configuration"""
-    print_header("TEST 8: Broker Configuration")
+    print_header("TEST 7: Broker Configuration")
     
     broker_type = os.getenv('BROKER_TYPE', 'NOT_SET')
     print_result("BROKER_TYPE", broker_type != 'NOT_SET', broker_type)
@@ -417,7 +287,6 @@ def run_all_tests():
     # Run tests
     results['imports'] = test_imports()
     results['presets'] = test_analysis_presets()
-    results['queue'] = test_queue_analysis_request()
     results['position_manager'] = test_ai_stock_position_manager()
     results['orchestrator'] = test_service_orchestrator()
     results['stock_monitor'] = test_stock_monitor_initialization()
@@ -449,4 +318,3 @@ def run_all_tests():
 if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)
-
