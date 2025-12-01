@@ -26,6 +26,7 @@ import json
 import os
 
 from loguru import logger
+import requests
 _debug_file.write("[TRACE] stock_informational_monitor.py: Imported logger\n")
 _debug_file.flush()
 from services.llm_helper import get_llm_helper, LLMServiceMixin
@@ -257,6 +258,19 @@ class StockInformationalMonitor(LLMServiceMixin):
         # Alert cooldown to prevent spam (like crypto breakout monitor)
         self.recent_alerts: Dict[str, datetime] = {}
         self.alert_cooldown_minutes = 60
+        
+        # Discord webhook for rich embeds (like crypto breakout monitor)
+        self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        if not self.discord_webhook:
+            logger.warning("⚠️ DISCORD_WEBHOOK_URL not set - alerts will use fallback system")
+        
+        # Discord bot manager for interactive buttons (if available)
+        self.discord_bot_manager = None
+        try:
+            from services.discord_approval_manager import get_discord_approval_manager
+            self.discord_bot_manager = get_discord_approval_manager()
+        except Exception:
+            pass
         
         print(f"[TRACE] StockInformationalMonitor.__init__: About to log initialization complete...", flush=True)
         logger.info(
@@ -803,13 +817,106 @@ class StockInformationalMonitor(LLMServiceMixin):
         return opportunities
     
     def _send_alert(self, opportunity: StockOpportunity):
-        """Send Discord alert for opportunity and queue to orchestrator"""
+        """Send Discord alert for opportunity and queue to orchestrator (crypto-style)"""
+        
+        # Log alert
+        logger.info(f"\n🚨 STOCK ALERT: {opportunity.symbol}")
+        logger.info(f"   Type: {opportunity.opportunity_type}")
+        logger.info(f"   Score: {opportunity.ensemble_score}/100")
+        logger.info(f"   Confidence: {opportunity.alert_priority} ({opportunity.confidence:.1%})")
+        logger.info(f"   Price: ${opportunity.price:.2f}")
+        logger.info(f"   Alignment: {opportunity.timeframe_alignment}")
+        
         try:
             # Queue to Service Orchestrator for review in Control Panel
             self._queue_to_orchestrator(opportunity)
             
-            alert_title = f"📊 {opportunity.symbol} - {opportunity.opportunity_type}"
+            # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
+            bot_sent = False
+            if self.discord_bot_manager and hasattr(self.discord_bot_manager, 'is_running') and self.discord_bot_manager.is_running():
+                try:
+                    import asyncio
+                    
+                    # Build message for bot
+                    type_emoji = self._get_opportunity_emoji(opportunity.opportunity_type, opportunity.ensemble_score)
+                    
+                    message_text = (
+                        f"**Score:** {opportunity.ensemble_score}/100 | **Confidence:** {opportunity.alert_priority}\n"
+                        f"**Price:** ${opportunity.price:.2f} | **Alignment:** {opportunity.timeframe_alignment}\n"
+                        f"**Technical:** {opportunity.technical_summary[:100] if opportunity.technical_summary else 'N/A'}"
+                    )
+                    
+                    # Send via bot with interactive buttons
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(
+                            self.discord_bot_manager.send_alert(
+                                symbol=opportunity.symbol,
+                                alert_type=opportunity.opportunity_type,
+                                asset_type="stock",
+                                score=opportunity.ensemble_score,
+                                message=message_text,
+                                embed=self._build_discord_embed(opportunity)
+                            )
+                        )
+                        bot_sent = True
+                        logger.info(f"   ✅ Discord alert sent via BOT with Watch/Analyze/Dismiss buttons")
+                    else:
+                        loop.run_until_complete(
+                            self.discord_bot_manager.send_alert(
+                                symbol=opportunity.symbol,
+                                alert_type=opportunity.opportunity_type,
+                                asset_type="stock",
+                                score=opportunity.ensemble_score,
+                                message=message_text,
+                                embed=self._build_discord_embed(opportunity)
+                            )
+                        )
+                        bot_sent = True
+                        logger.info(f"   ✅ Discord alert sent via BOT")
+                
+                except Exception as e:
+                    logger.debug(f"   Bot alert failed ({type(e).__name__}), falling back to webhook: {e}")
             
+            # Fallback to webhook (no buttons, but still shows embed)
+            if not bot_sent:
+                if self.discord_webhook:
+                    try:
+                        embed = self._build_discord_embed(opportunity)
+                        
+                        payload = {
+                            'embeds': [embed],
+                            'username': 'Stock Opportunity Monitor',
+                            'avatar_url': 'https://cdn-icons-png.flaticon.com/512/2830/2830284.png'
+                        }
+                        
+                        logger.debug(f"   📤 Sending Discord webhook...")
+                        response = requests.post(self.discord_webhook, json=payload, timeout=15)
+                        response.raise_for_status()
+                        
+                        logger.info(f"   ✅ Discord alert sent via WEBHOOK (HTTP {response.status_code})")
+                    
+                    except requests.exceptions.Timeout:
+                        logger.error(f"   ❌ Discord webhook timeout (15s)")
+                        # Fallback to alert system
+                        self._send_fallback_alert(opportunity)
+                    except requests.exceptions.ConnectionError as e:
+                        logger.error(f"   ❌ Discord connection error: {e}")
+                        self._send_fallback_alert(opportunity)
+                    except Exception as e:
+                        logger.error(f"   ❌ Failed to send Discord webhook: {type(e).__name__}: {e}")
+                        self._send_fallback_alert(opportunity)
+                else:
+                    # Use fallback alert system
+                    self._send_fallback_alert(opportunity)
+        
+        except Exception as e:
+            logger.error(f"Error sending alert for {opportunity.symbol}: {e}")
+    
+    def _send_fallback_alert(self, opportunity: StockOpportunity):
+        """Fallback to simple alert system when Discord fails"""
+        try:
+            alert_title = f"📊 {opportunity.symbol} - {opportunity.opportunity_type}"
             alert_message = f"""
 **Score:** {opportunity.ensemble_score}/100
 **Confidence:** {opportunity.confidence:.1%}
@@ -833,22 +940,257 @@ class StockInformationalMonitor(LLMServiceMixin):
                     'type': 'STOCK_OPPORTUNITY'
                 }
             )
-        
         except Exception as e:
-            logger.error(f"Error sending alert for {opportunity.symbol}: {e}")
+            logger.error(f"Fallback alert also failed for {opportunity.symbol}: {e}")
+    
+    def _get_opportunity_emoji(self, opportunity_type: str, score: int) -> str:
+        """Get emoji for opportunity type"""
+        type_emoji = {
+            'MULTI_FACTOR': '🎯',
+            'SETUP': '📊',
+            'BREAKOUT': '💥',
+            'ENTRY': '🚀',
+            'MOMENTUM': '⚡',
+            'REVERSAL': '🔄',
+            'WATCH': '👀'
+        }
+        emoji = type_emoji.get(opportunity_type, '📈')
+        
+        # Add fire for high scores
+        if score >= 85:
+            emoji = '🔥' + emoji
+        elif score >= 75:
+            emoji = '🌟' + emoji
+        
+        return emoji
+    
+    def _build_discord_embed(self, opportunity: StockOpportunity) -> Dict:
+        """Build Discord embed message for stock opportunity (crypto-style)"""
+        
+        # Determine color based on score and priority
+        if opportunity.ensemble_score >= 85 and opportunity.alert_priority == "CRITICAL":
+            color = 0x00FF00  # Bright green
+        elif opportunity.ensemble_score >= 75:
+            color = 0x32CD32  # Lime green
+        elif opportunity.ensemble_score >= 65:
+            color = 0xFFD700  # Gold
+        else:
+            color = 0xFFA500  # Orange
+        
+        # Emoji for opportunity type
+        emoji = self._get_opportunity_emoji(opportunity.opportunity_type, opportunity.ensemble_score)
+        
+        # Title
+        title = f"{emoji} STOCK OPPORTUNITY: {opportunity.symbol}"
+        
+        # Description
+        description = f"**Score:** {opportunity.ensemble_score}/100 | **Confidence:** {opportunity.alert_priority} ({opportunity.confidence:.1%})"
+        
+        # Fields
+        fields = []
+        
+        # Price
+        fields.append({
+            'name': '💰 Price',
+            'value': f'${opportunity.price:.2f}',
+            'inline': True
+        })
+        
+        # Timeframe Alignment
+        alignment_emoji = {
+            'TRIPLE_THREAT': '🎯',
+            'DUAL_ALIGN': '✅',
+            'SINGLE': '👀',
+            'NONE': '⚪'
+        }
+        fields.append({
+            'name': '📊 Alignment',
+            'value': f"{alignment_emoji.get(opportunity.timeframe_alignment, '📊')} {opportunity.timeframe_alignment}",
+            'inline': True
+        })
+        
+        # Priority
+        priority_emoji = {
+            'CRITICAL': '🔴',
+            'HIGH': '🟠',
+            'MEDIUM': '🟡',
+            'LOW': '🟢'
+        }
+        fields.append({
+            'name': '⚡ Priority',
+            'value': f"{priority_emoji.get(opportunity.alert_priority, '⚪')} {opportunity.alert_priority}",
+            'inline': True
+        })
+        
+        # Technical Summary
+        if opportunity.technical_summary:
+            fields.append({
+                'name': '📈 Technical Analysis',
+                'value': opportunity.technical_summary[:200] if len(opportunity.technical_summary) > 200 else opportunity.technical_summary,
+                'inline': False
+            })
+        
+        # Metadata scores if available
+        if opportunity.metadata:
+            tech_score = opportunity.metadata.get('technical_score', 0)
+            ml_score = opportunity.metadata.get('ml_score', 0)
+            llm_score = opportunity.metadata.get('llm_score', 0)
+            
+            if any([tech_score, ml_score, llm_score]):
+                score_breakdown = f"Tech: {tech_score:.0f} | ML: {ml_score:.0f} | LLM: {llm_score:.0f}"
+                fields.append({
+                    'name': '🔬 Score Breakdown',
+                    'value': score_breakdown,
+                    'inline': False
+                })
+            
+            # Volume ratio if available
+            volume_ratio = opportunity.metadata.get('volume_ratio', 0)
+            if volume_ratio > 0:
+                vol_emoji = "🚀" if volume_ratio > 2 else "📊"
+                fields.append({
+                    'name': '📊 Volume',
+                    'value': f'{vol_emoji} {volume_ratio:.1f}x average',
+                    'inline': True
+                })
+            
+            # Trend if available
+            trend = opportunity.metadata.get('trend', '')
+            if trend:
+                trend_emoji = "📈" if trend == "UPTREND" else "📉" if trend == "DOWNTREND" else "➡️"
+                fields.append({
+                    'name': '📊 Trend',
+                    'value': f'{trend_emoji} {trend}',
+                    'inline': True
+                })
+        
+        # AI Reasoning
+        if opportunity.reasoning:
+            reasoning = opportunity.reasoning
+            if len(reasoning) > 400:
+                reasoning = reasoning[:397] + "..."
+            fields.append({
+                'name': '🤖 AI Analysis',
+                'value': reasoning,
+                'inline': False
+            })
+        
+        # Trading suggestion
+        action_suggestion = self._get_action_suggestion(opportunity)
+        fields.append({
+            'name': '💡 Suggested Action',
+            'value': action_suggestion,
+            'inline': False
+        })
+        
+        # Build embed
+        embed = {
+            'title': title,
+            'description': description,
+            'color': color,
+            'fields': fields,
+            'timestamp': datetime.now().isoformat(),
+            'footer': {
+                'text': f'Scan #{self.stats.scans_completed} | Stock Opportunity Monitor | Uptime: {(datetime.now() - datetime.fromisoformat(self.stats.start_time)).total_seconds() / 60:.0f}min'
+            }
+        }
+        
+        return embed
+    
+    def _get_action_suggestion(self, opportunity: StockOpportunity) -> str:
+        """Get trading action suggestion based on opportunity analysis"""
+        
+        suggestions = []
+        
+        # Score-based suggestion
+        if opportunity.ensemble_score >= 85:
+            suggestions.append("⚡ **STRONG SETUP** - High confidence, consider entry")
+        elif opportunity.ensemble_score >= 75:
+            suggestions.append("✅ **GOOD SETUP** - Solid technical profile")
+        elif opportunity.ensemble_score >= 65:
+            suggestions.append("👀 **MONITOR** - Developing setup, wait for confirmation")
+        else:
+            suggestions.append("⚠️ **WATCH** - Moderate signal, requires more validation")
+        
+        # Alignment consideration
+        if opportunity.timeframe_alignment == "TRIPLE_THREAT":
+            suggestions.append("🎯 Triple timeframe alignment - strongest signal")
+        elif opportunity.timeframe_alignment == "DUAL_ALIGN":
+            suggestions.append("✅ Dual timeframe alignment - good confirmation")
+        
+        # Metadata-based suggestions
+        if opportunity.metadata:
+            volume_ratio = opportunity.metadata.get('volume_ratio', 0)
+            if volume_ratio > 3:
+                suggestions.append("🚀 Massive volume surge - strong momentum")
+            elif volume_ratio < 1.5 and volume_ratio > 0:
+                suggestions.append("⚠️ Low volume - wait for confirmation")
+            
+            trend = opportunity.metadata.get('trend', '')
+            if trend == "UPTREND":
+                suggestions.append("📈 Confirmed uptrend")
+            elif trend == "DOWNTREND":
+                suggestions.append("⚠️ Downtrend - counter-trend play")
+        
+        return "\n".join(suggestions) if suggestions else "📊 Standard opportunity - evaluate entry"
     
     def _queue_to_orchestrator(self, opportunity: StockOpportunity):
-        """Queue stock opportunity to Service Orchestrator for review in Control Panel"""
+        """Queue stock opportunity to Service Orchestrator for review in Control Panel (crypto-style)"""
         try:
             from services.service_orchestrator import get_orchestrator
             orch = get_orchestrator()
             
-            # Map priority to confidence
+            # Map priority to confidence (matching crypto breakout monitor)
             priority_to_confidence = {
                 "CRITICAL": "HIGH",
                 "HIGH": "HIGH",
                 "MEDIUM": "MEDIUM",
                 "LOW": "LOW"
+            }
+            
+            # Build comprehensive reasoning (like crypto breakout monitor)
+            reasoning_parts = [f"{opportunity.opportunity_type}: Score {opportunity.ensemble_score}/100"]
+            reasoning_parts.append(f"Alignment: {opportunity.timeframe_alignment}")
+            
+            if opportunity.reasoning:
+                reasoning_parts.append(opportunity.reasoning[:150])
+            
+            if opportunity.metadata:
+                trend = opportunity.metadata.get('trend', '')
+                volume_ratio = opportunity.metadata.get('volume_ratio', 0)
+                if trend:
+                    reasoning_parts.append(f"Trend: {trend}")
+                if volume_ratio > 0:
+                    reasoning_parts.append(f"Vol: {volume_ratio:.1f}x")
+            
+            # Create comprehensive metadata for control panel
+            full_metadata = {
+                # Core scores
+                "score": opportunity.ensemble_score,
+                "ensemble_score": opportunity.ensemble_score,
+                "confidence_pct": opportunity.confidence,
+                
+                # Technical
+                "timeframe_alignment": opportunity.timeframe_alignment,
+                "alert_priority": opportunity.alert_priority,
+                "technical_summary": opportunity.technical_summary[:300] if opportunity.technical_summary else "",
+                
+                # For display in Control Panel
+                "display_score": f"{opportunity.ensemble_score}/100",
+                "display_confidence": f"{opportunity.confidence:.1%}",
+                "display_alignment": opportunity.timeframe_alignment,
+                
+                # Action suggestions for Control Panel
+                "suggested_action": self._get_action_suggestion(opportunity),
+                
+                # Full reasoning for analysis
+                "full_reasoning": opportunity.reasoning,
+                
+                # Timestamp for tracking
+                "detected_at": opportunity.timestamp,
+                
+                # Include all original metadata
+                **opportunity.metadata
             }
             
             orch.add_alert(
@@ -857,21 +1199,41 @@ class StockInformationalMonitor(LLMServiceMixin):
                 source="stock_monitor",
                 asset_type="stock",
                 price=opportunity.price,
-                reasoning=f"Score {opportunity.ensemble_score}/100 | {opportunity.timeframe_alignment} | {opportunity.reasoning[:100]}",
+                reasoning=" | ".join(reasoning_parts),
                 confidence=priority_to_confidence.get(opportunity.alert_priority, "MEDIUM"),
                 expires_minutes=240,  # 4 hour expiry for stocks
-                metadata={
-                    "ensemble_score": opportunity.ensemble_score,
-                    "confidence": opportunity.confidence,
-                    "timeframe_alignment": opportunity.timeframe_alignment,
-                    "alert_priority": opportunity.alert_priority,
-                    "technical_summary": opportunity.technical_summary[:200] if opportunity.technical_summary else "",
-                    **opportunity.metadata
-                }
+                metadata=full_metadata
             )
             logger.info(f"   📥 {opportunity.symbol} queued to Control Panel alert queue")
+            
+            # Also save to analysis results for the Results tab
+            self._save_to_analysis_results(opportunity)
+            
         except Exception as e:
             logger.debug(f"   Could not queue to orchestrator: {e}")
+    
+    def _save_to_analysis_results(self, opportunity: StockOpportunity):
+        """Save opportunity to analysis results for display in Control Panel Results tab"""
+        try:
+            result = {
+                'ticker': opportunity.symbol,
+                'signal': opportunity.opportunity_type,
+                'confidence': opportunity.ensemble_score,
+                'price': opportunity.price,
+                'change_24h': 0.0,  # Could be calculated from metadata if available
+                'volume_24h': opportunity.metadata.get('volume_ratio', 0) if opportunity.metadata else 0,
+                'timestamp': datetime.now().isoformat(),
+                'alignment': opportunity.timeframe_alignment,
+                'priority': opportunity.alert_priority,
+                'reasoning': opportunity.reasoning[:200] if opportunity.reasoning else '',
+                'technical_summary': opportunity.technical_summary[:150] if opportunity.technical_summary else '',
+            }
+            
+            # Add to results
+            save_analysis_results('Stock Monitor Alert', [result])
+            logger.debug(f"   💾 Saved {opportunity.symbol} to analysis results")
+        except Exception as e:
+            logger.debug(f"   Could not save to analysis results: {e}")
     
     def _log_opportunity(self, opportunity: StockOpportunity):
         """Log opportunity to file"""
