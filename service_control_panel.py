@@ -836,6 +836,10 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
             'logs/stock_monitor_service.log',
             'logs/stock_monitor_error.log',
         ],
+        'sentient-stock-ai-trader': [
+            'logs/stock_ai_trader_service.log',
+            'logs/stock_ai_trader_error.log',
+        ],
         'sentient-dex-launch': [
             'logs/dex_launch_service.log',
             'logs/dex_launch_error.log'
@@ -855,7 +859,11 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
         'sentient-orb-fvg': [
             'logs/orb_fvg_service.log',
             'logs/orb_fvg_error.log',
-        ]
+        ],
+        'sentient-analysis-queue': [
+            'logs/analysis_queue_service.log',
+            'logs/analysis_queue_error.log',
+        ],
     }
     
     candidates = log_map.get(service_name, [])
@@ -925,6 +933,10 @@ def clear_service_logs(service_name: str) -> tuple:
             'logs/stock_monitor_service.log',
             'logs/stock_monitor_error.log',
         ],
+        'sentient-stock-ai-trader': [
+            'logs/stock_ai_trader_service.log',
+            'logs/stock_ai_trader_error.log',
+        ],
         'sentient-dex-launch': [
             'logs/dex_launch_service.log',
             'logs/dex_launch_error.log'
@@ -944,7 +956,11 @@ def clear_service_logs(service_name: str) -> tuple:
         'sentient-orb-fvg': [
             'logs/orb_fvg_service.log',
             'logs/orb_fvg_error.log',
-        ]
+        ],
+        'sentient-analysis-queue': [
+            'logs/analysis_queue_service.log',
+            'logs/analysis_queue_error.log',
+        ],
     }
     
     candidates = log_map.get(service_name, [])
