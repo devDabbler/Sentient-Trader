@@ -49,6 +49,23 @@ class JupiterClient:
     BASE_URL = "https://api.jup.ag/price"
     QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
     
+    # Solana token mint addresses for common tokens
+    SOLANA_TOKENS = {
+        'SOL': 'So11111111111111111111111111111111111111112',
+        'USDC': 'EPjFWaJPg5w7zJ7Y5aQUNjpWN9BABdZc8m5DMXBPfHXo',
+        'USDT': 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BcYNvp',
+        'JUP': 'JUPyiwrYJFskUPiHa7hL93z1XZzProps6LYW2HyS5vy',
+        'RAY': '4k3Dyjzvzp8eMZWUUbX8HRk1Jmuh8jzudVSTQWcX1XY',
+        'COPE': '8HidbjKU2ktH7qReiMYKskKc6NsEqkzFSG7yporCxfda',
+        'MER': 'MERt85fc5boKw3BW1aysoZRSXxwk5xYYADVywXKepAe',
+    }
+    
+    # Tokens NOT on Solana (should not attempt Jupiter pricing)
+    NON_SOLANA_TOKENS = {
+        'PERP', 'MYX', 'KTA', 'MATIC', 'LINEA', 'AAVE', 'SNX', 'OCEAN', 'ALGO',
+        'ETH', 'AVAX', 'FTM', 'BNBB', 'ARB', 'OP', 'DOGE', 'LTC', 'BCH'
+    }  # These are on other chains or CEX-only
+    
     def __init__(self, cache_ttl_seconds: int = 60):
         """
         Initialize Jupiter client
@@ -61,6 +78,30 @@ class JupiterClient:
         self.rate_limit_delay = 0.2  # 200ms between requests
         self.last_request_time = 0.0
         
+    def is_solana_token(self, token_symbol: str) -> bool:
+        """
+        Check if token is available on Solana chain
+        
+        Args:
+            token_symbol: Token symbol (e.g., 'SOL', 'USDC', 'PERP')
+            
+        Returns:
+            True if token is on Solana, False otherwise
+        """
+        token_upper = token_symbol.upper().strip()
+        
+        # Check if it's in known Solana tokens
+        if token_upper in self.SOLANA_TOKENS:
+            return True
+        
+        # Check if it's explicitly NOT on Solana
+        if token_upper in self.NON_SOLANA_TOKENS:
+            return False
+        
+        # Unknown token - only attempt if it's a valid mint address format (44 chars, base58)
+        is_mint_format = len(token_symbol) == 44 and all(c in '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz' for c in token_symbol)
+        return is_mint_format
+    
     async def get_price(
         self,
         mint_id: str,
@@ -70,18 +111,26 @@ class JupiterClient:
         Get current token price in USDC (or specified token)
         
         Args:
-            mint_id: Token mint address on Solana
+            mint_id: Token mint address on Solana OR token symbol
             vs_token: Reference token for pricing (default USDC)
             
         Returns:
             Price as float or None if failed
         """
         try:
+            # Check if this is a Solana token
+            if not self.is_solana_token(mint_id):
+                logger.debug(f"[JUPITER] Skipping price fetch for {mint_id} (not a Solana token)")
+                return None
+            
+            # Convert symbol to mint if needed
+            actual_mint = self.SOLANA_TOKENS.get(mint_id.upper(), mint_id)
+            
             # Rate limiting
             await self._apply_rate_limit()
             
             params = {
-                "ids": mint_id,
+                "ids": actual_mint,
                 "vsToken": vs_token
             }
             
@@ -91,14 +140,14 @@ class JupiterClient:
                 
                 data = response.json()
                 
-                if "data" in data and mint_id in data["data"]:
-                    price_info = data["data"][mint_id]
+                if "data" in data and actual_mint in data["data"]:
+                    price_info = data["data"][actual_mint]
                     return price_info.get("price", None)
                     
                 return None
                 
         except Exception as e:
-            logger.warning(f"[JUPITER] Price fetch failed for {mint_id[:8]}...: {e}")
+            logger.warning(f"[JUPITER] Price fetch failed for {mint_id}: {e}")
             return None
     
     async def get_quote(
