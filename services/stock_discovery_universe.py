@@ -1,16 +1,8 @@
 """
 Stock Discovery Universe Service
 
-Automatically discovers trading opportunities outside the watchlist:
-- Top gainers/losers
-- Most active by volume
-- Technical breakouts (new highs, momentum plays)
-- Sector rotations
-- Trend-following strategies
-- Screener-based discovery
-
-Configurable via Service Control Panel to enable/disable discovery modes
-and set universe size.
+Uses TieredStockScanner categories to discover trading opportunities outside the watchlist.
+Leverages existing scanner infrastructure from the main app.
 """
 
 import os
@@ -22,19 +14,17 @@ from dataclasses import dataclass
 import logging
 
 from loguru import logger
-import yfinance as yf
-import pandas as pd
 
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from services.enhanced_stock_opportunity_detector import get_enhanced_stock_detector
+from services.stock_tiered_scanner import get_tiered_stock_scanner
 
 
 @dataclass
 class DiscoveryMode:
-    """Configuration for discovery mode"""
+    """Configuration for discovery mode - maps to TieredStockScanner categories"""
     name: str
     description: str
     enabled: bool = False
@@ -44,78 +34,54 @@ class DiscoveryMode:
 
 class StockDiscoveryUniverse:
     """
-    Discovers stocks outside watchlist using multiple sources
-    Can be toggled on/off via control panel
+    Discovers stocks outside watchlist using TieredStockScanner categories
+    Uses the same scanner infrastructure as the main app
     """
-    
-    # List of known crypto tickers to exclude
-    CRYPTO_BLACKLIST = {
-        'BTC', 'ETH', 'SOL', 'ADA', 'XRP', 'DOGE', 'SHIB', 'PEPE',
-        'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'LINK', 'UNI',
-        'AAVE', 'CRV', 'CVX', 'GMX', 'SNX', 'YFI', 'MKR', 'LIDO'
-    }
     
     def __init__(self, detector=None):
         """
         Initialize discovery universe
         
         Args:
-            detector: Enhanced stock opportunity detector instance
+            detector: Enhanced stock opportunity detector instance (not used, kept for compatibility)
         """
-        self.detector = detector or get_enhanced_stock_detector()
+        # Initialize TieredStockScanner
+        self.scanner = get_tiered_stock_scanner(use_ai=False)  # No AI for discovery, just filtering
         
-        # Discovery modes (all can be toggled)
-        self.modes = {
-            'top_gainers': DiscoveryMode(
-                'top_gainers',
-                'Top percentage gainers (momentum plays)',
-                enabled=False,
-                max_universe_size=30
-            ),
-            'top_losers': DiscoveryMode(
-                'top_losers',
-                'Top percentage losers (reversal plays)',
-                enabled=False,
-                max_universe_size=20
-            ),
-            'most_active': DiscoveryMode(
-                'most_active',
-                'Most active by volume (breakout candidates)',
-                enabled=False,
-                max_universe_size=40
-            ),
-            'new_highs': DiscoveryMode(
-                'new_highs',
-                '52-week new highs (trend breakouts)',
-                enabled=False,
-                max_universe_size=30
-            ),
-            'high_volume_breakouts': DiscoveryMode(
-                'high_volume_breakouts',
-                'High volume with price movement (technical breakouts)',
-                enabled=False,
-                max_universe_size=25
-            ),
-            'sector_leaders': DiscoveryMode(
-                'sector_leaders',
-                'Top performers in each sector',
-                enabled=False,
-                max_universe_size=20
-            ),
+        # Map scanner categories to discovery modes
+        # These match the categories available in the main app's Daily Stock Scanner
+        category_map = {
+            'mega_cap': ('Mega Caps', 'Options-friendly large caps (AAPL, MSFT, etc.)'),
+            'high_beta_tech': ('High Beta Tech', 'Volatile tech stocks (PLTR, SOFI, etc.)'),
+            'momentum': ('Momentum/Meme', 'High momentum and meme stocks'),
+            'ev_energy': ('EV/Clean Energy', 'Electric vehicle and clean energy stocks'),
+            'crypto_related': ('Crypto-Related', 'Stocks tied to crypto (MARA, RIOT, COIN)'),
+            'ai_stocks': ('AI Stocks', 'Artificial intelligence related stocks'),
+            'biotech': ('Biotech', 'Biotechnology and pharma stocks'),
+            'financial': ('Financial', 'Banks and financial services'),
+            'energy': ('Energy', 'Oil and gas stocks'),
+            'high_iv': ('High IV Options', 'High implied volatility for options trading'),
+            'penny_stocks': ('Penny Stocks', 'Low-priced stocks under $5'),
         }
+        
+        # Discovery modes mapped to scanner categories
+        self.modes = {}
+        for category_key, (display_name, description) in category_map.items():
+            self.modes[category_key] = DiscoveryMode(
+                category_key,
+                description,
+                enabled=False,
+                max_universe_size=30 if category_key in ['mega_cap', 'high_beta_tech'] else 20,
+                priority=1 if category_key in ['mega_cap', 'high_beta_tech', 'momentum'] else 2
+            )
         
         # Cache for discovered tickers
         self.discovered_tickers: Dict[str, List[str]] = {}
         self.discovery_cache_time: Dict[str, datetime] = {}
-        self.cache_ttl_minutes = 60  # Update every hour
+        self.cache_ttl_minutes = 30  # Cache for 30 minutes (shorter than before for fresher results)
         
-        # Known universe pools
-        self.sp500_tickers = self._get_sp500_tickers()
-        self.russell_2000 = self._get_russell_2000_tickers()
-        
-        logger.info("✅ Stock Discovery Universe initialized")
-        logger.info(f"   Available modes: {len(self.modes)}")
-        logger.info(f"   SP500 universe: {len(self.sp500_tickers) if self.sp500_tickers else 'N/A'}")
+        logger.info("✅ Stock Discovery Universe initialized (using TieredStockScanner)")
+        logger.info(f"   Available categories: {len(self.modes)}")
     
     def set_discovery_enabled(self, mode_name: str, enabled: bool):
         """
@@ -163,53 +129,65 @@ class StockDiscoveryUniverse:
     
     def discover_stocks(self, exclude_watchlist: Optional[List[str]] = None) -> Dict[str, List[str]]:
         """
-        Discover stocks from enabled modes
+        Discover stocks from enabled categories using TieredStockScanner
         
         Args:
             exclude_watchlist: List of tickers to exclude from discovery
             
         Returns:
-            Dict of mode_name -> list of tickers (stocks only, no crypto)
+            Dict of mode_name -> list of tickers
         """
         if exclude_watchlist is None:
             exclude_watchlist = []
         
-        # Filter watchlist to only valid stocks
-        exclude_watchlist = self._filter_valid_tickers(exclude_watchlist)
         exclude_set = set(t.upper() for t in exclude_watchlist)
         discovered = {}
         
-        logger.info("🔍 Starting stock discovery...")
+        logger.info("🔍 Starting stock discovery using TieredStockScanner...")
         
         for mode_name, mode in self.modes.items():
             if not mode.enabled:
                 continue
             
             try:
-                logger.debug(f"  📊 {mode.name}: {mode.description}...")
+                logger.info(f"  📊 Scanning {mode.description}...")
                 
                 # Check cache
                 if self._is_cache_valid(mode_name):
                     tickers = self.discovered_tickers.get(mode_name, [])
-                    logger.debug(f"    (using cache)")
+                    logger.debug(f"    (using cache: {len(tickers)} tickers)")
                 else:
-                    # Discover new tickers
-                    tickers = self._discover_mode_tickers(mode_name, mode)
+                    # Get tickers from scanner category
+                    category_tickers = self.scanner.get_tickers_by_category(mode_name)
                     
-                    # Exclude watchlist AND validate stocks only
-                    tickers = [t for t in tickers if t.upper() not in exclude_set]
-                    tickers = self._filter_valid_tickers(tickers)
+                    if not category_tickers:
+                        logger.warning(f"    No tickers found for category: {mode_name}")
+                        discovered[mode_name] = []
+                        continue
+                    
+                    # Use Tier 1 quick filter to find promising stocks
+                    logger.debug(f"    Running Tier 1 filter on {len(category_tickers)} tickers...")
+                    tier1_results = self.scanner.tier1_quick_filter(
+                        category_tickers,
+                        max_results=mode.max_universe_size
+                    )
+                    
+                    # Extract tickers from results, excluding watchlist
+                    tickers = [
+                        r['ticker'] for r in tier1_results
+                        if r['ticker'].upper() not in exclude_set
+                    ]
                     
                     # Cache results
                     self.discovered_tickers[mode_name] = tickers
                     self.discovery_cache_time[mode_name] = datetime.now()
                     
-                    logger.info(f"    ✅ Discovered {len(tickers)} tickers from {mode.name}")
+                    logger.info(f"    ✅ Discovered {len(tickers)} tickers from {mode.description}")
                 
                 discovered[mode_name] = tickers
             
             except Exception as e:
-                logger.error(f"Error discovering {mode_name}: {e}")
+                logger.error(f"Error discovering {mode_name}: {e}", exc_info=True)
                 discovered[mode_name] = []
         
         # Combine all discovered tickers (deduplicated)
@@ -279,231 +257,6 @@ class StockDiscoveryUniverse:
     # DISCOVERY METHODS
     # ============================================================
     
-    def _discover_mode_tickers(self, mode_name: str, mode: DiscoveryMode) -> List[str]:
-        """Discover tickers for specific mode"""
-        
-        if mode_name == 'top_gainers':
-            return self._get_top_gainers(mode.max_universe_size)
-        elif mode_name == 'top_losers':
-            return self._get_top_losers(mode.max_universe_size)
-        elif mode_name == 'most_active':
-            return self._get_most_active(mode.max_universe_size)
-        elif mode_name == 'new_highs':
-            return self._get_new_highs(mode.max_universe_size)
-        elif mode_name == 'high_volume_breakouts':
-            return self._get_volume_breakouts(mode.max_universe_size)
-        elif mode_name == 'sector_leaders':
-            return self._get_sector_leaders(mode.max_universe_size)
-        else:
-            return []
-    
-    def _get_top_gainers(self, limit: int = 30) -> List[str]:
-        """Get top percentage gainers"""
-        try:
-            # Using a subset of liquid stocks
-            universe = self.sp500_tickers[:200] if self.sp500_tickers else []
-            if not universe:
-                logger.debug("    SP500 universe not available, using defaults")
-                universe = ['SPY', 'QQQ', 'IWM', 'EEM', 'FXI', 'EWJ', 'EWG', 'EWU']
-            
-            gainers = []
-            for ticker in universe[:limit * 2]:  # Check more to get top
-                try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
-                    if hist is not None and len(hist) > 0:
-                        pct_change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
-                        if pct_change > 2:  # At least 2% gain
-                            gainers.append({'ticker': ticker, 'change': pct_change})
-                except Exception:
-                    pass
-            
-            # Sort by change and return top
-            gainers.sort(key=lambda x: x['change'], reverse=True)
-            results = [g['ticker'] for g in gainers[:limit]]
-            # Filter for valid stocks only
-            results = self._filter_valid_tickers(results)
-            return results
-        
-        except Exception as e:
-            logger.debug(f"Error getting top gainers: {e}")
-            return []
-    
-    def _get_top_losers(self, limit: int = 20) -> List[str]:
-        """Get top percentage losers (reversal candidates)"""
-        try:
-            universe = self.sp500_tickers[:200] if self.sp500_tickers else []
-            if not universe:
-                universe = ['SPY', 'QQQ', 'IWM', 'EEM']
-            
-            losers = []
-            for ticker in universe[:limit * 3]:
-                try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
-                    if hist is not None and len(hist) > 0:
-                        pct_change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
-                        if -5 < pct_change < -1:  # -5% to -1% loss (reversal play)
-                            losers.append({'ticker': ticker, 'change': pct_change})
-                except Exception:
-                    pass
-            
-            losers.sort(key=lambda x: x['change'])
-            results = [l['ticker'] for l in losers[:limit]]
-            # Filter for valid stocks only
-            results = self._filter_valid_tickers(results)
-            return results
-        
-        except Exception as e:
-            logger.debug(f"Error getting top losers: {e}")
-            return []
-    
-    def _get_most_active(self, limit: int = 40) -> List[str]:
-        """Get most active stocks by volume"""
-        try:
-            universe = self.sp500_tickers[:300] if self.sp500_tickers else []
-            if not universe:
-                universe = ['SPY', 'QQQ', 'IWM', 'EEM', 'GLD', 'TLT']
-            
-            active = []
-            for ticker in universe[:limit * 2]:
-                try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
-                    if hist is not None and len(hist) > 1:
-                        recent_vol = hist['Volume'].iloc[-1]
-                        avg_vol = hist['Volume'].iloc[-5:].mean()
-                        vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1
-                        if vol_ratio > 1.3:  # 30% above average
-                            active.append({'ticker': ticker, 'vol_ratio': vol_ratio})
-                except Exception:
-                    pass
-            
-            active.sort(key=lambda x: x['vol_ratio'], reverse=True)
-            results = [a['ticker'] for a in active[:limit]]
-            # Filter for valid stocks only
-            results = self._filter_valid_tickers(results)
-            return results
-        
-        except Exception as e:
-            logger.debug(f"Error getting most active: {e}")
-            return []
-    
-    def _get_new_highs(self, limit: int = 30) -> List[str]:
-        """Get 52-week new highs (trend followers)"""
-        try:
-            universe = self.sp500_tickers[:200] if self.sp500_tickers else []
-            if not universe:
-                universe = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA']
-            
-            new_highs = []
-            for ticker in universe[:limit * 2]:
-                try:
-                    hist = yf.download(ticker, period='1y', progress=False, threads=False, auto_adjust=True)
-                    if hist is not None and len(hist) > 50:
-                        current = hist['Close'].iloc[-1]
-                        high_52w = hist['Close'].max()
-                        if current >= high_52w * 0.99:  # Within 1% of 52-week high
-                            new_highs.append({'ticker': ticker, 'price': current})
-                except Exception:
-                    pass
-            
-            results = [n['ticker'] for n in new_highs[:limit]]
-            # Filter for valid stocks only
-            results = self._filter_valid_tickers(results)
-            return results
-        
-        except Exception as e:
-            logger.debug(f"Error getting new highs: {e}")
-            return []
-    
-    def _get_volume_breakouts(self, limit: int = 25) -> List[str]:
-        """Get high volume with price movement breakouts"""
-        try:
-            universe = self.sp500_tickers[:250] if self.sp500_tickers else []
-            if not universe:
-                universe = ['SPY', 'QQQ', 'IWM']
-            
-            breakouts = []
-            for ticker in universe[:limit * 3]:
-                try:
-                    hist = yf.download(ticker, period='10d', progress=False, threads=False, auto_adjust=True)
-                    if hist is not None and len(hist) > 2:
-                        # High volume
-                        recent_vol = hist['Volume'].iloc[-1]
-                        avg_vol = hist['Volume'].iloc[:-1].mean()
-                        vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1
-                        
-                        # Price movement
-                        price_move = abs((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2])
-                        
-                        if vol_ratio > 1.5 and price_move > 0.02:  # 50% vol spike + 2% price move
-                            breakouts.append({'ticker': ticker, 'vol_ratio': vol_ratio})
-                except Exception:
-                    pass
-            
-            breakouts.sort(key=lambda x: x['vol_ratio'], reverse=True)
-            results = [b['ticker'] for b in breakouts[:limit]]
-            # Filter for valid stocks only
-            results = self._filter_valid_tickers(results)
-            return results
-        
-        except Exception as e:
-            logger.debug(f"Error getting volume breakouts: {e}")
-            return []
-    
-    def _get_sector_leaders(self, limit: int = 20) -> List[str]:
-        """Get top performers in each major sector"""
-        # Simplified - use sector ETFs as proxy
-        sector_etfs = ['XLK', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLF']
-        return sector_etfs[:limit]
-    
-    # ============================================================
-    # STOCK VALIDATION METHODS
-    # ============================================================
-    
-    def _is_valid_stock_ticker(self, ticker: str) -> bool:
-        """
-        Validate that ticker is a stock, not crypto or other asset
-        
-        Args:
-            ticker: Ticker symbol to validate
-            
-        Returns:
-            True if valid stock ticker, False otherwise
-        """
-        if not ticker:
-            return False
-        
-        ticker = ticker.upper().strip()
-        
-        # Filter out crypto indicators
-        if '/' in ticker:  # Crypto pairs like BTC/USD
-            return False
-        
-        if '-' in ticker and len(ticker) > 5:  # Likely warrants or special securities
-            return False
-        
-        # Check against known crypto blacklist
-        if ticker in self.CRYPTO_BLACKLIST:
-            return False
-        
-        # Check for common crypto naming patterns
-        crypto_patterns = ['COIN', 'HODL', 'GBTC', 'ETHE', 'IBIT', 'FBTC']
-        if any(pattern in ticker for pattern in crypto_patterns):
-            return False
-        
-        # Must be 1-5 characters (standard stock symbols)
-        if len(ticker) < 1 or len(ticker) > 5:
-            return False
-        
-        # Must be alphanumeric only
-        if not ticker.replace('.', '').replace('=', '').isalnum():
-            return False
-        
-        return True
-    
-    def _filter_valid_tickers(self, tickers: List[str]) -> List[str]:
-        """Filter list of tickers to only valid stocks"""
-        return [t for t in tickers if self._is_valid_stock_ticker(t)]
-    
     # ============================================================
     # UTILITY METHODS
     # ============================================================
@@ -514,21 +267,6 @@ class StockDiscoveryUniverse:
             return False
         age_minutes = (datetime.now() - self.discovery_cache_time[mode_name]).total_seconds() / 60
         return age_minutes < self.cache_ttl_minutes
-    
-    def _get_sp500_tickers(self) -> Optional[List[str]]:
-        """Get SP500 tickers"""
-        try:
-            # Try to get from yfinance
-            sp500 = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]
-            return sp500['Symbol'].tolist()
-        except:
-            # Fallback to common stocks
-            return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'BRK.B', 'JNJ', 'V']
-    
-    def _get_russell_2000_tickers(self) -> Optional[List[str]]:
-        """Get Russell 2000 tickers"""
-        # Simplified fallback - in production would fetch real list
-        return []
 
 
 # Singleton instance

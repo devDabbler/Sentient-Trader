@@ -50,44 +50,74 @@ def save_discovery_config(config: Dict[str, Any]):
 
 
 def get_default_discovery_config() -> Dict[str, Any]:
-    """Get default discovery configuration"""
+    """Get default discovery configuration - uses TieredStockScanner categories"""
     return {
         'enabled': False,  # Disabled by default
         'last_updated': datetime.now().isoformat(),
         'modes': {
-            'top_gainers': {
+            'mega_cap': {
                 'enabled': False,
-                'description': 'Top percentage gainers (momentum plays)',
+                'description': 'Mega Caps - Options-friendly large caps (AAPL, MSFT, etc.)',
                 'max_universe_size': 30,
                 'priority': 1
             },
-            'top_losers': {
+            'high_beta_tech': {
                 'enabled': False,
-                'description': 'Top percentage losers (reversal plays)',
+                'description': 'High Beta Tech - Volatile tech stocks (PLTR, SOFI, etc.)',
+                'max_universe_size': 30,
+                'priority': 1
+            },
+            'momentum': {
+                'enabled': False,
+                'description': 'Momentum/Meme - High momentum and meme stocks',
+                'max_universe_size': 20,
+                'priority': 1
+            },
+            'ev_energy': {
+                'enabled': False,
+                'description': 'EV/Clean Energy - Electric vehicle and clean energy stocks',
                 'max_universe_size': 20,
                 'priority': 2
             },
-            'most_active': {
+            'crypto_related': {
                 'enabled': False,
-                'description': 'Most active by volume (breakout candidates)',
-                'max_universe_size': 40,
-                'priority': 1
-            },
-            'new_highs': {
-                'enabled': False,
-                'description': '52-week new highs (trend breakouts)',
-                'max_universe_size': 30,
+                'description': 'Crypto-Related - Stocks tied to crypto (MARA, RIOT, COIN)',
+                'max_universe_size': 20,
                 'priority': 2
             },
-            'high_volume_breakouts': {
+            'ai_stocks': {
                 'enabled': False,
-                'description': 'High volume with price movement (technical breakouts)',
-                'max_universe_size': 25,
+                'description': 'AI Stocks - Artificial intelligence related stocks',
+                'max_universe_size': 20,
                 'priority': 1
             },
-            'sector_leaders': {
+            'biotech': {
                 'enabled': False,
-                'description': 'Top performers in each sector',
+                'description': 'Biotech - Biotechnology and pharma stocks',
+                'max_universe_size': 20,
+                'priority': 2
+            },
+            'financial': {
+                'enabled': False,
+                'description': 'Financial - Banks and financial services',
+                'max_universe_size': 20,
+                'priority': 3
+            },
+            'energy': {
+                'enabled': False,
+                'description': 'Energy - Oil and gas stocks',
+                'max_universe_size': 20,
+                'priority': 3
+            },
+            'high_iv': {
+                'enabled': False,
+                'description': 'High IV Options - High implied volatility for options trading',
+                'max_universe_size': 20,
+                'priority': 2
+            },
+            'penny_stocks': {
+                'enabled': False,
+                'description': 'Penny Stocks - Low-priced stocks under $5',
                 'max_universe_size': 20,
                 'priority': 3
             },

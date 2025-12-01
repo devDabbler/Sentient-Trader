@@ -33,12 +33,18 @@ def render_discovery_config_panel():
     
     st.header("🔍 Stock Discovery Universe")
     st.write("""
-    Automatically discover trading opportunities outside your watchlist:
-    - Top gainers & losers (momentum/reversal plays)
-    - Most active stocks (volume breakouts)
-    - 52-week new highs (trend followers)
-    - High volume breakouts (technical signals)
-    - Sector leaders (rotation opportunities)
+    Automatically discover trading opportunities outside your watchlist using the same scanner categories from the main app:
+    - **Mega Caps** - Options-friendly large caps (AAPL, MSFT, etc.)
+    - **High Beta Tech** - Volatile tech stocks (PLTR, SOFI, etc.)
+    - **Momentum/Meme** - High momentum and meme stocks
+    - **EV/Clean Energy** - Electric vehicle and clean energy stocks
+    - **Crypto-Related** - Stocks tied to crypto (MARA, RIOT, COIN)
+    - **AI Stocks** - Artificial intelligence related stocks
+    - **Biotech** - Biotechnology and pharma stocks
+    - **Financial** - Banks and financial services
+    - **Energy** - Oil and gas stocks
+    - **High IV Options** - High implied volatility for options trading
+    - **Penny Stocks** - Low-priced stocks under $5
     """)
     
     # Load current config
