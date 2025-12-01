@@ -420,9 +420,11 @@ class DiscordTradeApprovalBot(commands.Bot):
 `SHORT` - Execute SHORT/SELL trade
 `P` or `PAPER` - Paper trade (test mode)
 
-**Position Sizing:**
+**Position Sizing & Account:**
 `SIZE` or `SIZING` - Show recommended position size
 `RISK` - Show current risk profile
+`BALANCE` or `BAL` - Show broker account balance
+`SYNC` - Sync broker balance to risk profile
 
 **Other:**
 `X` or `D` - Dismiss alert
@@ -436,6 +438,22 @@ class DiscordTradeApprovalBot(commands.Bot):
         elif content == 'RISK':
             # Show risk profile
             await self._handle_risk_command(message)
+        
+        elif content in ['BALANCE', 'BAL', 'ACCOUNT']:
+            # Show broker account balance
+            await self._handle_balance_command(message)
+        
+        elif content == 'SYNC':
+            # Sync broker balance to risk profile
+            await self._handle_sync_command(message)
+        
+        elif content in ['BALANCE', 'BAL', 'ACCOUNT', 'STATUS']:
+            # Show broker account status
+            await self._handle_balance_command(message)
+        
+        elif content == 'SYNC':
+            # Sync broker balance to risk profile
+            await self._handle_sync_command(message)
 
     async def _handle_watch_command(self, message: discord.Message, symbol: str):
         """Handle WATCH command"""
@@ -502,6 +520,82 @@ class DiscordTradeApprovalBot(commands.Bot):
         except Exception as e:
             logger.error(f"Error showing risk profile: {e}")
             await message.channel.send(f"❌ Error loading risk profile: {str(e)}")
+    
+    async def _handle_balance_command(self, message: discord.Message):
+        """Handle BALANCE command - show broker account status and cash"""
+        try:
+            from ui.risk_profile_ui import get_broker_status
+            
+            status = get_broker_status()
+            
+            if status['connected']:
+                mode_emoji = "📝" if status['paper_mode'] else "💰"
+                mode_str = "PAPER" if status['paper_mode'] else "LIVE"
+                
+                balance_text = f"""🏦 **Broker Account Status**
+
+✅ **Connected:** {status['broker_type']} ({mode_emoji} {mode_str})
+
+💵 **Account Balance:**
+   Total Equity: **${status['total_equity']:,.2f}**
+   Cash: **${status['cash']:,.2f}**
+   Buying Power: **${status['buying_power']:,.2f}**
+
+📊 **Quick Stats:**
+   Available for Trading: ${status['buying_power']:,.2f}
+   
+💡 *Reply `RISK` to see risk profile, `SYNC` to update risk profile with these balances*
+"""
+            else:
+                balance_text = f"""🏦 **Broker Account Status**
+
+❌ **Not Connected**
+   Broker: {status['broker_type']}
+   Mode: {'PAPER' if status['paper_mode'] else 'LIVE'}
+   Error: {status.get('error', 'Unknown')}
+
+💡 *Check your .env configuration and broker connection*
+"""
+            
+            await message.channel.send(balance_text)
+            
+        except Exception as e:
+            logger.error(f"Error showing broker balance: {e}")
+            await message.channel.send(f"❌ Error loading broker status: {str(e)}")
+    
+    async def _handle_sync_command(self, message: discord.Message):
+        """Handle SYNC command - sync broker balance to risk profile"""
+        try:
+            from ui.risk_profile_ui import get_broker_status
+            from services.risk_profile_config import get_risk_profile_manager
+            
+            # Get broker status
+            status = get_broker_status()
+            
+            if not status['connected']:
+                await message.channel.send(
+                    f"❌ Cannot sync - broker not connected.\n"
+                    f"Error: {status.get('error', 'Unknown')}"
+                )
+                return
+            
+            # Update risk profile
+            manager = get_risk_profile_manager()
+            manager.update_capital(
+                total=status['total_equity'],
+                available=status['buying_power']
+            )
+            
+            await message.channel.send(
+                f"✅ **Risk Profile Synced!**\n\n"
+                f"💵 Total Capital: ${status['total_equity']:,.2f}\n"
+                f"💰 Available Capital: ${status['buying_power']:,.2f}\n\n"
+                f"Your risk profile now uses live broker balances."
+            )
+            
+        except Exception as e:
+            logger.error(f"Error syncing broker balance: {e}")
+            await message.channel.send(f"❌ Error syncing: {str(e)}")
     
     async def _handle_sizing_command(self, message: discord.Message, symbol: str):
         """Handle SIZING command - calculate position size for symbol"""

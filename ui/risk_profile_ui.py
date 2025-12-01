@@ -27,6 +27,10 @@ def render_risk_profile_config():
         st.error(f"Could not load risk profile module: {e}")
         return
     
+    # Broker Status Section
+    render_broker_status()
+    st.divider()
+    
     st.subheader("💰 Risk Profile & Position Sizing")
     
     # Get manager
@@ -340,4 +344,138 @@ def get_position_recommendation_for_trade(
             'recommended_value': 0,
             'error': str(e)
         }
+
+
+def get_broker_status() -> Dict:
+    """
+    Get broker connection status and account balance
+    
+    Returns:
+        Dict with broker status, balance info, and connection details
+    """
+    import os
+    
+    result = {
+        'connected': False,
+        'broker_type': os.getenv('BROKER_TYPE', 'NOT_SET'),
+        'paper_mode': os.getenv('STOCK_PAPER_MODE', 'true').lower() == 'true',
+        'total_equity': 0.0,
+        'cash': 0.0,
+        'buying_power': 0.0,
+        'error': None
+    }
+    
+    try:
+        broker_type = result['broker_type'].upper()
+        
+        if broker_type == 'TRADIER':
+            from src.integrations.tradier_client import TradierClient
+            from src.integrations.broker_adapter import TradierAdapter
+            
+            # Get credentials based on mode
+            if result['paper_mode']:
+                account_id = os.getenv('TRADIER_PAPER_ACCOUNT_ID') or os.getenv('TRADIER_ACCOUNT_ID')
+                access_token = os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or os.getenv('TRADIER_ACCESS_TOKEN')
+            else:
+                account_id = os.getenv('TRADIER_PROD_ACCOUNT_ID')
+                access_token = os.getenv('TRADIER_PROD_ACCESS_TOKEN')
+            
+            if access_token and account_id:
+                client = TradierClient(account_id=account_id, access_token=access_token)
+                adapter = TradierAdapter(client)
+                
+                success, balance = adapter.get_account_balance()
+                if success:
+                    result['connected'] = True
+                    result['total_equity'] = balance.get('total_equity', 0)
+                    result['cash'] = balance.get('cash', 0)
+                    result['buying_power'] = balance.get('buying_power', 0)
+                else:
+                    result['error'] = "Failed to get balance"
+            else:
+                result['error'] = "Credentials not configured"
+                
+        elif broker_type == 'IBKR':
+            from src.integrations.ibkr_client import IBKRClient
+            
+            if result['paper_mode']:
+                port = int(os.getenv('IBKR_PAPER_PORT', '7497'))
+                client_id = int(os.getenv('IBKR_PAPER_CLIENT_ID', '1'))
+            else:
+                port = int(os.getenv('IBKR_LIVE_PORT', '7496'))
+                client_id = int(os.getenv('IBKR_LIVE_CLIENT_ID', '2'))
+            
+            client = IBKRClient(port=port, client_id=client_id)
+            if client.connect():
+                account_info = client.get_account_info()
+                if account_info:
+                    result['connected'] = True
+                    result['total_equity'] = account_info.net_liquidation
+                    result['cash'] = account_info.total_cash_value
+                    result['buying_power'] = account_info.buying_power
+                else:
+                    result['error'] = "Failed to get account info"
+                client.disconnect()
+            else:
+                result['error'] = "Failed to connect to TWS/Gateway"
+        else:
+            result['error'] = f"Unknown broker type: {broker_type}"
+            
+    except Exception as e:
+        result['error'] = str(e)
+        logger.error(f"Error getting broker status: {e}")
+    
+    return result
+
+
+def render_broker_status():
+    """Render broker connection status and balance in Streamlit"""
+    st.subheader("🏦 Broker Account Status")
+    
+    status = get_broker_status()
+    
+    # Connection status
+    if status['connected']:
+        st.success(f"✅ Connected to **{status['broker_type']}** ({'PAPER' if status['paper_mode'] else 'LIVE'})")
+    else:
+        st.error(f"❌ Not Connected: {status.get('error', 'Unknown error')}")
+        return
+    
+    # Balance metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Total Equity",
+            f"${status['total_equity']:,.2f}",
+            help="Total account value including positions"
+        )
+    
+    with col2:
+        st.metric(
+            "Cash",
+            f"${status['cash']:,.2f}",
+            help="Available cash in account"
+        )
+    
+    with col3:
+        st.metric(
+            "Buying Power",
+            f"${status['buying_power']:,.2f}",
+            help="Available buying power for trades"
+        )
+    
+    # Sync button
+    if st.button("🔄 Sync Capital to Risk Profile", use_container_width=True):
+        try:
+            from services.risk_profile_config import get_risk_profile_manager
+            manager = get_risk_profile_manager()
+            manager.update_capital(
+                total=status['total_equity'],
+                available=status['buying_power']
+            )
+            st.success("✅ Risk profile updated with broker balances!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error syncing: {e}")
 
