@@ -1186,8 +1186,81 @@ def check_password():
 # WATCHLIST UI
 # ============================================================
 
+def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_type: str, key_prefix: str):
+    """
+    Helper function to render a ticker category (stocks/crypto) with add/remove functionality.
+    
+    Args:
+        tm: TickerManager instance
+        tickers_data: List of ticker dicts from Supabase
+        category_name: Display name for the category (e.g., "Stocks", "Crypto")
+        ticker_type: Type filter for adding new tickers (e.g., "stock", "crypto")
+        key_prefix: Unique prefix for Streamlit widget keys
+    """
+    # Add new ticker
+    with st.expander(f"➕ Add {category_name}"):
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            new_ticker = st.text_input("Symbol", key=f"{key_prefix}_new_ticker").upper()
+        with col2:
+            if ticker_type == "stock":
+                sub_type = st.selectbox("Sub-type", ["stock", "penny_stock"], key=f"{key_prefix}_sub_type")
+            else:
+                sub_type = ticker_type
+        
+        if st.button(f"Add {category_name}", type="primary", key=f"{key_prefix}_add_btn"):
+            if new_ticker:
+                if tm and tm.add_ticker(new_ticker, ticker_type=sub_type if ticker_type == "stock" else ticker_type):
+                    st.success(f"Added {new_ticker} to {category_name}")
+                    st.rerun()
+                else:
+                    st.error("Failed to add ticker")
+    
+    # List/Manage tickers for this category
+    if tickers_data:
+        ticker_list = [t['ticker'] for t in tickers_data]
+        
+        # Quick stats
+        st.caption(f"📊 {len(ticker_list)} {category_name.lower()} in your watchlist")
+        
+        # Quick action buttons
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("✅ Select All", key=f"{key_prefix}_select_all", use_container_width=True):
+                st.session_state[f"{key_prefix}_selected"] = ticker_list.copy()
+                st.rerun()
+        with btn_col2:
+            if st.button("❌ Clear Selection", key=f"{key_prefix}_clear_all", use_container_width=True):
+                st.session_state[f"{key_prefix}_selected"] = []
+                st.rerun()
+        
+        # Initialize session state for selections
+        if f"{key_prefix}_selected" not in st.session_state:
+            st.session_state[f"{key_prefix}_selected"] = ticker_list.copy()
+        
+        selected = st.multiselect(
+            f"Current {category_name}",
+            options=ticker_list,
+            default=st.session_state.get(f"{key_prefix}_selected", ticker_list),
+            key=f"{key_prefix}_ticker_list"
+        )
+        
+        # Check for removals
+        to_remove = set(ticker_list) - set(selected)
+        if to_remove:
+            st.warning(f"⚠️ {len(to_remove)} ticker(s) will be removed")
+            if st.button(f"🗑️ Remove {len(to_remove)} ticker(s)?", key=f"{key_prefix}_remove_btn", type="secondary"):
+                for t in to_remove:
+                    if tm:
+                        tm.remove_ticker(t)
+                st.success(f"Removed {len(to_remove)} {category_name.lower()}")
+                st.rerun()
+    else:
+        st.info(f"No {category_name.lower()} found in your watchlist. Add some above!")
+
+
 def render_watchlist_manager():
-    """Render the Watchlist Manager section"""
+    """Render the Watchlist Manager section with separate Stock and Crypto tabs"""
     st.header("📋 Watchlist Manager")
     
     # Try to import TickerManager
@@ -1200,54 +1273,54 @@ def render_watchlist_manager():
         supabase_available = False
         tm = None
 
-    tab1, tab2, tab3 = st.tabs(["My Tickers (Supabase)", "Service Watchlists (Local)", "🚫 AI Exclusions"])
+    tab1, tab2, tab3 = st.tabs(["📈 My Tickers (Supabase)", "⚙️ Service Watchlists", "🚫 AI Exclusions"])
     
-    # Tab 1: Global "My Tickers" (Supabase)
+    # Tab 1: Global "My Tickers" (Supabase) - Now with Stock/Crypto separation
     with tab1:
         if supabase_available:
             st.caption("✅ Connected to Supabase 'saved_tickers'")
             
-            # Add new ticker
-            with st.expander("➕ Add Ticker"):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    new_ticker = st.text_input("Ticker Symbol", key="sb_new_ticker").upper()
-                with col2:
-                    ticker_type = st.selectbox("Type", ["stock", "crypto", "penny_stock"], key="sb_new_type")
-                
-                if st.button("Add to My Tickers", type="primary"):
-                    if new_ticker:
-                        if tm and tm.add_ticker(new_ticker, ticker_type=ticker_type):
-                            st.success(f"Added {new_ticker}")
-                            st.rerun()
-                        else:
-                            st.error("Failed to add ticker")
-            
-            # List/Manage tickers
+            # Fetch all tickers once
             if tm:
-                tickers = tm.get_all_tickers(limit=1000)
+                all_tickers = tm.get_all_tickers(limit=1000)
             else:
-                tickers = []
-            if tickers:
-                ticker_list = [t['ticker'] for t in tickers]
-                selected = st.multiselect(
-                    "Current Watchlist",
-                    options=ticker_list,
-                    default=ticker_list,
-                    key="sb_ticker_list"
+                all_tickers = []
+            
+            # Separate by type
+            stock_tickers = [t for t in all_tickers if t.get('type') in ['stock', 'penny_stock', None]]
+            crypto_tickers = [t for t in all_tickers if t.get('type') == 'crypto']
+            
+            # Display summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 Total", len(all_tickers))
+            with col2:
+                st.metric("📈 Stocks", len(stock_tickers))
+            with col3:
+                st.metric("🪙 Crypto", len(crypto_tickers))
+            
+            st.markdown("---")
+            
+            # Sub-tabs for Stocks and Crypto
+            stock_tab, crypto_tab = st.tabs(["📈 Stocks", "🪙 Crypto"])
+            
+            with stock_tab:
+                _render_ticker_category(
+                    tm=tm,
+                    tickers_data=stock_tickers,
+                    category_name="Stocks",
+                    ticker_type="stock",
+                    key_prefix="sb_stocks"
                 )
-                
-                # Check for removals
-                to_remove = set(ticker_list) - set(selected)
-                if to_remove:
-                    if st.button(f"Remove {len(to_remove)} tickers?"):
-                        for t in to_remove:
-                            if tm:
-                                tm.remove_ticker(t)
-                        st.success("Updated watchlist")
-                        st.rerun()
-            else:
-                st.info("No tickers found in database.")
+            
+            with crypto_tab:
+                _render_ticker_category(
+                    tm=tm,
+                    tickers_data=crypto_tickers,
+                    category_name="Crypto",
+                    ticker_type="crypto",
+                    key_prefix="sb_crypto"
+                )
         else:
             st.warning("⚠️ Supabase connection not available. Ensure credentials are in .env")
             st.info("Use 'Service Watchlists' tab for local configuration.")
@@ -2241,24 +2314,60 @@ def main():
                         category = svc_info.get("category", "stocks")
                         current_watchlist = get_service_watchlist(service_name, category)
                         
-                        # Get default tickers based on service type
+                        # Default ticker lists (fallback)
+                        default_stock_tickers = [
+                            'SPY', 'QQQ', 'IWM', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT',
+                            'META', 'AMZN', 'GOOGL', 'PLTR', 'SOFI', 'COIN', 'MARA',
+                            'RIOT', 'HOOD', 'NFLX', 'CRM', 'SHOP'
+                        ]
+                        default_crypto_tickers = [
+                            'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 
+                            'DOGE/USD', 'SHIB/USD', 'PEPE/USD', 'XRP/USD', 'ADA/USD',
+                            'DOT/USD', 'MATIC/USD', 'UNI/USD', 'ATOM/USD', 'ARB/USD'
+                        ]
+                        default_dex_chains = ['solana', 'ethereum', 'base', 'arbitrum', 'polygon']
+                        
+                        # Try to fetch tickers from Supabase based on category
+                        supabase_tickers = []
+                        try:
+                            from services.ticker_manager import TickerManager
+                            svc_tm = TickerManager()
+                            if svc_tm.test_connection():
+                                if category == "crypto" and service_name != "sentient-dex-launch":
+                                    # Fetch crypto tickers from Supabase
+                                    crypto_data = svc_tm.get_all_tickers(ticker_type='crypto', limit=1000)
+                                    if crypto_data:
+                                        supabase_tickers = [t['ticker'] for t in crypto_data]
+                                elif category == "stocks":
+                                    # Fetch stock tickers from Supabase (includes penny_stock type)
+                                    stock_data = svc_tm.get_all_tickers(ticker_type='stock', limit=1000)
+                                    penny_data = svc_tm.get_all_tickers(ticker_type='penny_stock', limit=1000)
+                                    if stock_data:
+                                        supabase_tickers.extend([t['ticker'] for t in stock_data])
+                                    if penny_data:
+                                        supabase_tickers.extend([t['ticker'] for t in penny_data])
+                        except Exception as e:
+                            print(f"Failed to fetch tickers from Supabase: {e}")
+                        
+                        # Determine final ticker list: Supabase tickers + defaults
                         if category == "crypto" and service_name != "sentient-dex-launch":
-                            all_tickers = [
-                                'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 
-                                'DOGE/USD', 'SHIB/USD', 'PEPE/USD', 'XRP/USD', 'ADA/USD',
-                                'DOT/USD', 'MATIC/USD', 'UNI/USD', 'ATOM/USD', 'ARB/USD'
-                            ]
+                            all_tickers = list(set(supabase_tickers + default_crypto_tickers))
                         elif service_name == "sentient-dex-launch":
-                            all_tickers = ['solana', 'ethereum', 'base', 'arbitrum', 'polygon']
+                            all_tickers = default_dex_chains
                         else:
-                            all_tickers = [
-                                'SPY', 'QQQ', 'IWM', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT',
-                                'META', 'AMZN', 'GOOGL', 'PLTR', 'SOFI', 'COIN', 'MARA',
-                                'RIOT', 'HOOD', 'NFLX', 'CRM', 'SHOP'
-                            ]
+                            all_tickers = list(set(supabase_tickers + default_stock_tickers))
+                        
+                        # Sort for consistent display
+                        all_tickers.sort()
+                        
+                        # Show data source info
+                        if supabase_tickers:
+                            st.caption(f"☁️ Loaded {len(supabase_tickers)} tickers from Supabase + defaults")
+                        else:
+                            st.caption("📂 Using default ticker list (Supabase not connected or empty)")
                         
                         # Quick action buttons (mobile-friendly)
-                        btn_col1, btn_col2, btn_col3 = st.columns(3)
+                        btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                         with btn_col1:
                             if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True):
                                 set_service_watchlist(service_name, all_tickers)
@@ -2271,6 +2380,13 @@ def main():
                             if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True):
                                 set_service_watchlist(service_name, all_tickers[:5])
                                 st.rerun()
+                        with btn_col4:
+                            # Sync from Supabase button - use all Supabase tickers
+                            if supabase_tickers:
+                                if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help="Use all tickers from Supabase"):
+                                    set_service_watchlist(service_name, supabase_tickers)
+                                    st.toast(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
+                                    st.rerun()
                         
                         # Multiselect for tickers
                         # Combine all_tickers with current_watchlist to ensure custom additions are available as options

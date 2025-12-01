@@ -105,7 +105,17 @@ class TickerManager:
             logger.error(f"Error getting ticker {ticker}: {e}")
             return None
 
-    def get_all_tickers(self, ticker_type: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    def get_all_tickers(self, ticker_type: Optional[str] = None, limit: int = 1000) -> List[Dict]:
+        """
+        Get all tickers from the saved_tickers table.
+        
+        Args:
+            ticker_type: Optional filter by type ('stock', 'crypto', 'penny_stock')
+            limit: Maximum number of tickers to return (default: 1000 for full watchlist)
+            
+        Returns:
+            List of ticker dictionaries with all fields
+        """
         if not self._check_client(): return []
         try:
             query = self.supabase.table('saved_tickers').select('*')

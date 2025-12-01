@@ -612,11 +612,26 @@ sentient-trader/
 python service_control_panel.py
 ```
 
-This launches an interactive terminal UI for:
+This launches an interactive Streamlit UI for:
 - Starting/stopping services
 - Viewing service status
 - Checking logs in real-time
 - Configuring service parameters
+
+#### Watchlist Manager (December 2025)
+
+The Control Panel includes a unified **Watchlist Manager** with:
+
+* **📈 Stocks / 🪙 Crypto Separation:** Tickers are organized into dedicated tabs for stocks and crypto, making it easy to manage each asset class independently
+* **☁️ Supabase Integration:** Full sync with Supabase database for persistent storage
+  - Automatic fetching of all tickers (up to 1000) from your saved watchlist
+  - Filter by asset type (stock, penny_stock, crypto)
+  - Real-time add/remove with cloud sync
+* **⚙️ Service-Specific Watchlists:** Configure which tickers each service monitors
+  - Stock Monitor, Crypto Breakout, AI Trader, etc.
+  - Quick actions: Select All, Clear, Top 5, Sync from Supabase
+  - Custom ticker input for adding new symbols
+* **🚫 AI Exclusions:** Manage pairs permanently excluded from AI trading
 
 ### Service Status Commands
 
