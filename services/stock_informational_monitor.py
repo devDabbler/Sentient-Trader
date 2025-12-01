@@ -264,13 +264,19 @@ class StockInformationalMonitor(LLMServiceMixin):
         if not self.discord_webhook:
             logger.warning("⚠️ DISCORD_WEBHOOK_URL not set - alerts will use fallback system")
         
-        # Discord bot manager for interactive buttons (if available)
+        # Discord bot for interactive buttons (Watch/Analyze/Dismiss) - same as crypto breakout monitor
         self.discord_bot_manager = None
         try:
-            from services.discord_approval_manager import get_discord_approval_manager
+            from services.discord_trade_approval import get_discord_approval_manager
             self.discord_bot_manager = get_discord_approval_manager()
-        except Exception:
-            pass
+            if self.discord_bot_manager and self.discord_bot_manager.enabled:
+                logger.info("✅ Discord bot enabled - stock alerts will have interactive buttons")
+            else:
+                logger.info("ℹ️ Discord bot not configured - using webhook only (no buttons)")
+                self.discord_bot_manager = None
+        except Exception as e:
+            logger.debug(f"Discord bot not available: {e}")
+            self.discord_bot_manager = None
         
         print(f"[TRACE] StockInformationalMonitor.__init__: About to log initialization complete...", flush=True)
         logger.info(
@@ -817,7 +823,7 @@ class StockInformationalMonitor(LLMServiceMixin):
         return opportunities
     
     def _send_alert(self, opportunity: StockOpportunity):
-        """Send Discord alert for opportunity and queue to orchestrator (crypto-style)"""
+        """Send Discord alert for opportunity and queue to orchestrator (crypto-style with buttons)"""
         
         # Log alert
         logger.info(f"\n🚨 STOCK ALERT: {opportunity.symbol}")
@@ -833,12 +839,12 @@ class StockInformationalMonitor(LLMServiceMixin):
             
             # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
             bot_sent = False
-            if self.discord_bot_manager and hasattr(self.discord_bot_manager, 'is_running') and self.discord_bot_manager.is_running():
+            if self.discord_bot_manager:
                 try:
                     import asyncio
                     
-                    # Build message for bot
-                    type_emoji = self._get_opportunity_emoji(opportunity.opportunity_type, opportunity.ensemble_score)
+                    # Build message for bot (matching crypto breakout monitor format)
+                    emoji = self._get_opportunity_emoji(opportunity.opportunity_type, opportunity.ensemble_score)
                     
                     message_text = (
                         f"**Score:** {opportunity.ensemble_score}/100 | **Confidence:** {opportunity.alert_priority}\n"
@@ -846,34 +852,57 @@ class StockInformationalMonitor(LLMServiceMixin):
                         f"**Technical:** {opportunity.technical_summary[:100] if opportunity.technical_summary else 'N/A'}"
                     )
                     
-                    # Send via bot with interactive buttons
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(
-                            self.discord_bot_manager.send_alert(
-                                symbol=opportunity.symbol,
-                                alert_type=opportunity.opportunity_type,
-                                asset_type="stock",
-                                score=opportunity.ensemble_score,
-                                message=message_text,
-                                embed=self._build_discord_embed(opportunity)
-                            )
-                        )
-                        bot_sent = True
-                        logger.info(f"   ✅ Discord alert sent via BOT with Watch/Analyze/Dismiss buttons")
+                    # Add metadata from analysis
+                    if opportunity.metadata:
+                        tech_score = opportunity.metadata.get('technical_score', 0)
+                        ml_score = opportunity.metadata.get('ml_score', 0)
+                        trend = opportunity.metadata.get('trend', '')
+                        volume_ratio = opportunity.metadata.get('volume_ratio', 0)
+                        
+                        if tech_score or ml_score:
+                            message_text += f"\n**Scores:** Tech: {tech_score:.0f} | ML: {ml_score:.0f}"
+                        if trend:
+                            message_text += f"\n**Trend:** {trend}"
+                        if volume_ratio > 0:
+                            message_text += f" | **Volume:** {volume_ratio:.1f}x"
+                    
+                    # Add reasoning if available
+                    if opportunity.reasoning:
+                        message_text += f"\n\n🤖 **AI:** {opportunity.reasoning[:200]}"
+                    
+                    message_text += "\n\n**Reply with:** `1`=Standard `2`=Multi `3`=Ultimate | `W`=Watch | `X`=Dismiss"
+                    
+                    # Color based on score (matching crypto breakout monitor)
+                    if opportunity.ensemble_score >= 85:
+                        color = 0x00FF00  # Green
+                    elif opportunity.ensemble_score >= 75:
+                        color = 0x32CD32  # Lime
+                    elif opportunity.ensemble_score >= 65:
+                        color = 0xFFD700  # Gold
                     else:
-                        loop.run_until_complete(
-                            self.discord_bot_manager.send_alert(
-                                symbol=opportunity.symbol,
-                                alert_type=opportunity.opportunity_type,
-                                asset_type="stock",
-                                score=opportunity.ensemble_score,
-                                message=message_text,
-                                embed=self._build_discord_embed(opportunity)
-                            )
+                        color = 0xFFA500  # Orange
+                    
+                    # Send via bot (has buttons) - same pattern as crypto breakout monitor
+                    async def send_bot_alert():
+                        return await self.discord_bot_manager.bot.send_alert_notification(
+                            symbol=opportunity.symbol,
+                            alert_type=f"{emoji} STOCK {opportunity.opportunity_type}",
+                            message_text=message_text,
+                            confidence=opportunity.alert_priority,
+                            color=color
                         )
-                        bot_sent = True
-                        logger.info(f"   ✅ Discord alert sent via BOT")
+                    
+                    if self.discord_bot_manager.loop:
+                        future = asyncio.run_coroutine_threadsafe(
+                            send_bot_alert(),
+                            self.discord_bot_manager.loop
+                        )
+                        bot_sent = future.result(timeout=10)
+                    
+                    if bot_sent:
+                        logger.info(f"   ✅ Discord alert sent via BOT (with Watch/Analyze/Dismiss buttons)")
+                    else:
+                        logger.debug("   Bot send returned False, falling back to webhook")
                 
                 except Exception as e:
                     logger.debug(f"   Bot alert failed ({type(e).__name__}), falling back to webhook: {e}")
@@ -895,6 +924,7 @@ class StockInformationalMonitor(LLMServiceMixin):
                         response.raise_for_status()
                         
                         logger.info(f"   ✅ Discord alert sent via WEBHOOK (HTTP {response.status_code})")
+                        logger.info(f"      ⚠️ No buttons - reply with 1/2/3/W/X or configure Discord bot")
                     
                     except requests.exceptions.Timeout:
                         logger.error(f"   ❌ Discord webhook timeout (15s)")
