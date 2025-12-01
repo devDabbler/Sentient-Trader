@@ -148,6 +148,16 @@ try:
             min_conf = discord_settings.get('min_confidence', 70)
             logger.info(f"  🔔 Discord alerts enabled (min confidence: {min_conf}%)")
             os.environ['DISCORD_MIN_CONFIDENCE'] = str(min_conf)
+        
+        # Load discovery configuration
+        try:
+            from windows_services.runners.service_discovery_config import apply_config_to_monitor
+            apply_config_to_monitor(monitor)
+            logger.info("  🔍 Discovery config loaded from Control Panel")
+        except ImportError:
+            logger.debug("Discovery config not available - using defaults")
+        except Exception as e:
+            logger.warning(f"Could not load discovery config: {e}")
             
     except ImportError:
         logger.debug("service_config_loader not available - using defaults")

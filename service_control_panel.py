@@ -1964,6 +1964,17 @@ def main():
                                 time.sleep(1)
                                 st.rerun()
                 
+                # Stock Discovery Config - only for Stock Monitor
+                if svc_name == "sentient-stock-monitor":
+                    st.markdown("---")
+                    try:
+                        from ui.discovery_config_ui import render_discovery_config_panel
+                        render_discovery_config_panel()
+                    except ImportError as e:
+                        st.warning(f"Discovery config UI not available: {e}")
+                    except Exception as e:
+                        st.error(f"Error loading discovery config: {e}")
+                
                 st.markdown("---")
 
     with tab_analysis:

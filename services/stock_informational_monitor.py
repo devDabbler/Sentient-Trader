@@ -627,6 +627,36 @@ class StockInformationalMonitor(LLMServiceMixin):
         except Exception as e:
             logger.error(f"Error in _sync_watchlist_from_config: {e}")
     
+    def _sync_discovery_config(self):
+        """Periodically sync discovery configuration from Control Panel"""
+        try:
+            from windows_services.runners.service_discovery_config import load_discovery_config
+            config = load_discovery_config()
+            
+            # Update discovery enabled state
+            if config.get('enabled') != self.discovery_enabled:
+                self.set_discovery_enabled(config['enabled'])
+                logger.info(f"🔍 Discovery {'enabled' if config['enabled'] else 'disabled'} via Control Panel")
+            
+            # Update discovery modes
+            modes_config = {
+                name: settings['enabled']
+                for name, settings in config.get('modes', {}).items()
+            }
+            self.configure_discovery_modes(modes_config)
+            
+            # Update universe sizes
+            for mode_name, mode_settings in config.get('modes', {}).items():
+                if mode_name in self.discovery_universe.modes:
+                    max_size = mode_settings.get('max_universe_size')
+                    if max_size:
+                        self.discovery_universe.modes[mode_name].max_universe_size = max_size
+            
+        except ImportError:
+            pass  # Discovery config not available
+        except Exception as e:
+            logger.debug(f"Could not sync discovery config: {e}")
+    
     def _cleanup_old_errors(self):
         """Remove old error records to prevent memory growth"""
         try:
@@ -1359,6 +1389,10 @@ class StockInformationalMonitor(LLMServiceMixin):
                 try:
                     # Check analysis queue from Control Panel
                     self._process_analysis_queue()
+                    
+                    # Sync watchlist and discovery config from Control Panel
+                    self._sync_watchlist_from_config()
+                    self._sync_discovery_config()
                     
                     # Perform scan with resilience features
                     opportunities = self.scan_all_tickers()
