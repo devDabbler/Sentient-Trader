@@ -207,10 +207,11 @@ class DexScreenerClient:
     async def get_new_pairs(
         self,
         chains: Optional[List[str]] = None,
-        min_liquidity: float = 5000.0,
+        min_liquidity: float = 1000.0,  # Lowered from 5000 - catch earlier
         max_liquidity: Optional[float] = None,
         max_age_hours: float = 24.0,
-        limit: int = 50
+        limit: int = 50,
+        discovery_mode: str = "aggressive"  # "conservative", "balanced", "aggressive"
     ) -> Tuple[bool, List[DexPair]]:
         """
         Get new token pairs across supported chains using MULTIPLE sources
@@ -221,22 +222,46 @@ class DexScreenerClient:
             max_liquidity: Maximum liquidity USD
             max_age_hours: Maximum pair age in hours
             limit: Maximum pairs to return
+            discovery_mode: How aggressive to be in finding tokens
             
         Returns:
             (success, list of DexPair objects)
         """
-        logger.info("Searching for new pairs via DexScreener...")
+        logger.info(f"Searching for new pairs via DexScreener (mode={discovery_mode})...")
         
         all_pairs = []
         seen_addresses = set()
         
+        # Adjust filters based on mode
+        if discovery_mode == "aggressive":
+            effective_min_liq = min(min_liquidity, 500)  # Lower to $500
+            effective_min_vol = 100  # Very low volume threshold
+            max_search_queries = 20  # More queries
+        elif discovery_mode == "balanced":
+            effective_min_liq = min_liquidity
+            effective_min_vol = 300
+            max_search_queries = 12
+        else:  # conservative
+            effective_min_liq = max(min_liquidity, 5000)
+            effective_min_vol = 500
+            max_search_queries = 8
+        
         # Scam filter patterns
         scam_names = {"coin", "token", "test", "scam", "rug", "fake"}
+        
+        # Stats for logging
+        stats = {
+            "source1_found": 0, "source2_found": 0, "source3_found": 0,
+            "skipped_seen": 0, "skipped_chain": 0, "skipped_scam": 0,
+            "skipped_liquidity": 0, "skipped_volume": 0, "skipped_address": 0,
+            "skipped_age": 0
+        }
         
         try:
             # SOURCE 1: Get latest pairs (with timeout to prevent hangs)
             try:
                 latest_pairs = await asyncio.wait_for(self._get_latest_pairs(chains), timeout=30.0)
+                stats["source1_found"] = len(latest_pairs)
                 logger.info(f"Source 1: Found {len(latest_pairs)} from latest pairs")
             except asyncio.TimeoutError:
                 logger.warning("Source 1 timed out, continuing...")
@@ -248,6 +273,7 @@ class DexScreenerClient:
             # SOURCE 2: Get trending/boosted tokens (with timeout)
             try:
                 trending_pairs = await asyncio.wait_for(self._get_trending_pairs(chains), timeout=30.0)
+                stats["source2_found"] = len(trending_pairs)
                 logger.info(f"Source 2: Found {len(trending_pairs)} from trending")
             except asyncio.TimeoutError:
                 logger.warning("Source 2 timed out, continuing...")
@@ -256,44 +282,48 @@ class DexScreenerClient:
                 logger.warning(f"Source 2 failed: {e}")
                 trending_pairs = []
             
-            # SOURCE 3: Search queries (existing)
+            # SOURCE 3: Expanded search queries for better coverage
             logger.info("Source 3: Searching by keywords...")
             search_queries = [
-                "new",      # Tokens with "new" in name
-                "launch",   # Launch-related tokens  
-                "moon",     # Common meme token keyword
-                "inu",      # Popular token suffix
-                "pepe",     # Trending meme theme
-                "doge",     # Dog meme tokens
-                "shiba",    # Shiba variants
-                "elon",     # Elon-themed tokens
-                "safe",     # SafeMoon-style tokens
-                "baby",     # Baby variants
-                "mini",     # Mini variants
-                "gem",      # Hidden gem tokens
-                "ai",       # AI tokens (trending)
-                "x",        # X/Twitter-themed tokens
-                "cat",      # Cat meme tokens
-                "wojak",    # Wojak meme tokens
-                "based",    # Based tokens
+                # High priority - common meme patterns
+                "pepe", "doge", "shiba", "inu", "cat", "meme",
+                # Chain-specific searches for fresh tokens
+                "solana", "sol", "pump", "fun",
+                # Trending themes
+                "ai", "gpt", "elon", "trump", "based",
+                # Classic patterns
+                "moon", "rocket", "gem", "new", "launch",
+                # Animal memes
+                "frog", "dog", "bear", "bull",
+                # Pop culture
+                "wojak", "chad", "virgin", "giga",
+                # Finance themes
+                "safe", "baby", "mini", "micro",
+                # Numbers/symbols often in meme coins
+                "1000x", "100x", "x",
             ]
             
             # Combine all sources
             all_source_pairs = latest_pairs + trending_pairs
             
             # Add search results
-            for query in search_queries[:10]:  # Limit to 10 queries to save time
-                if len(all_source_pairs) >= limit * 3:  # Get 3x limit for filtering
+            search_count = 0
+            for query in search_queries[:max_search_queries]:
+                if len(all_source_pairs) >= limit * 4:  # Get 4x limit for better filtering
                     break
                 
                 try:
                     success, results = await self.search_pairs(query)
                     if success and results:
                         all_source_pairs.extend(results)
-                    await asyncio.sleep(0.5)  # Faster delay
+                        search_count += len(results)
+                    await asyncio.sleep(0.3)  # Faster delay for more queries
                 except Exception as e:
                     logger.debug(f"Error searching '{query}': {e}")
                     continue
+            
+            stats["source3_found"] = search_count
+            logger.info(f"Source 3: Found {search_count} from {max_search_queries} keyword searches")
             
             # Process and filter all pairs
             for pair in all_source_pairs:
@@ -302,41 +332,46 @@ class DexScreenerClient:
                 
                 # Skip if already seen
                 if pair.base_token_address.lower() in seen_addresses:
+                    stats["skipped_seen"] += 1
                     continue
                 
                 # Filter by chain
                 if chains and pair.chain.value not in chains:
+                    stats["skipped_chain"] += 1
                     continue
                 
                 # SCAM FILTER 1: Generic names
                 symbol_lower = pair.base_token_symbol.lower()
                 if symbol_lower in scam_names:
-                    logger.debug(f"Skipping generic name: {pair.base_token_symbol}")
+                    stats["skipped_scam"] += 1
                     continue
                 
                 # SCAM FILTER 2: Very short symbols (< 2 chars)
                 if len(pair.base_token_symbol) < 2:
-                    logger.debug(f"Skipping very short symbol: {pair.base_token_symbol}")
+                    stats["skipped_scam"] += 1
                     continue
                 
-                # Filter by liquidity
-                if pair.liquidity_usd < min_liquidity:
+                # Filter by liquidity (use effective values based on mode)
+                if pair.liquidity_usd < effective_min_liq:
+                    stats["skipped_liquidity"] += 1
                     continue
                 if max_liquidity and pair.liquidity_usd > max_liquidity:
+                    stats["skipped_liquidity"] += 1
                     continue
                 
-                # QUALITY FILTER: Require meaningful volume (not dead)
-                if pair.volume_24h < 500:  # At least $500 volume for active tokens
-                    logger.debug(f"Skipping low volume: {pair.base_token_symbol} (${pair.volume_24h:.0f})")
+                # QUALITY FILTER: Require meaningful volume (adjusted by mode)
+                if pair.volume_24h < effective_min_vol:
+                    stats["skipped_volume"] += 1
                     continue
                 
                 # VALIDATION: Check address format before adding
                 if not self._is_valid_address_format(pair.base_token_address, pair.chain):
-                    logger.debug(f"Skipping invalid address: {pair.base_token_symbol} ({pair.base_token_address[:20]}...)")
+                    stats["skipped_address"] += 1
                     continue
                 
                 # Filter by age (if available)
                 if pair.pair_age_hours > 0 and pair.pair_age_hours > max_age_hours:
+                    stats["skipped_age"] += 1
                     continue
                 
                 # Add to results
@@ -349,7 +384,15 @@ class DexScreenerClient:
             # Sort by age (newest first) if age data available
             all_pairs.sort(key=lambda p: p.pair_age_hours if p.pair_age_hours > 0 else 999)
             
-            logger.info(f"Found {len(all_pairs)} new pairs matching criteria")
+            # Log detailed stats
+            total_found = stats["source1_found"] + stats["source2_found"] + stats["source3_found"]
+            logger.info(f"Discovery stats: total_raw={total_found}, final={len(all_pairs)}")
+            logger.info(f"  Filtered: seen={stats['skipped_seen']}, chain={stats['skipped_chain']}, "
+                       f"scam={stats['skipped_scam']}, liq={stats['skipped_liquidity']}, "
+                       f"vol={stats['skipped_volume']}, addr={stats['skipped_address']}, age={stats['skipped_age']}")
+            
+            print(f"[DEXSCREENER] Discovery: {total_found} raw → {len(all_pairs)} passed filters (mode={discovery_mode})", flush=True)
+            
             return True, all_pairs[:limit]
             
         except Exception as e:
@@ -440,50 +483,96 @@ class DexScreenerClient:
         return True  # Other chains: accept for now
     
     async def _get_latest_pairs(self, chains: Optional[List[str]] = None) -> List[DexPair]:
-        """Get latest pairs from profile pages"""
+        """Get latest pairs using multiple search strategies"""
         pairs = []
         try:
             target_chains = chains if chains else ["solana", "ethereum", "bsc"]
             
-            for chain in target_chains[:3]:  # Limit to 3 chains
+            # Strategy 1: Chain-specific searches with different keywords
+            chain_keywords = {
+                "solana": ["pump.fun", "raydium", "jupiter", "meteora"],
+                "ethereum": ["uniswap", "launch", "presale"],
+                "bsc": ["pancake", "launch", "gem"]
+            }
+            
+            for chain in target_chains[:3]:
+                keywords = chain_keywords.get(chain, ["launch", "new"])
+                for keyword in keywords[:2]:  # 2 keywords per chain
+                    try:
+                        success, results = await asyncio.wait_for(
+                            self.search_pairs(f"{keyword}"),
+                            timeout=8.0
+                        )
+                        if success and results:
+                            # Filter to target chain
+                            chain_pairs = [p for p in results if p.chain.value == chain]
+                            pairs.extend(chain_pairs[:15])
+                        await asyncio.sleep(0.3)
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        continue
+            
+            # Strategy 2: Search for recently trending symbols (often new launches)
+            trending_searches = ["$", "sol", "eth", "bnb"]  # $ often appears in new meme coins
+            for search in trending_searches[:2]:
                 try:
-                    # Add timeout to individual search
                     success, results = await asyncio.wait_for(
-                        self.search_pairs(f"{chain} launch"),
-                        timeout=10.0
+                        self.search_pairs(search),
+                        timeout=8.0
                     )
                     if success and results:
-                        pairs.extend(results[:20])  # Take top 20 from each
-                    await asyncio.sleep(0.5)
-                except asyncio.TimeoutError:
+                        # Take youngest pairs (sorted by age)
+                        sorted_by_age = sorted(results, key=lambda p: p.pair_age_hours if p.pair_age_hours > 0 else 999)
+                        pairs.extend(sorted_by_age[:20])
+                    await asyncio.sleep(0.3)
+                except:
                     continue
-                except Exception:
-                    continue
+                    
         except Exception as e:
             logger.debug(f"Error getting latest pairs: {e}")
         
+        logger.debug(f"Latest pairs source found: {len(pairs)} total")
         return pairs
     
     async def _get_trending_pairs(self, chains: Optional[List[str]] = None) -> List[DexPair]:
-        """Get trending/boosted tokens (NEW SOURCE!)"""
+        """Get trending/boosted tokens with momentum"""
         pairs = []
         try:
-            # Search for tokens with high momentum keywords
-            momentum_keywords = ["100x", "1000x", "pump", "rocket", "exploding", "viral"]
+            # Search for tokens with high momentum keywords (expanded list)
+            momentum_keywords = [
+                "100x", "1000x", "pump", "moon", "rocket",
+                "gem", "alpha", "call", "bullish", "send"
+            ]
             
-            for keyword in momentum_keywords[:3]:  # Limit to 3 keywords
+            for keyword in momentum_keywords[:5]:  # 5 keywords
                 try:
                     success, results = await self.search_pairs(keyword)
                     if success and results:
-                        # Filter for tokens with actual momentum (high volume)
-                        momentum_pairs = [p for p in results if p.volume_24h > 5000]
-                        pairs.extend(momentum_pairs[:10])  # Top 10 per keyword
-                    await asyncio.sleep(0.5)
+                        # Filter for tokens with actual momentum (lower threshold for discovery)
+                        momentum_pairs = [p for p in results if p.volume_24h > 1000]  # Lowered from 5000
+                        pairs.extend(momentum_pairs[:10])
+                    await asyncio.sleep(0.3)
                 except:
                     continue
+            
+            # Also search for common meme formats
+            meme_patterns = ["inu", "pepe", "wojak", "chad", "giga"]
+            for pattern in meme_patterns[:3]:
+                try:
+                    success, results = await self.search_pairs(pattern)
+                    if success and results:
+                        # Sort by age to get freshest ones
+                        fresh_pairs = sorted(results, key=lambda p: p.pair_age_hours if p.pair_age_hours > 0 else 999)
+                        pairs.extend(fresh_pairs[:10])
+                    await asyncio.sleep(0.3)
+                except:
+                    continue
+                    
         except Exception as e:
             logger.debug(f"Error getting trending pairs: {e}")
         
+        logger.debug(f"Trending pairs source found: {len(pairs)} total")
         return pairs
     
     async def get_trending_pairs(self, limit: int = 50) -> Tuple[bool, List[DexPair]]:

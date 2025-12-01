@@ -359,6 +359,27 @@ Tokens are automatically blacklisted if:
 - ❌ LP tokens in EOA wallet (rug pull risk)
 - ❌ Already detected as honeypot
 
+### Configuration Options (NEW - December 2025)
+
+**Lenient Mode** - Most new Solana tokens keep mint/freeze authority initially:
+```python
+from models.dex_models import HunterConfig
+
+config = HunterConfig(
+    lenient_solana_mode=True,    # Allow tokens with mint/freeze (most new launches have these)
+    discovery_mode="aggressive",  # "conservative", "balanced", or "aggressive"
+    min_liquidity_usd=500.0,     # Lower for early launches
+    min_composite_score=20.0,    # Show more tokens for manual evaluation
+)
+```
+
+**Discovery Modes:**
+- `aggressive` - Lowest filters, finds most tokens (higher risk)
+- `balanced` - Moderate filters (default)
+- `conservative` - Strict filters, fewer but safer tokens
+
+**Why Lenient Mode?** Many legitimate meme coins keep mint/freeze authority for the first few hours/days. Strict mode (default before this update) would filter out ~90% of new launches. With lenient mode ON, these tokens are flagged with warnings but not blacklisted.
+
 ### RPC Optimization
 
 - **Two-tier strategy**: `getTokenLargestAccounts` (lightweight) → fallback to `getProgramAccounts`

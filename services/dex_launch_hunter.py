@@ -89,7 +89,20 @@ class DexLaunchHunter:
         self.total_alerts = 0
         self.is_running = False
         
+        # Log configuration
         logger.info("DEX Launch Hunter initialized")
+        logger.info(f"  ├─ Chains: {[c.value for c in self.config.enabled_chains]}")
+        logger.info(f"  ├─ Liquidity: ${self.config.min_liquidity_usd:,.0f} - ${self.config.max_liquidity_usd:,.0f}")
+        logger.info(f"  ├─ Max age: {self.config.max_age_hours}h")
+        logger.info(f"  ├─ Lenient Solana mode: {getattr(self.config, 'lenient_solana_mode', True)}")
+        logger.info(f"  └─ Discovery mode: {getattr(self.config, 'discovery_mode', 'aggressive')}")
+        
+        # Print config summary
+        lenient = getattr(self.config, 'lenient_solana_mode', True)
+        discovery = getattr(self.config, 'discovery_mode', 'aggressive')
+        print(f"[DEX] Config: lenient_solana_mode={lenient}, discovery_mode={discovery}", flush=True)
+        if lenient:
+            print("[DEX] ⚠️ LENIENT MODE ON: Allowing tokens with mint/freeze authority (higher risk)", flush=True)
     
     async def start_monitoring(self, continuous: bool = True):
         """
@@ -144,12 +157,16 @@ class DexLaunchHunter:
             chain_ids = [chain.value for chain in self.config.enabled_chains]
             
             # Scan using FREE DexScreener API endpoints
+            # Use discovery_mode from config (aggressive finds more tokens, conservative is safer)
+            discovery_mode = getattr(self.config, 'discovery_mode', 'aggressive')
+            
             success, new_pairs = await self.dex_client.get_new_pairs(
                 chains=chain_ids,
                 min_liquidity=self.config.min_liquidity_usd,
                 max_liquidity=self.config.max_liquidity_usd,
                 max_age_hours=self.config.max_age_hours,
-                limit=50  # Scan top 50 new tokens per cycle
+                limit=50,  # Scan top 50 new tokens per cycle
+                discovery_mode=discovery_mode
             )
             
             if not success:
@@ -326,23 +343,38 @@ class DexLaunchHunter:
             
             # 4. Check if it passes minimum safety requirements
             if self.config.verify_contract_before_alert:
-                # HARD REJECT: Solana on-chain checks failed (mint/freeze authority or LP in EOA)
+                # For Solana tokens with mint/freeze authority
                 if safety.safety_score == 0.0 and chain == Chain.SOLANA:
-                    logger.warning(f"🚨 Blacklisting Solana token (on-chain check failed): {contract_address}")
-                    # Log the specific reason
-                    if not safety.solana_mint_authority_revoked:
-                        logger.warning(f"   Reason: Mint authority retained")
-                    if not safety.solana_freeze_authority_revoked:
-                        logger.warning(f"   Reason: Freeze authority retained")
-                    if safety.solana_lp_owner_type == 'EOA_unknown':
-                        logger.warning(f"   Reason: LP tokens in EOA wallet (rug risk)")
-                    self.blacklisted_tokens.add(contract_address.lower())
-                    return False, None
+                    # In LENIENT MODE: Allow tokens with mint/freeze authority (common for new launches)
+                    if self.config.lenient_solana_mode:
+                        logger.warning(f"⚠️ Solana token has mint/freeze authority (lenient mode): {contract_address}")
+                        if not safety.solana_mint_authority_revoked:
+                            logger.warning(f"   Warning: Mint authority retained")
+                        if not safety.solana_freeze_authority_revoked:
+                            logger.warning(f"   Warning: Freeze authority retained")
+                        # Adjust safety score to reflect risk but don't block
+                        safety.safety_score = 25.0
+                        safety.solana_risk_flags.append("LENIENT_MODE: Mint/freeze authority not revoked")
+                    else:
+                        # STRICT MODE: Blacklist tokens with mint/freeze authority
+                        logger.warning(f"🚨 Blacklisting Solana token (on-chain check failed): {contract_address}")
+                        if not safety.solana_mint_authority_revoked:
+                            logger.warning(f"   Reason: Mint authority retained")
+                        if not safety.solana_freeze_authority_revoked:
+                            logger.warning(f"   Reason: Freeze authority retained")
+                        if safety.solana_lp_owner_type == 'EOA_unknown':
+                            logger.warning(f"   Reason: LP tokens in EOA wallet (rug risk)")
+                        self.blacklisted_tokens.add(contract_address.lower())
+                        return False, None
                 
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
-                    logger.warning(f"Blacklisting honeypot: {contract_address}")
-                    self.blacklisted_tokens.add(contract_address.lower())
-                    return False, None
+                    # In lenient mode for Solana, allow if it's just freeze authority issue
+                    if self.config.lenient_solana_mode and chain == Chain.SOLANA:
+                        logger.warning(f"⚠️ Potential honeypot (freeze authority) - allowing in lenient mode: {contract_address}")
+                    else:
+                        logger.warning(f"Blacklisting honeypot: {contract_address}")
+                        self.blacklisted_tokens.add(contract_address.lower())
+                        return False, None
                 
                 if (safety.buy_tax > 15 or safety.sell_tax > 15) and self.config.auto_blacklist_high_tax:
                     logger.warning(f"Blacklisting high tax token: {contract_address} (buy: {safety.buy_tax}%, sell: {safety.sell_tax}%)")
@@ -460,16 +492,29 @@ class DexLaunchHunter:
             
             # Check minimum safety requirements
             if self.config.verify_contract_before_alert:
-                # HARD REJECT: Solana on-chain checks failed (mint/freeze authority or LP in EOA)
+                # For Solana tokens with mint/freeze authority
                 if safety.safety_score == 0.0 and pair.chain == Chain.SOLANA:
-                    print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (Solana on-chain check failed - mint/freeze authority)", flush=True)
-                    self.blacklisted_tokens.add(contract_address.lower())
-                    return False, None
+                    # In LENIENT MODE: Allow tokens with mint/freeze authority (common for new launches)
+                    if self.config.lenient_solana_mode:
+                        # Log warning but DON'T blacklist - add risk flags instead
+                        print(f"[DEX] ⚠️ {pair.base_token_symbol}: RISKY (mint/freeze authority) - allowing in lenient mode", flush=True)
+                        # Adjust safety score to reflect risk but don't block
+                        safety.safety_score = 25.0  # Low but not zero
+                        safety.solana_risk_flags.append("LENIENT_MODE: Mint/freeze authority not revoked")
+                    else:
+                        # STRICT MODE: Blacklist tokens with mint/freeze authority
+                        print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (Solana on-chain check failed - mint/freeze authority)", flush=True)
+                        self.blacklisted_tokens.add(contract_address.lower())
+                        return False, None
                 
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
-                    print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (honeypot detected)", flush=True)
-                    self.blacklisted_tokens.add(contract_address.lower())
-                    return False, None
+                    # In lenient mode, still warn about honeypots but check if it's just freeze authority
+                    if self.config.lenient_solana_mode and pair.chain == Chain.SOLANA and not safety.solana_mint_authority_revoked:
+                        print(f"[DEX] ⚠️ {pair.base_token_symbol}: POTENTIAL HONEYPOT (freeze authority) - allowing in lenient mode", flush=True)
+                    else:
+                        print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (honeypot detected)", flush=True)
+                        self.blacklisted_tokens.add(contract_address.lower())
+                        return False, None
                 
                 if (safety.buy_tax > 15 or safety.sell_tax > 15) and self.config.auto_blacklist_high_tax:
                     print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (high tax: buy={safety.buy_tax}%, sell={safety.sell_tax}%)", flush=True)

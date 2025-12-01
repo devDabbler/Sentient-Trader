@@ -103,8 +103,17 @@ try:
     print("Initializing services...", flush=True)
     monitor = get_announcement_monitor(scan_interval=300)
     print("  ✓ Announcement monitor created", flush=True)
-    dex_hunter = get_dex_launch_hunter()
-    print("  ✓ DEX hunter created", flush=True)
+    
+    # Import config to customize settings
+    from models.dex_models import HunterConfig
+    config = HunterConfig(
+        lenient_solana_mode=True,  # Allow tokens with mint/freeze authority (most new tokens have these)
+        discovery_mode="aggressive",  # Find more tokens (lower filters)
+        min_liquidity_usd=500.0,  # Lower threshold for early launches
+        min_composite_score=20.0,  # Show more tokens for user to evaluate
+    )
+    dex_hunter = get_dex_launch_hunter(config=config)
+    print("  ✓ DEX hunter created (lenient_mode=ON, discovery=aggressive)", flush=True)
     alert_system = get_alert_system()
     print("  ✓ Alert system created", flush=True)
     logger.info("✓ Services initialized")

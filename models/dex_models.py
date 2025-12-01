@@ -324,3 +324,14 @@ class HunterConfig:
     auto_blacklist_honeypots: bool = True
     auto_blacklist_high_tax: bool = True  # Tax > 15%
     verify_contract_before_alert: bool = True
+    
+    # Lenient Mode (RECOMMENDED for new token discovery)
+    # When True: Allows tokens with mint/freeze authority (common for new Solana launches)
+    # These tokens are HIGHER RISK but most new meme coins keep these initially
+    lenient_solana_mode: bool = True  # Default ON - most new tokens have these authorities
+    
+    # Discovery Settings
+    discovery_mode: str = "aggressive"  # "conservative", "balanced", "aggressive"
+    # aggressive = lower filters, find more tokens (higher risk)
+    # balanced = moderate filters (default)
+    # conservative = strict filters, fewer but safer tokens
