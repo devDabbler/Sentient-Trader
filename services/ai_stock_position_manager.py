@@ -762,35 +762,53 @@ def _create_broker_adapter():
             from src.integrations.ibkr_client import IBKRClient
             from src.integrations.broker_adapter import IBKRAdapter
             
-            port = int(os.getenv('IBKR_PAPER_PORT', '7497'))
-            client_id = int(os.getenv('IBKR_PAPER_CLIENT_ID', '1'))
+            # Check for paper or production mode (matching trading_config.py)
+            paper_mode = os.getenv('STOCK_PAPER_MODE', 'true').lower() == 'true'
+            
+            if paper_mode:
+                # Paper trading settings (TWS paper port)
+                port = int(os.getenv('IBKR_PAPER_PORT', '7497'))
+                client_id = int(os.getenv('IBKR_PAPER_CLIENT_ID', '1'))
+            else:
+                # Live trading settings (TWS live port)
+                port = int(os.getenv('IBKR_LIVE_PORT', '7496'))
+                client_id = int(os.getenv('IBKR_LIVE_CLIENT_ID', '2'))
+            
+            logger.info(f"🔌 Connecting to IBKR ({'PAPER' if paper_mode else 'LIVE'} mode) on port {port}...")
             
             client = IBKRClient(port=port, client_id=client_id)
             if client.connect():
+                logger.info(f"✅ IBKR client connected ({'PAPER' if paper_mode else 'LIVE'} mode)")
                 return IBKRAdapter(client)
             else:
-                logger.warning("Failed to connect to IBKR")
+                logger.warning(f"Failed to connect to IBKR on port {port}")
                 return None
                 
         elif broker_type == 'TRADIER':
             from src.integrations.tradier_client import TradierClient
             from src.integrations.broker_adapter import TradierAdapter
             
-            api_key = os.getenv('TRADIER_API_KEY')
-            account_id = os.getenv('TRADIER_ACCOUNT_ID')
+            # Check for paper or production credentials (matching trading_config.py)
+            paper_mode = os.getenv('STOCK_PAPER_MODE', 'true').lower() == 'true'
             
-            if api_key and account_id:
-                # Check if paper trading
-                paper_mode = os.getenv('TRADIER_PAPER', 'true').lower() == 'true'
-                
+            if paper_mode:
+                # Paper trading credentials
+                account_id = os.getenv('TRADIER_PAPER_ACCOUNT_ID') or os.getenv('TRADIER_ACCOUNT_ID')
+                access_token = os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or os.getenv('TRADIER_ACCESS_TOKEN')
+            else:
+                # Production credentials
+                account_id = os.getenv('TRADIER_PROD_ACCOUNT_ID')
+                access_token = os.getenv('TRADIER_PROD_ACCESS_TOKEN')
+            
+            if access_token and account_id:
                 client = TradierClient(
-                    api_key=api_key,
                     account_id=account_id,
-                    sandbox=paper_mode
+                    access_token=access_token
                 )
+                logger.info(f"✅ Tradier client created ({'PAPER' if paper_mode else 'LIVE'} mode)")
                 return TradierAdapter(client)
             else:
-                logger.warning("Tradier API credentials not configured")
+                logger.warning(f"Tradier credentials not configured (account_id: {bool(account_id)}, token: {bool(access_token)})")
                 return None
         
         return None
