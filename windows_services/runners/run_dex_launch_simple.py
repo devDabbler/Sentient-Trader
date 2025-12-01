@@ -45,7 +45,7 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
     colorize=True
 )
-# Add file handler
+# Add file handler with immediate flush
 logger.add(
     str(log_dir / "dex_launch_service.log"),
     rotation="50 MB",
@@ -54,10 +54,12 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
     diagnose=True,
-    enqueue=False,
-    buffering=1
+    enqueue=False
 )
 
+print("=" * 70, flush=True)
+print("🚀 DEX LAUNCH - SIMPLE RUNNER", flush=True)
+print("=" * 70, flush=True)
 logger.info("=" * 70)
 logger.info("🚀 DEX LAUNCH - SIMPLE RUNNER")
 logger.info("=" * 70)
@@ -75,19 +77,36 @@ logging.getLogger('requests').setLevel(logging.WARNING)
 
 logger.info("")
 logger.info("Starting imports...")
+print("Starting imports...", flush=True)
 
 try:
     import_start = time.time()
     
+    print("  → Importing launch_announcement_monitor...", flush=True)
+    logger.info("  → Importing launch_announcement_monitor...")
     from services.launch_announcement_monitor import get_announcement_monitor
+    print("  ✓ launch_announcement_monitor imported", flush=True)
+    
+    print("  → Importing dex_launch_hunter...", flush=True)
+    logger.info("  → Importing dex_launch_hunter...")
     from services.dex_launch_hunter import get_dex_launch_hunter
+    print("  ✓ dex_launch_hunter imported", flush=True)
+    
+    print("  → Importing alert_system...", flush=True)
+    logger.info("  → Importing alert_system...")
     from services.alert_system import get_alert_system
+    print("  ✓ alert_system imported", flush=True)
     
-    logger.info(f"✓ Imported in {time.time() - import_start:.1f}s")
+    logger.info(f"✓ All imports complete in {time.time() - import_start:.1f}s")
+    print(f"✓ All imports complete in {time.time() - import_start:.1f}s", flush=True)
     
+    print("Initializing services...", flush=True)
     monitor = get_announcement_monitor(scan_interval=300)
+    print("  ✓ Announcement monitor created", flush=True)
     dex_hunter = get_dex_launch_hunter()
+    print("  ✓ DEX hunter created", flush=True)
     alert_system = get_alert_system()
+    print("  ✓ Alert system created", flush=True)
     logger.info("✓ Services initialized")
     
     # Print SERVICE READY
