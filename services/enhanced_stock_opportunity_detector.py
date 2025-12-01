@@ -23,6 +23,7 @@ import logging
 
 from loguru import logger
 import yfinance as yf
+import pandas as pd
 from pandas import DataFrame
 
 # Add project root to path
@@ -230,16 +231,15 @@ class EnhancedStockOpportunityDetector:
             
             analysis_duration = time.time() - analysis_start
             
-            # Log result
-            if composite_score >= self.min_composite_score:
-                emoji = "🎯" if composite_score >= 80 else "👀" if composite_score >= 70 else "✓"
-                logger.debug(
-                    f"  {emoji} {symbol}: Composite {composite_score:.0f} "
-                    f"(Tech: {technical_score:.0f}, Event: {event_score:.0f}, "
-                    f"ML: {ml_score:.0f}, LLM: {llm_score:.0f}) in {analysis_duration:.1f}s"
-                )
-            else:
-                logger.debug(f"  ⏭️  {symbol}: Score {composite_score:.0f} below threshold in {analysis_duration:.1f}s")
+            # Log result - always log to help diagnose filtering issues
+            emoji = "🎯" if composite_score >= 80 else "👀" if composite_score >= 70 else "✓" if composite_score >= self.min_composite_score else "⏭️"
+            
+            logger.info(
+                f"  {emoji} {symbol}: Score {composite_score:.0f}/100 "
+                f"(Tech: {technical_score:.0f}, Event: {event_score:.0f}, "
+                f"ML: {ml_score:.0f}, LLM: {llm_score:.0f}) "
+                f"{'✅ PASSED' if composite_score >= self.min_composite_score else '❌ Below ' + str(self.min_composite_score) + ' threshold'}"
+            )
             
             # Cache result
             self._cache_analysis(symbol, opportunity)
@@ -512,13 +512,56 @@ Format: [SCORE: XX] Analysis here.
     def _calculate_composite_score(
         self, technical: float, event: float, ml: float, llm: float
     ) -> float:
-        """Calculate weighted composite score"""
-        return (
-            technical * self.technical_weight +
-            event * self.event_weight +
-            ml * self.ml_weight +
-            llm * self.llm_weight
-        )
+        """
+        Calculate weighted composite score with dynamic weight redistribution
+        
+        When certain components return 0 (no data/disabled), redistribute their
+        weight to active components to avoid penalizing valid opportunities.
+        """
+        # Determine which components are active (non-zero)
+        active_weights = {}
+        inactive_weight = 0.0
+        
+        if technical > 0:
+            active_weights['technical'] = self.technical_weight
+        else:
+            inactive_weight += self.technical_weight
+            
+        if event > 0:
+            active_weights['event'] = self.event_weight
+        else:
+            inactive_weight += self.event_weight
+            
+        if ml > 0:
+            active_weights['ml'] = self.ml_weight
+        else:
+            inactive_weight += self.ml_weight
+            
+        if llm > 0:
+            active_weights['llm'] = self.llm_weight
+        else:
+            inactive_weight += self.llm_weight
+        
+        # If no active weights, return 0
+        if not active_weights:
+            return 0.0
+        
+        # Redistribute inactive weight proportionally to active components
+        total_active_weight = sum(active_weights.values())
+        redistribution_factor = (total_active_weight + inactive_weight) / total_active_weight
+        
+        # Calculate score with redistributed weights
+        score = 0.0
+        if 'technical' in active_weights:
+            score += technical * active_weights['technical'] * redistribution_factor
+        if 'event' in active_weights:
+            score += event * active_weights['event'] * redistribution_factor
+        if 'ml' in active_weights:
+            score += ml * active_weights['ml'] * redistribution_factor
+        if 'llm' in active_weights:
+            score += llm * active_weights['llm'] * redistribution_factor
+        
+        return min(100, score)
     
     def _determine_confidence(self, score: float) -> str:
         """Determine confidence level"""
@@ -578,7 +621,9 @@ Format: [SCORE: XX] Analysis here.
             
             rs = gain / loss
             rsi = 100 - (100 / (1 + rs))
-            return float(rsi.iloc[-1])
+            # Use .item() to extract scalar value (avoids FutureWarning)
+            last_rsi = rsi.iloc[-1]
+            return float(last_rsi.item()) if hasattr(last_rsi, 'item') else float(last_rsi)
         except:
             return 50.0
     
@@ -630,15 +675,34 @@ Format: [SCORE: XX] Analysis here.
     # ============================================================
     
     def _get_ticker_data(self, symbol: str, period: str = "3mo") -> Optional[DataFrame]:
-        """Fetch ticker data from yfinance"""
-        try:
-            data = yf.download(symbol, period=period, progress=False, threads=False, auto_adjust=True)
-            if data is None or (isinstance(data, DataFrame) and data.empty):
+        """Fetch ticker data from yfinance with retry logic for rate limiting"""
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                data = yf.download(symbol, period=period, progress=False, threads=False, auto_adjust=True)
+                if data is None or (isinstance(data, DataFrame) and data.empty):
+                    logger.debug(f"  ❌ No data returned for {symbol}")
+                    return None
+                
+                # Handle multi-indexed columns (yfinance now returns (Price, Ticker) format)
+                if isinstance(data.columns, pd.MultiIndex):
+                    # Flatten the columns - take only the first level (Price)
+                    data.columns = data.columns.get_level_values(0)
+                    logger.debug(f"  ⚙️  Flattened multi-index columns for {symbol}")
+                
+                logger.debug(f"  ✓ Fetched {len(data)} rows for {symbol}")
+                return data
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check for rate limiting / throttling
+                if 'rate' in error_str or 'throttl' in error_str or 'right back' in error_str:
+                    if attempt < max_retries:
+                        logger.warning(f"  ⚠️  Rate limited on {symbol}, waiting 5s (attempt {attempt + 1})...")
+                        time.sleep(5)
+                        continue
+                logger.debug(f"Error fetching {symbol}: {e}")
                 return None
-            return data
-        except Exception as e:
-            logger.debug(f"Error fetching {symbol}: {e}")
-            return None
+        return None
     
     def _get_cached_analysis(self, symbol: str) -> Optional[CompositeOpportunity]:
         """Get cached analysis if still valid"""
