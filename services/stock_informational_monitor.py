@@ -737,30 +737,46 @@ class StockInformationalMonitor(LLMServiceMixin):
         # BUILD SCAN UNIVERSE
         scan_universe = list(self.watchlist) if self.watchlist else []
         
-        # Add discovered stocks if enabled
+        # Add discovered stocks if enabled AND at least one mode is active
         if self.discovery_enabled:
-            logger.info("🔍 Running stock discovery to expand universe...")
-            try:
-                discovered_dict = self.discovery_universe.discover_stocks(exclude_watchlist=scan_universe)
-                
-                # Flatten discovered tickers from all modes
-                discovered_tickers = []
-                for mode_tickers in discovered_dict.values():
-                    discovered_tickers.extend(mode_tickers)
-                
-                # Deduplicate and validate (discovery should already filter, but double-check)
-                discovered_tickers = list(set(discovered_tickers))
-                # Filter out any invalid tickers (shouldn't be needed, but safety check)
-                valid_discovered = [t for t in discovered_tickers if self.discovery_universe._is_valid_stock_ticker(t)]
-                
-                # Add to scan universe (limit to avoid overwhelming)
-                max_discovered = 50  # Limit added tickers
-                valid_discovered = valid_discovered[:max_discovered]
-                scan_universe.extend(valid_discovered)
-                
-                logger.info(f"📈 Added {len(valid_discovered)} discovered stock tickers (total universe: {len(scan_universe)})")
-            except Exception as e:
-                logger.error(f"❌ Error in discovery: {e}")
+            # Check if any discovery modes are actually enabled
+            active_modes = [
+                mode_name for mode_name, mode in self.discovery_universe.modes.items()
+                if mode.enabled
+            ]
+            
+            if active_modes:
+                logger.info(f"🔍 Running stock discovery to expand universe ({len(active_modes)} mode(s) active)...")
+                try:
+                    discovered_dict = self.discovery_universe.discover_stocks(exclude_watchlist=scan_universe)
+                    
+                    # Flatten discovered tickers from all modes
+                    discovered_tickers = []
+                    for mode_tickers in discovered_dict.values():
+                        discovered_tickers.extend(mode_tickers)
+                    
+                    # Deduplicate and validate (discovery should already filter, but double-check)
+                    discovered_tickers = list(set(discovered_tickers))
+                    # Filter out any invalid tickers (shouldn't be needed, but safety check)
+                    valid_discovered = [t for t in discovered_tickers if self.discovery_universe._is_valid_stock_ticker(t)]
+                    
+                    # Add to scan universe (limit to avoid overwhelming)
+                    max_discovered = 50  # Limit added tickers
+                    valid_discovered = valid_discovered[:max_discovered]
+                    
+                    # Final deduplication: remove any discovered tickers that are already in watchlist
+                    existing_set = set(t.upper() for t in scan_universe)
+                    new_discovered = [t for t in valid_discovered if t.upper() not in existing_set]
+                    
+                    scan_universe.extend(new_discovered)
+                    
+                    logger.info(f"📈 Added {len(new_discovered)} discovered stock tickers (total universe: {len(scan_universe)})")
+                    if len(new_discovered) < len(valid_discovered):
+                        logger.debug(f"   (Skipped {len(valid_discovered) - len(new_discovered)} duplicates already in watchlist)")
+                except Exception as e:
+                    logger.error(f"❌ Error in discovery: {e}")
+            else:
+                logger.debug("🔍 Discovery enabled but no modes active - skipping discovery")
         
         self.stats.tickers_scanned = 0
         
