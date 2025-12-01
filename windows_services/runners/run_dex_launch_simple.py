@@ -154,7 +154,7 @@ try:
                 logger.info(f"🔄 Scan cycle #{scan_counter} starting...")
                 
                 # ===== PART 1: Active DEX Scanning =====
-                print("🔍 Running active DEX scan...", flush=True)
+                print("🔍 Running active DEX scan (max 120s)...", flush=True)
                 logger.info("🔍 Running active DEX scan...")
                 try:
                     # Add timeout to prevent hanging
@@ -162,6 +162,7 @@ try:
                         dex_hunter._scan_for_launches(),
                         timeout=120  # 2 minute timeout
                     )
+                    print("✓ Active DEX scan completed!", flush=True)
                     logger.info("✓ Active DEX scan completed")
                     
                     # Check for high-score tokens from active scan
@@ -192,8 +193,10 @@ try:
                             logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
                 
                 except asyncio.TimeoutError:
+                    print("⚠️ DEX scan TIMEOUT after 120s!", flush=True)
                     logger.warning("⚠️ Active DEX scan timed out after 120s, continuing...")
                 except Exception as e:
+                    print(f"❌ Scan error: {e}", flush=True)
                     logger.error(f"Active scan error: {e}")
                 
                 # ===== PART 2: Process Announcements =====
@@ -242,14 +245,18 @@ try:
                 discovered_count = len(dex_hunter.discovered_tokens)
                 high_score_count = sum(1 for t in dex_hunter.discovered_tokens.values() if t.composite_score >= 60)
                 
+                stats_msg = f"📊 Stats: {discovered_count} discovered, {high_score_count} high-score"
+                print(stats_msg, flush=True)
                 logger.info(
                     f"📊 Stats: {discovered_count} tokens discovered, "
                     f"{high_score_count} high-score, "
                     f"{stats.get('total_announcements', 0)} announcements"
                 )
                 
+                print("💤 Sleeping 5 minutes until next scan...", flush=True)
                 logger.info(f"💤 Sleeping 5 minutes until next scan...")
                 await asyncio.sleep(300)  # 5 minutes
+                print("⏰ Waking up for next scan cycle...", flush=True)
                 
         except Exception as e:
             logger.error(f"Monitor loop error: {e}", exc_info=True)
