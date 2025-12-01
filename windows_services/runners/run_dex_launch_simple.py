@@ -108,11 +108,17 @@ try:
     alert_system = get_alert_system()
     print("  ✓ Alert system created", flush=True)
     logger.info("✓ Services initialized")
+    print("✓ Services initialized", flush=True)
     
     # Print SERVICE READY
+    service_ready_msg = f"🚀 SERVICE READY (total startup: {time.time() - import_start:.1f}s)"
+    print("", flush=True)
+    print("=" * 70, flush=True)
+    print(service_ready_msg, flush=True)
+    print("=" * 70, flush=True)
+    print("", flush=True)
     logger.info("")
     logger.info("=" * 70)
-    service_ready_msg = f"🚀 SERVICE READY (total startup: {time.time() - import_start:.1f}s)"
     logger.info(service_ready_msg)
     logger.info("=" * 70)
     logger.info("")
@@ -125,6 +131,7 @@ try:
         logger.warning(f"Could not write status file: {e}")
     
     async def monitor_loop():
+        print("Starting monitor loop...", flush=True)
         logger.info("=" * 70)
         logger.info("Starting DEX launch monitoring (announcements + active scanning)...")
         logger.info("=" * 70)
@@ -246,6 +253,7 @@ try:
             monitor_task.cancel()
     
     # Run the async loop
+    print("Starting async monitor loop...", flush=True)
     asyncio.run(monitor_loop())
 
 except KeyboardInterrupt:
