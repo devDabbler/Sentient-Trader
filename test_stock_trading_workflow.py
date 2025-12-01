@@ -275,6 +275,172 @@ def test_broker_configuration():
     return True
 
 
+def test_send_discord_alert():
+    """TEST 8: Send a test Discord alert (simulates Stock Monitor detection)"""
+    print_header("TEST 8: Send Discord Alert")
+    
+    import requests
+    
+    webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+    if not webhook_url:
+        print("       ⚠️ DISCORD_WEBHOOK_URL not set - skipping")
+        return True
+    
+    # Build a realistic stock opportunity alert
+    symbol = "AAPL"
+    current_price = 185.50
+    
+    embed = {
+        "title": f"🧪 TEST ALERT: {symbol}",
+        "description": (
+            f"**This is a TEST alert from the workflow test suite**\n\n"
+            f"📈 **Stock Opportunity Detected**\n"
+            f"Multi-factor analysis suggests bullish momentum\n\n"
+            f"💰 **Price:** ${current_price:.2f}\n"
+            f"📊 **Score:** 85/100\n"
+            f"🎯 **Confidence:** HIGH\n\n"
+            f"**Reply to this message with:**\n"
+            f"• `1` - Standard Analysis\n"
+            f"• `2` - Multi-Config Analysis\n"
+            f"• `3` - Ultimate Analysis\n"
+            f"• `T` or `TRADE` - Execute Long Trade\n"
+            f"• `SHORT` - Execute Short Trade\n"
+            f"• `P` or `PAPER` - Paper Trade Test"
+        ),
+        "color": 3066993,  # Green
+        "fields": [
+            {"name": "Symbol", "value": symbol, "inline": True},
+            {"name": "Price", "value": f"${current_price:.2f}", "inline": True},
+            {"name": "Type", "value": "TEST", "inline": True},
+        ],
+        "footer": {"text": "Stock Trading Workflow Test"},
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    payload = {
+        "embeds": [embed],
+        "username": "Stock Workflow Test",
+        "avatar_url": "https://cdn-icons-png.flaticon.com/512/2830/2830284.png"
+    }
+    
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=10)
+        response.raise_for_status()
+        print_result("Discord webhook alert sent", True, f"HTTP {response.status_code}")
+        print("       📨 Check your Discord channel for the test alert!")
+        print("       💡 Reply with 1, 2, 3, T, SHORT, or P to test workflow")
+        return True
+    except requests.exceptions.RequestException as e:
+        print_result("Discord webhook alert", False, str(e))
+        return False
+
+
+def test_queue_mock_trade_approval():
+    """TEST 9: Queue a mock trade for Discord approval"""
+    print_header("TEST 9: Queue Mock Trade Approval")
+    
+    try:
+        from services.ai_stock_position_manager import get_ai_stock_position_manager
+        
+        manager = get_ai_stock_position_manager()
+        
+        if not manager:
+            print_result("Position manager", False, "Not available")
+            return False
+        
+        if not manager.discord_approval_manager:
+            print("       ⚠️ Discord approval manager not configured")
+            print("       💡 Configure DISCORD_BOT_TOKEN and DISCORD_CHANNEL_IDS")
+            return True  # Not a failure, just not configured
+        
+        # Queue a test trade for approval
+        symbol = "NVDA"
+        approval_id = manager.queue_trade_for_approval(
+            symbol=symbol,
+            side="BUY",
+            quantity=10,
+            entry_price=450.00,
+            stop_loss=440.00,
+            take_profit=480.00,
+            strategy="TEST_WORKFLOW",
+            confidence=85.0,
+            reasoning="This is a TEST trade from the workflow test suite. Reply APPROVE or REJECT to test the approval flow."
+        )
+        
+        if approval_id:
+            print_result("Mock trade queued", True, f"ID: {approval_id}")
+            print(f"       📨 Check Discord for approval request!")
+            print(f"       💡 Reply 'APPROVE' or 'REJECT' to test")
+            
+            # Show pending approvals
+            pending = manager.get_pending_approvals()
+            print_result("Pending approvals", True, f"{len(pending)} in queue")
+            
+            return True
+        else:
+            print_result("Mock trade queued", False, "Failed to queue")
+            return False
+            
+    except Exception as e:
+        print_result("Queue mock trade", False, str(e))
+        return False
+
+
+def test_send_bot_alert_with_buttons():
+    """TEST 10: Send Discord alert via bot (with action buttons)"""
+    print_header("TEST 10: Send Bot Alert with Buttons")
+    
+    try:
+        from services.discord_trade_approval import get_discord_approval_manager
+        import asyncio
+        
+        # Get the existing manager (should already be initialized from previous tests)
+        manager = get_discord_approval_manager()
+        
+        if not manager or not manager.enabled:
+            print("       ⚠️ Discord bot not enabled")
+            return True  # Not a failure
+        
+        if not manager.bot or not manager.loop:
+            print("       ⚠️ Discord bot not running")
+            return True
+        
+        bot = manager.bot  # Store reference for type checker
+        loop = manager.loop
+        
+        # Send alert via bot (with buttons!)
+        async def send_test_alert():
+            return await bot.send_alert_notification(
+                symbol="TSLA",
+                alert_type="🧪 TEST STOCK OPPORTUNITY",
+                message_text=(
+                    "**Test Alert from Workflow Suite**\n\n"
+                    "📈 This is a test alert with interactive buttons!\n\n"
+                    "• Click 📊 for Standard Analysis\n"
+                    "• Click 🎯 for Multi Analysis\n"
+                    "• Click 🚀 for Ultimate Analysis\n"
+                    "• Click ✅ to Add to Watchlist\n"
+                    "• Click ❌ to Dismiss"
+                ),
+                confidence="HIGH",
+                color=15844367  # Gold
+            )
+        
+        # Run in the bot's event loop
+        future = asyncio.run_coroutine_threadsafe(send_test_alert(), loop)
+        result = future.result(timeout=10)
+        
+        print_result("Bot alert with buttons", result, "Sent!" if result else "Failed")
+        if result:
+            print("       📨 Check Discord for alert with ACTION BUTTONS!")
+        
+        return result
+        
+    except Exception as e:
+        print_result("Bot alert", False, str(e))
+        return False
+
+
 def run_all_tests():
     """Run all tests and report results"""
     print("\n" + "=" * 70)
@@ -315,6 +481,73 @@ def run_all_tests():
     return passed == total
 
 
+def run_discord_workflow_tests():
+    """Run Discord-specific workflow tests (sends actual messages!)"""
+    print("\n" + "=" * 70)
+    print("  🤖 DISCORD WORKFLOW TESTS")
+    print("  " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("  ⚠️  These tests send REAL Discord messages!")
+    print("=" * 70)
+    
+    results = {}
+    
+    # First run basic tests to initialize managers
+    print("\n📋 Initializing managers...")
+    test_ai_stock_position_manager()  # This starts the Discord bot
+    
+    # Wait for bot to be ready
+    print("\n⏳ Waiting for Discord bot to connect...")
+    time.sleep(5)
+    
+    # Run Discord tests
+    results['webhook_alert'] = test_send_discord_alert()
+    results['mock_trade_approval'] = test_queue_mock_trade_approval()
+    results['bot_alert_buttons'] = test_send_bot_alert_with_buttons()
+    
+    # Summary
+    print_header("DISCORD TEST SUMMARY")
+    
+    passed = sum(1 for v in results.values() if v)
+    total = len(results)
+    
+    for test_name, result in results.items():
+        print_result(test_name.replace('_', ' ').title(), result)
+    
+    print("\n" + "-" * 70)
+    print(f"  TOTAL: {passed}/{total} Discord tests passed")
+    print("-" * 70)
+    
+    print("\n" + "=" * 70)
+    print("  📱 CHECK YOUR DISCORD CHANNEL!")
+    print("  " + "-" * 60)
+    print("  You should see:")
+    print("    1. A webhook test alert (reply with 1/2/3/T/SHORT/P)")
+    print("    2. A trade approval request (reply APPROVE/REJECT)")
+    print("    3. A bot alert with clickable buttons")
+    print("=" * 70 + "\n")
+    
+    return passed == total
+
+
 if __name__ == "__main__":
-    success = run_all_tests()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Stock Trading Workflow Test Suite")
+    parser.add_argument('--discord', action='store_true', 
+                       help='Run Discord workflow tests (sends real messages!)')
+    parser.add_argument('--all', action='store_true',
+                       help='Run all tests including Discord workflow')
+    
+    args = parser.parse_args()
+    
+    if args.discord:
+        success = run_discord_workflow_tests()
+    elif args.all:
+        success = run_all_tests()
+        if success:
+            print("\n🔄 Running Discord workflow tests...\n")
+            success = run_discord_workflow_tests() and success
+    else:
+        success = run_all_tests()
+    
     sys.exit(0 if success else 1)
