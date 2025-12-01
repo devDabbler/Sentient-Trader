@@ -21,6 +21,18 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    env_path = PROJECT_ROOT / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"✅ Loaded .env from {env_path}")
+    else:
+        print(f"⚠️ No .env file found at {env_path}")
+except ImportError:
+    print("⚠️ python-dotenv not installed, using existing environment")
+
 # Suppress excessive logging during tests
 import logging
 logging.getLogger("httpx").setLevel(logging.WARNING)
