@@ -250,6 +250,7 @@ def run_stock_analysis(ticker: str, mode: str = "standard") -> dict:
     try:
         import os
         from services.ai_stock_entry_assistant import AIStockEntryAssistant
+        from services.llm_strategy_analyzer import LLMStrategyAnalyzer
         
         # Try to get a broker client - Tradier is simplest
         broker_client = None
@@ -281,7 +282,14 @@ def run_stock_analysis(ticker: str, mode: str = "standard") -> dict:
                     return {"last": 0}
             broker_client = MinimalBrokerMock()
         
-        assistant = AIStockEntryAssistant(broker_client=broker_client)
+        # Create LLM analyzer for AI decisions
+        llm_analyzer = None
+        try:
+            llm_analyzer = LLMStrategyAnalyzer()
+        except Exception as e:
+            logger.warning(f"Could not initialize LLM analyzer: {e}")
+        
+        assistant = AIStockEntryAssistant(broker_client=broker_client, llm_analyzer=llm_analyzer)
         
         analysis = assistant.analyze_entry(
             symbol=ticker.upper(),
@@ -475,7 +483,6 @@ def main_loop():
                     tickers = request.get("tickers", [])
                     asset_type = request.get("asset_type", "crypto")
                     
-                    logger.info(f"")
                     logger.info(f"{'='*60}")
                     logger.info(f"▶️  PROCESSING REQUEST: {request_id}")
                     logger.info(f"    Asset Type: {asset_type.upper()}")
