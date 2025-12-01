@@ -69,6 +69,7 @@ class DexLaunchHunter:
                     use_llm=True,  # Uses local Ollama LLM (FREE)
                     llm_budget_manager=None  # No budget limits with local LLM
                 )
+                print("[DEX] ✅ X Sentiment Service enabled (uses local Ollama LLM)", flush=True)
                 logger.info("✅ X Sentiment Service integrated with DEX Hunter (local LLM)")
             except Exception as e:
                 logger.warning(f"Could not initialize X Sentiment Service: {e}")
@@ -195,7 +196,10 @@ class DexLaunchHunter:
                         continue
                     
                     if success and token:
-                        print(f"[DEX] ✓ {token.symbol}: Score={token.composite_score:.1f}, Risk={token.risk_level.value}", flush=True)
+                        # Detailed score breakdown
+                        print(f"[DEX] ✓ {token.symbol}: Score={token.composite_score:.1f}/100, Risk={token.risk_level.value}", flush=True)
+                        print(f"    └─ Pump:{token.pump_potential_score:.0f} Velocity:{token.velocity_score:.0f} Safety:{token.safety_score:.0f} Liq:{token.liquidity_score:.0f}", flush=True)
+                        print(f"    └─ Price=${token.price_usd:.6f} Liq=${token.liquidity_usd:,.0f} Vol=${token.volume_24h:,.0f}", flush=True)
                         logger.info(
                             f"Discovered: {token.symbol} - "
                             f"Score: {token.composite_score:.1f}, "
@@ -241,12 +245,15 @@ class DexLaunchHunter:
     
     async def _check_smart_money(self):
         """Check for smart money wallet activity"""
+        print("[WHALE] 🐋 Checking smart money wallet activity...", flush=True)
         try:
             activities = await self.smart_money_tracker.check_all_wallets()
             
             if not activities:
+                print("[WHALE] No smart money activity detected", flush=True)
                 return
             
+            print(f"[WHALE] Found {len(activities)} smart money activities!", flush=True)
             logger.info(f"Found {len(activities)} smart money activities")
             
             # Process each activity
@@ -415,18 +422,12 @@ class DexLaunchHunter:
             
             # VALIDATION 1: Check address format
             if not self._is_valid_address(contract_address, pair.chain):
-                logger.debug(f"Invalid address format for {pair.chain.value}: {contract_address}")
+                print(f"[DEX] ✗ {pair.base_token_symbol}: Invalid address format", flush=True)
                 return False, None
-            
-            # VALIDATION 2: Verify token still exists on DexScreener (catch delisted/stale)
-            # Skip this verification for now to speed up - we already have the pair data
-            # verified = await self._verify_token_exists(contract_address, pair.chain)
-            # if not verified:
-            #     logger.debug(f"Token not found on DexScreener (delisted?): {pair.base_token_symbol}")
-            #     return False, None
             
             # Check if blacklisted
             if contract_address.lower() in self.blacklisted_tokens:
+                print(f"[DEX] ✗ {pair.base_token_symbol}: Already blacklisted", flush=True)
                 return False, None
             
             # Safety analysis (pass pool address for Solana LP analysis)
@@ -441,11 +442,12 @@ class DexLaunchHunter:
                     timeout=15.0
                 )
             except asyncio.TimeoutError:
+                print(f"[DEX] ✗ {pair.base_token_symbol}: Safety analysis timeout", flush=True)
                 success = False
                 safety = ContractSafety()
             
             if not success:
-                logger.warning(f"Safety analysis failed for {contract_address}")
+                print(f"[DEX] ⚠ {pair.base_token_symbol}: Safety check failed, using defaults", flush=True)
                 safety = ContractSafety()
             
             # Determine risk level
@@ -455,17 +457,17 @@ class DexLaunchHunter:
             if self.config.verify_contract_before_alert:
                 # HARD REJECT: Solana on-chain checks failed (mint/freeze authority or LP in EOA)
                 if safety.safety_score == 0.0 and pair.chain == Chain.SOLANA:
-                    logger.warning(f"🚨 Blacklisting Solana token (on-chain check failed): {contract_address}")
+                    print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (Solana on-chain check failed - mint/freeze authority)", flush=True)
                     self.blacklisted_tokens.add(contract_address.lower())
                     return False, None
                 
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
-                    logger.warning(f"Blacklisting honeypot: {contract_address}")
+                    print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (honeypot detected)", flush=True)
                     self.blacklisted_tokens.add(contract_address.lower())
                     return False, None
                 
                 if (safety.buy_tax > 15 or safety.sell_tax > 15) and self.config.auto_blacklist_high_tax:
-                    logger.warning(f"Blacklisting high tax token: {contract_address}")
+                    print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (high tax: buy={safety.buy_tax}%, sell={safety.sell_tax}%)", flush=True)
                     self.blacklisted_tokens.add(contract_address.lower())
                     return False, None
             
@@ -912,15 +914,20 @@ class DexLaunchHunter:
         Only enriches promising tokens to conserve API/scraping budget.
         """
         if not self.x_sentiment_service:
+            print("[X] X Sentiment Service not available - skipping social enrichment", flush=True)
             return
+        
+        print("[X] 🐦 Starting X/Twitter sentiment enrichment...", flush=True)
         
         # Get top tokens by composite score (that don't have X data yet)
         tokens_needing_x = [
             token for token in self.discovered_tokens.values()
             if token.social_buzz_score == 0.0  # Not yet enriched
-            and token.composite_score >= 30  # Only promising ones
+            and token.composite_score >= 30  # Only promising ones (min score to check X)
             and token.age_hours < 24  # Fresh tokens only
         ]
+        
+        print(f"[X] Found {len(tokens_needing_x)} tokens needing X sentiment (score>=30, age<24h)", flush=True)
         
         # Sort by score, take top 10 per cycle
         tokens_needing_x = sorted(
@@ -931,6 +938,7 @@ class DexLaunchHunter:
         
         for token in tokens_needing_x:
             try:
+                print(f"[X] 🐦 Fetching X/Twitter sentiment for ${token.symbol}...", flush=True)
                 logger.info(f"\U0001F426 Fetching X sentiment for {token.symbol}...")
                 
                 snapshot = await self.x_sentiment_service.fetch_snapshot(
@@ -951,11 +959,14 @@ class DexLaunchHunter:
                     token.social_buzz_score = snapshot.x_sentiment_score
                     
                     # Re-calculate composite score with social data
+                    old_score = token.composite_score
                     token = self._score_token(token)
                     
                     # Update in storage
                     self.discovered_tokens[token.contract_address.lower()] = token
                     
+                    print(f"[X] ✓ ${token.symbol}: {snapshot.tweet_count} tweets, sentiment={snapshot.heuristic_sentiment:.2f}, buzz={token.social_buzz_score:.1f}", flush=True)
+                    print(f"[X]   └─ Score updated: {old_score:.1f} → {token.composite_score:.1f}", flush=True)
                     logger.info(
                         f"\u2705 X sentiment for {token.symbol}: "
                         f"tweets={snapshot.tweet_count}, "
@@ -963,16 +974,22 @@ class DexLaunchHunter:
                         f"buzz_score={token.social_buzz_score:.1f}"
                     )
                 else:
+                    print(f"[X] ✗ ${token.symbol}: No tweets found", flush=True)
                     logger.debug(f"No X data found for {token.symbol}")
                 
                 # Small delay between X requests (be polite)
                 await asyncio.sleep(2)
                 
             except Exception as e:
+                print(f"[X] ⚠ ${token.symbol}: Error fetching X data - {e}", flush=True)
                 logger.warning(f"Failed to fetch X sentiment for {token.symbol}: {e}")
     
     async def _generate_alerts(self):
         """Generate alerts for promising tokens"""
+        alert_candidates = len([t for t in self.discovered_tokens.values() if not t.notified])
+        print(f"[ALERT] 🔔 Checking {alert_candidates} tokens for alert criteria (score>=60)...", flush=True)
+        
+        alerts_sent = 0
         for address, token in self.discovered_tokens.items():
             # Skip if already notified
             if token.notified:
