@@ -186,10 +186,24 @@ class StockInformationalMonitor(LLMServiceMixin):
                 tm = TickerManager()
                 # Only use if we can connect
                 if tm.test_connection():
-                    db_tickers = tm.get_all_tickers()
+                    # IMPORTANT: Filter for stocks only to avoid crypto tickers
+                    db_tickers = tm.get_all_tickers(ticker_type='stock')
                     if db_tickers:
-                        self.watchlist = [t['ticker'] for t in db_tickers]
-                        logger.info(f"Loaded {len(self.watchlist)} tickers from TickerManager (My Tickers)")
+                        # Additional validation: filter out any crypto-like tickers
+                        valid_tickers = []
+                        for t in db_tickers:
+                            ticker = t.get('ticker', '')
+                            # Skip crypto pairs (e.g., BTC/USD, TURBO/USD)
+                            if '/' in ticker:
+                                logger.debug(f"Skipping crypto ticker: {ticker}")
+                                continue
+                            # Skip if not alphanumeric (with dots allowed for BRK.B etc)
+                            if not ticker.replace('.', '').isalnum():
+                                logger.debug(f"Skipping invalid ticker: {ticker}")
+                                continue
+                            valid_tickers.append(ticker)
+                        self.watchlist = valid_tickers
+                        logger.info(f"Loaded {len(self.watchlist)} stock tickers from TickerManager (My Tickers)")
             except Exception as e:
                 logger.warning(f"Failed to load from TickerManager: {e}")
 
@@ -271,17 +285,25 @@ class StockInformationalMonitor(LLMServiceMixin):
         Returns:
             StockOpportunity if found, None otherwise
         """
+        # Validate ticker format - skip crypto and invalid tickers
+        if '/' in symbol:
+            logger.debug(f"  ⏭️  {symbol}: Skipped (crypto pair format)")
+            return None
+        
+        if not symbol.replace('.', '').isalnum():
+            logger.debug(f"  ⏭️  {symbol}: Skipped (invalid format)")
+            return None
+        
         retry_count = 0
         
         while retry_count <= max_retries:
             try:
                 if retry_count == 0:
-                    logger.debug(f"🔎 Scanning {symbol} (multi-pronged)...")
+                    logger.info(f"🔎 Scanning {symbol}...")
                 else:
                     logger.debug(f"  🔄 Retrying {symbol} (attempt {retry_count + 1}/{max_retries + 1})...")
                 
                 # ENHANCED: Use multi-pronged detector for comprehensive analysis
-                logger.debug(f"  ↳ {symbol}: Running enhanced multi-pronged analysis...")
                 enhanced_opp = self.enhanced_detector.analyze_ticker(symbol)
                 
                 if enhanced_opp:
