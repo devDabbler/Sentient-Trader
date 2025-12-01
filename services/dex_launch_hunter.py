@@ -28,6 +28,7 @@ from services.token_safety_analyzer import TokenSafetyAnalyzer
 from services.smart_money_tracker import SmartMoneyTracker
 from services.price_validator import PriceValidator
 from services.crypto_whale_tracker import CryptoWhaleTracker
+from services.dex_execution_webhook import get_dex_execution_webhook, ExecutionStrategy
 from windows_services.runners.service_config_loader import save_analysis_results
 
 # Optional X Sentiment integration
@@ -58,6 +59,10 @@ class DexLaunchHunter:
         self.smart_money_tracker = SmartMoneyTracker()
         self.price_validator = PriceValidator()
         self.whale_tracker = CryptoWhaleTracker()
+        
+        # Execution webhook for future bundler integration
+        self.execution_webhook = get_dex_execution_webhook()
+        logger.info("✅ DEX Execution Webhook initialized (ready for future bundler integration)")
         
         # X Sentiment integration (optional - catches early pump coins)
         # Uses local LLM (Ollama) - no budget limits needed
@@ -1019,6 +1024,12 @@ class DexLaunchHunter:
                     f"🚨 ALERT: {token.symbol} - {alert.priority} - "
                     f"Score: {token.composite_score:.1f}"
                 )
+                
+                # Send to execution webhook if configured and priority is CRITICAL
+                if token.chain == Chain.SOLANA and alert.priority in ["CRITICAL", "HIGH"]:
+                    asyncio.create_task(
+                        self._route_to_execution_service(token, alert)
+                    )
     
     def _should_alert(self, token: TokenLaunch) -> Tuple[bool, List[str]]:
         """Determine if token should trigger an alert"""
@@ -1125,6 +1136,81 @@ class DexLaunchHunter:
         )
         
         return checklist
+    
+    async def _route_to_execution_service(self, token: TokenLaunch, alert: LaunchAlert):
+        """
+        Route high-priority alerts to execution service via webhook
+        
+        HIGH-LEVEL FLOW:
+        1. Only routes Solana CRITICAL/HIGH priority tokens
+        2. Sends token data to execution webhook
+        3. External service (bundler, sniper) handles actual execution
+        4. This function is non-blocking (fire-and-forget)
+        
+        Args:
+            token: TokenLaunch object
+            alert: LaunchAlert with priority info
+        """
+        try:
+            # Only route Solana tokens
+            if token.chain != Chain.SOLANA:
+                logger.debug(f"[EXECUTION] Skipping non-Solana token {token.symbol}")
+                return
+            
+            # Only route high-priority alerts
+            if alert.priority not in ["CRITICAL", "HIGH"]:
+                logger.debug(f"[EXECUTION] Skipping low-priority alert for {token.symbol}")
+                return
+            
+            logger.info(
+                f"[EXECUTION] 🚀 Routing {alert.priority} alert to execution service: {token.symbol}"
+            )
+            
+            # Prepare metadata
+            metadata = {
+                'symbol': token.symbol,
+                'chain': token.chain.value,
+                'liquidity_usd': token.liquidity_usd,
+                'age_hours': token.age_hours,
+                'safety_score': token.safety_score,
+                'composite_score': token.composite_score,
+                'risk_level': token.risk_level.value,
+                'dexscreener_url': f"https://dexscreener.com/{token.chain.value}/{token.contract_address}",
+                'alert_reasons': alert.reasoning
+            }
+            
+            # Suggest execution amount (conservative: 5-50 USD based on safety)
+            if token.safety_score >= 80:
+                suggested_amount = 50.0
+            elif token.safety_score >= 60:
+                suggested_amount = 25.0
+            else:
+                suggested_amount = 5.0
+            
+            # Route to execution webhook
+            success, message, _ = await self.execution_webhook.execute_snipe(
+                token_mint=token.contract_address,
+                amount_usd=suggested_amount,
+                slippage_bps=50,  # 0.5%
+                request_id=f"dex_{token.contract_address[:8]}_{int(datetime.now().timestamp())}",
+                metadata=metadata
+            )
+            
+            if success:
+                logger.info(
+                    f"[EXECUTION] ✅ Successfully sent to execution service: {token.symbol} "
+                    f"(${suggested_amount:.2f}) - {message}"
+                )
+            else:
+                logger.warning(
+                    f"[EXECUTION] ⚠️ Execution service returned warning: {token.symbol} - {message}"
+                )
+            
+        except Exception as e:
+            logger.error(
+                f"[EXECUTION] Error routing {token.symbol} to execution service: {e}",
+                exc_info=True
+            )
     
     def _cleanup_old_data(self):
         """Remove old discovered tokens and alerts"""
