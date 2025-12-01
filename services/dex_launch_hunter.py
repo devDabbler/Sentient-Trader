@@ -151,6 +151,7 @@ class DexLaunchHunter:
                 return
             
             logger.info(f"Found {len(new_pairs)} new pairs to analyze")
+            print(f"[DEX] Found {len(new_pairs)} pairs from DexScreener", flush=True)
             
             # Collect results for control panel
             results_for_panel = []
@@ -159,18 +160,28 @@ class DexLaunchHunter:
             max_pairs_per_cycle = 20
             pairs_to_analyze = new_pairs[:max_pairs_per_cycle]
             
+            analyzed_count = 0
+            skipped_already = 0
+            skipped_blacklist = 0
+            failed_analysis = 0
+            
             # Analyze each new pair
             for pair in pairs_to_analyze:
                 try:
                     # Skip if already discovered
                     if pair.base_token_address.lower() in self.discovered_tokens:
+                        skipped_already += 1
                         continue
                     
                     # Skip if blacklisted
                     if pair.base_token_address.lower() in self.blacklisted_tokens:
+                        skipped_blacklist += 1
                         continue
                     
                     self.total_scanned += 1
+                    analyzed_count += 1
+                    
+                    print(f"[DEX] Analyzing: {pair.base_token_symbol} ({pair.chain.value})...", flush=True)
                     
                     # Add timeout to prevent hanging on individual token analysis
                     try:
@@ -180,14 +191,19 @@ class DexLaunchHunter:
                         )
                     except asyncio.TimeoutError:
                         logger.warning(f"Analysis timeout for {pair.base_token_symbol}")
+                        failed_analysis += 1
                         continue
                     
                     if success and token:
+                        print(f"[DEX] ✓ {token.symbol}: Score={token.composite_score:.1f}, Risk={token.risk_level.value}", flush=True)
                         logger.info(
                             f"Discovered: {token.symbol} - "
                             f"Score: {token.composite_score:.1f}, "
                             f"Risk: {token.risk_level.value}"
                         )
+                    else:
+                        print(f"[DEX] ✗ {pair.base_token_symbol}: Analysis failed (success={success})", flush=True)
+                        failed_analysis += 1
                         
                         # Add to results for panel
                         results_for_panel.append({
@@ -205,7 +221,12 @@ class DexLaunchHunter:
                     
                 except Exception as e:
                     logger.error(f"Error analyzing pair {pair.base_token_symbol}: {e}")
+                    failed_analysis += 1
                     continue
+            
+            # Print scan summary
+            print(f"[DEX] Scan complete: Analyzed={analyzed_count}, Skipped(seen)={skipped_already}, Skipped(blacklist)={skipped_blacklist}, Failed={failed_analysis}", flush=True)
+            print(f"[DEX] Total discovered this session: {len(self.discovered_tokens)}", flush=True)
             
             # Save results to control panel
             if results_for_panel:
