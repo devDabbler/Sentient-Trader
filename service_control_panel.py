@@ -2544,32 +2544,53 @@ def main():
                         confidence = result.get('confidence', result.get('score', 0))
                         price = result.get('price', result.get('entry_price', 0))
                         timestamp = result.get('analysis_time', '')[:19] if result.get('analysis_time') else ''
+                        reasoning = result.get('reasoning', '')
+                        
+                        # Get more detailed fields for stock analysis
+                        entry_point = result.get('suggested_entry')
+                        stop_loss = result.get('suggested_stop')
+                        target = result.get('suggested_target')
+                        risk_reward = result.get('risk_reward_ratio')
+                        urgency = result.get('urgency', '')
                         
                         # Color based on signal
-                        if signal in ['LONG', 'BUY', 'BULLISH']:
+                        if signal in ['LONG', 'BUY', 'BULLISH', 'ENTER_NOW']:
                             signal_color = "🟢"
-                        elif signal in ['SHORT', 'SELL', 'BEARISH']:
+                        elif signal in ['SHORT', 'SELL', 'BEARISH', 'DO_NOT_ENTER']:
                             signal_color = "🔴"
                         else:
                             signal_color = "🟡"
                         
-                        col1, col2, col3, col4, col5 = st.columns([1.5, 1, 0.8, 0.8, 1.5])
-                        with col1:
-                            st.write(f"**{ticker}**")
-                        with col2:
-                            st.write(f"{signal_color} {signal}")
-                        with col3:
-                            if isinstance(confidence, (int, float)):
-                                st.write(f"{confidence:.0f}%")
-                            else:
-                                st.write(str(confidence))
-                        with col4:
-                            if isinstance(price, (int, float)) and price > 0:
-                                st.write(f"${price:.2f}")
-                            else:
-                                st.write("N/A")
-                        with col5:
-                            st.caption(timestamp)
+                        # Urgency indicator
+                        urgency_emoji = "🔥" if urgency == "HIGH" else "⏱️" if urgency == "MEDIUM" else "✅"
+                        
+                        # Create an expandable result card
+                        with st.expander(f"{signal_color} **{ticker}** → {signal} ({confidence:.0f if isinstance(confidence, (int, float)) else confidence}%)", expanded=False):
+                            result_col1, result_col2 = st.columns([1, 2])
+                            
+                            with result_col1:
+                                st.markdown(f"**Signal:** {signal_color} {signal}")
+                                st.markdown(f"**Confidence:** {confidence:.0f if isinstance(confidence, (int, float)) else confidence}%")
+                                if urgency:
+                                    st.markdown(f"**Urgency:** {urgency_emoji} {urgency}")
+                                if isinstance(price, (int, float)) and price > 0:
+                                    st.markdown(f"**Price:** ${price:.2f}")
+                                st.caption(f"📅 {timestamp}")
+                            
+                            with result_col2:
+                                if reasoning:
+                                    st.markdown(f"**Analysis:** {reasoning}")
+                                if entry_point is not None and signal not in ['DO_NOT_ENTER']:
+                                    st.markdown(f"**Entry:** ${entry_point if isinstance(entry_point, (int, float)) else entry_point}")
+                                if stop_loss is not None:
+                                    st.markdown(f"**Stop Loss:** ${stop_loss if isinstance(stop_loss, (int, float)) else stop_loss}")
+                                if target is not None:
+                                    st.markdown(f"**Target:** ${target if isinstance(target, (int, float)) else target}")
+                                if risk_reward is not None and signal not in ['DO_NOT_ENTER']:
+                                    st.markdown(f"**Risk/Reward:** {risk_reward:.2f if isinstance(risk_reward, (int, float)) else risk_reward}")
+                            
+                            # Divider between results
+                            st.divider()
                 else:
                     st.info("📭 No results yet. Analysis requests will appear here once processed.")
         
