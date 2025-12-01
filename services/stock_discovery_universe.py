@@ -48,6 +48,13 @@ class StockDiscoveryUniverse:
     Can be toggled on/off via control panel
     """
     
+    # List of known crypto tickers to exclude
+    CRYPTO_BLACKLIST = {
+        'BTC', 'ETH', 'SOL', 'ADA', 'XRP', 'DOGE', 'SHIB', 'PEPE',
+        'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'LINK', 'UNI',
+        'AAVE', 'CRV', 'CVX', 'GMX', 'SNX', 'YFI', 'MKR', 'LIDO'
+    }
+    
     def __init__(self, detector=None):
         """
         Initialize discovery universe
@@ -162,11 +169,13 @@ class StockDiscoveryUniverse:
             exclude_watchlist: List of tickers to exclude from discovery
             
         Returns:
-            Dict of mode_name -> list of tickers
+            Dict of mode_name -> list of tickers (stocks only, no crypto)
         """
         if exclude_watchlist is None:
             exclude_watchlist = []
         
+        # Filter watchlist to only valid stocks
+        exclude_watchlist = self._filter_valid_tickers(exclude_watchlist)
         exclude_set = set(t.upper() for t in exclude_watchlist)
         discovered = {}
         
@@ -187,8 +196,9 @@ class StockDiscoveryUniverse:
                     # Discover new tickers
                     tickers = self._discover_mode_tickers(mode_name, mode)
                     
-                    # Exclude watchlist
+                    # Exclude watchlist AND validate stocks only
                     tickers = [t for t in tickers if t.upper() not in exclude_set]
+                    tickers = self._filter_valid_tickers(tickers)
                     
                     # Cache results
                     self.discovered_tickers[mode_name] = tickers
@@ -299,17 +309,20 @@ class StockDiscoveryUniverse:
             gainers = []
             for ticker in universe[:limit * 2]:  # Check more to get top
                 try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False)
-                    if len(hist) > 0:
+                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
+                    if hist is not None and len(hist) > 0:
                         pct_change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
                         if pct_change > 2:  # At least 2% gain
                             gainers.append({'ticker': ticker, 'change': pct_change})
-                except:
+                except Exception:
                     pass
             
             # Sort by change and return top
             gainers.sort(key=lambda x: x['change'], reverse=True)
-            return [g['ticker'] for g in gainers[:limit]]
+            results = [g['ticker'] for g in gainers[:limit]]
+            # Filter for valid stocks only
+            results = self._filter_valid_tickers(results)
+            return results
         
         except Exception as e:
             logger.debug(f"Error getting top gainers: {e}")
@@ -325,16 +338,19 @@ class StockDiscoveryUniverse:
             losers = []
             for ticker in universe[:limit * 3]:
                 try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False)
-                    if len(hist) > 0:
+                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
+                    if hist is not None and len(hist) > 0:
                         pct_change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100
                         if -5 < pct_change < -1:  # -5% to -1% loss (reversal play)
                             losers.append({'ticker': ticker, 'change': pct_change})
-                except:
+                except Exception:
                     pass
             
             losers.sort(key=lambda x: x['change'])
-            return [l['ticker'] for l in losers[:limit]]
+            results = [l['ticker'] for l in losers[:limit]]
+            # Filter for valid stocks only
+            results = self._filter_valid_tickers(results)
+            return results
         
         except Exception as e:
             logger.debug(f"Error getting top losers: {e}")
@@ -350,18 +366,21 @@ class StockDiscoveryUniverse:
             active = []
             for ticker in universe[:limit * 2]:
                 try:
-                    hist = yf.download(ticker, period='5d', progress=False, threads=False)
-                    if len(hist) > 1:
+                    hist = yf.download(ticker, period='5d', progress=False, threads=False, auto_adjust=True)
+                    if hist is not None and len(hist) > 1:
                         recent_vol = hist['Volume'].iloc[-1]
                         avg_vol = hist['Volume'].iloc[-5:].mean()
                         vol_ratio = recent_vol / avg_vol if avg_vol > 0 else 1
                         if vol_ratio > 1.3:  # 30% above average
                             active.append({'ticker': ticker, 'vol_ratio': vol_ratio})
-                except:
+                except Exception:
                     pass
             
             active.sort(key=lambda x: x['vol_ratio'], reverse=True)
-            return [a['ticker'] for a in active[:limit]]
+            results = [a['ticker'] for a in active[:limit]]
+            # Filter for valid stocks only
+            results = self._filter_valid_tickers(results)
+            return results
         
         except Exception as e:
             logger.debug(f"Error getting most active: {e}")
@@ -377,16 +396,19 @@ class StockDiscoveryUniverse:
             new_highs = []
             for ticker in universe[:limit * 2]:
                 try:
-                    hist = yf.download(ticker, period='1y', progress=False, threads=False)
-                    if len(hist) > 50:
+                    hist = yf.download(ticker, period='1y', progress=False, threads=False, auto_adjust=True)
+                    if hist is not None and len(hist) > 50:
                         current = hist['Close'].iloc[-1]
                         high_52w = hist['Close'].max()
                         if current >= high_52w * 0.99:  # Within 1% of 52-week high
                             new_highs.append({'ticker': ticker, 'price': current})
-                except:
+                except Exception:
                     pass
             
-            return [n['ticker'] for n in new_highs[:limit]]
+            results = [n['ticker'] for n in new_highs[:limit]]
+            # Filter for valid stocks only
+            results = self._filter_valid_tickers(results)
+            return results
         
         except Exception as e:
             logger.debug(f"Error getting new highs: {e}")
@@ -402,8 +424,8 @@ class StockDiscoveryUniverse:
             breakouts = []
             for ticker in universe[:limit * 3]:
                 try:
-                    hist = yf.download(ticker, period='10d', progress=False, threads=False)
-                    if len(hist) > 2:
+                    hist = yf.download(ticker, period='10d', progress=False, threads=False, auto_adjust=True)
+                    if hist is not None and len(hist) > 2:
                         # High volume
                         recent_vol = hist['Volume'].iloc[-1]
                         avg_vol = hist['Volume'].iloc[:-1].mean()
@@ -414,11 +436,14 @@ class StockDiscoveryUniverse:
                         
                         if vol_ratio > 1.5 and price_move > 0.02:  # 50% vol spike + 2% price move
                             breakouts.append({'ticker': ticker, 'vol_ratio': vol_ratio})
-                except:
+                except Exception:
                     pass
             
             breakouts.sort(key=lambda x: x['vol_ratio'], reverse=True)
-            return [b['ticker'] for b in breakouts[:limit]]
+            results = [b['ticker'] for b in breakouts[:limit]]
+            # Filter for valid stocks only
+            results = self._filter_valid_tickers(results)
+            return results
         
         except Exception as e:
             logger.debug(f"Error getting volume breakouts: {e}")
@@ -429,6 +454,55 @@ class StockDiscoveryUniverse:
         # Simplified - use sector ETFs as proxy
         sector_etfs = ['XLK', 'XLV', 'XLE', 'XLI', 'XLY', 'XLRE', 'XLF']
         return sector_etfs[:limit]
+    
+    # ============================================================
+    # STOCK VALIDATION METHODS
+    # ============================================================
+    
+    def _is_valid_stock_ticker(self, ticker: str) -> bool:
+        """
+        Validate that ticker is a stock, not crypto or other asset
+        
+        Args:
+            ticker: Ticker symbol to validate
+            
+        Returns:
+            True if valid stock ticker, False otherwise
+        """
+        if not ticker:
+            return False
+        
+        ticker = ticker.upper().strip()
+        
+        # Filter out crypto indicators
+        if '/' in ticker:  # Crypto pairs like BTC/USD
+            return False
+        
+        if '-' in ticker and len(ticker) > 5:  # Likely warrants or special securities
+            return False
+        
+        # Check against known crypto blacklist
+        if ticker in self.CRYPTO_BLACKLIST:
+            return False
+        
+        # Check for common crypto naming patterns
+        crypto_patterns = ['COIN', 'HODL', 'GBTC', 'ETHE', 'IBIT', 'FBTC']
+        if any(pattern in ticker for pattern in crypto_patterns):
+            return False
+        
+        # Must be 1-5 characters (standard stock symbols)
+        if len(ticker) < 1 or len(ticker) > 5:
+            return False
+        
+        # Must be alphanumeric only
+        if not ticker.replace('.', '').replace('=', '').isalnum():
+            return False
+        
+        return True
+    
+    def _filter_valid_tickers(self, tickers: List[str]) -> List[str]:
+        """Filter list of tickers to only valid stocks"""
+        return [t for t in tickers if self._is_valid_stock_ticker(t)]
     
     # ============================================================
     # UTILITY METHODS

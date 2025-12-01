@@ -676,12 +676,17 @@ class StockInformationalMonitor(LLMServiceMixin):
                 for mode_tickers in discovered_dict.values():
                     discovered_tickers.extend(mode_tickers)
                 
+                # Deduplicate and validate (discovery should already filter, but double-check)
+                discovered_tickers = list(set(discovered_tickers))
+                # Filter out any invalid tickers (shouldn't be needed, but safety check)
+                valid_discovered = [t for t in discovered_tickers if self.discovery_universe._is_valid_stock_ticker(t)]
+                
                 # Add to scan universe (limit to avoid overwhelming)
                 max_discovered = 50  # Limit added tickers
-                discovered_tickers = list(set(discovered_tickers))[:max_discovered]
-                scan_universe.extend(discovered_tickers)
+                valid_discovered = valid_discovered[:max_discovered]
+                scan_universe.extend(valid_discovered)
                 
-                logger.info(f"📈 Added {len(discovered_tickers)} discovered tickers (total universe: {len(scan_universe)})")
+                logger.info(f"📈 Added {len(valid_discovered)} discovered stock tickers (total universe: {len(scan_universe)})")
             except Exception as e:
                 logger.error(f"❌ Error in discovery: {e}")
         
