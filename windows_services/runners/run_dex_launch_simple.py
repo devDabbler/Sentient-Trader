@@ -137,19 +137,24 @@ try:
         logger.info("=" * 70)
         
         # Start announcement monitoring in background
+        print("Creating background monitor task...", flush=True)
         async def start_monitor_with_timeout():
             await monitor.start_monitoring()
         
         monitor_task = asyncio.create_task(start_monitor_with_timeout())
+        print("Background monitor task created", flush=True)
         
         scan_counter = 0
         
         try:
+            print("Entering main scan loop...", flush=True)
             while True:
                 scan_counter += 1
+                print(f"🔄 Scan cycle #{scan_counter} starting...", flush=True)
                 logger.info(f"🔄 Scan cycle #{scan_counter} starting...")
                 
                 # ===== PART 1: Active DEX Scanning =====
+                print("🔍 Running active DEX scan...", flush=True)
                 logger.info("🔍 Running active DEX scan...")
                 try:
                     # Add timeout to prevent hanging
