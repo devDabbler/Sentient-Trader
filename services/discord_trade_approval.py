@@ -174,10 +174,36 @@ class DiscordTradeApprovalBot(commands.Bot):
                     elif content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N', '❌']:
                         await self._handle_reply_approval(message, approval_id, approval, approve=False)
                         return
+                    elif content == 'RISK':
+                        # Show risk profile
+                        await self._handle_risk_command(message)
+                        return
+                    elif content in ['SIZE', 'SIZING']:
+                        # Show position sizing for this approval
+                        await self._handle_sizing_command(message, approval.pair)
+                        return
+                    elif content in ['?', 'HELP', 'H']:
+                        # Show help for trade approvals
+                        help_text = f"""📋 **Trade Approval Commands for {approval.pair}:**
+
+**Approve/Reject:**
+`APPROVE` or `YES` - ✅ Execute the trade
+`REJECT` or `NO` - ❌ Cancel the trade
+
+**Position Sizing:**
+`SIZE` or `SIZING` - 📊 Recalculate position size
+`RISK` - 📊 Show current risk profile
+
+**Other:**
+`?` or `HELP` - Show this help
+"""
+                        await message.channel.send(help_text)
+                        return
                     else:
                         # Reply to the approval message but unclear intent
                         await message.channel.send(
-                            f"❓ Reply with **APPROVE** or **REJECT** to confirm your decision for {approval.pair}"
+                            f"❓ Reply with **APPROVE** or **REJECT** to confirm.\n"
+                            f"Or use `RISK` to see profile, `SIZE` for sizing, `?` for help."
                         )
                         return
             
