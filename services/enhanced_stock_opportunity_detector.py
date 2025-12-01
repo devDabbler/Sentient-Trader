@@ -131,7 +131,7 @@ class EnhancedStockOpportunityDetector:
         
         if use_llm:
             try:
-                self.llm_helper = get_llm_helper()
+                self.llm_helper = get_llm_helper('enhanced_stock_detector')
                 logger.info("✅ LLM helper initialized for opportunity detection")
             except Exception as e:
                 logger.warning(f"⚠️ LLM helper not available: {e}")
@@ -569,6 +569,9 @@ Format: [SCORE: XX] Analysis here.
     def _calculate_rsi(self, prices, period: int = 14) -> float:
         """Calculate RSI"""
         try:
+            if len(prices) < period:
+                return 50.0
+            
             delta = prices.diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -629,8 +632,8 @@ Format: [SCORE: XX] Analysis here.
     def _get_ticker_data(self, symbol: str, period: str = "3mo") -> Optional[DataFrame]:
         """Fetch ticker data from yfinance"""
         try:
-            data = yf.download(symbol, period=period, progress=False, threads=False)
-            if data.empty:
+            data = yf.download(symbol, period=period, progress=False, threads=False, auto_adjust=True)
+            if data is None or (isinstance(data, DataFrame) and data.empty):
                 return None
             return data
         except Exception as e:
