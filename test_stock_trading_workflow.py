@@ -493,7 +493,7 @@ def run_all_tests():
     return passed == total
 
 
-def run_discord_workflow_tests():
+def run_discord_workflow_tests(interactive: bool = False):
     """Run Discord-specific workflow tests (sends actual messages!)"""
     print("\n" + "=" * 70)
     print("  🤖 DISCORD WORKFLOW TESTS")
@@ -538,6 +538,26 @@ def run_discord_workflow_tests():
     print("    3. A bot alert with clickable buttons")
     print("=" * 70 + "\n")
     
+    # Interactive mode - keep bot running to test replies
+    if interactive:
+        print("\n" + "=" * 70)
+        print("  🔄 INTERACTIVE MODE - Bot is listening for replies!")
+        print("  " + "-" * 60)
+        print("  Test these Discord commands by replying to alerts:")
+        print("    • RISK - Show your risk profile")
+        print("    • SIZE - Show position sizing for a symbol")
+        print("    • APPROVE/REJECT - For trade approvals")
+        print("    • 1/2/3 - For analysis requests")
+        print("")
+        print("  Press Ctrl+C to exit when done testing.")
+        print("=" * 70 + "\n")
+        
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n\n👋 Exiting interactive mode...")
+    
     return passed == total
 
 
@@ -549,16 +569,18 @@ if __name__ == "__main__":
                        help='Run Discord workflow tests (sends real messages!)')
     parser.add_argument('--all', action='store_true',
                        help='Run all tests including Discord workflow')
+    parser.add_argument('-i', '--interactive', action='store_true',
+                       help='Keep bot running after tests to test replies (use with --discord)')
     
     args = parser.parse_args()
     
     if args.discord:
-        success = run_discord_workflow_tests()
+        success = run_discord_workflow_tests(interactive=args.interactive)
     elif args.all:
         success = run_all_tests()
         if success:
             print("\n🔄 Running Discord workflow tests...\n")
-            success = run_discord_workflow_tests() and success
+            success = run_discord_workflow_tests(interactive=args.interactive) and success
     else:
         success = run_all_tests()
     
