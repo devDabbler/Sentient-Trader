@@ -344,7 +344,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 if alert.symbol == target_symbol:
                     orch.approve_alert(alert.id, add_to_watchlist=True)
         
-        # Analysis commands with shortcuts
+        # Analysis commands with shortcuts (works for both crypto and stocks)
         elif content in ['1', 'S', 'STD', 'STANDARD', 'ANALYZE', 'SCAN', 'CHECK']:
             await self._handle_analyze_command(message, target_symbol, mode="standard")
             
@@ -353,6 +353,16 @@ class DiscordTradeApprovalBot(commands.Bot):
 
         elif content in ['3', 'U', 'ULT', 'ULTIMATE']:
             await self._handle_analyze_command(message, target_symbol, mode="ultimate")
+        
+        # STOCK TRADE EXECUTION COMMANDS (after analysis approval)
+        elif content in ['T', 'TRADE', 'EXECUTE', 'BUY', 'ENTER']:
+            await self._handle_stock_trade_execution(message, target_symbol, side="BUY")
+        
+        elif content in ['SHORT', 'SELL', 'S-TRADE']:
+            await self._handle_stock_trade_execution(message, target_symbol, side="SELL")
+        
+        elif content in ['P', 'PAPER', 'PAPER-TRADE', 'TEST']:
+            await self._handle_stock_trade_execution(message, target_symbol, side="BUY", paper_mode=True)
             
         elif content in ['DISMISS', 'REMOVE', 'DELETE', 'X', 'D']:
             # Reject in orchestrator
@@ -376,8 +386,13 @@ class DiscordTradeApprovalBot(commands.Bot):
 
 **Analysis (reply with):**
 `1` or `S` - 🔬 Standard (single strategy)
-`2` or `M` - 🎯 Multi (Long/Short + leverage)
+`2` or `M` - 🎯 Multi (Long/Short + timeframes)
 `3` or `U` - 🚀 Ultimate (ALL combinations)
+
+**Trade Execution (after analysis):**
+`T` or `TRADE` - Execute BUY trade
+`SHORT` - Execute SHORT/SELL trade
+`P` or `PAPER` - Paper trade (test mode)
 
 **Other:**
 `X` or `D` - Dismiss alert
@@ -408,24 +423,46 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send(f"❌ Error adding {symbol}: {str(e)}")
 
     async def _handle_analyze_command(self, message: discord.Message, symbol: str, mode: str = "standard"):
-        """Handle ANALYZE command"""
+        """Handle ANALYZE command - supports both crypto and stock analysis modes"""
         from windows_services.runners.service_config_loader import queue_analysis_request
         
         try:
             # Determine asset type
-            asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL"] else "stock"
+            asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOGE", "XRP"] else "stock"
             
-            preset_map = {
-                "standard": "crypto_standard" if asset_type == "crypto" else "stock_momentum",
-                "multi": "crypto_multi",
-                "ultimate": "crypto_ultimate"
-            }
-            preset = preset_map.get(mode, "crypto_standard")
-            
-            if queue_analysis_request(preset, [symbol]):
-                 await message.channel.send(f"🔍 **{mode.upper()}** Analysis queued for **{symbol}** ({asset_type}). Check Control Panel.")
+            # Updated preset map with stock-specific analysis modes
+            if asset_type == "crypto":
+                preset_map = {
+                    "standard": "crypto_standard",
+                    "multi": "crypto_multi",
+                    "ultimate": "crypto_ultimate"
+                }
             else:
-                 await message.channel.send(f"❌ Failed to queue analysis for {symbol}")
+                # Stock-specific analysis modes
+                preset_map = {
+                    "standard": "stock_standard",
+                    "multi": "stock_multi",
+                    "ultimate": "stock_ultimate"
+                }
+            
+            preset = preset_map.get(mode, preset_map["standard"])
+            
+            # Mode descriptions for user feedback
+            mode_descriptions = {
+                "standard": "🔬 Single strategy analysis",
+                "multi": "🎯 Multi-strategy (Long/Short + leverage)",
+                "ultimate": "🚀 Complete analysis (ALL strategies + timeframes)"
+            }
+            mode_desc = mode_descriptions.get(mode, "📊 Standard analysis")
+            
+            if queue_analysis_request(preset, [symbol], asset_type=asset_type, analysis_mode=mode):
+                await message.channel.send(
+                    f"🔍 **{mode.upper()}** Analysis queued for **{symbol}** ({asset_type})\n"
+                    f"   {mode_desc}\n"
+                    f"   Check Control Panel for results or wait for Discord notification."
+                )
+            else:
+                await message.channel.send(f"❌ Failed to queue analysis for {symbol}")
                  
         except Exception as e:
             logger.error(f"Error processing ANALYZE {symbol}: {e}")
@@ -449,6 +486,97 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send(f"🗑️ Dismissed {rejected_count} alert(s) for **{symbol}**")
         else:
              await message.channel.send(f"ℹ️ No pending alerts found for **{symbol}**")
+    
+    async def _handle_stock_trade_execution(self, message: discord.Message, symbol: str, side: str = "BUY", paper_mode: bool = False):
+        """
+        Handle TRADE command - Execute stock trade via broker adapter
+        This is the critical link between analysis approval and trade execution
+        
+        Args:
+            message: Discord message
+            symbol: Stock symbol to trade
+            side: "BUY" or "SELL" 
+            paper_mode: If True, use paper trading regardless of config
+        """
+        try:
+            from services.ai_stock_position_manager import get_ai_stock_position_manager
+            from services.service_orchestrator import get_orchestrator
+            
+            # Get pending alert info for this symbol
+            orch = get_orchestrator()
+            orch.refresh_state()
+            pending = orch.get_pending_alerts(asset_type="stock")
+            
+            # Find the alert for this symbol
+            alert_info = None
+            for alert in pending:
+                if alert.symbol.upper() == symbol.upper():
+                    alert_info = alert
+                    break
+            
+            if not alert_info:
+                await message.channel.send(
+                    f"⚠️ No pending analysis found for **{symbol}**.\n"
+                    f"Run analysis first: Reply with `1` (Standard), `2` (Multi), or `3` (Ultimate)"
+                )
+                return
+            
+            # Get stock position manager
+            stock_manager = get_ai_stock_position_manager()
+            
+            if not stock_manager:
+                await message.channel.send(
+                    f"❌ Stock Position Manager not available.\n"
+                    f"Ensure broker (Tradier/IBKR) is configured in your .env file."
+                )
+                return
+            
+            # Determine if paper trading
+            use_paper = paper_mode or stock_manager.paper_mode
+            mode_str = "📝 PAPER" if use_paper else "💰 LIVE"
+            
+            # Queue trade for approval
+            await message.channel.send(
+                f"🚀 **{mode_str} TRADE QUEUED: {symbol}**\n"
+                f"   Side: **{side}**\n"
+                f"   Confidence: {alert_info.confidence}\n"
+                f"   Price: ${alert_info.price:.2f if alert_info.price else 'Market'}\n\n"
+                f"Reply **YES** to confirm or **NO** to cancel."
+            )
+            
+            # Create pending trade approval
+            approval_id = f"stock_{symbol}_{int(datetime.now().timestamp())}"
+            
+            # Store in pending approvals with stock-specific data
+            self.pending_approvals[approval_id] = PendingTradeApproval(
+                approval_id=approval_id,
+                pair=symbol,
+                side=side,
+                entry_price=alert_info.price or 0.0,
+                position_size=stock_manager.default_position_size,
+                stop_loss=alert_info.stop_loss or 0.0,
+                take_profit=alert_info.target or 0.0,
+                strategy=alert_info.alert_type,
+                confidence=float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0,
+                reasoning=alert_info.reasoning or "Stock opportunity detected",
+                created_time=datetime.now(),
+                discord_message_id=str(message.id)
+            )
+            
+            # Mark the orchestrator alert as in progress
+            orch.approve_alert(alert_info.id, add_to_watchlist=False)
+            
+            logger.info(f"📊 Stock trade queued for approval: {symbol} {side} (approval_id={approval_id})")
+            
+        except ImportError as e:
+            logger.error(f"Import error handling stock trade: {e}")
+            await message.channel.send(
+                f"❌ Stock trading module not available.\n"
+                f"Run: `pip install ib_insync` for IBKR or configure Tradier API."
+            )
+        except Exception as e:
+            logger.error(f"Error handling stock trade execution: {e}", exc_info=True)
+            await message.channel.send(f"❌ Error processing trade: {str(e)[:200]}")
     
     async def _list_pending_trades(self, message: discord.Message):
         """List all pending trade approvals with numbers"""

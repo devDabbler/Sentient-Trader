@@ -201,6 +201,7 @@ def get_analysis_results(service_name: Optional[str] = None) -> Dict:
 
 # Analysis presets (shared with service_control_panel.py)
 ANALYSIS_PRESETS = {
+    # Crypto Analysis Modes
     "crypto_standard": {
         "name": "🔬 Crypto Standard",
         "tickers": None,
@@ -229,6 +230,31 @@ ANALYSIS_PRESETS = {
         "asset_type": "crypto",
         "analysis_mode": "standard",
     },
+    # Stock Analysis Modes
+    "stock_standard": {
+        "name": "🔬 Stock Standard",
+        "tickers": None,
+        "depth": "standard",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+        "description": "Single strategy + timeframe analysis",
+    },
+    "stock_multi": {
+        "name": "🎯 Stock Multi-Config",
+        "tickers": None,
+        "depth": "multi",
+        "asset_type": "stock",
+        "analysis_mode": "multi_config",
+        "description": "Test Long/Short + multiple timeframes",
+    },
+    "stock_ultimate": {
+        "name": "🚀 Stock Ultimate",
+        "tickers": None,
+        "depth": "ultimate",
+        "asset_type": "stock",
+        "analysis_mode": "ultimate",
+        "description": "ALL strategies + directions + timeframes",
+    },
     "stock_momentum": {
         "name": "📈 Stock Momentum",
         "tickers": ['NVDA', 'TSLA', 'AMD', 'PLTR', 'COIN', 'MARA'],
@@ -246,13 +272,20 @@ ANALYSIS_PRESETS = {
 }
 
 
-def queue_analysis_request(preset_key: str, custom_tickers: Optional[List[str]] = None) -> bool:
+def queue_analysis_request(
+    preset_key: str, 
+    custom_tickers: Optional[List[str]] = None,
+    asset_type: Optional[str] = None,
+    analysis_mode: Optional[str] = None
+) -> bool:
     """
     Queue an analysis request for services to pick up.
     
     Args:
         preset_key: Key from ANALYSIS_PRESETS or 'custom'
         custom_tickers: Optional list of tickers (overrides preset)
+        asset_type: Optional asset type override ('crypto' or 'stock')
+        analysis_mode: Optional analysis mode override ('standard', 'multi', 'ultimate')
         
     Returns:
         True if successful
@@ -270,13 +303,18 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[List[str]] 
         
         # Add new request
         preset = ANALYSIS_PRESETS.get(preset_key, {})
+        
+        # Use overrides if provided, otherwise use preset defaults
+        final_asset_type = asset_type or preset.get("asset_type", "crypto")
+        final_analysis_mode = analysis_mode or preset.get("analysis_mode", "standard")
+        
         request = {
             "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
             "preset": preset_key,
             "tickers": custom_tickers or preset.get("tickers", []),
             "depth": preset.get("depth", "medium"),
-            "asset_type": preset.get("asset_type", "crypto"),
-            "analysis_mode": preset.get("analysis_mode", "standard"),
+            "asset_type": final_asset_type,
+            "analysis_mode": final_analysis_mode,
             "status": "pending",
             "created": datetime.now().isoformat(),
         }
