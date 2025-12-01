@@ -257,6 +257,11 @@ class DiscordTradeApprovalBot(commands.Bot):
             await self._show_global_help(message)
             return
         
+        # AI validation toggle
+        if content == 'AICHECK':
+            await self._handle_aicheck_command(message)
+            return
+        
         # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
         
         # Generic Alert Commands: WATCH, ANALYZE, DISMISS, MULTI, ULTIMATE
@@ -772,6 +777,7 @@ Type `BROKER TRADIER` or `BROKER IBKR` to switch
 **📊 Risk & Position Sizing:**
 `RISK` - Show your risk profile
 `SIZE NVDA` - Calculate position size for a symbol
+`AICHECK` - Toggle AI validation before trades
 
 **📋 Trades & Alerts:**
 `LIST` or `PENDING` - Show pending trade approvals
@@ -788,6 +794,30 @@ Type `BROKER TRADIER` or `BROKER IBKR` to switch
 💡 *Type any command directly - no need to reply!*
 """
         await message.channel.send(help_text)
+    
+    async def _handle_aicheck_command(self, message: discord.Message):
+        """Toggle AI pre-trade validation on/off"""
+        try:
+            import os
+            
+            # Get current setting (default True)
+            current = os.environ.get('AI_TRADE_VALIDATION', 'true').lower() == 'true'
+            
+            # Toggle
+            new_value = not current
+            os.environ['AI_TRADE_VALIDATION'] = str(new_value).lower()
+            
+            status = "✅ ENABLED" if new_value else "❌ DISABLED"
+            
+            await message.channel.send(
+                f"🥊 **AI Pre-Trade Validation: {status}**\n\n"
+                f"{'Trades will be validated by AI before execution.' if new_value else 'Trades will execute immediately after approval (no AI check).'}\n\n"
+                f"💡 Type `AICHECK` again to toggle."
+            )
+            
+        except Exception as e:
+            logger.error(f"Error toggling AI check: {e}")
+            await message.channel.send(f"❌ Error: {str(e)}")
     
     async def _handle_sizing_command(self, message: discord.Message, symbol: str):
         """Handle SIZING command - calculate position size for symbol"""

@@ -148,16 +148,22 @@ class TradierAdapter(BrokerAdapter):
     def get_account_balance(self) -> Tuple[bool, Dict]:
         """Get account balance from Tradier"""
         try:
-            success, balance = self.client.get_account_balance()
+            success, balance_response = self.client.get_account_balance()
             if not success:
                 return False, {}
+            
+            # Handle nested structure: {'balances': {'total_equity': ..., 'margin': {...}}}
+            balance = balance_response.get('balances', balance_response)
+            margin = balance.get('margin', {})
             
             # Normalize balance format
             normalized = {
                 'total_equity': float(balance.get('total_equity', 0)),
                 'cash': float(balance.get('total_cash', 0)),
-                'buying_power': float(balance.get('option_buying_power', 0) or balance.get('stock_buying_power', 0))
+                'buying_power': float(margin.get('stock_buying_power', 0) or margin.get('option_buying_power', 0) or balance.get('stock_buying_power', 0))
             }
+            
+            logger.info(f"📊 Tradier balance: equity=${normalized['total_equity']:,.2f}, buying_power=${normalized['buying_power']:,.2f}")
             return True, normalized
         except Exception as e:
             logger.error(f"Error getting Tradier balance: {e}")

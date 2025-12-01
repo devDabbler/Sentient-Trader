@@ -406,13 +406,14 @@ class AIStockPositionManager:
             logger.error(f"Error queuing trade for approval: {e}")
             return None
     
-    def execute_trade(self, decision: StockTradeDecision, skip_approval: bool = False) -> bool:
+    def execute_trade(self, decision: StockTradeDecision, skip_approval: bool = False, skip_ai_validation: bool = False) -> bool:
         """
         Execute a stock trade via broker adapter
         
         Args:
             decision: Trade decision to execute
             skip_approval: If True, skip manual approval (already approved)
+            skip_ai_validation: If True, skip final AI validation check
             
         Returns:
             True if executed successfully
@@ -430,6 +431,22 @@ class AIStockPositionManager:
             symbol = decision.symbol
             side = decision.side
             quantity = decision.quantity
+            
+            # 🥊 AI PRE-TRADE VALIDATION (Final Risk Check)
+            if not skip_ai_validation and self.llm_analyzer:
+                logger.info("🥊 AI PRE-TRADE VALIDATION - Final Risk Check")
+                approved, confidence, reasoning = self._ai_validate_trade(decision)
+                
+                if not approved:
+                    logger.warning(f"🚫 AI VALIDATION REJECTED trade for {symbol}")
+                    logger.warning(f"   Reason: {reasoning}")
+                    return False
+                elif confidence < self.min_confidence:
+                    logger.warning(f"⚠️ AI confidence too low ({confidence:.0f}% < {self.min_confidence}%)")
+                    logger.warning(f"   Reason: {reasoning}")
+                    return False
+                else:
+                    logger.info(f"✅ AI VALIDATION APPROVED: {symbol} (confidence: {confidence:.0f}%)")
             
             logger.info("")
             logger.info("=" * 60)
@@ -500,6 +517,36 @@ class AIStockPositionManager:
         except Exception as e:
             logger.error(f"Error executing trade: {e}", exc_info=True)
             return False
+    
+    def _ai_validate_trade(self, decision: StockTradeDecision) -> Tuple[bool, float, str]:
+        """Final AI validation before trade execution (PUNCH 2)"""
+        try:
+            if not self.llm_analyzer:
+                return True, 100.0, "AI validation skipped - no analyzer"
+            
+            risk_reward = abs(decision.take_profit - decision.entry_price) / max(abs(decision.entry_price - decision.stop_loss), 0.01)
+            stop_pct = abs(decision.entry_price - decision.stop_loss) / decision.entry_price * 100
+            
+            prompt = f"""🥊 FINAL PRE-TRADE VALIDATION
+Symbol: {decision.symbol} | Side: {decision.side} | Qty: {decision.quantity}
+Entry: ${decision.entry_price:.2f} | Stop: ${decision.stop_loss:.2f} ({stop_pct:.1f}%) | TP: ${decision.take_profit:.2f}
+R:R = 1:{risk_reward:.2f} | Confidence: {decision.confidence:.0f}% | Strategy: {decision.strategy}
+
+VALIDATE: Risk:Reward (min 1:1.5), Stop distance (2-8%), Position size.
+RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
+
+            response = self.llm_analyzer.analyze_with_llm(prompt) or ""
+            approved = "APPROVED: YES" in response.upper() or ("YES" in response.upper() and "NO" not in response.upper())
+            
+            import re
+            conf_match = re.search(r'CONFIDENCE:\s*(\d+)', response, re.I)
+            confidence = float(conf_match.group(1)) if conf_match else 75.0
+            reasoning = response[:200] if response else "AI validation completed"
+            
+            return approved, confidence, reasoning
+        except Exception as e:
+            logger.error(f"AI validation error: {e}")
+            return True, 70.0, f"Validation error - approved: {str(e)[:50]}"
     
     def close_position(self, trade_id: str, reason: str = "Manual close") -> bool:
         """Close an existing position"""
