@@ -355,9 +355,12 @@ def get_broker_status() -> Dict:
     """
     import os
     
+    # Default to TRADIER if not set (matches ai_stock_position_manager behavior)
+    broker_type = os.getenv('BROKER_TYPE', 'TRADIER').upper()
+    
     result = {
         'connected': False,
-        'broker_type': os.getenv('BROKER_TYPE', 'NOT_SET'),
+        'broker_type': broker_type,
         'paper_mode': os.getenv('STOCK_PAPER_MODE', 'true').lower() == 'true',
         'total_equity': 0.0,
         'cash': 0.0,
@@ -366,8 +369,6 @@ def get_broker_status() -> Dict:
     }
     
     try:
-        broker_type = result['broker_type'].upper()
-        
         if broker_type == 'TRADIER':
             from src.integrations.tradier_client import TradierClient
             from src.integrations.broker_adapter import TradierAdapter

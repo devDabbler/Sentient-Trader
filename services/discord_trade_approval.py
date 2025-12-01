@@ -212,12 +212,52 @@ class DiscordTradeApprovalBot(commands.Bot):
             return
             
         # Check for LIST command to show pending trades
-        if content in ['LIST', 'PENDING', 'TRADES', 'STATUS']:
+        if content in ['LIST', 'PENDING', 'TRADES']:
             await self._list_pending_trades(message)
             return
         
-        # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
+        # ============================================================
+        # STANDALONE COMMANDS (no reply needed)
+        # ============================================================
+        
+        # Account & Risk Commands
+        if content in ['BALANCE', 'BAL', 'ACCOUNT', 'STATUS']:
+            await self._handle_balance_command(message)
+            return
+        
+        if content == 'RISK':
+            await self._handle_risk_command(message)
+            return
+        
+        if content == 'SYNC':
+            await self._handle_sync_command(message)
+            return
+        
+        if content in ['BROKER', 'BROKERS']:
+            await self._handle_broker_command(message)
+            return
+        
+        # Broker switching: BROKER TRADIER or BROKER IBKR
         import re
+        broker_match = re.match(r'BROKER\s+(TRADIER|IBKR)', content)
+        if broker_match:
+            broker = broker_match.group(1)
+            await self._handle_broker_switch_command(message, broker)
+            return
+        
+        # SIZE SYMBOL command (e.g., "SIZE NVDA")
+        size_match = re.match(r'SIZE\s+([A-Z]+)', content)
+        if size_match:
+            symbol = size_match.group(1)
+            await self._handle_sizing_command(message, symbol)
+            return
+        
+        # Help command
+        if content in ['HELP', '?', 'H', 'COMMANDS']:
+            await self._show_global_help(message)
+            return
+        
+        # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
         
         # Generic Alert Commands: WATCH, ANALYZE, DISMISS, MULTI, ULTIMATE
         # Pattern: CMD SYMBOL (e.g., "WATCH BTC", "ANALYZE AAPL")
@@ -596,6 +636,158 @@ class DiscordTradeApprovalBot(commands.Bot):
         except Exception as e:
             logger.error(f"Error syncing broker balance: {e}")
             await message.channel.send(f"❌ Error syncing: {str(e)}")
+    
+    async def _handle_broker_command(self, message: discord.Message):
+        """Handle BROKER command - show current broker config and options"""
+        try:
+            import os
+            from ui.risk_profile_ui import get_broker_status
+            
+            status = get_broker_status()
+            
+            # Check which brokers are configured
+            tradier_configured = bool(
+                os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or 
+                os.getenv('TRADIER_ACCESS_TOKEN') or
+                os.getenv('TRADIER_PROD_ACCESS_TOKEN')
+            )
+            ibkr_configured = bool(os.getenv('IBKR_PAPER_PORT'))
+            
+            broker_text = f"""🏦 **Broker Configuration**
+
+**Current Broker:** {status['broker_type']} ({'📝 PAPER' if status['paper_mode'] else '💰 LIVE'})
+**Status:** {'✅ Connected' if status['connected'] else '❌ Not Connected'}
+
+**Available Brokers:**
+{'✅' if tradier_configured else '❌'} **TRADIER** - {'Configured' if tradier_configured else 'Not configured'}
+{'✅' if ibkr_configured else '❌'} **IBKR** - {'Configured' if ibkr_configured else 'Not configured'}
+
+**Switch Broker:**
+Type `BROKER TRADIER` or `BROKER IBKR` to switch
+
+**Commands:**
+• `BALANCE` - Show account balance
+• `SYNC` - Sync balance to risk profile
+• `RISK` - Show risk profile
+"""
+            await message.channel.send(broker_text)
+            
+        except Exception as e:
+            logger.error(f"Error showing broker config: {e}")
+            await message.channel.send(f"❌ Error: {str(e)}")
+    
+    async def _handle_broker_switch_command(self, message: discord.Message, broker: str):
+        """Handle BROKER TRADIER or BROKER IBKR command"""
+        try:
+            import os
+            
+            broker = broker.upper()
+            
+            if broker == 'TRADIER':
+                # Check if Tradier is configured
+                has_token = bool(
+                    os.getenv('TRADIER_PAPER_ACCESS_TOKEN') or 
+                    os.getenv('TRADIER_ACCESS_TOKEN')
+                )
+                if not has_token:
+                    await message.channel.send(
+                        "❌ **Tradier not configured**\n\n"
+                        "Add to your `.env` file:\n"
+                        "```\n"
+                        "TRADIER_PAPER_ACCESS_TOKEN=your_token\n"
+                        "TRADIER_PAPER_ACCOUNT_ID=your_account_id\n"
+                        "```"
+                    )
+                    return
+                
+                # Set broker type (note: this is runtime only, doesn't persist)
+                os.environ['BROKER_TYPE'] = 'TRADIER'
+                
+                # Test connection
+                from ui.risk_profile_ui import get_broker_status
+                status = get_broker_status()
+                
+                if status['connected']:
+                    await message.channel.send(
+                        f"✅ **Switched to TRADIER**\n\n"
+                        f"Mode: {'📝 PAPER' if status['paper_mode'] else '💰 LIVE'}\n"
+                        f"Balance: ${status['total_equity']:,.2f}\n"
+                        f"Buying Power: ${status['buying_power']:,.2f}"
+                    )
+                else:
+                    await message.channel.send(
+                        f"⚠️ Switched to TRADIER but connection failed:\n{status.get('error', 'Unknown error')}"
+                    )
+                    
+            elif broker == 'IBKR':
+                # Check if IBKR is configured
+                has_port = bool(os.getenv('IBKR_PAPER_PORT'))
+                if not has_port:
+                    await message.channel.send(
+                        "❌ **IBKR not configured**\n\n"
+                        "Add to your `.env` file:\n"
+                        "```\n"
+                        "IBKR_PAPER_PORT=7497\n"
+                        "IBKR_PAPER_CLIENT_ID=1\n"
+                        "```\n"
+                        "And make sure TWS/Gateway is running!"
+                    )
+                    return
+                
+                os.environ['BROKER_TYPE'] = 'IBKR'
+                
+                from ui.risk_profile_ui import get_broker_status
+                status = get_broker_status()
+                
+                if status['connected']:
+                    await message.channel.send(
+                        f"✅ **Switched to IBKR**\n\n"
+                        f"Mode: {'📝 PAPER' if status['paper_mode'] else '💰 LIVE'}\n"
+                        f"Balance: ${status['total_equity']:,.2f}\n"
+                        f"Buying Power: ${status['buying_power']:,.2f}"
+                    )
+                else:
+                    await message.channel.send(
+                        f"⚠️ Switched to IBKR but connection failed:\n{status.get('error', 'Unknown error')}\n\n"
+                        f"Make sure TWS/Gateway is running on port {os.getenv('IBKR_PAPER_PORT', '7497')}"
+                    )
+            else:
+                await message.channel.send(f"❌ Unknown broker: {broker}. Use `TRADIER` or `IBKR`")
+                
+        except Exception as e:
+            logger.error(f"Error switching broker: {e}")
+            await message.channel.send(f"❌ Error switching broker: {str(e)}")
+    
+    async def _show_global_help(self, message: discord.Message):
+        """Show global help for all available commands"""
+        help_text = """📋 **Sentient Trader Discord Commands**
+
+**🏦 Account & Broker:**
+`BALANCE` or `BAL` - Show broker account balance
+`BROKER` - Show broker configuration
+`BROKER TRADIER` - Switch to Tradier
+`BROKER IBKR` - Switch to IBKR
+`SYNC` - Sync broker balance to risk profile
+
+**📊 Risk & Position Sizing:**
+`RISK` - Show your risk profile
+`SIZE NVDA` - Calculate position size for a symbol
+
+**📋 Trades & Alerts:**
+`LIST` or `PENDING` - Show pending trade approvals
+`WATCH AAPL` - Add symbol to watchlist
+`ANALYZE NVDA` - Run standard analysis
+
+**Reply to Alerts with:**
+`1` / `2` / `3` - Standard / Multi / Ultimate analysis
+`T` or `TRADE` - Execute long trade
+`SHORT` - Execute short trade
+`APPROVE` / `REJECT` - For trade approvals
+`?` - Show alert-specific help
+
+💡 *Type any command directly - no need to reply!*
+"""
+        await message.channel.send(help_text)
     
     async def _handle_sizing_command(self, message: discord.Message, symbol: str):
         """Handle SIZING command - calculate position size for symbol"""
