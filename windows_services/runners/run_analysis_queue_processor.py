@@ -368,39 +368,50 @@ def save_results_to_file(results: list, request: dict):
         
         all_results = {}
         if ANALYSIS_RESULTS_FILE.exists():
-            with open(ANALYSIS_RESULTS_FILE, 'r') as f:
-                all_results = json.load(f)
+            try:
+                with open(ANALYSIS_RESULTS_FILE, 'r') as f:
+                    all_results = json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load existing results, starting fresh: {e}")
+                all_results = {}
         
         # Add new results under a key
         result_key = f"queue_{request.get('id', 'unknown')}"
+        now_iso = datetime.now().isoformat()
+        
         all_results[result_key] = {
             "results": results,
             "request": request,
-            "completed": datetime.now().isoformat(),
+            "completed": now_iso,
+            "updated": now_iso,  # Also use "updated" for consistency
             "count": len(results)
         }
         
-        # Also update "latest" for quick access
-        all_results["latest"] = {
+        # Also update "queue_latest" for quick access to latest queue result
+        all_results["queue_latest"] = {
             "results": results,
             "request": request,
-            "completed": datetime.now().isoformat(),
+            "completed": now_iso,
+            "updated": now_iso,
             "count": len(results)
         }
         
-        # Keep only last 10 result sets
-        keys = [k for k in all_results.keys() if k.startswith("queue_")]
-        if len(keys) > 10:
-            for old_key in sorted(keys)[:-10]:
+        # Keep only last 20 result sets to avoid file bloat
+        keys = [k for k in all_results.keys() if k.startswith("queue_") and k != "queue_latest"]
+        if len(keys) > 20:
+            for old_key in sorted(keys)[:-20]:
+                logger.info(f"Removing old result set: {old_key}")
                 del all_results[old_key]
         
         with open(ANALYSIS_RESULTS_FILE, 'w') as f:
             json.dump(all_results, f, indent=2)
         
-        logger.info(f"Saved {len(results)} results to {ANALYSIS_RESULTS_FILE}")
+        logger.info(f"✅ Saved {len(results)} results from request {result_key}")
+        logger.info(f"   Tickers: {', '.join([r.get('ticker', '?') for r in results[:5]])}" + 
+                   (f"... and {len(results)-5} more" if len(results) > 5 else ""))
         
     except Exception as e:
-        logger.error(f"Error saving results: {e}")
+        logger.error(f"Error saving results: {e}", exc_info=True)
 
 
 def mark_request_complete(request_id: str):
@@ -427,15 +438,26 @@ def mark_request_complete(request_id: str):
 
 def main_loop():
     """Main processing loop"""
-    logger.info("=" * 50)
-    logger.info("Analysis Queue Processor Started")
-    logger.info(f"Checking every {CHECK_INTERVAL} seconds")
-    logger.info("=" * 50)
+    logger.info("=" * 60)
+    logger.info("🚀 ANALYSIS QUEUE PROCESSOR SERVICE STARTED")
+    logger.info(f"📅 Started at: {datetime.now().isoformat()}")
+    logger.info(f"⏱️  Checking for new requests every {CHECK_INTERVAL} seconds")
+    logger.info(f"📊 LLM Mode: {ANALYSIS_LLM_MODE}")
+    logger.info(f"⏰ Analysis Timeout: {ANALYSIS_TIMEOUT}s")
+    logger.info("=" * 60)
+    
+    loop_count = 0
+    processed_count = 0
+    error_count = 0
     
     while True:
+        loop_count += 1
         try:
             # Check for pending requests
             if not ANALYSIS_REQUESTS_FILE.exists():
+                # Periodic logging every 60 loops (10 min at 10s intervals)
+                if loop_count % 60 == 0:
+                    logger.info(f"⏳ Waiting for requests... (checked {loop_count} times, processed {processed_count})")
                 time.sleep(CHECK_INTERVAL)
                 continue
             
@@ -446,10 +468,20 @@ def main_loop():
             pending = [r for r in requests if r.get("status") == "pending"]
             
             if pending:
-                logger.info(f"Found {len(pending)} pending request(s)")
+                logger.info(f"📋 Found {len(pending)} pending request(s)")
                 
                 for request in pending:
                     request_id = request.get("id")
+                    tickers = request.get("tickers", [])
+                    asset_type = request.get("asset_type", "crypto")
+                    
+                    logger.info(f"")
+                    logger.info(f"{'='*60}")
+                    logger.info(f"▶️  PROCESSING REQUEST: {request_id}")
+                    logger.info(f"    Asset Type: {asset_type.upper()}")
+                    logger.info(f"    Tickers: {', '.join(tickers[:5])}" + 
+                               (f" ... and {len(tickers)-5} more" if len(tickers) > 5 else ""))
+                    logger.info(f"{'='*60}")
                     
                     # Process the request
                     results = process_request(request)
@@ -460,16 +492,38 @@ def main_loop():
                     # Mark complete
                     mark_request_complete(request_id)
                     
-                    logger.info(f"✅ Completed request {request_id}")
+                    logger.info(f"✅ COMPLETED request {request_id}")
+                    logger.info(f"   📊 Results: {len(results)} tickers analyzed")
+                    processed_count += 1
             
+            else:
+                # Periodic logging every 30 loops (5 min at 10s intervals)
+                if loop_count % 30 == 0:
+                    logger.info(f"⏳ No pending requests... (checked {loop_count} times, processed {processed_count}, errors {error_count})")
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON parsing error: {e}")
+            error_count += 1
+            time.sleep(CHECK_INTERVAL * 2)  # Wait longer on error
         except Exception as e:
-            logger.error(f"Error in main loop: {e}", exc_info=True)
+            logger.error(f"❌ Error in main loop: {e}", exc_info=True)
+            error_count += 1
+            time.sleep(CHECK_INTERVAL * 2)  # Wait longer on error
         
         time.sleep(CHECK_INTERVAL)
 
 
 if __name__ == "__main__":
+    logger.info("=" * 60)
+    logger.info("Analysis Queue Processor initializing...")
+    logger.info("=" * 60)
+    
     try:
         main_loop()
     except KeyboardInterrupt:
-        logger.info("Shutting down...")
+        logger.info("")
+        logger.info("🛑 Received keyboard interrupt signal")
+        logger.info("Shutting down gracefully...")
+    except Exception as e:
+        logger.critical(f"💥 FATAL ERROR: {e}", exc_info=True)
+        exit(1)
