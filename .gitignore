@@ -104,3 +104,4 @@ migrations/
 .env.systemd
 DEBUG_TRACE.txt
 FETCH_HEAD
+.cursor/
