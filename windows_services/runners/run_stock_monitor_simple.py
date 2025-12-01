@@ -62,12 +62,13 @@ logger.add(
 )
 
 logger.info("=" * 70)
-logger.info("📊 STOCK MONITOR - SIMPLE RUNNER (No Timeouts)")
+logger.info("📊 STOCK MONITOR - ENHANCED RUNNER")
 logger.info("=" * 70)
 logger.info(f"✓ Working directory: {os.getcwd()}")
 logger.info(f"✓ Project root: {PROJECT_ROOT}")
 logger.info(f"✓ Python: {sys.executable}")
 logger.info(f"✓ User: {os.getenv('USER', os.getenv('USERNAME', 'UNKNOWN'))}")
+logger.info(f"✓ Features: Stats tracking, Health monitoring, Circuit breaker, Auto-recovery")
 
 # Force flush stdout/stderr for systemd
 sys.stdout.flush()
@@ -189,10 +190,21 @@ try:
     status_file = PROJECT_ROOT / "logs" / ".stock_monitor_ready"
     status_file.write_text(f"SERVICE READY at {time.time()}")
     
-    # Step 3/3: Start monitoring loop
+    # Step 3/3: Start monitoring loop with enhanced error handling
+    logger.info("=" * 70)
+    logger.info("Starting monitoring service with resilience features...")
+    logger.info("=" * 70)
+    
+    # Use the main run_continuous() method which includes all resilience features
     if hasattr(monitor, 'run_continuous'):
-        logger.info("Using monitor.run_continuous() method")
-        monitor.run_continuous()
+        logger.info("✅ Using monitor.run_continuous() method with stats tracking")
+        try:
+            monitor.run_continuous()
+        except KeyboardInterrupt:
+            logger.info("✅ Service cleanly shut down")
+            if hasattr(monitor, '_print_final_stats'):
+                monitor._print_final_stats()
+            sys.exit(0)
         
     elif hasattr(monitor, 'run_continuous_async'):
         logger.info("Using monitor.run_continuous_async() method")
@@ -200,8 +212,8 @@ try:
         asyncio.run(monitor.run_continuous_async())
         
     else:
-        # Manual scan loop
-        logger.info("Using manual scan loop")
+        # Fallback: Manual scan loop (shouldn't reach this with enhanced monitor)
+        logger.info("⚠️  Fallback: Using manual scan loop (enhanced monitor.run_continuous() should be available)")
         scan_count = 0
         all_results = []
         
@@ -242,8 +254,8 @@ try:
                             results.append(result)
                         
                         all_results.extend(results)
-                        # Keep last 50 results
-                        all_results = all_results[-50:]
+                        # Keep last 100 results (increased from 50)
+                        all_results = all_results[-100:]
                         
                         save_analysis_results('sentient-stock-monitor', all_results)
                         logger.debug(f"Saved {len(results)} results to control panel")
