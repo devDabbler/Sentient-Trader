@@ -380,6 +380,14 @@ config = HunterConfig(
 
 **Why Lenient Mode?** Many legitimate meme coins keep mint/freeze authority for the first few hours/days. Strict mode (default before this update) would filter out ~90% of new launches. With lenient mode ON, these tokens are flagged with warnings but not blacklisted.
 
+**Environment Variables (add to .env):**
+```bash
+# DEX Hunter Settings
+DEX_LENIENT_MODE=true       # true = allow risky tokens, false = strict filtering
+DEX_DISCOVERY_MODE=aggressive  # aggressive, balanced, or conservative
+DEX_MIN_LIQUIDITY=500       # Minimum liquidity in USD
+```
+
 ### RPC Optimization
 
 - **Two-tier strategy**: `getTokenLargestAccounts` (lightweight) → fallback to `getProgramAccounts`

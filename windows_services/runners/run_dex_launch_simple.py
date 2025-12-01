@@ -106,14 +106,24 @@ try:
     
     # Import config to customize settings
     from models.dex_models import HunterConfig
+    
+    # Read settings from environment variables (can be set in .env file)
+    # DEX_LENIENT_MODE: "true" or "false" - Allow tokens with mint/freeze authority
+    # DEX_DISCOVERY_MODE: "aggressive", "balanced", or "conservative"
+    lenient_mode = os.getenv("DEX_LENIENT_MODE", "true").lower() == "true"
+    discovery_mode = os.getenv("DEX_DISCOVERY_MODE", "aggressive").lower()
+    min_liquidity = float(os.getenv("DEX_MIN_LIQUIDITY", "500"))
+    
     config = HunterConfig(
-        lenient_solana_mode=True,  # Allow tokens with mint/freeze authority (most new tokens have these)
-        discovery_mode="aggressive",  # Find more tokens (lower filters)
-        min_liquidity_usd=500.0,  # Lower threshold for early launches
-        min_composite_score=20.0,  # Show more tokens for user to evaluate
+        lenient_solana_mode=lenient_mode,
+        discovery_mode=discovery_mode,
+        min_liquidity_usd=min_liquidity,
+        min_composite_score=20.0,
     )
     dex_hunter = get_dex_launch_hunter(config=config)
-    print("  ✓ DEX hunter created (lenient_mode=ON, discovery=aggressive)", flush=True)
+    
+    mode_str = "LENIENT" if lenient_mode else "STRICT"
+    print(f"  ✓ DEX hunter created (mode={mode_str}, discovery={discovery_mode})", flush=True)
     alert_system = get_alert_system()
     print("  ✓ Alert system created", flush=True)
     logger.info("✓ Services initialized")
