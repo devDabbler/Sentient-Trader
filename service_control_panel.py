@@ -141,7 +141,35 @@ ANALYSIS_PRESETS = {
         "analysis_mode": "standard",
         "description": "Fast scan of BTC, ETH, SOL"
     },
-    # Stock presets
+    # Stock presets - Analysis Modes (Standard/Multi/Ultimate)
+    "stock_standard": {
+        "name": "🔬 Stock Standard",
+        "emoji": "🔬",
+        "tickers": None,  # Use watchlist
+        "depth": "standard",
+        "asset_type": "stock",
+        "analysis_mode": "standard",
+        "description": "Single strategy analysis for stocks"
+    },
+    "stock_multi": {
+        "name": "🎯 Stock Multi-Config",
+        "emoji": "🎯",
+        "tickers": None,  # Use watchlist
+        "depth": "multi",
+        "asset_type": "stock",
+        "analysis_mode": "multi_config",
+        "description": "Test Long/Short + multiple timeframes"
+    },
+    "stock_ultimate": {
+        "name": "🚀 Stock Ultimate",
+        "emoji": "🚀",
+        "tickers": None,  # Use watchlist
+        "depth": "ultimate",
+        "asset_type": "stock",
+        "analysis_mode": "ultimate",
+        "description": "ALL strategies + directions + timeframes"
+    },
+    # Stock Quick Scans
     "stock_momentum": {
         "name": "📈 Stock Momentum",
         "emoji": "📈",
@@ -202,6 +230,16 @@ SERVICES = {
         "interval_default": 300,
         "interval_min": 30,
         "interval_max": 3600  # Up to 1 hour
+    },
+    "AI Stock Trader": {
+        "name": "sentient-stock-ai-trader",
+        "description": "AI-powered stock position manager (executes trades via Tradier/IBKR)",
+        "emoji": "🤖",
+        "category": "stocks",
+        "interval_key": "check_interval_seconds",
+        "interval_default": 60,
+        "interval_min": 30,
+        "interval_max": 300  # Up to 5 minutes
     },
     "ORB FVG Scanner": {
         "name": "sentient-orb-fvg",

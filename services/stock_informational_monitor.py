@@ -870,7 +870,8 @@ class StockInformationalMonitor(LLMServiceMixin):
                     if opportunity.reasoning:
                         message_text += f"\n\n🤖 **AI:** {opportunity.reasoning[:200]}"
                     
-                    message_text += "\n\n**Reply with:** `1`=Standard `2`=Multi `3`=Ultimate | `W`=Watch | `X`=Dismiss"
+                    message_text += "\n\n**📊 Analysis:** `1`=Standard `2`=Multi `3`=Ultimate"
+                    message_text += "\n**🎯 Actions:** `W`=Watch | `T`=Trade | `X`=Dismiss"
                     
                     # Color based on score (matching crypto breakout monitor)
                     if opportunity.ensemble_score >= 85:

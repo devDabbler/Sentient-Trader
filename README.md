@@ -154,13 +154,97 @@ The platform runs multiple background services for continuous analysis and tradi
 ### Running Services
 
 **Windows:**
-```bash
+```powershell
 START_SERVICES.bat              # Start all services
 START_STOCK_MONITOR.bat         # Start enhanced stock intelligence monitor (with discovery)
 START_DEX_HUNTER.bat            # Start DEX Hunter only
 START_CRYPTO_AI_TRADER.bat      # Start crypto trader
 service_control_panel.py        # Streamlit UI for configuring all services
 ```
+
+---
+
+## 📊 Stock Trading Workflow (Discord + Broker Execution)
+
+The platform now supports a complete **stock trading workflow** from detection → analysis → approval → execution via Discord:
+
+### Workflow Overview
+
+```
+Stock Monitor (Detection) 
+    ↓ High-confidence alert (score ≥70)
+Discord Notification (with buttons/commands)
+    ↓ Select analysis type (1/2/3)
+AI Analysis (Standard/Multi/Ultimate)
+    ↓ Review results, approve trade
+Trade Execution (Paper or Live via Tradier/IBKR)
+```
+
+### Discord Commands (Reply to Alert)
+
+| Command | Description |
+|:--------|:------------|
+| `1` or `S` | 🔬 Standard Analysis (single strategy) |
+| `2` or `M` | 🎯 Multi-Config Analysis (Long/Short + timeframes) |
+| `3` or `U` | 🚀 Ultimate Analysis (ALL combinations) |
+| `W` or `WATCH` | Add to watchlist |
+| `T` or `TRADE` | Execute BUY trade (after analysis) |
+| `SHORT` | Execute SHORT/SELL trade |
+| `P` or `PAPER` | Paper trade (test mode) |
+| `X` or `D` | Dismiss alert |
+| `?` or `HELP` | Show all commands |
+
+### Setting Up Stock Trading
+
+1. **Configure Broker** (`.env` file):
+```bash
+# For IBKR (Interactive Brokers)
+BROKER_TYPE=IBKR
+IBKR_PAPER_PORT=7497       # Paper trading port
+IBKR_PAPER_CLIENT_ID=1
+STOCK_PAPER_MODE=true      # Start with paper trading!
+
+# For Tradier
+BROKER_TYPE=TRADIER
+TRADIER_API_KEY=your_key
+TRADIER_ACCOUNT_ID=your_id
+TRADIER_PAPER=true
+```
+
+2. **Enable Discord Bot**:
+```bash
+DISCORD_BOT_TOKEN=your_bot_token
+DISCORD_CHANNEL_IDS=channel_id_for_approvals
+```
+
+3. **Start Services**:
+```powershell
+# Activate virtual environment
+.\venv\Scripts\Activate.ps1
+
+# Start stock monitor + approval bot
+python -m windows_services.runners.run_stock_monitor
+# Or use the batch file
+START_STOCK_MONITOR.bat
+```
+
+### Key Components
+
+| Component | File | Description |
+|:----------|:-----|:------------|
+| Stock Monitor | `services/stock_informational_monitor.py` | Detects opportunities |
+| AI Stock Entry | `services/ai_stock_entry_assistant.py` | Analyzes entry timing |
+| Position Manager | `services/ai_stock_position_manager.py` | **NEW:** Executes trades via broker |
+| Discord Approval | `services/discord_trade_approval.py` | Handles approval workflow |
+| Broker Adapter | `src/integrations/broker_adapter.py` | Unified Tradier/IBKR interface |
+
+### Analysis Modes
+
+| Mode | Description | Use Case |
+|:-----|:------------|:---------|
+| **Standard** | Single strategy, one timeframe | Quick scan, high-volume opportunities |
+| **Multi** | Long + Short analysis, multiple timeframes | Swing trades, position sizing |
+| **Ultimate** | ALL strategies + directions + timeframes | Deep research, confident entries |
 
 **Linux (Systemd):**
 ```bash
