@@ -1,7 +1,10 @@
 [server]
 # Allow connections from any IP (required for remote access)
+# NOTE: Port and address can be overridden via command line:
+#   streamlit run app.py --server.port 8502 --server.address localhost
+# Defaults are set below, but command-line args take precedence
 address = "0.0.0.0"
-port = 8501
+# port = 8501  # Commented out - let each app specify its own port
 
 # Headless mode (no browser auto-launch on server)
 headless = true
@@ -24,17 +27,15 @@ maxMessageSize = 200
 # Don't collect usage stats
 gatherUsageStats = false
 
-# Server address for the browser (your public IP)
+# Server address for the browser
+# NOTE: For local development, use localhost. For remote access, use your public IP.
 # This helps with WebSocket connections on mobile
-serverAddress = "157.245.233.229"
-serverPort = 8501
+# serverAddress = "157.245.233.229"  # Commented out for local development
+# serverPort = 8501  # Commented out - each app should specify its own port
 
 [client]
 # Show error details (helpful for debugging)
 showErrorDetails = true
-
-# Caching - reduces reload time
-caching = true
 
 # Toolbar mode - collapsed saves space on mobile
 toolbarMode = "minimal"
