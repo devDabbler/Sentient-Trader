@@ -2553,6 +2553,12 @@ def main():
                         risk_reward = result.get('risk_reward_ratio')
                         urgency = result.get('urgency', '')
                         
+                        # Format confidence for display (avoid f-string format issues)
+                        if isinstance(confidence, (int, float)):
+                            confidence_str = f"{confidence:.0f}"
+                        else:
+                            confidence_str = str(confidence)
+                        
                         # Color based on signal
                         if signal in ['LONG', 'BUY', 'BULLISH', 'ENTER_NOW']:
                             signal_color = "🟢"
@@ -2565,12 +2571,12 @@ def main():
                         urgency_emoji = "🔥" if urgency == "HIGH" else "⏱️" if urgency == "MEDIUM" else "✅"
                         
                         # Create an expandable result card
-                        with st.expander(f"{signal_color} **{ticker}** → {signal} ({confidence:.0f if isinstance(confidence, (int, float)) else confidence}%)", expanded=False):
+                        with st.expander(f"{signal_color} **{ticker}** → {signal} ({confidence_str}%)", expanded=False):
                             result_col1, result_col2 = st.columns([1, 2])
                             
                             with result_col1:
                                 st.markdown(f"**Signal:** {signal_color} {signal}")
-                                st.markdown(f"**Confidence:** {confidence:.0f if isinstance(confidence, (int, float)) else confidence}%")
+                                st.markdown(f"**Confidence:** {confidence_str}%")
                                 if urgency:
                                     st.markdown(f"**Urgency:** {urgency_emoji} {urgency}")
                                 if isinstance(price, (int, float)) and price > 0:
@@ -2581,13 +2587,17 @@ def main():
                                 if reasoning:
                                     st.markdown(f"**Analysis:** {reasoning}")
                                 if entry_point is not None and signal not in ['DO_NOT_ENTER']:
-                                    st.markdown(f"**Entry:** ${entry_point if isinstance(entry_point, (int, float)) else entry_point}")
+                                    entry_str = f"{entry_point:.2f}" if isinstance(entry_point, (int, float)) else str(entry_point)
+                                    st.markdown(f"**Entry:** ${entry_str}")
                                 if stop_loss is not None:
-                                    st.markdown(f"**Stop Loss:** ${stop_loss if isinstance(stop_loss, (int, float)) else stop_loss}")
+                                    stop_str = f"{stop_loss:.2f}" if isinstance(stop_loss, (int, float)) else str(stop_loss)
+                                    st.markdown(f"**Stop Loss:** ${stop_str}")
                                 if target is not None:
-                                    st.markdown(f"**Target:** ${target if isinstance(target, (int, float)) else target}")
+                                    target_str = f"{target:.2f}" if isinstance(target, (int, float)) else str(target)
+                                    st.markdown(f"**Target:** ${target_str}")
                                 if risk_reward is not None and signal not in ['DO_NOT_ENTER']:
-                                    st.markdown(f"**Risk/Reward:** {risk_reward:.2f if isinstance(risk_reward, (int, float)) else risk_reward}")
+                                    rr_str = f"{risk_reward:.2f}" if isinstance(risk_reward, (int, float)) else str(risk_reward)
+                                    st.markdown(f"**Risk/Reward:** {rr_str}")
                             
                             # Divider between results
                             st.divider()
