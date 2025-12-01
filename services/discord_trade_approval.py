@@ -646,6 +646,7 @@ class DiscordTradeApprovalBot(commands.Bot):
         """Handle BROKER command - show current broker config and options"""
         try:
             import os
+            import socket
             from ui.risk_profile_ui import get_broker_status
             
             status = get_broker_status()
@@ -658,17 +659,25 @@ class DiscordTradeApprovalBot(commands.Bot):
             )
             ibkr_configured = bool(os.getenv('IBKR_PAPER_PORT'))
             
+            # Check if we're on a remote server
+            hostname = socket.gethostname()
+            is_remote = 'sentient' in hostname.lower() or not os.path.exists('C:\\')
+            
+            # IBKR availability note
+            ibkr_note = " ⚠️ (requires TWS locally)" if is_remote and ibkr_configured else ""
+            
             broker_text = f"""🏦 **Broker Configuration**
 
 **Current Broker:** {status['broker_type']} ({'📝 PAPER' if status['paper_mode'] else '💰 LIVE'})
 **Status:** {'✅ Connected' if status['connected'] else '❌ Not Connected'}
+**Host:** `{hostname}` {'🌐 (remote)' if is_remote else '💻 (local)'}
 
 **Available Brokers:**
-{'✅' if tradier_configured else '❌'} **TRADIER** - {'Configured' if tradier_configured else 'Not configured'}
-{'✅' if ibkr_configured else '❌'} **IBKR** - {'Configured' if ibkr_configured else 'Not configured'}
+{'✅' if tradier_configured else '❌'} **TRADIER** - {'Configured ✨ (works anywhere!)' if tradier_configured else 'Not configured'}
+{'✅' if ibkr_configured else '❌'} **IBKR** - {'Configured' + ibkr_note if ibkr_configured else 'Not configured'}
 
 **Switch Broker:**
-Type `BROKER TRADIER` or `BROKER IBKR` to switch
+`BROKER TRADIER` or `BROKER IBKR`
 
 **Commands:**
 • `BALANCE` - Show account balance
@@ -739,6 +748,23 @@ Type `BROKER TRADIER` or `BROKER IBKR` to switch
                     )
                     return
                 
+                # Check if we're on a remote server (IBKR won't work)
+                import socket
+                hostname = socket.gethostname()
+                is_remote = 'sentient' in hostname.lower() or not os.path.exists('C:\\')
+                
+                if is_remote:
+                    await message.channel.send(
+                        f"⚠️ **IBKR requires TWS/Gateway running locally**\n\n"
+                        f"You're on: `{hostname}` (remote server)\n"
+                        f"IBKR TWS is a desktop GUI app that must run on your **local Windows machine**.\n\n"
+                        f"**Options:**\n"
+                        f"1. Run this bot on your local machine with TWS running\n"
+                        f"2. Use **Tradier** instead (`BROKER TRADIER`) - works anywhere!\n"
+                        f"3. Set up VPN/port forwarding to your local TWS (advanced)"
+                    )
+                    return
+                
                 os.environ['BROKER_TYPE'] = 'IBKR'
                 
                 from ui.risk_profile_ui import get_broker_status
@@ -753,8 +779,14 @@ Type `BROKER TRADIER` or `BROKER IBKR` to switch
                     )
                 else:
                     await message.channel.send(
-                        f"⚠️ Switched to IBKR but connection failed:\n{status.get('error', 'Unknown error')}\n\n"
-                        f"Make sure TWS/Gateway is running on port {os.getenv('IBKR_PAPER_PORT', '7497')}"
+                        f"⚠️ **IBKR connection failed**\n\n"
+                        f"Error: {status.get('error', 'Connection refused')}\n\n"
+                        f"**Checklist:**\n"
+                        f"☐ TWS or IB Gateway is running\n"
+                        f"☐ API connections enabled in TWS (File → Global Config → API)\n"
+                        f"☐ Port matches: `{os.getenv('IBKR_PAPER_PORT', '7497')}`\n"
+                        f"☐ 'Read-Only API' is **disabled**\n\n"
+                        f"💡 Or use `BROKER TRADIER` - no desktop app needed!"
                     )
             else:
                 await message.channel.send(f"❌ Unknown broker: {broker}. Use `TRADIER` or `IBKR`")
