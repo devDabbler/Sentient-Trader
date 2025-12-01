@@ -165,7 +165,7 @@ class DexLaunchHunter:
                 min_liquidity=self.config.min_liquidity_usd,
                 max_liquidity=self.config.max_liquidity_usd,
                 max_age_hours=self.config.max_age_hours,
-                limit=50,  # Scan top 50 new tokens per cycle
+                limit=100,  # Scan top 100 new tokens per cycle (was 50)
                 discovery_mode=discovery_mode
             )
             
@@ -368,9 +368,14 @@ class DexLaunchHunter:
                         return False, None
                 
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
-                    # In lenient mode for Solana, allow if it's just freeze authority issue
-                    if self.config.lenient_solana_mode and chain == Chain.SOLANA:
-                        logger.warning(f"⚠️ Potential honeypot (freeze authority) - allowing in lenient mode: {contract_address}")
+                    # In lenient mode for Solana, allow if "honeypot" is just due to freeze authority
+                    is_freeze_authority_honeypot = (
+                        chain == Chain.SOLANA and 
+                        not safety.solana_freeze_authority_revoked
+                    )
+                    
+                    if self.config.lenient_solana_mode and is_freeze_authority_honeypot:
+                        logger.warning(f"⚠️ Freeze authority retained (risky but allowing in lenient mode): {contract_address}")
                     else:
                         logger.warning(f"Blacklisting honeypot: {contract_address}")
                         self.blacklisted_tokens.add(contract_address.lower())
@@ -508,9 +513,16 @@ class DexLaunchHunter:
                         return False, None
                 
                 if safety.is_honeypot and self.config.auto_blacklist_honeypots:
-                    # In lenient mode, still warn about honeypots but check if it's just freeze authority
-                    if self.config.lenient_solana_mode and pair.chain == Chain.SOLANA and not safety.solana_mint_authority_revoked:
-                        print(f"[DEX] ⚠️ {pair.base_token_symbol}: POTENTIAL HONEYPOT (freeze authority) - allowing in lenient mode", flush=True)
+                    # In lenient mode for Solana, allow if "honeypot" is just due to freeze authority
+                    # (not a real honeypot detection from external APIs)
+                    is_freeze_authority_honeypot = (
+                        pair.chain == Chain.SOLANA and 
+                        not safety.solana_freeze_authority_revoked  # Freeze authority retained = why it's marked honeypot
+                    )
+                    
+                    if self.config.lenient_solana_mode and is_freeze_authority_honeypot:
+                        print(f"[DEX] ⚠️ {pair.base_token_symbol}: FREEZE AUTHORITY RETAINED (risky but allowing in lenient mode)", flush=True)
+                        # Don't blacklist, continue with analysis
                     else:
                         print(f"[DEX] 🚨 {pair.base_token_symbol}: BLACKLISTED (honeypot detected)", flush=True)
                         self.blacklisted_tokens.add(contract_address.lower())

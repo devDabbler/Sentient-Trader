@@ -234,17 +234,20 @@ class DexScreenerClient:
         
         # Adjust filters based on mode
         if discovery_mode == "aggressive":
-            effective_min_liq = min(min_liquidity, 500)  # Lower to $500
-            effective_min_vol = 100  # Very low volume threshold
-            max_search_queries = 20  # More queries
+            effective_min_liq = min(min_liquidity, 100)  # Very low - catch super early launches
+            effective_min_vol = 0  # No volume filter - new tokens may have 0 volume initially
+            max_search_queries = 25  # More queries
+            effective_max_age = max_age_hours * 2  # Allow older tokens too (48h default)
         elif discovery_mode == "balanced":
             effective_min_liq = min_liquidity
-            effective_min_vol = 300
-            max_search_queries = 12
+            effective_min_vol = 200
+            max_search_queries = 15
+            effective_max_age = max_age_hours
         else:  # conservative
             effective_min_liq = max(min_liquidity, 5000)
             effective_min_vol = 500
             max_search_queries = 8
+            effective_max_age = max_age_hours
         
         # Scam filter patterns
         scam_names = {"coin", "token", "test", "scam", "rug", "fake"}
@@ -369,8 +372,8 @@ class DexScreenerClient:
                     stats["skipped_address"] += 1
                     continue
                 
-                # Filter by age (if available)
-                if pair.pair_age_hours > 0 and pair.pair_age_hours > max_age_hours:
+                # Filter by age (if available) - use effective_max_age based on mode
+                if pair.pair_age_hours > 0 and pair.pair_age_hours > effective_max_age:
                     stats["skipped_age"] += 1
                     continue
                 
@@ -391,7 +394,9 @@ class DexScreenerClient:
                        f"scam={stats['skipped_scam']}, liq={stats['skipped_liquidity']}, "
                        f"vol={stats['skipped_volume']}, addr={stats['skipped_address']}, age={stats['skipped_age']}")
             
-            print(f"[DEXSCREENER] Discovery: {total_found} raw → {len(all_pairs)} passed filters (mode={discovery_mode})", flush=True)
+            # Print to console for visibility
+            print(f"[DEXSCREENER] Discovery: {total_found} raw → {len(all_pairs)} passed (mode={discovery_mode})", flush=True)
+            print(f"[DEXSCREENER] Filter breakdown: dupes={stats['skipped_seen']}, liq={stats['skipped_liquidity']}, vol={stats['skipped_volume']}, age={stats['skipped_age']}", flush=True)
             
             return True, all_pairs[:limit]
             
