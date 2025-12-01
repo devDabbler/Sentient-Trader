@@ -49,6 +49,35 @@ The platform supports:
 * **💧 Liquidity Depth Analysis:** Validates execution viability at multiple price levels
 * **🎯 Confidence Scoring:** AI-enhanced technical analysis (when enabled)
 
+#### Stock Intelligence Monitor (ENHANCED - December 2025) ✅ PRODUCTION READY
+* **🎯 Multi-Pronged Analysis:** 4-stream detection (Technical + Events + ML + LLM)
+  - Technical indicators (RSI, MACD, Bollinger Bands, Volume, Momentum)
+  - Event/catalyst detection (Earnings, FDA, SEC filings, News sentiment)
+  - ML confidence scoring (Performance, volatility, alignment)
+  - LLM meta-analysis (AI reasoning on composite signals)
+* **🔍 Stock Discovery Universe:** Auto-discover opportunities beyond watchlist
+  - Top gainers & losers (momentum/reversal plays)
+  - Most active stocks (volume breakouts)
+  - 52-week new highs (trend followers)
+  - High volume breakouts (technical signals)
+  - Sector leaders (rotation opportunities)
+  - All 6 modes independently toggleable via Control Panel
+* **⚙️ Service Control Panel Integration:** Full discovery configuration UI
+  - Toggle discovery on/off with single click
+  - Enable/disable individual discovery modes
+  - Adjust universe size per mode (10-100 stocks)
+  - View discovery statistics and metrics
+* **📊 Production-Grade Resilience:** Health tracking, circuit breakers, auto-recovery
+  - Comprehensive stats tracking (scans, alerts, errors, uptime)
+  - Circuit breaker protection (prevents cascading failures)
+  - Automatic retry logic with exponential backoff
+  - Graceful shutdown with detailed statistics
+  - Alert cooldown to prevent notification spam
+* **🚀 Smart Caching:** 30-minute TTL per ticker
+  - Efficient performance with fresh data
+  - Automatic cleanup of old records
+  - Watchlist auto-sync with Control Panel
+
 ---
 
 ## 🚀 Quick Start
@@ -118,6 +147,7 @@ The platform runs multiple background services for continuous analysis and tradi
 | **Warrior Scalping** | Momentum "Gap & Go" (9:30-10:00 AM) | ✅ Active | `config_warrior_scalping.py` |
 | **EMA Power Zone** | Swing trading based on 8/21 EMA & DeMarker | ✅ Active | `config_swing_trader.py` |
 | **Options Premium** | Wheel strategy and credit spreads | ✅ Active | `config_options_premium.py` |
+| **Stock Intelligence** | 🆕 Multi-pronged opportunity detection + discovery | ✅ PRODUCTION | `services/stock_informational_monitor.py` |
 | **Crypto Breakout** | 24/7 Scanner for crypto pairs | ✅ Active | `services/crypto_breakout_service.py` |
 | **DEX Hunter** | 🆕 Production Solana token launch detection | ✅ PRODUCTION | `services/dex_launch_hunter.py` |
 
@@ -126,9 +156,10 @@ The platform runs multiple background services for continuous analysis and tradi
 **Windows:**
 ```bash
 START_SERVICES.bat              # Start all services
+START_STOCK_MONITOR.bat         # Start enhanced stock intelligence monitor (with discovery)
 START_DEX_HUNTER.bat            # Start DEX Hunter only
 START_CRYPTO_AI_TRADER.bat      # Start crypto trader
-START_STOCK_MONITOR.bat         # Start stock monitoring
+service_control_panel.py        # Streamlit UI for configuring all services
 ```
 
 **Linux (Systemd):**

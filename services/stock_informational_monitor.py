@@ -37,6 +37,12 @@ _debug_file.flush()
 from services.ai_confidence_scanner import AIConfidenceScanner
 _debug_file.write("[TRACE] stock_informational_monitor.py: Imported AIConfidenceScanner\n")
 _debug_file.flush()
+from services.enhanced_stock_opportunity_detector import get_enhanced_stock_detector
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported enhanced_stock_opportunity_detector\n")
+_debug_file.flush()
+from services.stock_discovery_universe import get_stock_discovery_universe
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported stock_discovery_universe\n")
+_debug_file.flush()
 from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
 
 _debug_file.write("[TRACE] stock_informational_monitor.py: About to import config_stock_informational\n")
@@ -205,6 +211,18 @@ class StockInformationalMonitor(LLMServiceMixin):
         self.confidence_scanner = AIConfidenceScanner()
         print(f"[TRACE] StockInformationalMonitor.__init__: AIConfidenceScanner created", flush=True)
         
+        # ENHANCED: Multi-pronged detector for superior opportunities
+        print(f"[TRACE] StockInformationalMonitor.__init__: Initializing enhanced detector...", flush=True)
+        self.enhanced_detector = get_enhanced_stock_detector(use_llm=True)
+        print(f"[TRACE] StockInformationalMonitor.__init__: Enhanced detector initialized", flush=True)
+        
+        # DISCOVERY: Stock universe discovery (toggleable)
+        print(f"[TRACE] StockInformationalMonitor.__init__: Initializing discovery universe...", flush=True)
+        self.discovery_universe = get_stock_discovery_universe(detector=self.enhanced_detector)
+        self.discovery_enabled = False  # Can be toggled via control panel
+        self.discovery_modes = {}  # Tracks which modes are enabled
+        print(f"[TRACE] StockInformationalMonitor.__init__: Discovery universe initialized", flush=True)
+        
         # State
         print(f"[TRACE] StockInformationalMonitor.__init__: Setting up state variables...", flush=True)
         self.opportunities: List[StockOpportunity] = []
@@ -237,7 +255,14 @@ class StockInformationalMonitor(LLMServiceMixin):
     
     def scan_ticker(self, symbol: str, max_retries: int = 1) -> Optional[StockOpportunity]:
         """
-        Scan a single ticker for opportunities with retry logic
+        Scan a single ticker for opportunities with multi-pronged approach
+        
+        ENHANCED: Now uses comprehensive analysis instead of cache-only approach:
+        - Technical indicators analysis
+        - ML confidence scoring
+        - Event/catalyst detection
+        - LLM reasoning
+        - Composite weighted scoring
         
         Args:
             symbol: Ticker symbol to scan
@@ -251,14 +276,22 @@ class StockInformationalMonitor(LLMServiceMixin):
         while retry_count <= max_retries:
             try:
                 if retry_count == 0:
-                    logger.debug(f"Scanning {symbol}...")
+                    logger.debug(f"🔎 Scanning {symbol} (multi-pronged)...")
                 else:
                     logger.debug(f"  🔄 Retrying {symbol} (attempt {retry_count + 1}/{max_retries + 1})...")
                 
-                # Get confidence analysis (already migrated to LLM manager)
-                logger.debug(f"  ↳ {symbol}: Calling analyze_ticker...")
+                # ENHANCED: Use multi-pronged detector for comprehensive analysis
+                logger.debug(f"  ↳ {symbol}: Running enhanced multi-pronged analysis...")
+                enhanced_opp = self.enhanced_detector.analyze_ticker(symbol)
+                
+                if enhanced_opp:
+                    # Convert enhanced opportunity to StockOpportunity
+                    return self._convert_enhanced_to_stock_opportunity(enhanced_opp)
+                
+                # Fallback: Try legacy analyzer if enhanced returns None
+                logger.debug(f"  ↳ {symbol}: Falling back to legacy analyzer...")
                 analysis = self.confidence_scanner.analyze_ticker(symbol)
-                logger.debug(f"  ↳ {symbol}: analyze_ticker returned: {analysis is not None}")
+                logger.debug(f"  ↳ {symbol}: Legacy analyzer returned: {analysis is not None}")
                 
                 if not analysis:
                     logger.debug(f"  ↳ {symbol}: Not in scanner cache, skipping")
@@ -363,6 +396,118 @@ class StockInformationalMonitor(LLMServiceMixin):
         
         # LOW: Below threshold but still valid
         return "LOW"
+    
+    # ============================================================
+    # DISCOVERY: Stock Universe Discovery Control
+    # ============================================================
+    
+    def set_discovery_enabled(self, enabled: bool):
+        """
+        Enable or disable stock discovery
+        
+        Args:
+            enabled: True to discover stocks outside watchlist
+        """
+        self.discovery_enabled = enabled
+        status = "✅ ENABLED" if enabled else "❌ DISABLED"
+        logger.info(f"Stock discovery: {status}")
+    
+    def configure_discovery_modes(self, modes_config: Dict[str, bool]):
+        """
+        Configure which discovery modes are active
+        
+        Args:
+            modes_config: Dict of mode_name -> enabled (e.g., {'top_gainers': True, 'most_active': False})
+        """
+        logger.info("📋 Configuring discovery modes...")
+        for mode_name, enabled in modes_config.items():
+            if mode_name in self.discovery_universe.modes:
+                self.discovery_universe.set_discovery_enabled(mode_name, enabled)
+                self.discovery_modes[mode_name] = enabled
+        logger.info(f"   Active modes: {sum(1 for e in modes_config.values() if e)}")
+    
+    def get_discovery_config(self) -> Dict[str, Any]:
+        """Get current discovery configuration"""
+        return {
+            'enabled': self.discovery_enabled,
+            'modes': self.discovery_universe.get_discovery_config()
+        }
+    
+    def set_discovery_config_from_panel(self, config: Dict[str, Any]):
+        """Load discovery configuration from control panel"""
+        try:
+            if 'enabled' in config:
+                self.set_discovery_enabled(config['enabled'])
+            if 'modes' in config:
+                self.discovery_universe.set_discovery_config(config['modes'])
+            logger.info("✅ Discovery config loaded from control panel")
+        except Exception as e:
+            logger.error(f"Error loading discovery config: {e}")
+    
+    # ============================================================
+    # ENHANCEMENT: Multi-Pronged Analysis Integration
+    # ============================================================
+    
+    def _convert_enhanced_to_stock_opportunity(self, enhanced_opp) -> StockOpportunity:
+        """Convert enhanced opportunity to StockOpportunity format"""
+        try:
+            # Map enhanced signals to stock opportunity
+            ensemble_score = int(enhanced_opp.composite_score)
+            
+            # Determine timeframe alignment from signals
+            timeframe_alignment = "SINGLE"
+            if enhanced_opp.technical_signals.price_above_sma50 and enhanced_opp.technical_signals.price_above_sma200:
+                timeframe_alignment = "TRIPLE_THREAT"
+            elif enhanced_opp.technical_signals.price_above_sma50 or enhanced_opp.technical_signals.macd_bullish:
+                timeframe_alignment = "DUAL_ALIGN"
+            
+            # Determine priority from enhanced confidence
+            priority_map = {
+                "CRITICAL": "CRITICAL",
+                "HIGH": "HIGH",
+                "MEDIUM": "MEDIUM",
+                "LOW": "LOW"
+            }
+            alert_priority = priority_map.get(enhanced_opp.confidence, "MEDIUM")
+            
+            # Build reasoning from all signals
+            reasoning_parts = []
+            if enhanced_opp.composite_reasoning:
+                reasoning_parts.append(enhanced_opp.composite_reasoning)
+            if enhanced_opp.ml_reasoning:
+                reasoning_parts.append(f"ML: {enhanced_opp.ml_reasoning[:100]}")
+            
+            reasoning = " | ".join(reasoning_parts) if reasoning_parts else "Multi-factor analysis opportunity"
+            
+            # Create opportunity
+            opportunity = StockOpportunity(
+                symbol=enhanced_opp.symbol,
+                opportunity_type="MULTI_FACTOR",
+                ensemble_score=ensemble_score,
+                confidence=min(1.0, enhanced_opp.composite_score / 100.0),
+                price=enhanced_opp.price,
+                reasoning=reasoning,
+                technical_summary=f"Tech: {enhanced_opp.technical_signals.score:.0f} | Events: {enhanced_opp.event_signals.score:.0f}",
+                timeframe_alignment=timeframe_alignment,
+                alert_priority=alert_priority,
+                timestamp=enhanced_opp.timestamp,
+                metadata={
+                    'technical_score': enhanced_opp.technical_score,
+                    'event_score': enhanced_opp.event_score,
+                    'ml_score': enhanced_opp.ml_score,
+                    'llm_score': enhanced_opp.llm_score,
+                    'trend': enhanced_opp.technical_signals.trend,
+                    'volume_ratio': enhanced_opp.technical_signals.volume_ratio,
+                    'composite_reasoning': enhanced_opp.composite_reasoning,
+                }
+            )
+            
+            logger.debug(f"  ✅ Converted enhanced opportunity: {enhanced_opp.symbol} ({ensemble_score}/100)")
+            return opportunity
+        
+        except Exception as e:
+            logger.error(f"Error converting enhanced opportunity: {e}")
+            return None
     
     # ============================================================
     # RESILIENCE & HEALTH MANAGEMENT METHODS
@@ -517,9 +662,32 @@ class StockInformationalMonitor(LLMServiceMixin):
         # Sync watchlist from Control Panel if needed
         self._sync_watchlist_from_config()
         
+        # BUILD SCAN UNIVERSE
+        scan_universe = list(self.watchlist) if self.watchlist else []
+        
+        # Add discovered stocks if enabled
+        if self.discovery_enabled:
+            logger.info("🔍 Running stock discovery to expand universe...")
+            try:
+                discovered_dict = self.discovery_universe.discover_stocks(exclude_watchlist=scan_universe)
+                
+                # Flatten discovered tickers from all modes
+                discovered_tickers = []
+                for mode_tickers in discovered_dict.values():
+                    discovered_tickers.extend(mode_tickers)
+                
+                # Add to scan universe (limit to avoid overwhelming)
+                max_discovered = 50  # Limit added tickers
+                discovered_tickers = list(set(discovered_tickers))[:max_discovered]
+                scan_universe.extend(discovered_tickers)
+                
+                logger.info(f"📈 Added {len(discovered_tickers)} discovered tickers (total universe: {len(scan_universe)})")
+            except Exception as e:
+                logger.error(f"❌ Error in discovery: {e}")
+        
         self.stats.tickers_scanned = 0
         
-        for symbol in self.watchlist:
+        for symbol in scan_universe:
             try:
                 # Skip if in circuit breaker
                 if self._is_ticker_in_circuit_breaker(symbol):
