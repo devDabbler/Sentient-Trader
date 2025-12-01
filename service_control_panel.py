@@ -1885,49 +1885,6 @@ def main():
                     with col3:
                         st.caption(f"❌ {health.get('error_count', 0)} errors")
             
-            st.markdown("---")
-            
-            # ============================================================
-            # SERVICE DISCOVERY CONFIGURATION
-            # ============================================================
-            st.markdown("### 🔍 Discovery Configuration")
-            st.caption("Configure scanners to discover new opportunities beyond your watchlist")
-            
-            # Stock Monitor Discovery
-            with st.expander("📊 Stock Monitor - Discovery Settings", expanded=False):
-                try:
-                    from ui.discovery_config_ui import render_discovery_config_panel
-                    render_discovery_config_panel()
-                except ImportError as e:
-                    st.warning(f"Discovery config UI not available: {e}")
-                except Exception as e:
-                    st.error(f"Error loading discovery config: {e}")
-            
-            # Crypto Breakout Monitor Discovery
-            with st.expander("📈 Crypto Breakout Monitor - Discovery Settings", expanded=False):
-                st.info("""
-                **Crypto Breakout Monitor** automatically scans:
-                - Your watchlist coins (from Supabase)
-                - New listings on Kraken (pre-listing scanner)
-                - High-volume breakouts
-                - Momentum plays
-                
-                Discovery is **always enabled** for crypto. The monitor uses:
-                - **Pre-listing Scanner**: Finds new coins before they list
-                - **Auto-add to Watchlist**: New discoveries are automatically added
-                - **Volume Breakouts**: Detects unusual volume spikes
-                - **Momentum Plays**: Catches trending coins early
-                """)
-                
-                # Show current settings
-                try:
-                    from windows_services.runners.service_config_loader import load_service_watchlist
-                    crypto_watchlist = load_service_watchlist('sentient-crypto-breakout') or []
-                    st.metric("Watchlist Size", len(crypto_watchlist))
-                except:
-                    st.caption("Watchlist size: N/A")
-                
-                st.caption("💡 To manage your crypto watchlist, go to the **Watchlists** tab")
         else:
             st.warning("⚠️ Orchestrator not available. Using legacy service control.")
             st.info("The orchestrator provides unified service management. Check if `services/service_orchestrator.py` exists.")
@@ -2577,6 +2534,49 @@ def main():
                                 st.rerun()
                             else:
                                 st.error("Failed to save Discord settings")
+                        
+                        # ============================================================
+                        # DISCOVERY CONFIGURATION (Stock Monitor only)
+                        # ============================================================
+                        if service_name == "sentient-stock-monitor":
+                            st.markdown("---")
+                            st.markdown("**🔍 Stock Discovery Universe**")
+                            st.caption("Discover trading opportunities outside your watchlist")
+                            
+                            try:
+                                from ui.discovery_config_ui import render_discovery_config_panel
+                                render_discovery_config_panel()
+                            except ImportError as e:
+                                st.warning(f"Discovery config UI not available: {e}")
+                            except Exception as e:
+                                st.error(f"Error loading discovery config: {e}")
+                        
+                        # ============================================================
+                        # DISCOVERY INFO (Crypto Breakout Monitor)
+                        # ============================================================
+                        if service_name == "sentient-crypto-breakout":
+                            st.markdown("---")
+                            st.markdown("**🔍 Discovery Settings**")
+                            st.info("""
+                            **Crypto Breakout Monitor** automatically discovers new opportunities:
+                            
+                            ✅ **Pre-listing Scanner** - Finds new coins before they list on Kraken
+                            ✅ **Auto-add to Watchlist** - New discoveries automatically added
+                            ✅ **Volume Breakouts** - Detects unusual volume spikes
+                            ✅ **Momentum Plays** - Catches trending coins early
+                            
+                            Discovery is **always enabled** for crypto. The monitor scans both your watchlist and discovers new opportunities automatically.
+                            """)
+                            
+                            # Show current watchlist size
+                            try:
+                                from windows_services.runners.service_config_loader import load_service_watchlist
+                                crypto_watchlist = load_service_watchlist('sentient-crypto-breakout') or []
+                                st.metric("Current Watchlist Size", len(crypto_watchlist))
+                            except:
+                                st.caption("Watchlist size: N/A")
+                            
+                            st.caption("💡 To manage your crypto watchlist, use the Watchlist section above or go to the **Watchlists** tab")
                 
                 st.markdown("---")
     
