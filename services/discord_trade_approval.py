@@ -1324,10 +1324,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                 discord_message_id=str(sent_msg.id)  # Use the bot's message ID for replies
             )
             
-            # Mark the orchestrator alert as in progress
-            orch.approve_alert(alert_info.id, add_to_watchlist=False)
-            
             logger.info(f"📊 Stock trade queued for approval: {symbol} {side} (approval_id={approval_id})")
+            
+            # Mark the orchestrator alert as in progress (run in thread to avoid blocking)
+            await asyncio.to_thread(orch.approve_alert, alert_info.id, False)
             
         except ImportError as e:
             logger.error(f"Import error handling stock trade: {e}")
