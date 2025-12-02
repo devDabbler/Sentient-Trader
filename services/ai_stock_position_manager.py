@@ -509,6 +509,9 @@ class AIStockPositionManager:
             # Save state
             self._save_state()
             
+            # Log to unified trade journal (matching crypto position manager)
+            self._journal_trade_entry(position, decision)
+            
             logger.info(f"   📊 Position added to tracking")
             logger.info("=" * 60)
             
@@ -603,6 +606,10 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                 
                 logger.info(f"   ✅ Position closed | P&L: {pnl_pct:+.2f}% | Reason: {reason}")
                 self._save_state()
+                
+                # Log exit to unified trade journal (matching crypto position manager)
+                self._journal_trade_exit(position, reason)
+                
                 return True
             else:
                 logger.error(f"   ❌ Failed to close position")
@@ -611,6 +618,109 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         except Exception as e:
             logger.error(f"Error closing position: {e}")
             return False
+    
+    def _journal_trade_entry(self, position: StockPosition, decision: StockTradeDecision):
+        """
+        Log trade entry to unified trade journal (matching crypto position manager pattern)
+        Ensures stock trades are properly journaled for reference and historical analysis
+        """
+        try:
+            from services.unified_trade_journal import get_unified_journal, UnifiedTradeEntry, TradeType
+            journal = get_unified_journal()
+            
+            # Calculate risk/reward metrics
+            if position.side.upper() == "BUY":
+                risk_pct = ((position.entry_price - position.stop_loss) / position.entry_price) * 100
+                reward_pct = ((position.take_profit - position.entry_price) / position.entry_price) * 100
+            else:
+                risk_pct = ((position.stop_loss - position.entry_price) / position.entry_price) * 100
+                reward_pct = ((position.entry_price - position.take_profit) / position.entry_price) * 100
+            
+            rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+            position_size_usd = position.quantity * position.entry_price
+            
+            # Determine broker
+            broker = "UNKNOWN"
+            if self.broker_adapter:
+                broker_type = type(self.broker_adapter).__name__
+                if "Tradier" in broker_type:
+                    broker = "TRADIER"
+                elif "IBKR" in broker_type:
+                    broker = "IBKR"
+            if self.paper_mode:
+                broker = f"{broker}_PAPER"
+            
+            entry = UnifiedTradeEntry(
+                trade_id=position.trade_id,
+                trade_type=TradeType.STOCK.value,
+                symbol=position.symbol,
+                side=position.side,
+                entry_time=position.entry_time,
+                entry_price=position.entry_price,
+                quantity=float(position.quantity),
+                position_size_usd=position_size_usd,
+                stop_loss=position.stop_loss,
+                take_profit=position.take_profit,
+                risk_pct=risk_pct,
+                reward_pct=reward_pct,
+                risk_reward_ratio=rr_ratio,
+                strategy=position.strategy,
+                setup_type=decision.strategy if hasattr(decision, 'strategy') else None,
+                ai_managed=True,
+                broker=broker,
+                order_id=position.order_id,
+                notes=position.reasoning[:500] if position.reasoning else None,
+                status="OPEN"
+            )
+            
+            journal.log_trade_entry(entry)
+            logger.info(f"   📝 Logged STOCK trade to unified journal: {position.symbol}")
+            
+        except Exception as e:
+            logger.debug(f"Could not log stock trade to unified journal: {e}")
+    
+    def _journal_trade_exit(self, position: StockPosition, exit_reason: str):
+        """
+        Update unified trade journal with exit information (matching crypto position manager pattern)
+        Records the exit price, P&L, and reason for trade closure
+        """
+        try:
+            from services.unified_trade_journal import get_unified_journal
+            journal = get_unified_journal()
+            
+            # Get market conditions for exit (optional enhancement)
+            market_conditions = None
+            try:
+                # Try to get current technical indicators
+                import yfinance as yf
+                ticker = yf.Ticker(position.symbol)
+                hist = ticker.history(period='5d')
+                if not hist.empty and len(hist) >= 2:
+                    # Calculate simple RSI approximation
+                    deltas = hist['Close'].diff()
+                    gains = deltas.where(deltas > 0, 0).mean()
+                    losses = (-deltas.where(deltas < 0, 0)).mean()
+                    rs = gains / losses if losses != 0 else 1
+                    rsi = 100 - (100 / (1 + rs))
+                    
+                    market_conditions = {
+                        'rsi': rsi,
+                        'trend': 'UPTREND' if hist['Close'].iloc[-1] > hist['Close'].iloc[-5] else 'DOWNTREND'
+                    }
+            except Exception as e:
+                logger.debug(f"Could not get market conditions for exit: {e}")
+            
+            journal.update_trade_exit(
+                trade_id=position.trade_id,
+                exit_price=position.current_price,
+                exit_time=datetime.now(),
+                exit_reason=exit_reason,
+                market_conditions=market_conditions
+            )
+            logger.info(f"   📝 Updated STOCK trade exit in unified journal: {position.symbol}")
+            
+        except Exception as e:
+            logger.debug(f"Could not update stock trade exit in journal: {e}")
     
     def get_positions(self, status: Optional[str] = None) -> List[StockPosition]:
         """Get all positions, optionally filtered by status"""

@@ -902,6 +902,14 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### Unified Trade Journal Integration (December 2, 2025)
+- ✅ **Stock Trades Now Journaled:** AI Stock Position Manager now logs all trades to the UnifiedTradeJournal (matching crypto)
+- ✅ **Entry & Exit Logging:** Both trade entries and exits are recorded with full P&L, R-multiple, and market conditions
+- ✅ **Control Panel Integration:** New "Trade Journal" sections in Service Control Panel for both stock and crypto AI traders
+- ✅ **Journal Stats:** View total trades, win rate, P&L, AI-managed trade performance from Control Panel
+- ✅ **Recent Trades View:** Quick access to last 10 stock or crypto trades with status and P&L
+- ✅ **Consistent Style Tracking:** Stock trades now respect the same trading style/strategy as crypto trades
+
 ### AI Stock Position Manager (December 2, 2025)
 - ✅ **Broker Sync:** New `sync_with_broker()` method syncs positions from Tradier/IBKR on startup and periodically
 - ✅ **Position Monitoring:** Monitors all open stock positions (paper and live) with stop loss/take profit management
@@ -910,6 +918,7 @@ MIT License - See LICENSE file for details
 - ✅ **Runner Script:** New `run_stock_ai_trader_simple.py` for easy service startup
 - ✅ **Batch File:** `START_STOCK_AI_TRADER.bat` for Windows quick-start
 - ✅ **Service Integration:** Added to Service Control Panel and Service Orchestrator
+- ✅ **Trade Journal Integration:** All trades (entry/exit) now logged to UnifiedTradeJournal for tracking and reference
 
 ### Discord & Control Panel Fixes (December 2, 2025)
 - ✅ **Discord 'Analyze' Button Fixed**: Buttons now use unique IDs per message to prevent "interaction failed" errors

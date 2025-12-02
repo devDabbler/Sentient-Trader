@@ -93,6 +93,8 @@ ACTIVE_STRATEGY_FILE = Path(__file__).resolve().parent / "active_strategy.json"
 ANALYSIS_REQUESTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_requests.json"
 ANALYSIS_RESULTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_results.json"
 AI_POSITIONS_FILE = Path(__file__).resolve().parent / "data" / "ai_crypto_positions.json"
+AI_STOCK_POSITIONS_FILE = Path(__file__).resolve().parent / "data" / "ai_stock_positions.json"
+UNIFIED_TRADE_JOURNAL_DB = Path(__file__).resolve().parent / "data" / "unified_trade_journal.db"
 
 # Default watchlists for each service type (expanded for better coverage)
 DEFAULT_WATCHLISTS = {
@@ -773,6 +775,80 @@ def save_ai_exclusions(excluded_pairs: list) -> bool:
     except Exception as e:
         print(f"Error saving AI exclusions: {e}")
         return False
+
+
+def load_stock_positions() -> list:
+    """Load active stock positions from AI stock position manager state"""
+    try:
+        if AI_STOCK_POSITIONS_FILE.exists():
+            with open(AI_STOCK_POSITIONS_FILE, 'r') as f:
+                state = json.load(f)
+                positions = state.get("positions", {})
+                return list(positions.values())
+    except Exception as e:
+        print(f"Error loading stock positions: {e}")
+    return []
+
+
+def load_trade_journal_stats() -> dict:
+    """Load statistics from the unified trade journal"""
+    try:
+        from services.unified_trade_journal import get_unified_journal
+        journal = get_unified_journal()
+        stats = journal.get_statistics()
+        return {
+            'total_trades': stats.total_trades,
+            'open_trades': stats.open_trades,
+            'closed_trades': stats.closed_trades,
+            'winning_trades': stats.winning_trades,
+            'losing_trades': stats.losing_trades,
+            'win_rate': stats.win_rate * 100,
+            'total_pnl': stats.total_pnl,
+            'avg_win': stats.avg_win,
+            'avg_loss': stats.avg_loss,
+            'profit_factor': stats.profit_factor,
+            'stock_trades': stats.stock_trades,
+            'crypto_trades': stats.crypto_trades,
+            'ai_managed_trades': stats.ai_managed_trades,
+            'ai_win_rate': stats.ai_win_rate * 100
+        }
+    except Exception as e:
+        print(f"Error loading trade journal stats: {e}")
+    return {}
+
+
+def load_recent_trades(trade_type: str = None, limit: int = 20) -> list:
+    """Load recent trades from the unified trade journal"""
+    try:
+        from services.unified_trade_journal import get_unified_journal
+        journal = get_unified_journal()
+        trades = journal.get_trades(trade_type=trade_type, limit=limit)
+        return [
+            {
+                'trade_id': t.trade_id,
+                'trade_type': t.trade_type,
+                'symbol': t.symbol,
+                'side': t.side,
+                'entry_time': t.entry_time.isoformat() if t.entry_time else None,
+                'entry_price': t.entry_price,
+                'quantity': t.quantity,
+                'stop_loss': t.stop_loss,
+                'take_profit': t.take_profit,
+                'exit_time': t.exit_time.isoformat() if t.exit_time else None,
+                'exit_price': t.exit_price,
+                'exit_reason': t.exit_reason,
+                'realized_pnl': t.realized_pnl,
+                'pnl_pct': t.pnl_pct,
+                'strategy': t.strategy,
+                'ai_managed': t.ai_managed,
+                'status': t.status,
+                'broker': t.broker
+            }
+            for t in trades
+        ]
+    except Exception as e:
+        print(f"Error loading recent trades: {e}")
+    return []
 
 
 # ============================================================
@@ -2566,6 +2642,48 @@ def main():
                                             st.warning("⚠️ Position manager not available")
                                     except Exception as e:
                                         st.error(f"❌ Error: {e}")
+                            
+                            # ============================================================
+                            # TRADE JOURNAL (Stock trades from unified journal)
+                            # ============================================================
+                            st.markdown("---")
+                            st.markdown("**📒 Trade Journal**")
+                            st.caption("Recent stock trades tracked by AI position manager")
+                            
+                            journal_col1, journal_col2 = st.columns(2)
+                            with journal_col1:
+                                if st.button("📊 View Journal Stats", key="view_stock_journal_stats", use_container_width=True):
+                                    try:
+                                        stats = load_trade_journal_stats()
+                                        if stats:
+                                            st.markdown(f"**Total Trades:** {stats.get('total_trades', 0)} | **Win Rate:** {stats.get('win_rate', 0):.1f}%")
+                                            st.markdown(f"**Stock Trades:** {stats.get('stock_trades', 0)} | **Crypto:** {stats.get('crypto_trades', 0)}")
+                                            st.markdown(f"**AI Managed:** {stats.get('ai_managed_trades', 0)} | **AI Win Rate:** {stats.get('ai_win_rate', 0):.1f}%")
+                                            if stats.get('total_pnl'):
+                                                pnl_emoji = "🟢" if stats['total_pnl'] >= 0 else "🔴"
+                                                st.markdown(f"**Total P&L:** {pnl_emoji} ${stats['total_pnl']:+,.2f}")
+                                        else:
+                                            st.info("📭 No trades in journal yet")
+                                    except Exception as e:
+                                        st.error(f"❌ Error loading stats: {e}")
+                            
+                            with journal_col2:
+                                if st.button("📜 Recent Stock Trades", key="view_recent_stock_trades", use_container_width=True):
+                                    try:
+                                        trades = load_recent_trades(trade_type="STOCK", limit=10)
+                                        if trades:
+                                            for trade in trades:
+                                                status_emoji = "🟢" if trade.get('status') == "OPEN" else "⬜"
+                                                pnl = trade.get('realized_pnl')
+                                                if pnl is not None:
+                                                    pnl_str = f" | P&L: {'🟢' if pnl >= 0 else '🔴'} ${pnl:+,.2f}"
+                                                else:
+                                                    pnl_str = ""
+                                                st.write(f"{status_emoji} **{trade['symbol']}** {trade['side']} @ ${trade['entry_price']:.2f}{pnl_str}")
+                                        else:
+                                            st.info("📭 No stock trades in journal")
+                                    except Exception as e:
+                                        st.error(f"❌ Error: {e}")
                         
                         # Multiselect for tickers
                         # Combine all_tickers with current_watchlist to ensure custom additions are available as options
@@ -2734,6 +2852,73 @@ def main():
                                 st.caption("Watchlist size: N/A")
                             
                             st.caption("💡 To manage your crypto watchlist, use the Watchlist section above or go to the **Watchlists** tab")
+                        
+                        # ============================================================
+                        # CRYPTO TRADE JOURNAL (AI Crypto Trader)
+                        # ============================================================
+                        if service_name == "sentient-crypto-ai-trader":
+                            st.markdown("---")
+                            st.markdown("**📒 Crypto Trade Journal**")
+                            st.caption("Recent crypto trades tracked by AI position manager")
+                            
+                            crypto_journal_col1, crypto_journal_col2 = st.columns(2)
+                            with crypto_journal_col1:
+                                if st.button("📊 View Journal Stats", key="view_crypto_journal_stats", use_container_width=True):
+                                    try:
+                                        stats = load_trade_journal_stats()
+                                        if stats:
+                                            st.markdown(f"**Total Trades:** {stats.get('total_trades', 0)} | **Win Rate:** {stats.get('win_rate', 0):.1f}%")
+                                            st.markdown(f"**Crypto Trades:** {stats.get('crypto_trades', 0)} | **Stock:** {stats.get('stock_trades', 0)}")
+                                            st.markdown(f"**AI Managed:** {stats.get('ai_managed_trades', 0)} | **AI Win Rate:** {stats.get('ai_win_rate', 0):.1f}%")
+                                            if stats.get('total_pnl'):
+                                                pnl_emoji = "🟢" if stats['total_pnl'] >= 0 else "🔴"
+                                                st.markdown(f"**Total P&L:** {pnl_emoji} ${stats['total_pnl']:+,.2f}")
+                                        else:
+                                            st.info("📭 No trades in journal yet")
+                                    except Exception as e:
+                                        st.error(f"❌ Error loading stats: {e}")
+                            
+                            with crypto_journal_col2:
+                                if st.button("📜 Recent Crypto Trades", key="view_recent_crypto_trades", use_container_width=True):
+                                    try:
+                                        trades = load_recent_trades(trade_type="CRYPTO", limit=10)
+                                        if trades:
+                                            for trade in trades:
+                                                status_emoji = "🟢" if trade.get('status') == "OPEN" else "⬜"
+                                                pnl = trade.get('realized_pnl')
+                                                if pnl is not None:
+                                                    pnl_str = f" | P&L: {'🟢' if pnl >= 0 else '🔴'} ${pnl:+,.2f}"
+                                                else:
+                                                    pnl_str = ""
+                                                st.write(f"{status_emoji} **{trade['symbol']}** {trade['side']} @ ${trade['entry_price']:.4f}{pnl_str}")
+                                        else:
+                                            st.info("📭 No crypto trades in journal")
+                                    except Exception as e:
+                                        st.error(f"❌ Error: {e}")
+                            
+                            # Show active positions from crypto AI manager
+                            st.markdown("---")
+                            st.markdown("**📊 Active Crypto Positions**")
+                            if st.button("🔄 Refresh Positions", key="refresh_crypto_positions", use_container_width=True):
+                                try:
+                                    if AI_POSITIONS_FILE.exists():
+                                        with open(AI_POSITIONS_FILE, 'r') as f:
+                                            state = json.load(f)
+                                            positions = state.get("positions", {})
+                                            if positions:
+                                                for trade_id, pos in positions.items():
+                                                    if pos.get('status') == 'ACTIVE':
+                                                        entry_price = pos.get('entry_price', 0)
+                                                        current_price = pos.get('current_price', entry_price)
+                                                        pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                                                        emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                                        st.write(f"{emoji} **{pos.get('pair', 'N/A')}**: {pos.get('volume', 0):.4f} @ ${entry_price:.4f} ({pnl_pct:+.1f}%)")
+                                            else:
+                                                st.info("📭 No active crypto positions")
+                                    else:
+                                        st.info("📭 No crypto position data found")
+                                except Exception as e:
+                                    st.error(f"❌ Error loading positions: {e}")
                 
                 st.markdown("---")
     
