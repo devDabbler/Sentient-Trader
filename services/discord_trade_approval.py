@@ -443,6 +443,16 @@ class DiscordTradeApprovalBot(commands.Bot):
             elif action in ['DISMISS', 'REMOVE']:
                 await self._handle_dismiss_command(message, symbol)
             return
+        
+        # Standalone TRADE commands: "TRADE AAPL", "T NVDA", "BUY TSLA", "PAPER GOOG"
+        trade_match = re.match(r'(TRADE|T|BUY|ENTER|PAPER|P)\s+([A-Z0-9]+)', content)
+        if trade_match:
+            action = trade_match.group(1)
+            symbol = trade_match.group(2).upper()
+            paper_mode = action in ['PAPER', 'P']
+            logger.info(f"   🔍 Standalone TRADE command: {action} {symbol} (paper={paper_mode})")
+            await self._handle_stock_trade_execution(message, symbol, side="BUY", paper_mode=paper_mode)
+            return
 
         # Pattern: APPROVE/REJECT followed by number or symbol
         specific_match = re.match(r'(APPROVE|YES|REJECT|NO)\s+(\d+|[A-Z0-9/]+)', content)
