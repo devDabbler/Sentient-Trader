@@ -1254,18 +1254,18 @@ class DiscordTradeApprovalBot(commands.Bot):
                 
                 def _calculate_sizing():
                     risk_manager = get_risk_profile_manager()
-                    confidence_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
-                    entry_price = alert_info.price or 0.0
-                    stop_loss = alert_info.stop_loss or (entry_price * 0.95)  # Default 5% stop
+                    conf_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
+                    e_price = alert_info.price or 0.0
+                    s_loss = alert_info.stop_loss or (e_price * 0.95)  # Default 5% stop
                     
                     sizing = risk_manager.calculate_position_size(
-                        price=entry_price,
-                        stop_loss=stop_loss,
-                        confidence=confidence_score
+                        price=e_price,
+                        stop_loss=s_loss,
+                        confidence=conf_score
                     )
-                    return sizing, entry_price, stop_loss
+                    return sizing, e_price, s_loss, conf_score
                 
-                sizing, entry_price, stop_loss = await asyncio.to_thread(_calculate_sizing)
+                sizing, entry_price, stop_loss, confidence_score = await asyncio.to_thread(_calculate_sizing)
                 
                 recommended_shares = sizing['recommended_shares']
                 recommended_value = sizing['recommended_value']
@@ -1277,6 +1277,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 # Fallback to default sizing
                 entry_price = alert_info.price or 0.0
                 stop_loss = alert_info.stop_loss or (entry_price * 0.95)
+                confidence_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
                 recommended_shares = int(stock_manager.default_position_size / alert_info.price) if alert_info.price else 10
                 recommended_value = stock_manager.default_position_size
                 position_pct = 10.0
