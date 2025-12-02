@@ -2065,34 +2065,42 @@ def main():
                         st.caption(f"❌ {health.get('error_count', 0)} errors")
             
             # ============================================================
-            # CURRENT WATCHLISTS (Quick View)
+            # CURRENT WATCHLISTS (Quick View) - From Supabase
             # ============================================================
             st.markdown("---")
-            st.markdown("### 📋 Current Watchlists")
+            st.markdown("### 📋 Current Watchlists (Supabase)")
             
             watchlist_col1, watchlist_col2 = st.columns(2)
             
             with watchlist_col1:
                 st.markdown("**🪙 Crypto Watchlist**")
                 try:
-                    from windows_services.runners.service_config_loader import load_service_watchlist
-                    crypto_watchlist = load_service_watchlist('sentient-crypto-breakout') or []
+                    from services.crypto_watchlist_manager import CryptoWatchlistManager
+                    cwm = CryptoWatchlistManager()
+                    crypto_watchlist = cwm.get_all_cryptos()
                     if crypto_watchlist:
-                        st.write(f"**{len(crypto_watchlist)}** pairs: " + ", ".join(crypto_watchlist[:10]) + ("..." if len(crypto_watchlist) > 10 else ""))
+                        symbols = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
+                        st.write(f"**{len(symbols)}** pairs: " + ", ".join(symbols[:8]) + ("..." if len(symbols) > 8 else ""))
                     else:
-                        st.caption("No crypto pairs in watchlist")
+                        st.caption("No crypto pairs in Supabase watchlist")
                 except Exception as e:
                     st.caption(f"⚠️ Could not load: {e}")
             
             with watchlist_col2:
                 st.markdown("**📈 Stock Watchlist**")
                 try:
-                    from windows_services.runners.service_config_loader import load_service_watchlist
-                    stock_watchlist = load_service_watchlist('sentient-stock-monitor') or []
-                    if stock_watchlist:
-                        st.write(f"**{len(stock_watchlist)}** tickers: " + ", ".join(stock_watchlist[:10]) + ("..." if len(stock_watchlist) > 10 else ""))
+                    from services.ticker_manager import TickerManager
+                    tm = TickerManager()
+                    if tm.test_connection():
+                        stock_data = tm.get_all_tickers(ticker_type='stock', limit=1000) or []
+                        penny_data = tm.get_all_tickers(ticker_type='penny_stock', limit=1000) or []
+                        all_stocks = [t['ticker'] for t in stock_data] + [t['ticker'] for t in penny_data]
+                        if all_stocks:
+                            st.write(f"**{len(all_stocks)}** tickers: " + ", ".join(all_stocks[:8]) + ("..." if len(all_stocks) > 8 else ""))
+                        else:
+                            st.caption("No stocks in Supabase watchlist")
                     else:
-                        st.caption("No stocks in watchlist")
+                        st.caption("⚠️ Supabase not connected")
                 except Exception as e:
                     st.caption(f"⚠️ Could not load: {e}")
             
@@ -2553,22 +2561,26 @@ def main():
                         # Try to fetch tickers from Supabase based on category
                         supabase_tickers = []
                         try:
-                            from services.ticker_manager import TickerManager
-                            svc_tm = TickerManager()
-                            if svc_tm.test_connection():
-                                if category == "crypto" and service_name != "sentient-dex-launch":
-                                    # Fetch crypto tickers from Supabase
-                                    crypto_data = svc_tm.get_all_tickers(ticker_type='crypto', limit=1000)
-                                    if crypto_data:
-                                        supabase_tickers = [t['ticker'] for t in crypto_data]
-                                elif category == "stocks":
-                                    # Fetch stock tickers from Supabase (includes penny_stock type)
-                                    stock_data = svc_tm.get_all_tickers(ticker_type='stock', limit=1000)
-                                    penny_data = svc_tm.get_all_tickers(ticker_type='penny_stock', limit=1000)
-                                    if stock_data:
-                                        supabase_tickers.extend([t['ticker'] for t in stock_data])
-                                    if penny_data:
-                                        supabase_tickers.extend([t['ticker'] for t in penny_data])
+                            if category == "crypto" and service_name != "sentient-dex-launch":
+                                # Use CryptoWatchlistManager for crypto (same as Watchlist Manager tab)
+                                from services.crypto_watchlist_manager import CryptoWatchlistManager
+                                cwm = CryptoWatchlistManager()
+                                crypto_watchlist = cwm.get_all_cryptos()
+                                if crypto_watchlist:
+                                    supabase_tickers = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
+                            else:
+                                # Use TickerManager for stocks
+                                from services.ticker_manager import TickerManager
+                                svc_tm = TickerManager()
+                                if svc_tm.test_connection():
+                                    if category == "stocks":
+                                        # Fetch stock tickers from Supabase (includes penny_stock type)
+                                        stock_data = svc_tm.get_all_tickers(ticker_type='stock', limit=1000)
+                                        penny_data = svc_tm.get_all_tickers(ticker_type='penny_stock', limit=1000)
+                                        if stock_data:
+                                            supabase_tickers.extend([t['ticker'] for t in stock_data])
+                                        if penny_data:
+                                            supabase_tickers.extend([t['ticker'] for t in penny_data])
                         except Exception as e:
                             print(f"Failed to fetch tickers from Supabase: {e}")
                         

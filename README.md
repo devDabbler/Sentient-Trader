@@ -912,6 +912,7 @@ MIT License - See LICENSE file for details
 - ✅ **Singleton Function:** Added `get_ai_crypto_position_manager()` for easy integration from Control Panel
 - ✅ **Auto Kraken Init:** Function auto-creates Kraken client from environment variables if not provided
 - ✅ **Workflow Watchlists:** Workflow tab now shows quick-view of current crypto and stock watchlists
+- ✅ **Fixed Crypto Watchlist Source:** Service Status now uses `CryptoWatchlistManager` (same as Watchlists tab) instead of `TickerManager` - this ensures all 118+ crypto from Supabase are shown, not just 1
 
 ### Crypto Breakout Trade Execution from Discord (December 2, 2025)
 - ✅ **Trade Button Added:** Crypto breakout alerts now have a 🚀 Trade button for direct execution
