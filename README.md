@@ -909,6 +909,14 @@ MIT License - See LICENSE file for details
 - ✅ **Journal Stats:** View total trades, win rate, P&L, AI-managed trade performance from Control Panel
 - ✅ **Recent Trades View:** Quick access to last 10 stock or crypto trades with status and P&L
 - ✅ **Consistent Style Tracking:** Stock trades now respect the same trading style/strategy as crypto trades
+- ✅ **Discord Alerts for Stock Positions:** Now sends Discord notifications for:
+  - 📥 Position synced from broker (GME, SOFI, etc. will be announced when imported)
+  - 🛑 Stop loss triggered
+  - 🎯 Take profit hit
+  - 🛡️ Breakeven move executed
+  - ✅ Broker sync summary
+- ✅ **Synced Position Journaling:** Positions imported from broker are automatically journaled for tracking
+- ✅ **Position Status Logging:** Each check cycle logs P&L, current price, and stop/target for all positions
 
 ### AI Stock Position Manager (December 2, 2025)
 - ✅ **Broker Sync:** New `sync_with_broker()` method syncs positions from Tradier/IBKR on startup and periodically

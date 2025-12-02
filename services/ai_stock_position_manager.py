@@ -722,6 +722,73 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         except Exception as e:
             logger.debug(f"Could not update stock trade exit in journal: {e}")
     
+    def _journal_synced_position(self, position: StockPosition):
+        """
+        Log a synced position to the unified trade journal
+        This handles positions that were opened before the journal integration
+        """
+        try:
+            from services.unified_trade_journal import get_unified_journal, UnifiedTradeEntry, TradeType
+            journal = get_unified_journal()
+            
+            # Check if this position is already in the journal
+            existing_trades = journal.get_trades(symbol=position.symbol, status="OPEN", limit=10)
+            for trade in existing_trades:
+                if trade.trade_id == position.trade_id:
+                    logger.debug(f"   Position {position.symbol} already in journal")
+                    return
+            
+            # Calculate risk/reward metrics
+            if position.side.upper() == "BUY":
+                risk_pct = ((position.entry_price - position.stop_loss) / position.entry_price) * 100
+                reward_pct = ((position.take_profit - position.entry_price) / position.entry_price) * 100
+            else:
+                risk_pct = ((position.stop_loss - position.entry_price) / position.entry_price) * 100
+                reward_pct = ((position.entry_price - position.take_profit) / position.entry_price) * 100
+            
+            rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
+            position_size_usd = position.quantity * position.entry_price
+            
+            # Determine broker
+            broker = "UNKNOWN"
+            if self.broker_adapter:
+                broker_type = type(self.broker_adapter).__name__
+                if "Tradier" in broker_type:
+                    broker = "TRADIER"
+                elif "IBKR" in broker_type:
+                    broker = "IBKR"
+            if self.paper_mode:
+                broker = f"{broker}_PAPER"
+            
+            entry = UnifiedTradeEntry(
+                trade_id=position.trade_id,
+                trade_type=TradeType.STOCK.value,
+                symbol=position.symbol,
+                side=position.side,
+                entry_time=position.entry_time,
+                entry_price=position.entry_price,
+                quantity=float(position.quantity),
+                position_size_usd=position_size_usd,
+                stop_loss=position.stop_loss,
+                take_profit=position.take_profit,
+                risk_pct=risk_pct,
+                reward_pct=reward_pct,
+                risk_reward_ratio=rr_ratio,
+                strategy="SYNCED_FROM_BROKER",
+                setup_type="BROKER_IMPORT",
+                ai_managed=True,
+                broker=broker,
+                order_id=position.order_id,
+                notes=f"Synced from broker on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                status="OPEN"
+            )
+            
+            journal.log_trade_entry(entry)
+            logger.info(f"   📝 Logged SYNCED position to unified journal: {position.symbol}")
+            
+        except Exception as e:
+            logger.debug(f"Could not journal synced position: {e}")
+    
     def get_positions(self, status: Optional[str] = None) -> List[StockPosition]:
         """Get all positions, optionally filtered by status"""
         if status:
@@ -919,11 +986,37 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                         pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
                         logger.info(f"   📥 Added {symbol}: {quantity} shares @ ${entry_price:.2f} {pnl_emoji} ({pnl_pct:+.1f}%)")
                         
+                        # Send Discord notification for synced position
+                        self._send_notification(
+                            f"📥 POSITION SYNCED: {symbol}",
+                            f"**Imported from broker!**\n"
+                            f"**Side:** {side} | **Shares:** {quantity}\n"
+                            f"**Entry:** ${entry_price:.2f}\n"
+                            f"**Current:** ${current_price:.2f} ({pnl_pct:+.1f}%)\n"
+                            f"**Stop:** ${stop_loss:.2f} | **Target:** ${take_profit:.2f}\n\n"
+                            f"_AI monitoring now active for this position_",
+                            color=3447003  # Blue
+                        )
+                        
+                        # Also journal the synced position
+                        self._journal_synced_position(position)
+                        
                     except Exception as e:
                         logger.warning(f"   Failed to add broker position {symbol}: {e}")
             
             # Save state after sync
             self._save_state()
+            
+            # Send summary notification if positions were synced
+            if added_count > 0:
+                self._send_notification(
+                    f"✅ BROKER SYNC COMPLETE",
+                    f"**Added:** {added_count} position(s)\n"
+                    f"**Removed:** {removed_count}\n"
+                    f"**Kept:** {kept_count}\n\n"
+                    f"_All positions now being monitored by AI_",
+                    color=3066993  # Green
+                )
             
             logger.info(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
             return {'removed': removed_count, 'added': added_count, 'kept': kept_count}
@@ -1023,7 +1116,7 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                 time.sleep(self.check_interval_seconds)
     
     def _check_positions(self, positions: List[StockPosition]):
-        """Check positions for stop loss / take profit triggers"""
+        """Check positions for stop loss / take profit triggers with Discord alerts"""
         for position in positions:
             try:
                 # Get current price
@@ -1038,42 +1131,115 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                 position.highest_price = max(position.highest_price, current_price)
                 position.lowest_price = min(position.lowest_price, current_price)
                 
+                # Calculate P&L
+                pnl_pct = self._calculate_pnl_pct(position)
+                pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                
+                # Log position status
+                logger.info(f"   {pnl_emoji} {position.symbol}: ${current_price:.2f} ({pnl_pct:+.2f}%) | Stop: ${position.stop_loss:.2f} | TP: ${position.take_profit:.2f}")
+                
                 # Check stop loss
                 if position.side.upper() == "BUY":
                     if current_price <= position.stop_loss:
                         logger.warning(f"🛑 STOP LOSS HIT: {position.symbol} @ ${current_price:.2f}")
+                        self._send_notification(
+                            f"🛑 STOP LOSS: {position.symbol}",
+                            f"**Price:** ${current_price:.2f}\n"
+                            f"**P&L:** {pnl_pct:+.2f}%\n"
+                            f"**Entry:** ${position.entry_price:.2f}\n"
+                            f"**Shares:** {position.quantity}",
+                            color=15158332  # Red
+                        )
                         self.close_position(position.trade_id, "Stop loss triggered")
                         continue
                     
                     if current_price >= position.take_profit:
                         logger.info(f"🎯 TAKE PROFIT HIT: {position.symbol} @ ${current_price:.2f}")
+                        self._send_notification(
+                            f"🎯 TAKE PROFIT: {position.symbol}",
+                            f"**Price:** ${current_price:.2f}\n"
+                            f"**P&L:** {pnl_pct:+.2f}%\n"
+                            f"**Entry:** ${position.entry_price:.2f}\n"
+                            f"**Shares:** {position.quantity}",
+                            color=3066993  # Green
+                        )
                         self.close_position(position.trade_id, "Take profit triggered")
                         continue
                 else:
                     # Short position
                     if current_price >= position.stop_loss:
                         logger.warning(f"🛑 STOP LOSS HIT (SHORT): {position.symbol} @ ${current_price:.2f}")
+                        self._send_notification(
+                            f"🛑 STOP LOSS (SHORT): {position.symbol}",
+                            f"**Price:** ${current_price:.2f}\n"
+                            f"**P&L:** {pnl_pct:+.2f}%\n"
+                            f"**Entry:** ${position.entry_price:.2f}\n"
+                            f"**Shares:** {position.quantity}",
+                            color=15158332  # Red
+                        )
                         self.close_position(position.trade_id, "Stop loss triggered")
                         continue
                     
                     if current_price <= position.take_profit:
                         logger.info(f"🎯 TAKE PROFIT HIT (SHORT): {position.symbol} @ ${current_price:.2f}")
+                        self._send_notification(
+                            f"🎯 TAKE PROFIT (SHORT): {position.symbol}",
+                            f"**Price:** ${current_price:.2f}\n"
+                            f"**P&L:** {pnl_pct:+.2f}%\n"
+                            f"**Entry:** ${position.entry_price:.2f}\n"
+                            f"**Shares:** {position.quantity}",
+                            color=3066993  # Green
+                        )
                         self.close_position(position.trade_id, "Take profit triggered")
                         continue
                 
                 # Check breakeven move
                 if self.enable_breakeven_moves and not position.moved_to_breakeven:
-                    pnl_pct = self._calculate_pnl_pct(position)
                     if pnl_pct >= position.breakeven_trigger_pct:
+                        old_stop = position.stop_loss
                         position.stop_loss = position.entry_price
                         position.moved_to_breakeven = True
                         logger.info(f"✅ Moved {position.symbol} stop to breakeven")
+                        self._send_notification(
+                            f"🛡️ BREAKEVEN: {position.symbol}",
+                            f"**Stop moved to entry!**\n"
+                            f"**Old Stop:** ${old_stop:.2f}\n"
+                            f"**New Stop:** ${position.stop_loss:.2f}\n"
+                            f"**Current P&L:** {pnl_pct:+.2f}%",
+                            color=3447003  # Blue
+                        )
                 
             except Exception as e:
                 logger.error(f"Error checking position {position.symbol}: {e}")
         
         # Save state after checking
         self._save_state()
+    
+    def _send_notification(self, title: str, message: str, color: int = 3447003):
+        """Send Discord notification (matching crypto position manager pattern)"""
+        try:
+            import requests
+            
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if not webhook_url:
+                logger.debug("Discord webhook not configured - skipping notification")
+                return
+            
+            embed = {
+                'title': title,
+                'description': message,
+                'color': color,
+                'timestamp': datetime.now().isoformat(),
+                'footer': {'text': f'AI Stock Position Manager | {"📝 Paper" if self.paper_mode else "💰 Live"}'}
+            }
+            
+            payload = {'embeds': [embed]}
+            response = requests.post(webhook_url, json=payload, timeout=5)
+            response.raise_for_status()
+            logger.debug(f"📨 Discord notification sent: {title}")
+            
+        except Exception as e:
+            logger.debug(f"Failed to send Discord notification: {e}")
     
     def _get_current_price(self, symbol: str) -> Optional[float]:
         """Get current price from broker or fallback"""
