@@ -56,17 +56,24 @@ The platform supports:
   - ML confidence scoring (Performance, volatility, alignment)
   - LLM meta-analysis (AI reasoning on composite signals)
 * **🔍 Stock Discovery Universe:** Auto-discover opportunities beyond watchlist
-  - Top gainers & losers (momentum/reversal plays)
-  - Most active stocks (volume breakouts)
-  - 52-week new highs (trend followers)
-  - High volume breakouts (technical signals)
-  - Sector leaders (rotation opportunities)
-  - All 6 modes independently toggleable via Control Panel
+  - **Mega Caps** - Options-friendly large caps (AAPL, MSFT, etc.)
+  - **High Beta Tech** - Volatile tech stocks (PLTR, SOFI, etc.)
+  - **Momentum/Meme** - High momentum and meme stocks
+  - **EV/Clean Energy** - Electric vehicle and clean energy stocks
+  - **Crypto-Related** - Stocks tied to crypto (MARA, RIOT, COIN)
+  - **AI Stocks** - Artificial intelligence related stocks
+  - **Biotech** - Biotechnology and pharma stocks
+  - **Financial** - Banks and financial services
+  - **Energy** - Oil and gas stocks
+  - **High IV Options** - High implied volatility for options trading
+  - **Penny Stocks** - Low-priced stocks under $5
+  - All 11 categories independently toggleable via Control Panel
 * **⚙️ Service Control Panel Integration:** Full discovery configuration UI
-  - Toggle discovery on/off with single click
-  - Enable/disable individual discovery modes
-  - Adjust universe size per mode (10-100 stocks)
+  - **3 Scan Modes:** Watchlist Only | Discovery Only | Both (Watchlist + Discovery)
+  - Enable/disable individual discovery categories
+  - Adjust universe size per category (10-100 stocks)
   - View discovery statistics and metrics
+  - Real-time scan mode indicator
 * **📊 Production-Grade Resilience:** Health tracking, circuit breakers, auto-recovery
   - Comprehensive stats tracking (scans, alerts, errors, uptime)
   - Circuit breaker protection (prevents cascading failures)

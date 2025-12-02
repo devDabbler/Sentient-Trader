@@ -236,6 +236,8 @@ class StockInformationalMonitor(LLMServiceMixin):
         self.discovery_universe = get_stock_discovery_universe(detector=self.enhanced_detector)
         self.discovery_enabled = False  # Can be toggled via control panel
         self.discovery_modes = {}  # Tracks which modes are enabled
+        # SCAN MODE: 'watchlist_only', 'discovery_only', 'both'
+        self.scan_mode = 'watchlist_only'  # Default to watchlist only
         print(f"[TRACE] StockInformationalMonitor.__init__: Discovery universe initialized", flush=True)
         
         # State
@@ -443,6 +445,38 @@ class StockInformationalMonitor(LLMServiceMixin):
     # DISCOVERY: Stock Universe Discovery Control
     # ============================================================
     
+    def set_scan_mode(self, mode: str):
+        """
+        Set the scan mode
+        
+        Args:
+            mode: One of 'watchlist_only', 'discovery_only', 'both'
+        """
+        valid_modes = ['watchlist_only', 'discovery_only', 'both']
+        if mode not in valid_modes:
+            logger.error(f"Invalid scan mode: {mode}. Must be one of {valid_modes}")
+            return
+        
+        old_mode = getattr(self, 'scan_mode', 'watchlist_only')
+        self.scan_mode = mode
+        
+        # Auto-enable discovery if switching to discovery_only or both
+        if mode in ['discovery_only', 'both']:
+            self.discovery_enabled = True
+        else:
+            self.discovery_enabled = False
+        
+        mode_desc = {
+            'watchlist_only': '📋 Watchlist Only',
+            'discovery_only': '🔍 Discovery Only',
+            'both': '🚀 Watchlist + Discovery'
+        }
+        
+        if mode != old_mode:
+            logger.info(f"Scan mode changed: {mode_desc.get(old_mode, old_mode)} → {mode_desc[mode]}")
+        else:
+            logger.debug(f"Scan mode: {mode_desc[mode]}")
+    
     def set_discovery_enabled(self, enabled: bool):
         """
         Enable or disable stock discovery
@@ -633,10 +667,18 @@ class StockInformationalMonitor(LLMServiceMixin):
             from windows_services.runners.service_discovery_config import load_discovery_config
             config = load_discovery_config()
             
-            # Update discovery enabled state
-            if config.get('enabled') != self.discovery_enabled:
-                self.set_discovery_enabled(config['enabled'])
-                logger.info(f"🔍 Discovery {'enabled' if config['enabled'] else 'disabled'} via Control Panel")
+            # Update scan mode (watchlist_only, discovery_only, both)
+            new_scan_mode = config.get('scan_mode', 'watchlist_only')
+            current_scan_mode = getattr(self, 'scan_mode', 'watchlist_only')
+            if new_scan_mode != current_scan_mode:
+                self.set_scan_mode(new_scan_mode)
+                logger.info(f"🔄 Scan mode synced from Control Panel: {new_scan_mode}")
+            
+            # Update discovery enabled state based on scan mode
+            discovery_should_be_enabled = new_scan_mode in ['discovery_only', 'both']
+            if discovery_should_be_enabled != self.discovery_enabled:
+                self.discovery_enabled = discovery_should_be_enabled
+                logger.debug(f"Discovery {'enabled' if discovery_should_be_enabled else 'disabled'} (scan_mode={new_scan_mode})")
             
             # Update discovery modes
             modes_config = {
@@ -710,7 +752,12 @@ class StockInformationalMonitor(LLMServiceMixin):
     
     def scan_all_tickers(self) -> List[StockOpportunity]:
         """
-        Scan all tickers in watchlist with resilience features
+        Scan all tickers based on scan_mode with resilience features
+        
+        Scan modes:
+        - 'watchlist_only': Only scan watchlist tickers
+        - 'discovery_only': Only scan discovered tickers
+        - 'both': Scan both watchlist and discovered tickers
         
         Returns:
             List of detected opportunities
@@ -720,25 +767,43 @@ class StockInformationalMonitor(LLMServiceMixin):
         skipped_count = 0
         error_count = 0
         
-        logger.info("=" * 80)
-        logger.info(f"🔍 Starting scan of {len(self.watchlist) if self.watchlist else 0} tickers...")
+        # Get current scan mode (default to 'watchlist_only' for safety)
+        current_scan_mode = getattr(self, 'scan_mode', 'watchlist_only')
         
-        if not self.watchlist:
-            logger.warning("No tickers in watchlist to scan")
-            self.stats.scans_completed += 1
-            return opportunities
+        logger.info("=" * 80)
+        
+        # Determine scan mode display
+        mode_icons = {
+            'watchlist_only': '📋 WATCHLIST ONLY',
+            'discovery_only': '🔍 DISCOVERY ONLY',
+            'both': '🚀 WATCHLIST + DISCOVERY'
+        }
+        logger.info(f"Scan Mode: {mode_icons.get(current_scan_mode, current_scan_mode)}")
         
         # Cleanup old error/alert records periodically
         self._cleanup_old_errors()
         
-        # Sync watchlist from Control Panel if needed
-        self._sync_watchlist_from_config()
+        # Sync watchlist from Control Panel if needed (for watchlist_only and both modes)
+        if current_scan_mode in ['watchlist_only', 'both']:
+            self._sync_watchlist_from_config()
         
-        # BUILD SCAN UNIVERSE
-        scan_universe = list(self.watchlist) if self.watchlist else []
+        # Sync discovery config (for discovery_only and both modes)
+        if current_scan_mode in ['discovery_only', 'both']:
+            self._sync_discovery_config()
         
-        # Add discovered stocks if enabled AND at least one mode is active
-        if self.discovery_enabled:
+        # BUILD SCAN UNIVERSE based on scan_mode
+        scan_universe = []
+        watchlist_tickers = []
+        discovered_tickers = []
+        
+        # Step 1: Add watchlist tickers (if mode includes watchlist)
+        if current_scan_mode in ['watchlist_only', 'both']:
+            watchlist_tickers = list(self.watchlist) if self.watchlist else []
+            scan_universe.extend(watchlist_tickers)
+            logger.info(f"📋 Watchlist: {len(watchlist_tickers)} tickers")
+        
+        # Step 2: Add discovered tickers (if mode includes discovery)
+        if current_scan_mode in ['discovery_only', 'both']:
             # Check if any discovery modes are actually enabled
             active_modes = [
                 mode_name for mode_name, mode in self.discovery_universe.modes.items()
@@ -746,37 +811,54 @@ class StockInformationalMonitor(LLMServiceMixin):
             ]
             
             if active_modes:
-                logger.info(f"🔍 Running stock discovery to expand universe ({len(active_modes)} mode(s) active)...")
+                logger.info(f"🔍 Running stock discovery ({len(active_modes)} mode(s) active)...")
                 try:
-                    discovered_dict = self.discovery_universe.discover_stocks(exclude_watchlist=scan_universe)
+                    # Exclude watchlist tickers from discovery to avoid duplicates
+                    exclude_list = watchlist_tickers if current_scan_mode == 'both' else []
+                    discovered_dict = self.discovery_universe.discover_stocks(exclude_watchlist=exclude_list)
                     
                     # Flatten discovered tickers from all modes
-                    discovered_tickers = []
-                    for mode_tickers in discovered_dict.values():
-                        discovered_tickers.extend(mode_tickers)
+                    all_discovered = []
+                    for mode_name, mode_tickers in discovered_dict.items():
+                        all_discovered.extend(mode_tickers)
+                        if mode_tickers:
+                            logger.debug(f"   {mode_name}: {len(mode_tickers)} tickers")
                     
-                    # Deduplicate and validate (discovery should already filter, but double-check)
-                    discovered_tickers = list(set(discovered_tickers))
-                    # Filter out any invalid tickers (shouldn't be needed, but safety check)
-                    valid_discovered = [t for t in discovered_tickers if self.discovery_universe._is_valid_stock_ticker(t)]
+                    # Deduplicate and validate
+                    all_discovered = list(set(all_discovered))
+                    valid_discovered = [t for t in all_discovered if self.discovery_universe._is_valid_stock_ticker(t)]
                     
-                    # Add to scan universe (limit to avoid overwhelming)
-                    max_discovered = 50  # Limit added tickers
-                    valid_discovered = valid_discovered[:max_discovered]
+                    # Limit discovered tickers to avoid overwhelming the scan
+                    max_discovered = 50
+                    discovered_tickers = valid_discovered[:max_discovered]
                     
-                    # Final deduplication: remove any discovered tickers that are already in watchlist
+                    # Final deduplication: remove any discovered tickers already in scan universe
                     existing_set = set(t.upper() for t in scan_universe)
-                    new_discovered = [t for t in valid_discovered if t.upper() not in existing_set]
+                    new_discovered = [t for t in discovered_tickers if t.upper() not in existing_set]
                     
                     scan_universe.extend(new_discovered)
                     
-                    logger.info(f"📈 Added {len(new_discovered)} discovered stock tickers (total universe: {len(scan_universe)})")
+                    logger.info(f"🔍 Discovery: {len(new_discovered)} tickers added")
                     if len(new_discovered) < len(valid_discovered):
-                        logger.debug(f"   (Skipped {len(valid_discovered) - len(new_discovered)} duplicates already in watchlist)")
+                        logger.debug(f"   (Skipped {len(valid_discovered) - len(new_discovered)} duplicates)")
                 except Exception as e:
                     logger.error(f"❌ Error in discovery: {e}")
             else:
-                logger.debug("🔍 Discovery enabled but no modes active - skipping discovery")
+                logger.warning("🔍 Discovery mode active but no discovery categories enabled!")
+                logger.warning("   → Enable categories in Service Control Panel → Stock Discovery Universe")
+        
+        # Log final scan universe
+        logger.info(f"📊 Total scan universe: {len(scan_universe)} tickers")
+        
+        if not scan_universe:
+            if current_scan_mode == 'watchlist_only':
+                logger.warning("No tickers in watchlist to scan")
+            elif current_scan_mode == 'discovery_only':
+                logger.warning("No tickers discovered - enable discovery modes in Control Panel")
+            else:
+                logger.warning("No tickers to scan (empty watchlist and no discovery)")
+            self.stats.scans_completed += 1
+            return opportunities
         
         self.stats.tickers_scanned = 0
         

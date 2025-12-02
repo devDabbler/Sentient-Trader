@@ -29,7 +29,12 @@ def load_discovery_config() -> Dict[str, Any]:
         if DISCOVERY_CONFIG_FILE.exists():
             with open(DISCOVERY_CONFIG_FILE, 'r') as f:
                 config = json.load(f)
-                logger.debug(f"Loaded discovery config: enabled={config.get('enabled')}")
+                
+                # Migrate old configs: add scan_mode if missing
+                if 'scan_mode' not in config:
+                    config['scan_mode'] = 'both' if config.get('enabled') else 'watchlist_only'
+                
+                logger.debug(f"Loaded discovery config: enabled={config.get('enabled')}, scan_mode={config.get('scan_mode')}")
                 return config
     except Exception as e:
         logger.warning(f"Could not load discovery config: {e}")
@@ -53,6 +58,7 @@ def get_default_discovery_config() -> Dict[str, Any]:
     """Get default discovery configuration - uses TieredStockScanner categories"""
     return {
         'enabled': False,  # Disabled by default
+        'scan_mode': 'watchlist_only',  # Options: 'watchlist_only', 'discovery_only', 'both'
         'last_updated': datetime.now().isoformat(),
         'modes': {
             'mega_cap': {
@@ -135,6 +141,44 @@ def toggle_discovery(enabled: bool):
     logger.info(f"Stock discovery {status}")
 
 
+def get_scan_mode() -> str:
+    """Get current scan mode setting"""
+    config = load_discovery_config()
+    return config.get('scan_mode', 'watchlist_only')
+
+
+def set_scan_mode(mode: str):
+    """
+    Set the scan mode
+    
+    Args:
+        mode: One of 'watchlist_only', 'discovery_only', 'both'
+    """
+    valid_modes = ['watchlist_only', 'discovery_only', 'both']
+    if mode not in valid_modes:
+        logger.error(f"Invalid scan mode: {mode}. Must be one of {valid_modes}")
+        return
+    
+    config = load_discovery_config()
+    config['scan_mode'] = mode
+    config['last_updated'] = datetime.now().isoformat()
+    
+    # Set enabled flag based on scan mode
+    if mode in ['discovery_only', 'both']:
+        config['enabled'] = True
+    else:  # watchlist_only
+        config['enabled'] = False
+    
+    save_discovery_config(config)
+    
+    mode_desc = {
+        'watchlist_only': '📋 Watchlist Only',
+        'discovery_only': '🔍 Discovery Only',
+        'both': '🚀 Watchlist + Discovery'
+    }
+    logger.info(f"Scan mode set to: {mode_desc[mode]}")
+
+
 def toggle_discovery_mode(mode_name: str, enabled: bool):
     """Toggle specific discovery mode"""
     config = load_discovery_config()
@@ -184,8 +228,17 @@ def apply_config_to_monitor(monitor):
     try:
         config = load_discovery_config()
         
-        # Set discovery enabled/disabled
-        monitor.set_discovery_enabled(config['enabled'])
+        # Set scan mode (watchlist_only, discovery_only, both)
+        scan_mode = config.get('scan_mode', 'watchlist_only')
+        if hasattr(monitor, 'set_scan_mode'):
+            monitor.set_scan_mode(scan_mode)
+        else:
+            # Fallback for older monitor versions
+            monitor.scan_mode = scan_mode
+        
+        # Set discovery enabled based on scan_mode
+        discovery_enabled = scan_mode in ['discovery_only', 'both']
+        monitor.set_discovery_enabled(discovery_enabled)
         
         # Configure modes
         modes_config = {
@@ -194,7 +247,14 @@ def apply_config_to_monitor(monitor):
         }
         monitor.configure_discovery_modes(modes_config)
         
-        logger.info(f"Applied discovery config to monitor")
+        # Update universe sizes
+        for mode_name, mode_settings in config.get('modes', {}).items():
+            if hasattr(monitor, 'discovery_universe') and mode_name in monitor.discovery_universe.modes:
+                max_size = mode_settings.get('max_universe_size')
+                if max_size:
+                    monitor.discovery_universe.modes[mode_name].max_universe_size = max_size
+        
+        logger.info(f"Applied discovery config: scan_mode={scan_mode}, discovery_enabled={discovery_enabled}")
     except Exception as e:
         logger.error(f"Error applying config to monitor: {e}")
 

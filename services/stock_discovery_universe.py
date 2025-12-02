@@ -261,6 +261,40 @@ class StockDiscoveryUniverse:
     # UTILITY METHODS
     # ============================================================
     
+    def _is_valid_stock_ticker(self, ticker: str) -> bool:
+        """
+        Validate that a ticker is a valid stock ticker (not crypto, not invalid format)
+        
+        Args:
+            ticker: The ticker symbol to validate
+            
+        Returns:
+            True if valid stock ticker, False otherwise
+        """
+        if not ticker or not isinstance(ticker, str):
+            return False
+        
+        ticker = ticker.upper().strip()
+        
+        # Skip crypto pairs (e.g., BTC/USD, ETH/USD)
+        if '/' in ticker:
+            return False
+        
+        # Skip if too short or too long
+        if len(ticker) < 1 or len(ticker) > 6:
+            return False
+        
+        # Allow alphanumeric with dots (for BRK.B, BRK.A style tickers)
+        if not ticker.replace('.', '').replace('-', '').isalnum():
+            return False
+        
+        # Skip common crypto tickers that might slip through
+        crypto_tickers = {'BTC', 'ETH', 'SOL', 'DOGE', 'XRP', 'ADA', 'AVAX', 'MATIC', 'DOT', 'LINK'}
+        if ticker in crypto_tickers:
+            return False
+        
+        return True
+    
     def _is_cache_valid(self, mode_name: str) -> bool:
         """Check if cache is still valid"""
         if mode_name not in self.discovery_cache_time:
