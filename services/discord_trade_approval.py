@@ -204,13 +204,21 @@ class DiscordTradeApprovalBot(commands.Bot):
     
     async def on_message(self, message: discord.Message):
         """Handle incoming messages for approvals"""
+        # DEBUG: Log ALL incoming messages
+        logger.debug(f"📨 RAW MESSAGE: channel={message.channel.id}, author={message.author}, content='{message.content[:50] if message.content else ''}'")
+        
         # Ignore bot's own messages
         if message.author == self.user:
+            logger.debug(f"   ↳ Ignoring own message")
             return
         
         # Check if it's in our channel
         if message.channel.id != self.channel_id:
+            logger.debug(f"   ↳ Wrong channel (expected {self.channel_id})")
             return
+        
+        # Log that we're processing this message
+        logger.info(f"📩 Processing message from {message.author.name}: '{message.content}'")
         
         # MESSAGE DEDUPLICATION: Prevent processing same message twice
         # (can happen due to Discord reconnects or network issues)
@@ -230,6 +238,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 self._processed_messages.discard(old_id)
         
         content = message.content.upper().strip()
+        logger.info(f"   Content (upper): '{content}' | Pending approvals: {len(self.pending_approvals)}")
         
         # 🔔 CHECK IF THIS IS A REPLY TO A SPECIFIC APPROVAL MESSAGE
         if message.reference and message.reference.message_id:
@@ -348,10 +357,12 @@ class DiscordTradeApprovalBot(commands.Bot):
         # STANDALONE YES/NO - Apply to most recent pending approval
         # ============================================================
         if content in ['APPROVE', 'YES', 'GO', 'EXECUTE', 'Y', '✅', 'OK']:
+            logger.info(f"   🔍 Matched standalone APPROVE command")
             if await self._handle_standalone_approval(message, approve=True):
                 return
         
         if content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N', '❌']:
+            logger.info(f"   🔍 Matched standalone REJECT command")
             if await self._handle_standalone_approval(message, approve=False):
                 return
         
@@ -406,8 +417,11 @@ class DiscordTradeApprovalBot(commands.Bot):
         # These apply to the most recent pending approval
         # ============================================================
         original_content = message.content.strip()
+        logger.info(f"   🔍 Checking standalone position modification: '{content}'")
         if await self._handle_standalone_position_modification(message, content, original_content):
+            logger.info(f"   ✅ Handled by standalone position modification")
             return
+        logger.info(f"   ❌ Not a standalone position modification command")
         
         # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
         
@@ -1361,11 +1375,17 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         Returns True if there was a pending approval to act on, False otherwise.
         """
+        logger.info(f"   📋 _handle_standalone_approval called (approve={approve})")
+        logger.info(f"   📋 All pending_approvals: {list(self.pending_approvals.keys())}")
+        
         # Get the most recent pending approval
         pending = [(aid, a) for aid, a in self.pending_approvals.items() 
                    if not a.approved and not a.rejected and not a.is_expired()]
         
+        logger.info(f"   📋 Valid pending approvals: {[aid for aid, _ in pending]}")
+        
         if not pending:
+            logger.info(f"   ⚠️ No pending approvals found!")
             return False
         
         # Sort by created_time to get most recent
@@ -1388,12 +1408,18 @@ class DiscordTradeApprovalBot(commands.Bot):
         """
         import re
         
+        logger.info(f"   📋 _handle_standalone_position_modification called: content='{content}'")
+        logger.info(f"   📋 All pending_approvals: {list(self.pending_approvals.keys())}")
+        
         # Get the most recent pending approval
         pending = [(aid, a) for aid, a in self.pending_approvals.items() 
                    if not a.approved and not a.rejected and not a.is_expired()]
         
+        logger.info(f"   📋 Valid pending approvals: {[aid for aid, _ in pending]}")
+        
         if not pending:
             # No pending approvals - don't handle these commands
+            logger.info(f"   ⚠️ No pending approvals - not handling position modification")
             return False
         
         # Sort by created_time to get most recent
