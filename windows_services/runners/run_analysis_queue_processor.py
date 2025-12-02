@@ -317,6 +317,8 @@ def run_stock_analysis(ticker: str, mode: str = "standard") -> dict:
                 "suggested_target": analysis.suggested_target,
                 "risk_reward": getattr(analysis, 'risk_reward_ratio', 0),
                 "technical_score": getattr(analysis, 'technical_score', 0),
+                "trend_score": getattr(analysis, 'trend_score', 0),
+                "timing_score": getattr(analysis, 'timing_score', 0),
                 "analysis_time": datetime.now().isoformat(),
                 "mode": mode,
                 "asset_type": "stock"
@@ -427,6 +429,86 @@ def save_results_to_file(results: list, request: dict):
         logger.error(f"Error saving results: {e}", exc_info=True)
 
 
+def format_action_name(action: str) -> str:
+    """Convert action codes to human-readable format (WAIT_FOR_PULLBACK → Wait for Pullback)"""
+    action_labels = {
+        'ENTER_NOW': 'Enter Now',
+        'WAIT_FOR_PULLBACK': 'Wait for Pullback',
+        'DO_NOT_ENTER': 'Do Not Enter',
+        'WAIT_FOR_BREAKOUT': 'Wait for Breakout',
+        'WAIT_FOR_CONFIRMATION': 'Wait for Confirmation',
+        'LONG': 'Long',
+        'SHORT': 'Short',
+        'BUY': 'Buy',
+        'SELL': 'Sell',
+        'BULLISH': 'Bullish',
+        'BEARISH': 'Bearish',
+        'WAIT': 'Wait',
+        'HOLD': 'Hold',
+        'NO_RESULT': 'No Result',
+        'ERROR': 'Error',
+        'UNKNOWN': 'Unknown'
+    }
+    return action_labels.get(action, action.replace('_', ' ').title())
+
+
+def get_strategy_context(mode: str, action: str, confidence: float) -> str:
+    """Generate strategy context explaining why this signal was chosen"""
+    
+    # Mode descriptions with strategy details
+    mode_strategies = {
+        "standard": {
+            "name": "Standard Analysis",
+            "strategies_tested": ["Trend Following"],
+            "timeframes": ["Primary timeframe"],
+            "description": "Single strategy evaluation on primary timeframe"
+        },
+        "multi": {
+            "name": "Multi-Strategy Analysis", 
+            "strategies_tested": ["Trend Following", "Mean Reversion", "Momentum", "Breakout"],
+            "timeframes": ["Short-term", "Medium-term"],
+            "directions": ["Long", "Short"],
+            "description": "Tests multiple strategies across directions"
+        },
+        "multi_config": {
+            "name": "Multi-Strategy Analysis",
+            "strategies_tested": ["Trend Following", "Mean Reversion", "Momentum", "Breakout"],
+            "timeframes": ["Short-term", "Medium-term"],
+            "directions": ["Long", "Short"],
+            "description": "Tests multiple strategies across directions"
+        },
+        "ultimate": {
+            "name": "Ultimate Analysis",
+            "strategies_tested": ["Trend Following", "Mean Reversion", "Momentum", "Breakout", "Scalping", "Swing"],
+            "timeframes": ["1H", "4H", "Daily", "Weekly"],
+            "directions": ["Long", "Short", "Neutral"],
+            "description": "Exhaustive analysis of ALL strategy combinations"
+        }
+    }
+    
+    mode_info = mode_strategies.get(mode, mode_strategies["standard"])
+    
+    # Build context based on action
+    if action in ['ENTER_NOW', 'LONG', 'BUY', 'BULLISH']:
+        signal_reason = f"**Why {format_action_name(action)}?** This signal emerged as the strongest across {len(mode_info.get('strategies_tested', []))} strategies tested."
+        if confidence >= 85:
+            signal_reason += " High confidence indicates strong alignment across multiple indicators."
+        elif confidence >= 70:
+            signal_reason += " Good confirmation from technical and trend analysis."
+    elif action in ['SHORT', 'SELL', 'BEARISH']:
+        signal_reason = f"**Why {format_action_name(action)}?** Bearish signals dominated across strategy tests."
+    elif action in ['WAIT_FOR_PULLBACK']:
+        signal_reason = "**Why Wait for Pullback?** Current entry is suboptimal. A pullback to support would improve risk/reward ratio significantly."
+    elif action in ['WAIT_FOR_BREAKOUT']:
+        signal_reason = "**Why Wait for Breakout?** Price is consolidating. Entry on confirmed breakout offers better probability."
+    elif action in ['DO_NOT_ENTER', 'WAIT']:
+        signal_reason = "**Why Wait/Skip?** No clear edge detected. Conflicting signals or unfavorable market conditions."
+    else:
+        signal_reason = ""
+    
+    return signal_reason
+
+
 def send_discord_notification(results: list, request: dict):
     """Send analysis results to Discord webhook using rich embeds"""
     if not DISCORD_WEBHOOK_URL:
@@ -445,19 +527,28 @@ def send_discord_notification(results: list, request: dict):
         mode = request.get("analysis_mode", "standard")
         completed_time = datetime.now().strftime("%H:%M:%S")
         
-        # Count results by action
+        # Mode labels for display
+        mode_display = {
+            "standard": "🔬 Standard (Single Strategy)",
+            "multi": "🎯 Multi-Strategy (Long/Short + Timeframes)",
+            "multi_config": "🎯 Multi-Strategy (Long/Short + Timeframes)",
+            "ultimate": "🚀 Ultimate (ALL Strategies + Timeframes)"
+        }.get(mode, mode)
+        
+        # Count results by action (formatted)
         actions = {}
         for r in results:
-            action = r.get("action", "UNKNOWN")
+            action = format_action_name(r.get("action", "UNKNOWN"))
             actions[action] = actions.get(action, 0) + 1
         
         # Create embeds for each result (Discord allows multiple embeds)
         embeds = []
         
         # Header embed with summary
-        summary_text = "Asset Type: " + asset_type + " | Mode: " + mode + "\n"
-        summary_text += f"Analyzed: {len(results)} ticker(s)\n\n"
-        summary_text += "**Action Breakdown:**\n"
+        summary_text = f"**Asset Type:** {asset_type}\n"
+        summary_text += f"**Mode:** {mode_display}\n"
+        summary_text += f"**Analyzed:** {len(results)} ticker(s)\n\n"
+        summary_text += "**Signal Summary:**\n"
         for action, count in sorted(actions.items()):
             summary_text += f"• {action}: {count}\n"
         
@@ -474,6 +565,7 @@ def send_discord_notification(results: list, request: dict):
         for result in results:
             ticker = result.get('ticker', '?')
             action = result.get('action', 'UNKNOWN')
+            action_display = format_action_name(action)
             confidence = result.get('confidence', 0)
             reasoning = result.get('reasoning', 'No analysis provided')
             result_mode = result.get('mode', mode)
@@ -482,19 +574,19 @@ def send_discord_notification(results: list, request: dict):
             if action in ['LONG', 'BUY', 'BULLISH', 'ENTER_NOW']:
                 color = 65280  # Green
                 emoji = "🟢"
-                trade_direction = "📈 LONG/BUY"
+                trade_direction = "📈 Long / Buy"
             elif action in ['SHORT', 'SELL', 'BEARISH']:
                 color = 16711680  # Red
                 emoji = "🔴"
-                trade_direction = "📉 SHORT/SELL"
-            elif action in ['DO_NOT_ENTER', 'WAIT', 'WAIT_FOR_PULLBACK']:
+                trade_direction = "📉 Short / Sell"
+            elif action in ['DO_NOT_ENTER', 'WAIT', 'WAIT_FOR_PULLBACK', 'WAIT_FOR_BREAKOUT', 'WAIT_FOR_CONFIRMATION']:
                 color = 16776960  # Yellow
                 emoji = "🟡"
-                trade_direction = "⏸️ WAIT/NO TRADE"
+                trade_direction = "⏸️ Wait / No Trade"
             else:
                 color = 8421504  # Gray
                 emoji = "⚪"
-                trade_direction = "❓ UNDETERMINED"
+                trade_direction = "❓ Undetermined"
             
             # Mode descriptions
             mode_labels = {
@@ -507,23 +599,27 @@ def send_discord_notification(results: list, request: dict):
             
             # Build fields with available data
             fields = [
-                {"name": "Signal", "value": f"{emoji} {action}", "inline": True},
-                {"name": "Confidence", "value": f"{confidence:.0f}%" if isinstance(confidence, (int, float)) else str(confidence), "inline": True},
+                {"name": "Signal", "value": f"{emoji} **{action_display}**", "inline": True},
+                {"name": "Confidence", "value": f"**{confidence:.0f}%**" if isinstance(confidence, (int, float)) else str(confidence), "inline": True},
                 {"name": "Trade Direction", "value": trade_direction, "inline": True}
             ]
             
             # Add urgency
             if result.get('urgency'):
-                fields.append({"name": "Urgency", "value": result.get('urgency'), "inline": True})
+                urgency = result.get('urgency')
+                urgency_emoji = {"HIGH": "🔥", "MEDIUM": "⚡", "LOW": "💤"}.get(urgency, "")
+                fields.append({"name": "Urgency", "value": f"{urgency_emoji} {urgency}", "inline": True})
             
             # Add analysis mode
             fields.append({"name": "Analysis Mode", "value": mode_label, "inline": True})
             
             # Add entry/stop/target for actionable signals
-            if result.get('suggested_entry') is not None and action not in ['DO_NOT_ENTER', 'WAIT', 'WAIT_FOR_PULLBACK']:
+            if result.get('suggested_entry') is not None:
                 entry = result.get('suggested_entry')
                 entry_str = f"${entry:.4f}" if isinstance(entry, (int, float)) else str(entry)
-                fields.append({"name": "Entry Point", "value": entry_str, "inline": True})
+                # Show entry as "suggested" for wait signals
+                entry_label = "Entry Point" if action in ['ENTER_NOW', 'LONG', 'SHORT', 'BUY', 'SELL'] else "Target Entry"
+                fields.append({"name": entry_label, "value": entry_str, "inline": True})
             
             if result.get('suggested_stop') is not None:
                 stop = result.get('suggested_stop')
@@ -533,11 +629,11 @@ def send_discord_notification(results: list, request: dict):
             if result.get('suggested_target') is not None:
                 target = result.get('suggested_target')
                 target_str = f"${target:.4f}" if isinstance(target, (int, float)) else str(target)
-                fields.append({"name": "Target", "value": target_str, "inline": True})
+                fields.append({"name": "Take Profit", "value": target_str, "inline": True})
             
-            if result.get('risk_reward') is not None and action not in ['DO_NOT_ENTER', 'WAIT']:
+            if result.get('risk_reward') is not None:
                 rr = result.get('risk_reward')
-                rr_str = f"{rr:.2f}:1" if isinstance(rr, (int, float)) else str(rr)
+                rr_str = f"**{rr:.2f}:1**" if isinstance(rr, (int, float)) else str(rr)
                 fields.append({"name": "Risk/Reward", "value": rr_str, "inline": True})
             
             # Add technical scores if available
@@ -552,9 +648,14 @@ def send_discord_notification(results: list, request: dict):
             if scores:
                 fields.append({"name": "Scores", "value": " | ".join(scores), "inline": True})
             
+            # Add strategy context explaining WHY this signal
+            strategy_context = get_strategy_context(result_mode, action, confidence)
+            if strategy_context:
+                fields.append({"name": "Strategy Insight", "value": strategy_context, "inline": False})
+            
             # Add reasoning as main field (Discord truncates at 2048 chars per field)
-            reasoning_text = reasoning[:1024] if len(reasoning) > 1024 else reasoning
-            fields.append({"name": "Analysis", "value": reasoning_text, "inline": False})
+            reasoning_text = reasoning[:900] if len(reasoning) > 900 else reasoning
+            fields.append({"name": "📝 Analysis", "value": reasoning_text, "inline": False})
             
             result_embed = {
                 "title": f"{emoji} {ticker}",
