@@ -433,6 +433,7 @@ def switch_strategy(strategy_key: str) -> tuple:
 
 def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = None) -> bool:
     """Queue an analysis request for services to pick up"""
+    import os
     try:
         ANALYSIS_REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         
@@ -444,13 +445,29 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = Non
         
         # Add new request
         preset = ANALYSIS_PRESETS.get(preset_key, {})
+        final_tickers = custom_tickers or preset.get("tickers", [])
+        final_asset_type = preset.get("asset_type", "crypto")
+        final_analysis_mode = preset.get("analysis_mode", "standard")
+        
+        # DUPLICATE DETECTION: Check if identical pending request already exists
+        # Prevents double-clicks from creating duplicate analysis runs
+        for existing in requests:
+            if (existing.get("status") == "pending" and
+                existing.get("preset") == preset_key and
+                existing.get("tickers") == final_tickers and
+                existing.get("asset_type") == final_asset_type and
+                existing.get("analysis_mode") == final_analysis_mode):
+                print(f"[INFO] Duplicate pending request detected, skipping")
+                return True  # Return True so UI doesn't show error
+        
+        # Use microsecond precision for unique IDs (prevents same-second collisions)
         request = {
-            "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "id": datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{datetime.now().microsecond:06d}",
             "preset": preset_key,
-            "tickers": custom_tickers or preset.get("tickers", []),
+            "tickers": final_tickers,
             "depth": preset.get("depth", "medium"),
-            "asset_type": preset.get("asset_type", "crypto"),
-            "analysis_mode": preset.get("analysis_mode", "standard"),
+            "asset_type": final_asset_type,
+            "analysis_mode": final_analysis_mode,
             "status": "pending",
             "created": datetime.now().isoformat(),
         }
@@ -459,8 +476,11 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = Non
         # Keep only last 20 requests
         requests = requests[-20:]
         
+        # Write with explicit flush for Windows file system
         with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
             json.dump(requests, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         return True
     except Exception as e:
         print(f"Error queuing analysis: {e}")

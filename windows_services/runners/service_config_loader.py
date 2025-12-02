@@ -301,6 +301,7 @@ def queue_analysis_request(
     Returns:
         True if successful
     """
+    import os
     requests_file = PROJECT_ROOT / 'data' / 'analysis_requests.json'
     
     try:
@@ -318,11 +319,24 @@ def queue_analysis_request(
         # Use overrides if provided, otherwise use preset defaults
         final_asset_type = asset_type or preset.get("asset_type", "crypto")
         final_analysis_mode = analysis_mode or preset.get("analysis_mode", "standard")
+        final_tickers = custom_tickers or preset.get("tickers", [])
         
+        # DUPLICATE DETECTION: Check if an identical pending request already exists
+        # This prevents double-clicks from creating duplicate analysis runs
+        for existing in requests:
+            if (existing.get("status") == "pending" and
+                existing.get("preset") == preset_key and
+                existing.get("tickers") == final_tickers and
+                existing.get("asset_type") == final_asset_type and
+                existing.get("analysis_mode") == final_analysis_mode):
+                print(f"[service_config_loader] Duplicate pending request detected, skipping")
+                return True  # Return True so UI doesn't show error
+        
+        # Use microsecond precision for unique IDs (prevents same-second collisions)
         request = {
-            "id": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "id": datetime.now().strftime("%Y%m%d_%H%M%S") + f"_{datetime.now().microsecond:06d}",
             "preset": preset_key,
-            "tickers": custom_tickers or preset.get("tickers", []),
+            "tickers": final_tickers,
             "depth": preset.get("depth", "medium"),
             "asset_type": final_asset_type,
             "analysis_mode": final_analysis_mode,
@@ -334,8 +348,11 @@ def queue_analysis_request(
         # Keep only last 20 requests
         requests = requests[-20:]
         
+        # Write with explicit flush for Windows file system
         with open(requests_file, 'w') as f:
             json.dump(requests, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         return True
         
     except Exception as e:
