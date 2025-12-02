@@ -380,7 +380,7 @@ class TradierClient:
             return False, {"error": str(e)}
     
     def place_equity_order(self, symbol: str, side: str, quantity: int, order_type: str = 'market', 
-                          duration: str = 'day', price: float = None, stop: float = None) -> Dict:
+                          duration: str = 'day', price: float = None, stop: float = None) -> Tuple[bool, Dict]:
         """Place an equity (stock) order - convenience method"""
         try:
             order_data = {
@@ -409,11 +409,13 @@ class TradierClient:
             order_response = response.json()
             logger.info(f"Equity order placed: {symbol} {side} {quantity} @ {order_type}")
             
-            return order_response.get('order', {})
+            order_result = order_response.get('order', {})
+            order_id = order_result.get('id', 'unknown')
+            return True, {'order_id': order_id, 'order': order_result}
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error placing equity order: {e}")
-            return {}
+            return False, {'error': str(e)}
     
     @retry_on_timeout(max_retries=5, initial_delay=2.0, backoff_factor=1.5)
     def place_order(self, order_data: Dict) -> Tuple[bool, Dict]:
