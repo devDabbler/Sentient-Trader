@@ -79,6 +79,11 @@ def execute_approved_trade(approval_id: str, approved: bool):
         if approval_manager and approval_manager.bot:
             pending = approval_manager.bot.pending_approvals.get(approval_id)
             if pending:
+                # Prevent duplicate execution
+                if pending.executed:
+                    logger.warning(f"   ⚠️ Trade {approval_id} already executed - skipping")
+                    return
+                
                 shares = int(pending.position_size / pending.entry_price) if pending.entry_price > 0 else 0
                 logger.info(f"   Executing: {pending.pair} {pending.side}")
                 logger.info(f"   Shares: {shares}")
@@ -106,6 +111,12 @@ def execute_approved_trade(approval_id: str, approved: bool):
                         order_id = result.get('order_id', 'N/A') if isinstance(result, dict) else str(result)
                         logger.info(f"   ✅ ORDER PLACED: {order_id}")
                         logger.info(f"   📊 {pending.pair} {pending.side} {shares} shares @ market")
+                        
+                        # Mark as executed and remove from pending to prevent duplicates
+                        pending.executed = True
+                        if approval_id in approval_manager.bot.pending_approvals:
+                            del approval_manager.bot.pending_approvals[approval_id]
+                            logger.info(f"   🗑️ Removed {approval_id} from pending approvals")
                         
                         # Send success confirmation to Discord
                         paper_mode = stock_manager.paper_mode
