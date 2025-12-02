@@ -480,11 +480,14 @@ def get_analysis_requests() -> list:
 
 def clear_analysis_requests() -> bool:
     """Clear all analysis requests"""
+    import os
     try:
         # Ensure parent directory exists
         ANALYSIS_REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
             json.dump([], f)
+            f.flush()
+            os.fsync(f.fileno())  # Force write to disk
         print(f"[INFO] Cleared analysis requests file: {ANALYSIS_REQUESTS_FILE}")
         return True
     except Exception as e:
@@ -494,11 +497,14 @@ def clear_analysis_requests() -> bool:
 
 def clear_analysis_results() -> bool:
     """Clear all analysis results"""
+    import os
     try:
         # Ensure parent directory exists
         ANALYSIS_RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(ANALYSIS_RESULTS_FILE, 'w') as f:
             json.dump({}, f)
+            f.flush()
+            os.fsync(f.fileno())  # Force write to disk
         print(f"[INFO] Cleared analysis results file: {ANALYSIS_RESULTS_FILE}")
         return True
     except Exception as e:
@@ -1207,22 +1213,25 @@ def check_password():
 # WATCHLIST UI
 # ============================================================
 
-def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_type: str, key_prefix: str):
+def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_type: str, key_prefix: str, cwm=None):
     """
     Helper function to render a ticker category (stocks/crypto) with add/remove functionality.
     
     Args:
-        tm: TickerManager instance
+        tm: TickerManager instance (for stocks)
         tickers_data: List of ticker dicts from Supabase
         category_name: Display name for the category (e.g., "Stocks", "Crypto")
         ticker_type: Type filter for adding new tickers (e.g., "stock", "crypto")
         key_prefix: Unique prefix for Streamlit widget keys
+        cwm: CryptoWatchlistManager instance (optional, for crypto operations)
     """
     # Add new ticker
     with st.expander(f"➕ Add {category_name}"):
         col1, col2 = st.columns([3, 1])
         with col1:
             new_ticker = st.text_input("Symbol", key=f"{key_prefix}_new_ticker").upper()
+            if ticker_type == "crypto" and new_ticker and "/" not in new_ticker:
+                st.caption(f"Will be saved as: {new_ticker}/USD")
         with col2:
             if ticker_type == "stock":
                 sub_type = st.selectbox("Sub-type", ["stock", "penny_stock"], key=f"{key_prefix}_sub_type")
@@ -1231,7 +1240,16 @@ def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_t
         
         if st.button(f"Add {category_name}", type="primary", key=f"{key_prefix}_add_btn"):
             if new_ticker:
-                if tm and tm.add_ticker(new_ticker, ticker_type=sub_type if ticker_type == "stock" else ticker_type):
+                success = False
+                if ticker_type == "crypto" and cwm:
+                    # Use CryptoWatchlistManager for crypto
+                    symbol = new_ticker if "/" in new_ticker else f"{new_ticker}/USD"
+                    success = cwm.add_crypto(symbol)
+                elif tm:
+                    # Use TickerManager for stocks
+                    success = tm.add_ticker(new_ticker, ticker_type=sub_type if ticker_type == "stock" else ticker_type)
+                
+                if success:
                     st.success(f"Added {new_ticker} to {category_name}")
                     st.rerun()
                 else:
@@ -1272,7 +1290,9 @@ def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_t
             st.warning(f"⚠️ {len(to_remove)} ticker(s) will be removed")
             if st.button(f"🗑️ Remove {len(to_remove)} ticker(s)?", key=f"{key_prefix}_remove_btn", type="secondary"):
                 for t in to_remove:
-                    if tm:
+                    if ticker_type == "crypto" and cwm:
+                        cwm.remove_crypto(t)
+                    elif tm:
                         tm.remove_ticker(t)
                 st.success(f"Removed {len(to_remove)} {category_name.lower()}")
                 st.rerun()
@@ -1299,22 +1319,47 @@ def render_watchlist_manager():
     # Tab 1: Global "My Tickers" (Supabase) - Now with Stock/Crypto separation
     with tab1:
         if supabase_available:
-            st.caption("✅ Connected to Supabase 'saved_tickers'")
+            st.caption("✅ Connected to Supabase")
             
-            # Fetch all tickers once
+            # Fetch stock tickers from saved_tickers table
             if tm:
                 all_tickers = tm.get_all_tickers(limit=1000)
             else:
                 all_tickers = []
             
-            # Separate by type
+            # Filter stocks from saved_tickers
             stock_tickers = [t for t in all_tickers if t.get('type') in ['stock', 'penny_stock', None]]
-            crypto_tickers = [t for t in all_tickers if t.get('type') == 'crypto']
+            
+            # Fetch crypto from CRYPTO watchlist table (separate table!)
+            crypto_tickers = []
+            cwm = None
+            try:
+                from services.crypto_watchlist_manager import CryptoWatchlistManager
+                cwm = CryptoWatchlistManager()
+                crypto_watchlist = cwm.get_all_cryptos()
+                # Convert to same format as stock tickers for consistent display
+                crypto_tickers = [
+                    {
+                        'ticker': c.get('symbol', ''),
+                        'name': c.get('base_asset', ''),
+                        'type': 'crypto',
+                        'ml_score': c.get('composite_score'),
+                        'rsi': c.get('rsi'),
+                        'momentum': c.get('momentum_score'),
+                        'date_added': c.get('date_added'),
+                        'notes': c.get('notes', ''),
+                    }
+                    for c in crypto_watchlist
+                ]
+            except Exception as e:
+                print(f"CryptoWatchlistManager error: {e}")
+                # Fallback to crypto from saved_tickers
+                crypto_tickers = [t for t in all_tickers if t.get('type') == 'crypto']
             
             # Display summary metrics
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("📊 Total", len(all_tickers))
+                st.metric("📊 Total", len(stock_tickers) + len(crypto_tickers))
             with col2:
                 st.metric("📈 Stocks", len(stock_tickers))
             with col3:
@@ -1340,7 +1385,8 @@ def render_watchlist_manager():
                     tickers_data=crypto_tickers,
                     category_name="Crypto",
                     ticker_type="crypto",
-                    key_prefix="sb_crypto"
+                    key_prefix="sb_crypto",
+                    cwm=cwm  # Pass crypto manager for proper add/remove
                 )
         else:
             st.warning("⚠️ Supabase connection not available. Ensure credentials are in .env")
