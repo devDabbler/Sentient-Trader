@@ -1,0 +1,19 @@
+[Unit]
+Description=Sentient Trader - AI Stock Position Manager
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/sentient-trader
+Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/root/sentient-trader/venv/bin/python windows_services/runners/run_stock_ai_trader_simple.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/sentient-trader/logs/stock_ai_trader_service.log
+StandardError=append:/root/sentient-trader/logs/stock_ai_trader_error.log
+
+[Install]
+WantedBy=multi-user.target
+
