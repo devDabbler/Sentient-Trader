@@ -2473,21 +2473,33 @@ def main():
                             st.caption("📂 Using default ticker list (Supabase not connected or empty)")
                         
                         # Quick action buttons (mobile-friendly)
+                        # Helper to clear multiselect session state before rerun
+                        multiselect_key = f"main_watchlist_select_{service_name}"
+                        
                         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                         with btn_col1:
                             if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True, help=f"Select all {len(all_tickers)} tickers"):
                                 set_service_watchlist(service_name, all_tickers)
+                                # Clear session state so multiselect refreshes
+                                if multiselect_key in st.session_state:
+                                    del st.session_state[multiselect_key]
                                 st.toast(f"✅ Selected all {len(all_tickers)} tickers!")
                                 st.rerun()
                         with btn_col2:
                             if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True, help="Clear all tickers"):
                                 set_service_watchlist(service_name, [])
+                                # Clear session state so multiselect refreshes
+                                if multiselect_key in st.session_state:
+                                    del st.session_state[multiselect_key]
                                 st.toast("🗑️ Watchlist cleared!")
                                 st.rerun()
                         with btn_col3:
                             top_5 = all_tickers[:5]
                             if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True, help=f"Select: {', '.join(top_5)}"):
                                 set_service_watchlist(service_name, top_5)
+                                # Clear session state so multiselect refreshes
+                                if multiselect_key in st.session_state:
+                                    del st.session_state[multiselect_key]
                                 st.toast(f"✅ Selected top 5: {', '.join(top_5)}")
                                 st.rerun()
                         with btn_col4:
@@ -2495,6 +2507,9 @@ def main():
                             if supabase_tickers:
                                 if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help=f"Sync {len(supabase_tickers)} tickers from Supabase"):
                                     set_service_watchlist(service_name, supabase_tickers)
+                                    # Clear session state so multiselect refreshes
+                                    if multiselect_key in st.session_state:
+                                        del st.session_state[multiselect_key]
                                     st.toast(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
                                     st.rerun()
                             else:
@@ -2607,6 +2622,9 @@ def main():
                                     print(f"Failed to sync to Supabase: {e}")
                                 
                                 st.toast(f"✅ Saved {len(final_tickers)} tickers!")
+                                # Clear session state so multiselect refreshes with new values
+                                if multiselect_key in st.session_state:
+                                    del st.session_state[multiselect_key]
                                 # Restart service to apply
                                 control_service(service_name, "restart")
                                 st.rerun()
