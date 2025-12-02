@@ -94,11 +94,20 @@ ANALYSIS_REQUESTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_re
 ANALYSIS_RESULTS_FILE = Path(__file__).resolve().parent / "data" / "analysis_results.json"
 AI_POSITIONS_FILE = Path(__file__).resolve().parent / "data" / "ai_crypto_positions.json"
 
-# Default watchlists for each service type
+# Default watchlists for each service type (expanded for better coverage)
 DEFAULT_WATCHLISTS = {
-    "crypto": ['BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD', 'SHIB/USD', 'PEPE/USD'],
-    "stocks": ['SPY', 'QQQ', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT', 'PLTR', 'SOFI', 'COIN'],
-    "dex": ['solana', 'ethereum', 'base'],  # chains to monitor
+    "crypto": [
+        'BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD', 'DOGE/USD', 'SHIB/USD', 'PEPE/USD',
+        'XRP/USD', 'ADA/USD', 'DOT/USD', 'MATIC/USD', 'UNI/USD', 'ATOM/USD', 'ARB/USD', 'OP/USD',
+        'LTC/USD', 'BCH/USD', 'NEAR/USD', 'APT/USD', 'INJ/USD', 'SUI/USD', 'SEI/USD', 'TIA/USD'
+    ],
+    "stocks": [
+        'SPY', 'QQQ', 'IWM', 'NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT', 'META', 'AMZN', 'GOOGL',
+        'PLTR', 'SOFI', 'COIN', 'MARA', 'RIOT', 'HOOD', 'NFLX', 'CRM', 'SHOP', 'SNOW', 'NET',
+        'CRWD', 'ZS', 'DDOG', 'MDB', 'U', 'RBLX', 'PINS', 'SNAP', 'ROKU', 'SQ', 'PYPL',
+        'SMCI', 'ARM', 'MSTR', 'RDDT', 'AFRM', 'UPST', 'LCID', 'RIVN', 'NIO', 'XPEV'
+    ],
+    "dex": ['solana', 'ethereum', 'base', 'arbitrum', 'polygon'],  # chains to monitor
 }
 
 # Analysis presets for quick mobile access
@@ -2466,8 +2475,9 @@ def main():
                         # Quick action buttons (mobile-friendly)
                         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                         with btn_col1:
-                            if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True):
+                            if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True, help=f"Select all {len(all_tickers)} tickers"):
                                 set_service_watchlist(service_name, all_tickers)
+                                st.toast(f"✅ Selected all {len(all_tickers)} tickers!")
                                 st.rerun()
                         with btn_col2:
                             if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True):
@@ -2480,10 +2490,70 @@ def main():
                         with btn_col4:
                             # Sync from Supabase button - use all Supabase tickers
                             if supabase_tickers:
-                                if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help="Use all tickers from Supabase"):
+                                if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help=f"Sync {len(supabase_tickers)} tickers from Supabase"):
                                     set_service_watchlist(service_name, supabase_tickers)
                                     st.toast(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
                                     st.rerun()
+                        
+                        # ============================================================
+                        # BROKER SYNC (AI Stock Trader only)
+                        # ============================================================
+                        if service_name == "sentient-stock-ai-trader":
+                            st.markdown("---")
+                            st.markdown("**🔄 Broker Position Sync**")
+                            st.caption("Sync your active positions from Tradier/IBKR to monitor them with AI")
+                            
+                            broker_col1, broker_col2 = st.columns(2)
+                            with broker_col1:
+                                if st.button("🔄 Sync Broker Positions", key="sync_broker_positions", type="primary", use_container_width=True):
+                                    try:
+                                        from services.ai_stock_position_manager import get_ai_stock_position_manager
+                                        manager = get_ai_stock_position_manager()
+                                        if manager:
+                                            sync_result = manager.sync_with_broker()
+                                            st.success(f"✅ Synced! Added: {sync_result['added']}, Removed: {sync_result['removed']}, Kept: {sync_result['kept']}")
+                                            
+                                            # Show current positions
+                                            positions = manager.get_active_positions()
+                                            if positions:
+                                                st.markdown("**📊 Active Positions:**")
+                                                for pos in positions:
+                                                    pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                                    st.write(f"  {emoji} **{pos.symbol}**: {pos.quantity} shares @ ${pos.entry_price:.2f} ({pnl_pct:+.1f}%)")
+                                            else:
+                                                st.info("📭 No active positions found in broker")
+                                        else:
+                                            st.warning("⚠️ Could not initialize position manager - check broker config in .env")
+                                    except Exception as e:
+                                        st.error(f"❌ Error syncing: {e}")
+                            
+                            with broker_col2:
+                                if st.button("📊 View Positions", key="view_broker_positions", use_container_width=True):
+                                    try:
+                                        from services.ai_stock_position_manager import get_ai_stock_position_manager
+                                        manager = get_ai_stock_position_manager()
+                                        if manager:
+                                            positions = manager.get_active_positions()
+                                            status = manager.get_status()
+                                            
+                                            st.markdown(f"**Status:** {'🟢 Running' if status['is_running'] else '🔴 Stopped'}")
+                                            st.markdown(f"**Mode:** {'📝 Paper' if status['paper_mode'] else '💰 Live'}")
+                                            st.markdown(f"**Broker:** {'✅ Connected' if status['broker_connected'] else '❌ Not Connected'}")
+                                            
+                                            if positions:
+                                                total_value = sum(p.quantity * p.current_price for p in positions if p.current_price > 0)
+                                                st.markdown(f"**Positions:** {len(positions)} | **Value:** ${total_value:,.2f}")
+                                                for pos in positions:
+                                                    pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                                    st.write(f"  {emoji} {pos.symbol}: {pos.quantity} @ ${pos.current_price:.2f} ({pnl_pct:+.1f}%)")
+                                            else:
+                                                st.info("📭 No positions being monitored")
+                                        else:
+                                            st.warning("⚠️ Position manager not available")
+                                    except Exception as e:
+                                        st.error(f"❌ Error: {e}")
                         
                         # Multiselect for tickers
                         # Combine all_tickers with current_watchlist to ensure custom additions are available as options
