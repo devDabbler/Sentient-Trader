@@ -64,10 +64,14 @@ print("DEBUG: Getting approval manager...", flush=True)
 # Define callback to execute approved trades
 def execute_approved_trade(approval_id: str, approved: bool):
     """Execute or cancel trade when approved/rejected via Discord"""
+    import asyncio
+    
     logger.info(f"{'✅' if approved else '❌'} Trade {approval_id} {'approved' if approved else 'rejected'}")
     
     if not approved:
         logger.info(f"   Trade cancelled - no action taken")
+        # Send cancellation confirmation to Discord
+        _send_discord_message(f"❌ **Trade Cancelled:** {approval_id.split('_')[1] if '_' in approval_id else approval_id}")
         return
     
     try:
@@ -82,6 +86,7 @@ def execute_approved_trade(approval_id: str, approved: bool):
                 
                 if shares <= 0:
                     logger.error(f"   ❌ Invalid shares quantity: {shares}")
+                    _send_discord_message(f"❌ **Order Failed:** Invalid share quantity for {pending.pair}")
                     return
                 
                 # Get stock position manager and use broker adapter
@@ -101,14 +106,45 @@ def execute_approved_trade(approval_id: str, approved: bool):
                         order_id = result.get('order_id', 'N/A') if isinstance(result, dict) else str(result)
                         logger.info(f"   ✅ ORDER PLACED: {order_id}")
                         logger.info(f"   📊 {pending.pair} {pending.side} {shares} shares @ market")
+                        
+                        # Send success confirmation to Discord
+                        paper_mode = stock_manager.paper_mode
+                        mode_emoji = "📝" if paper_mode else "💰"
+                        _send_discord_message(
+                            f"✅ **{mode_emoji} ORDER EXECUTED**\n\n"
+                            f"**{pending.pair}** {pending.side}\n"
+                            f"   Shares: **{shares:,}**\n"
+                            f"   Value: **${pending.position_size:,.2f}**\n"
+                            f"   Order ID: `{order_id}`\n"
+                            f"   Type: {'Paper' if paper_mode else 'LIVE'} Trade"
+                        )
                     else:
+                        error_msg = result.get('error', 'Unknown error') if isinstance(result, dict) else str(result)
                         logger.error(f"   ❌ ORDER FAILED: {result}")
+                        _send_discord_message(f"❌ **Order Failed:** {pending.pair} {pending.side}\nError: {error_msg[:100]}")
                 else:
                     logger.error(f"   ❌ Stock position manager or broker adapter not available")
+                    _send_discord_message(f"❌ **Order Failed:** Broker not configured")
             else:
                 logger.warning(f"   ⚠️ Approval {approval_id} not found in pending")
     except Exception as e:
         logger.error(f"   ❌ Error executing trade: {e}", exc_info=True)
+        _send_discord_message(f"❌ **Order Error:** {str(e)[:100]}")
+
+def _send_discord_message(message: str):
+    """Helper to send message to Discord from sync context"""
+    import asyncio
+    try:
+        if approval_manager and approval_manager.bot and approval_manager.loop:
+            async def _send():
+                channel = approval_manager.bot.get_channel(approval_manager.bot.channel_id)
+                if channel:
+                    await channel.send(message)
+            
+            # Schedule the coroutine on the bot's event loop
+            asyncio.run_coroutine_threadsafe(_send(), approval_manager.loop)
+    except Exception as e:
+        logger.error(f"Failed to send Discord message: {e}")
 
 # Get approval manager with trade execution callback
 approval_manager = get_discord_approval_manager(approval_callback=execute_approved_trade)
