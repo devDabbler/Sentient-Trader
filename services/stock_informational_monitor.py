@@ -1628,15 +1628,16 @@ class StockInformationalMonitor(LLMServiceMixin):
                 cycle_start = time.time()
                 
                 try:
-                    # Check analysis queue from Control Panel
+                    # Check analysis queue from Control Panel (only runs analysis when explicitly requested)
                     self._process_analysis_queue()
                     
                     # Sync watchlist and discovery config from Control Panel
                     self._sync_watchlist_from_config()
                     self._sync_discovery_config()
                     
-                    # Perform scan with resilience features
-                    opportunities = self.scan_all_tickers()
+                    # NOTE: Automatic scanning removed - analysis only runs when explicitly requested
+                    # via Discord commands (1-3) or Control Panel analysis queue
+                    # opportunities = self.scan_all_tickers()  # REMOVED: Auto-analysis disabled
                     
                 except Exception as e:
                     logger.error("❌ Error during scan: {}", str(e), exc_info=True)
