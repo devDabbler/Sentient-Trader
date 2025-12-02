@@ -61,8 +61,57 @@ except ImportError as e:
 
 print("DEBUG: Getting approval manager...", flush=True)
 
-# Get approval manager
-approval_manager = get_discord_approval_manager()
+# Define callback to execute approved trades
+def execute_approved_trade(approval_id: str, approved: bool):
+    """Execute or cancel trade when approved/rejected via Discord"""
+    logger.info(f"{'✅' if approved else '❌'} Trade {approval_id} {'approved' if approved else 'rejected'}")
+    
+    if not approved:
+        logger.info(f"   Trade cancelled - no action taken")
+        return
+    
+    try:
+        # Get the pending approval details from the bot
+        if approval_manager and approval_manager.bot:
+            pending = approval_manager.bot.pending_approvals.get(approval_id)
+            if pending:
+                shares = int(pending.position_size / pending.entry_price) if pending.entry_price > 0 else 0
+                logger.info(f"   Executing: {pending.pair} {pending.side}")
+                logger.info(f"   Shares: {shares}")
+                logger.info(f"   Value: ${pending.position_size:,.2f}")
+                
+                if shares <= 0:
+                    logger.error(f"   ❌ Invalid shares quantity: {shares}")
+                    return
+                
+                # Get stock position manager and use broker adapter
+                from services.ai_stock_position_manager import get_ai_stock_position_manager
+                stock_manager = get_ai_stock_position_manager()
+                
+                if stock_manager and stock_manager.broker_adapter:
+                    # Place order via broker adapter
+                    success, result = stock_manager.broker_adapter.place_equity_order(
+                        symbol=pending.pair,
+                        side=pending.side.lower(),  # 'buy' or 'sell'
+                        quantity=shares,
+                        order_type='market'
+                    )
+                    
+                    if success:
+                        order_id = result.get('order_id', 'N/A') if isinstance(result, dict) else str(result)
+                        logger.info(f"   ✅ ORDER PLACED: {order_id}")
+                        logger.info(f"   📊 {pending.pair} {pending.side} {shares} shares @ market")
+                    else:
+                        logger.error(f"   ❌ ORDER FAILED: {result}")
+                else:
+                    logger.error(f"   ❌ Stock position manager or broker adapter not available")
+            else:
+                logger.warning(f"   ⚠️ Approval {approval_id} not found in pending")
+    except Exception as e:
+        logger.error(f"   ❌ Error executing trade: {e}", exc_info=True)
+
+# Get approval manager with trade execution callback
+approval_manager = get_discord_approval_manager(approval_callback=execute_approved_trade)
 
 if not approval_manager:
     logger.error("❌ Failed to create Discord approval manager!")
