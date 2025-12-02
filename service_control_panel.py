@@ -2592,12 +2592,14 @@ def main():
             if st.button("🗑️ Clear All Requests", use_container_width=True):
                 if clear_analysis_requests():
                     st.toast("✅ Analysis queue cleared!")
+                    st.rerun()  # Refresh to show cleared state
                 else:
                     st.error("❌ Failed to clear queue")
         with col_clear2:
             if st.button("🗑️ Clear Results", use_container_width=True):
                 if clear_analysis_results():
                     st.toast("✅ Analysis results cleared!")
+                    st.rerun()  # Refresh to show cleared state
                 else:
                     st.error("❌ Failed to clear results")
     else:
@@ -2901,8 +2903,11 @@ def main():
         
         with button_col2:
             if st.button("🗑️ Clear All Results", key="clear_all_results"):
-                clear_analysis_results()
-                st.toast("✅ All analysis results cleared!")
+                if clear_analysis_results():
+                    st.toast("✅ All analysis results cleared!")
+                    st.rerun()  # Refresh to show cleared state
+                else:
+                    st.error("❌ Failed to clear results")
         
         with button_col3:
             st.caption("⚠️ Use sparingly")
