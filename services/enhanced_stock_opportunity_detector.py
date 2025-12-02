@@ -32,6 +32,7 @@ sys.path.insert(0, project_root)
 
 from services.llm_helper import get_llm_helper
 from services.enhanced_catalyst_detector import EnhancedCatalystDetector
+from services.macro_market_filter import get_macro_market_filter, MacroMarketHealth
 
 
 @dataclass
@@ -108,16 +109,19 @@ class EnhancedStockOpportunityDetector:
     Combines technical, fundamental, event, and sentiment analysis
     """
     
-    def __init__(self, use_llm: bool = True):
+    def __init__(self, use_llm: bool = True, use_macro_filter: bool = True):
         """
         Initialize detector
         
         Args:
             use_llm: Whether to include LLM-based analysis
+            use_macro_filter: Whether to include macro market filter
         """
         self.use_llm = use_llm
+        self.use_macro_filter = use_macro_filter
         self.llm_helper = None
         self.catalyst_detector = None
+        self.macro_filter = None
         
         # Thresholds
         self.min_composite_score = 60  # Minimum composite score to flag opportunity
@@ -129,6 +133,15 @@ class EnhancedStockOpportunityDetector:
         # Cache for performance
         self.ticker_cache = {}
         self.cache_ttl_minutes = 30
+        
+        # Macro filter (shared instance)
+        if use_macro_filter:
+            try:
+                self.macro_filter = get_macro_market_filter()
+                logger.info("✅ Macro market filter initialized for enhanced detection")
+            except Exception as e:
+                logger.warning(f"⚠️ Macro filter not available: {e}")
+                self.use_macro_filter = False
         
         if use_llm:
             try:
@@ -199,18 +212,21 @@ class EnhancedStockOpportunityDetector:
                     symbol, technical_signals, event_signals, ml_score
                 )
             
-            # 5. COMPOSITE SCORING
-            composite_score = self._calculate_composite_score(
+            # 5. COMPOSITE SCORING (with macro adjustment)
+            composite_score, macro_adjustment = self._calculate_composite_score(
                 technical_score, event_score, ml_score, llm_score
             )
             
             # Determine confidence level
             confidence = self._determine_confidence(composite_score)
             
-            # Generate composite reasoning
+            # Generate composite reasoning (include macro if significant)
             composite_reasoning = self._generate_composite_reasoning(
                 symbol, technical_signals, event_signals, ml_reasoning, llm_reasoning, composite_score
             )
+            if abs(macro_adjustment) >= 5:
+                macro_note = f" | Macro: {macro_adjustment:+.0f} pts"
+                composite_reasoning += macro_note
             
             # Create opportunity
             opportunity = CompositeOpportunity(
@@ -510,13 +526,17 @@ Format: [SCORE: XX] Analysis here.
     # ============================================================
     
     def _calculate_composite_score(
-        self, technical: float, event: float, ml: float, llm: float
-    ) -> float:
+        self, technical: float, event: float, ml: float, llm: float,
+        apply_macro: bool = True
+    ) -> Tuple[float, float]:
         """
         Calculate weighted composite score with dynamic weight redistribution
         
         When certain components return 0 (no data/disabled), redistribute their
         weight to active components to avoid penalizing valid opportunities.
+        
+        Returns:
+            Tuple of (composite_score, macro_adjustment)
         """
         # Determine which components are active (non-zero)
         active_weights = {}
@@ -544,7 +564,7 @@ Format: [SCORE: XX] Analysis here.
         
         # If no active weights, return 0
         if not active_weights:
-            return 0.0
+            return 0.0, 0.0
         
         # Redistribute inactive weight proportionally to active components
         total_active_weight = sum(active_weights.values())
@@ -561,7 +581,16 @@ Format: [SCORE: XX] Analysis here.
         if 'llm' in active_weights:
             score += llm * active_weights['llm'] * redistribution_factor
         
-        return min(100, score)
+        # Apply macro adjustment if enabled
+        macro_adjustment = 0.0
+        if apply_macro and self.use_macro_filter and self.macro_filter:
+            try:
+                macro_adjustment, _ = self.macro_filter.get_score_adjustment()
+                score += macro_adjustment
+            except Exception as e:
+                logger.debug(f"Could not apply macro adjustment: {e}")
+        
+        return min(100, max(0, score)), macro_adjustment
     
     def _determine_confidence(self, score: float) -> str:
         """Determine confidence level"""
@@ -727,11 +756,26 @@ Format: [SCORE: XX] Analysis here.
 _detector_instance = None
 
 
-def get_enhanced_stock_detector(use_llm: bool = True) -> EnhancedStockOpportunityDetector:
-    """Get singleton instance of enhanced detector"""
+def get_enhanced_stock_detector(
+    use_llm: bool = True,
+    use_macro_filter: bool = True
+) -> EnhancedStockOpportunityDetector:
+    """
+    Get singleton instance of enhanced detector
+    
+    Args:
+        use_llm: Enable LLM analysis
+        use_macro_filter: Enable macro market filter for score adjustments
+    
+    Returns:
+        EnhancedStockOpportunityDetector instance
+    """
     global _detector_instance
     if _detector_instance is None:
-        _detector_instance = EnhancedStockOpportunityDetector(use_llm=use_llm)
+        _detector_instance = EnhancedStockOpportunityDetector(
+            use_llm=use_llm,
+            use_macro_filter=use_macro_filter
+        )
     return _detector_instance
 
 

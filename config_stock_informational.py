@@ -145,6 +145,44 @@ DETECT_MERGER_CANDIDATES = True
 DETECT_PENNY_STOCK_RISKS = True
 
 # ==============================================================================
+# MACRO MARKET FILTER
+# ==============================================================================
+
+# Enable macro market health filter for score adjustments
+USE_MACRO_FILTER = True
+
+# Cache TTL for macro data (minutes) - avoid excessive API calls
+MACRO_CACHE_TTL_MINUTES = 15
+
+# Enable micro/intraday timing factors (first hour, lunch, opex, etc.)
+MACRO_ENABLE_MICRO = True
+
+# VIX thresholds for trading decisions
+VIX_THRESHOLD_WARNING = 25      # Start reducing position sizes
+VIX_THRESHOLD_HIGH = 35         # Significant caution
+VIX_THRESHOLD_EXTREME = 50      # Avoid new positions
+
+# Block trades before major events (Fed, CPI, NFP)
+BLOCK_BEFORE_FOMC = True        # Pause 48h before FOMC
+BLOCK_BEFORE_CPI = False        # Pause before CPI release
+BLOCK_BEFORE_NFP = False        # Pause before Non-Farm Payrolls
+
+# Position sizing multipliers based on macro regime
+# RISK_ON: Favorable conditions, full size
+# NEUTRAL: Mixed signals, standard size
+# RISK_OFF: Caution, reduce size
+# CRISIS: High volatility, minimal exposure
+POSITION_SIZE_RISK_ON = 1.25    # 125% of standard
+POSITION_SIZE_NEUTRAL = 0.80    # 80% of standard
+POSITION_SIZE_RISK_OFF = 0.50   # 50% of standard
+POSITION_SIZE_CRISIS = 0.25     # 25% of standard
+
+# Score adjustment range (-30 to +30 points)
+# Positive adjustment boosts opportunity scores in favorable conditions
+# Negative adjustment reduces scores in unfavorable conditions
+MAX_MACRO_SCORE_ADJUSTMENT = 30
+
+# ==============================================================================
 # CAPITAL TRACKING (Reference Only - No Trading)
 # ==============================================================================
 

@@ -86,6 +86,35 @@ The platform supports:
   - Automatic cleanup of old records
   - Watchlist auto-sync with Control Panel
 
+#### Macro Market Filter (NEW - December 2025) ✅ PRODUCTION READY
+* **🌐 Multi-Factor Macro Analysis:** Comprehensive market health assessment
+  - **SPY/QQQ/IWM Trend Filter:** Major index direction (above/below 20/50/200 SMAs)
+  - **VIX Fear Gauge:** Volatility regime detection (LOW/NORMAL/ELEVATED/HIGH/EXTREME)
+  - **10Y Treasury Yields:** Interest rate environment (rising/stable/falling)
+  - **Dollar Strength (DXY):** Currency impact on multinationals
+  - **Sector Rotation:** Defensive vs Growth allocation tracking
+  - **Market Breadth:** RSP vs SPY comparison as breadth proxy
+  - **Economic Calendar:** Fed events, CPI, NFP proximity detection
+* **⏱️ Micro/Intraday Factors:**
+  - First hour momentum detection
+  - Lunch hour avoidance
+  - OpEx week awareness
+  - Monday/Friday effects
+* **📊 Trading Guidance:**
+  - **Score Adjustment:** -30 to +30 points based on macro conditions
+  - **Position Size Multiplier:** 25% to 125% based on market regime
+  - **Trade Blocking:** Auto-block during FOMC, extreme VIX, crisis conditions
+* **🎯 Regime Classification:**
+  - **RISK_ON:** Favorable conditions, full position sizes
+  - **NEUTRAL:** Mixed signals, standard approach
+  - **RISK_OFF:** Caution, reduced exposure
+  - **CRISIS:** High volatility, avoid new positions
+* **⚙️ Configuration Options:**
+  - VIX thresholds customizable (warning/high/extreme)
+  - Event blocking toggleable (FOMC/CPI/NFP)
+  - Position size multipliers per regime
+  - 15-minute cache TTL to reduce API load
+
 ---
 
 ## 🚀 Quick Start

@@ -44,6 +44,9 @@ _debug_file.flush()
 from services.stock_discovery_universe import get_stock_discovery_universe
 _debug_file.write("[TRACE] stock_informational_monitor.py: Imported stock_discovery_universe\n")
 _debug_file.flush()
+from services.macro_market_filter import get_macro_market_filter, MacroMarketHealth, MacroRegime
+_debug_file.write("[TRACE] stock_informational_monitor.py: Imported macro_market_filter\n")
+_debug_file.flush()
 from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
 
 _debug_file.write("[TRACE] stock_informational_monitor.py: About to import config_stock_informational\n")
@@ -239,6 +242,13 @@ class StockInformationalMonitor(LLMServiceMixin):
         # SCAN MODE: 'watchlist_only', 'discovery_only', 'both'
         self.scan_mode = 'watchlist_only'  # Default to watchlist only
         print(f"[TRACE] StockInformationalMonitor.__init__: Discovery universe initialized", flush=True)
+        
+        # MACRO FILTER: Market health assessment for score adjustments
+        print(f"[TRACE] StockInformationalMonitor.__init__: Initializing macro market filter...", flush=True)
+        self.macro_filter = get_macro_market_filter(cache_ttl_minutes=15, enable_micro=True)
+        self.macro_filter_enabled = True  # Can be toggled via control panel
+        self.last_macro_health: Optional[MacroMarketHealth] = None
+        print(f"[TRACE] StockInformationalMonitor.__init__: Macro filter initialized", flush=True)
         
         # State
         print(f"[TRACE] StockInformationalMonitor.__init__: Setting up state variables...", flush=True)
@@ -521,6 +531,59 @@ class StockInformationalMonitor(LLMServiceMixin):
             logger.error(f"Error loading discovery config: {e}")
     
     # ============================================================
+    # MACRO MARKET FILTER: Market Health Integration
+    # ============================================================
+    
+    def set_macro_filter_enabled(self, enabled: bool):
+        """
+        Enable or disable macro market filter
+        
+        Args:
+            enabled: True to use macro filter for score adjustments
+        """
+        self.macro_filter_enabled = enabled
+        status = "✅ ENABLED" if enabled else "❌ DISABLED"
+        logger.info(f"Macro Market Filter: {status}")
+    
+    def get_macro_health(self, force_refresh: bool = False) -> Optional[MacroMarketHealth]:
+        """
+        Get current macro market health
+        
+        Args:
+            force_refresh: Force refresh of cached data
+            
+        Returns:
+            MacroMarketHealth or None if not available
+        """
+        if not self.macro_filter_enabled:
+            return None
+        
+        try:
+            return self.macro_filter.get_market_health(force_refresh=force_refresh)
+        except Exception as e:
+            logger.error(f"Error getting macro health: {e}")
+            return None
+    
+    def get_macro_summary(self) -> str:
+        """Get one-line macro summary for display"""
+        if not self.macro_filter_enabled:
+            return "Macro filter disabled"
+        
+        try:
+            return self.macro_filter.get_quick_summary()
+        except Exception as e:
+            return f"Macro unavailable: {e}"
+    
+    def get_macro_config(self) -> Dict[str, Any]:
+        """Get current macro filter configuration"""
+        return {
+            'enabled': self.macro_filter_enabled,
+            'cache_ttl_minutes': self.macro_filter.cache_ttl_minutes if self.macro_filter else 15,
+            'enable_micro': self.macro_filter.enable_micro if self.macro_filter else True,
+            'last_health': self.last_macro_health.to_dict() if self.last_macro_health else None
+        }
+    
+    # ============================================================
     # ENHANCEMENT: Multi-Pronged Analysis Integration
     # ============================================================
     
@@ -780,6 +843,35 @@ class StockInformationalMonitor(LLMServiceMixin):
         }
         logger.info(f"Scan Mode: {mode_icons.get(current_scan_mode, current_scan_mode)}")
         
+        # MACRO MARKET HEALTH CHECK - Get current market conditions
+        macro_adjustment = 0.0
+        macro_size_multiplier = 1.0
+        if self.macro_filter_enabled:
+            try:
+                self.last_macro_health = self.macro_filter.get_market_health()
+                
+                # Log macro summary
+                logger.info(f"🌐 Macro: {self.macro_filter.get_quick_summary()}")
+                
+                # Get score adjustment
+                macro_adjustment, macro_reason = self.macro_filter.get_score_adjustment()
+                macro_size_multiplier, _ = self.macro_filter.get_position_size_multiplier()
+                
+                # Check if we should proceed with scanning
+                should_trade, blocking_reasons = self.macro_filter.should_trade()
+                if not should_trade:
+                    logger.warning(f"⚠️ Macro conditions unfavorable: {', '.join(blocking_reasons)}")
+                    logger.warning("   Continuing scan but opportunities will be flagged")
+                
+                if self.last_macro_health.caution_reasons:
+                    logger.info(f"   ⚠️ Cautions: {', '.join(self.last_macro_health.caution_reasons[:2])}")
+                if self.last_macro_health.favorable_reasons:
+                    logger.info(f"   ✅ Favorable: {', '.join(self.last_macro_health.favorable_reasons[:2])}")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Macro filter error (proceeding with neutral): {e}")
+                self.last_macro_health = None
+        
         # Cleanup old error/alert records periodically
         self._cleanup_old_errors()
         
@@ -876,6 +968,28 @@ class StockInformationalMonitor(LLMServiceMixin):
                 opportunity = self.scan_ticker(symbol)
                 
                 if opportunity:
+                    # Apply macro adjustment to opportunity score
+                    if self.macro_filter_enabled and macro_adjustment != 0:
+                        original_score = opportunity.ensemble_score
+                        adjusted_score = max(0, min(100, original_score + macro_adjustment))
+                        opportunity.ensemble_score = int(adjusted_score)
+                        
+                        # Add macro context to metadata
+                        if opportunity.metadata is None:
+                            opportunity.metadata = {}
+                        opportunity.metadata['macro_adjustment'] = macro_adjustment
+                        opportunity.metadata['macro_original_score'] = original_score
+                        opportunity.metadata['macro_size_multiplier'] = macro_size_multiplier
+                        
+                        if self.last_macro_health:
+                            opportunity.metadata['macro_regime'] = self.last_macro_health.regime.value
+                            opportunity.metadata['macro_score'] = self.last_macro_health.macro_score
+                        
+                        # Log adjustment
+                        if abs(macro_adjustment) >= 5:
+                            adj_icon = "📈" if macro_adjustment > 0 else "📉"
+                            logger.debug(f"  {adj_icon} {symbol}: Score {original_score} → {adjusted_score} (macro {macro_adjustment:+.0f})")
+                    
                     opportunities.append(opportunity)
                     
                     # Check cooldown before sending alert
@@ -1220,6 +1334,35 @@ class StockInformationalMonitor(LLMServiceMixin):
                 fields.append({
                     'name': '📊 Trend',
                     'value': f'{trend_emoji} {trend}',
+                    'inline': True
+                })
+            
+            # Macro market context if available
+            macro_adjustment = opportunity.metadata.get('macro_adjustment', 0)
+            macro_regime = opportunity.metadata.get('macro_regime', '')
+            if macro_regime or macro_adjustment != 0:
+                regime_emoji = {
+                    'risk_on': '🟢',
+                    'neutral': '🟡',
+                    'risk_off': '🟠',
+                    'crisis': '🔴'
+                }
+                macro_display = f"{regime_emoji.get(macro_regime, '⚪')} {macro_regime.upper()}" if macro_regime else "N/A"
+                if macro_adjustment != 0:
+                    macro_display += f" ({macro_adjustment:+.0f} pts)"
+                
+                fields.append({
+                    'name': '🌐 Macro',
+                    'value': macro_display,
+                    'inline': True
+                })
+            
+            # Position size multiplier if available
+            size_mult = opportunity.metadata.get('macro_size_multiplier', 0)
+            if size_mult > 0 and size_mult != 1.0:
+                fields.append({
+                    'name': '📐 Size',
+                    'value': f'{size_mult:.0%} recommended',
                     'inline': True
                 })
         
