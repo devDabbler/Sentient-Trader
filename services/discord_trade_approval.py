@@ -253,28 +253,85 @@ class DiscordTradeApprovalBot(commands.Bot):
                         # Show position sizing for this approval
                         await self._handle_sizing_command(message, approval.pair)
                         return
+                    elif content in ['MODIFY', 'EDIT', 'CHANGE', 'M']:
+                        # Show modification options
+                        await self._show_position_modify_help(message, approval)
+                        return
                     elif content in ['?', 'HELP', 'H']:
                         # Show help for trade approvals
                         help_text = f"""📋 **Trade Approval Commands for {approval.pair}:**
 
 **Approve/Reject:**
-`APPROVE` or `YES` - ✅ Execute the trade
-`REJECT` or `NO` - ❌ Cancel the trade
+`YES` - ✅ Execute the trade as shown
+`NO` - ❌ Cancel the trade
 
-**Position Sizing:**
-`SIZE` or `SIZING` - 📊 Recalculate position size
+**Modify Position (before approving):**
+`50` - Change to 50 shares (just type the number)
+`SHARES 100` - Change to 100 shares
+`$2000` - Change to $2,000 position value
+`HALF` - Reduce to 50% of suggested
+`DOUBLE` - Increase to 200%
+`1.5X` or `3X` - Custom multiplier
+`MODIFY` - Show all modification options
+
+**Info:**
+`SIZE` - 📊 Recalculate position size
 `RISK` - 📊 Show current risk profile
-
-**Other:**
-`?` or `HELP` - Show this help
+`?` - Show this help
 """
                         await message.channel.send(help_text)
                         return
                     else:
+                        # Check for position modification commands
+                        import re
+                        original_content = message.content.strip()
+                        
+                        # Pattern 1: Just a number (interpreted as shares) - e.g., "50" or "100"
+                        if content.isdigit():
+                            new_shares = int(content)
+                            await self._modify_position_shares(message, approval_id, approval, new_shares)
+                            return
+                        
+                        # Pattern 2: SHARES 50 or 50 SHARES
+                        shares_match = re.match(r'(?:SHARES?\s+)?(\d+)(?:\s+SHARES?)?$', content)
+                        if shares_match and ('SHARE' in content or content.replace(' ', '').isdigit()):
+                            new_shares = int(shares_match.group(1))
+                            await self._modify_position_shares(message, approval_id, approval, new_shares)
+                            return
+                        
+                        # Pattern 3: $2000 or $2,000 or $2000.00 (dollar sign with amount)
+                        dollar_match = re.match(r'\$\s*(\d+(?:,\d{3})*(?:\.\d{2})?)', original_content)
+                        if dollar_match:
+                            new_value = float(dollar_match.group(1).replace(',', ''))
+                            await self._modify_position_value(message, approval_id, approval, new_value)
+                            return
+                        
+                        # Pattern 4: VALUE 2000 or VAL 2000
+                        value_match = re.match(r'(?:VALUE?|VAL)\s+(\d+(?:,\d{3})*(?:\.\d{2})?)', content)
+                        if value_match:
+                            new_value = float(value_match.group(1).replace(',', ''))
+                            await self._modify_position_value(message, approval_id, approval, new_value)
+                            return
+                        
+                        # Pattern 5: HALF, DOUBLE, 2X, 0.5X, 1.5X, 3X, etc.
+                        multiplier_match = re.match(r'(HALF|DOUBLE|(\d+(?:\.\d+)?)\s*X)', content)
+                        if multiplier_match:
+                            if multiplier_match.group(1) == 'HALF':
+                                multiplier = 0.5
+                            elif multiplier_match.group(1) == 'DOUBLE':
+                                multiplier = 2.0
+                            else:
+                                multiplier = float(multiplier_match.group(2))
+                            await self._modify_position_multiplier(message, approval_id, approval, multiplier)
+                            return
+                        
                         # Reply to the approval message but unclear intent
                         await message.channel.send(
-                            f"❓ Reply with **APPROVE** or **REJECT** to confirm.\n"
-                            f"Or use `RISK` to see profile, `SIZE` for sizing, `?` for help."
+                            f"❓ Reply with **YES** to confirm or **NO** to cancel.\n\n"
+                            f"**To modify position, reply with:**\n"
+                            f"• `50` or `SHARES 50` → Set to 50 shares\n"
+                            f"• `$2000` → Set to $2,000 value\n"
+                            f"• `HALF` / `DOUBLE` / `1.5X` → Adjust size"
                         )
                         return
             
@@ -1174,7 +1231,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             
             # Queue trade for approval with sizing info
             entry_str = f"${entry_price:.2f}" if entry_price else "Market"
-            await message.channel.send(
+            sent_msg = await message.channel.send(
                 f"🚀 **{mode_str} TRADE QUEUED: {symbol}**\n\n"
                 f"📊 **Position Sizing:**\n"
                 f"   Shares: **{recommended_shares:,}**\n"
@@ -1185,13 +1242,19 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"   Entry: {entry_str}\n"
                 f"   Stop: ${stop_loss:.2f}\n"
                 f"   Confidence: {alert_info.confidence}\n\n"
-                f"Reply **YES** to confirm or **NO** to cancel."
+                f"**Reply to this message:**\n"
+                f"• `YES` - ✅ Confirm trade as shown\n"
+                f"• `NO` - ❌ Cancel trade\n"
+                f"• `SHARES 50` - Change to 50 shares\n"
+                f"• `$2000` - Change to $2,000 position\n"
+                f"• `HALF` / `DOUBLE` - Adjust size"
             )
             
             # Create pending trade approval
             approval_id = f"stock_{symbol}_{int(datetime.now().timestamp())}"
             
             # Store in pending approvals with stock-specific data including sizing
+            # Use sent_msg.id so users can reply to the trade queue message
             self.pending_approvals[approval_id] = PendingTradeApproval(
                 approval_id=approval_id,
                 pair=symbol,
@@ -1204,7 +1267,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 confidence=confidence_score,
                 reasoning=f"AI-sized: {recommended_shares} shares @ ${recommended_value:,.2f} | {alert_info.reasoning or 'Stock opportunity detected'}",
                 created_time=datetime.now(),
-                discord_message_id=str(message.id)
+                discord_message_id=str(sent_msg.id)  # Use the bot's message ID for replies
             )
             
             # Mark the orchestrator alert as in progress
@@ -1251,6 +1314,89 @@ class DiscordTradeApprovalBot(commands.Bot):
         lines.append("• `MULTI BTC` - Run Multi-Config Analysis")
         
         await message.channel.send("\n".join(lines))
+    
+    async def _show_position_modify_help(self, message: discord.Message, approval: 'PendingTradeApproval'):
+        """Show position modification options for a pending trade"""
+        current_shares = int(approval.position_size / approval.entry_price) if approval.entry_price else 0
+        
+        help_text = f"""📊 **Modify Position for {approval.pair}:**
+
+**Current Position:**
+   Shares: **{current_shares:,}**
+   Value: **${approval.position_size:,.2f}**
+
+**Modification Commands (reply with):**
+`SHARES 50` - Set to exactly 50 shares
+`$2000` or `VALUE 2000` - Set to $2,000 value
+`HALF` - Reduce to 50% ({current_shares // 2:,} shares)
+`DOUBLE` - Increase to 200% ({current_shares * 2:,} shares)
+`1.5X` - Increase to 150%
+
+**After modifying, reply `YES` to confirm or `NO` to cancel.**
+"""
+        await message.channel.send(help_text)
+    
+    async def _modify_position_shares(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', new_shares: int):
+        """Modify position to specific number of shares"""
+        if new_shares <= 0:
+            await message.channel.send("❌ Shares must be greater than 0")
+            return
+        
+        old_shares = int(approval.position_size / approval.entry_price) if approval.entry_price else 0
+        new_value = new_shares * approval.entry_price if approval.entry_price else approval.position_size
+        
+        # Update the approval
+        approval.position_size = new_value
+        approval.reasoning = f"Modified: {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
+        
+        await message.channel.send(
+            f"✅ **Position Modified for {approval.pair}:**\n"
+            f"   Shares: {old_shares:,} → **{new_shares:,}**\n"
+            f"   Value: ${new_value:,.2f}\n\n"
+            f"Reply **YES** to confirm this trade or **NO** to cancel."
+        )
+        logger.info(f"📊 Position modified: {approval.pair} → {new_shares} shares (${new_value:,.2f})")
+    
+    async def _modify_position_value(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', new_value: float):
+        """Modify position to specific dollar value"""
+        if new_value <= 0:
+            await message.channel.send("❌ Value must be greater than 0")
+            return
+        
+        old_value = approval.position_size
+        new_shares = int(new_value / approval.entry_price) if approval.entry_price else 0
+        
+        # Update the approval
+        approval.position_size = new_value
+        approval.reasoning = f"Modified: {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
+        
+        await message.channel.send(
+            f"✅ **Position Modified for {approval.pair}:**\n"
+            f"   Value: ${old_value:,.2f} → **${new_value:,.2f}**\n"
+            f"   Shares: **{new_shares:,}**\n\n"
+            f"Reply **YES** to confirm this trade or **NO** to cancel."
+        )
+        logger.info(f"📊 Position modified: {approval.pair} → ${new_value:,.2f} ({new_shares} shares)")
+    
+    async def _modify_position_multiplier(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', multiplier: float):
+        """Modify position by multiplier (HALF, DOUBLE, etc.)"""
+        old_value = approval.position_size
+        new_value = old_value * multiplier
+        new_shares = int(new_value / approval.entry_price) if approval.entry_price else 0
+        
+        multiplier_str = {0.5: "HALF", 2.0: "DOUBLE", 1.5: "1.5X"}.get(multiplier, f"{multiplier}X")
+        
+        # Update the approval
+        approval.position_size = new_value
+        approval.reasoning = f"Modified ({multiplier_str}): {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
+        
+        await message.channel.send(
+            f"✅ **Position Modified ({multiplier_str}) for {approval.pair}:**\n"
+            f"   Value: ${old_value:,.2f} → **${new_value:,.2f}**\n"
+            f"   Shares: **{new_shares:,}**\n\n"
+            f"Reply **YES** to confirm this trade or **NO** to cancel."
+        )
+        logger.info(f"📊 Position modified ({multiplier_str}): {approval.pair} → ${new_value:,.2f} ({new_shares} shares)")
     
     async def _handle_specific_approval(self, message: discord.Message, identifier: str, approve: bool):
         """Handle approval for a specific trade by number or symbol"""
