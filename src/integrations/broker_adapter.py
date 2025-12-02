@@ -196,15 +196,15 @@ class TradierAdapter(BrokerAdapter):
                           tag: Optional[str] = None) -> Tuple[bool, Dict]:
         """Place equity order via Tradier"""
         try:
+            # TradierClient uses 'price' and 'stop' instead of 'limit_price' and 'stop_price'
             success, result = self.client.place_equity_order(
                 symbol=symbol,
                 side=side,
                 quantity=quantity,
                 order_type=order_type,
                 duration=duration,
-                limit_price=limit_price,
-                stop_price=stop_price,
-                tag=tag
+                price=limit_price,
+                stop=stop_price
             )
             return success, result
         except Exception as e:
