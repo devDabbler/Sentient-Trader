@@ -2638,7 +2638,6 @@ def main():
             if st.button("🗑️ Clear All Requests", use_container_width=True):
                 if clear_analysis_requests():
                     st.success("✅ Analysis queue cleared!")
-                    import time
                     time.sleep(0.5)  # Ensure file write completes
                     st.rerun()
                 else:
@@ -2647,7 +2646,6 @@ def main():
             if st.button("🗑️ Clear Results", use_container_width=True):
                 if clear_analysis_results():
                     st.success("✅ Analysis results cleared!")
-                    import time
                     time.sleep(0.5)  # Ensure file write completes
                     st.rerun()
                 else:
@@ -2955,7 +2953,6 @@ def main():
             if st.button("🗑️ Clear All Results", key="clear_all_results"):
                 if clear_analysis_results():
                     st.success("✅ All analysis results cleared!")
-                    import time
                     time.sleep(0.5)  # Brief pause to ensure file write completes
                     st.rerun()  # Refresh to show cleared state
                 else:
