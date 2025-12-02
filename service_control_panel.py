@@ -496,19 +496,41 @@ def clear_analysis_requests() -> bool:
 
 
 def clear_analysis_results() -> bool:
-    """Clear all analysis results"""
+    """Clear all analysis results with verification"""
     import os
     try:
         # Ensure parent directory exists
         ANALYSIS_RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Get size before clearing for logging
+        size_before = ANALYSIS_RESULTS_FILE.stat().st_size if ANALYSIS_RESULTS_FILE.exists() else 0
+        
         with open(ANALYSIS_RESULTS_FILE, 'w') as f:
             json.dump({}, f)
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
-        print(f"[INFO] Cleared analysis results file: {ANALYSIS_RESULTS_FILE}")
-        return True
+        
+        # Verify the clear worked
+        size_after = ANALYSIS_RESULTS_FILE.stat().st_size
+        
+        print(f"[INFO] Cleared analysis results: {size_before} bytes -> {size_after} bytes")
+        print(f"[INFO] File path: {ANALYSIS_RESULTS_FILE}")
+        
+        # Double-check by re-reading
+        with open(ANALYSIS_RESULTS_FILE, 'r') as f:
+            verify = json.load(f)
+        
+        if len(verify) == 0:
+            print("[INFO] ✅ Verification passed - file is empty")
+            return True
+        else:
+            print(f"[ERROR] ❌ Verification failed - file still has {len(verify)} keys")
+            return False
+            
     except Exception as e:
-        print(f"Error clearing analysis results: {e}")
+        print(f"[ERROR] Error clearing analysis results: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -2951,15 +2973,16 @@ def main():
         
         with button_col2:
             if st.button("🗑️ Clear All Results", key="clear_all_results"):
-                if clear_analysis_results():
-                    st.success("✅ All analysis results cleared!")
-                    time.sleep(0.5)  # Brief pause to ensure file write completes
-                    st.rerun()  # Refresh to show cleared state
-                else:
-                    st.error("❌ Failed to clear results")
+                with st.spinner("Clearing results..."):
+                    if clear_analysis_results():
+                        st.success("✅ Results cleared! (Note: Running services will generate new results)")
+                        time.sleep(1)  # Longer pause to show message
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to clear results - check server logs")
         
         with button_col3:
-            st.caption("⚠️ Use sparingly")
+            st.caption("💡 Services keep generating new results")
     else:
         st.info("📭 No analysis results yet.\n\n**To get started:**\n1. Queue an analysis from the sidebar\n2. Or wait for background services to generate results\n3. Results will appear here automatically")
     
