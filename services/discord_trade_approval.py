@@ -1173,6 +1173,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 risk_pct = 2.0
             
             # Queue trade for approval with sizing info
+            entry_str = f"${entry_price:.2f}" if entry_price else "Market"
             await message.channel.send(
                 f"🚀 **{mode_str} TRADE QUEUED: {symbol}**\n\n"
                 f"📊 **Position Sizing:**\n"
@@ -1181,7 +1182,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"   Risk: **{risk_pct:.1f}%**\n\n"
                 f"📈 **Trade Details:**\n"
                 f"   Side: **{side}**\n"
-                f"   Entry: ${entry_price:.2f if entry_price else 'Market'}\n"
+                f"   Entry: {entry_str}\n"
                 f"   Stop: ${stop_loss:.2f}\n"
                 f"   Confidence: {alert_info.confidence}\n\n"
                 f"Reply **YES** to confirm or **NO** to cancel."
