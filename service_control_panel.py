@@ -782,6 +782,7 @@ def get_service_status(service_name: str) -> dict:
     if platform.system().lower().startswith('win'):
         windows_name_map = {
             'sentient-stock-monitor': 'SentientStockMonitor',
+            'sentient-stock-ai-trader': 'SentientStockAI',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',
@@ -834,6 +835,7 @@ def control_service(service_name: str, action: str) -> tuple:
         # Map systemd-style names to Windows service names
         windows_name_map = {
             'sentient-stock-monitor': 'SentientStockMonitor',
+            'sentient-stock-ai-trader': 'SentientStockAI',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',

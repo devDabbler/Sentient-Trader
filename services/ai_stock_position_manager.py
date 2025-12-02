@@ -707,16 +707,187 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         except Exception as e:
             logger.error(f"Error loading state: {e}")
     
+    def sync_with_broker(self) -> Dict[str, int]:
+        """
+        Sync AI monitor positions with current broker positions (Tradier/IBKR)
+        Removes positions not in broker, adds missing positions
+        
+        Returns:
+            Dict with 'removed', 'added', 'kept' counts
+        """
+        try:
+            logger.info("🔄 Syncing with broker portfolio...")
+            
+            if not self.broker_adapter:
+                logger.warning("⚠️ No broker adapter configured - cannot sync positions")
+                return {'removed': 0, 'added': 0, 'kept': len(self.positions)}
+            
+            # Fetch current broker positions
+            success, broker_positions = self.broker_adapter.get_positions()
+            
+            if not success:
+                logger.error("❌ Failed to fetch broker positions")
+                return {'removed': 0, 'added': 0, 'kept': len(self.positions)}
+            
+            logger.info(f"   Found {len(broker_positions)} position(s) in broker")
+            
+            # Create a map of broker positions by symbol
+            broker_symbols = {pos['symbol'].upper(): pos for pos in broker_positions}
+            
+            removed_count = 0
+            kept_count = 0
+            
+            # Remove AI positions that no longer exist in broker
+            positions_to_remove = []
+            for trade_id, ai_pos in self.positions.items():
+                symbol = ai_pos.symbol.upper()
+                if symbol not in broker_symbols:
+                    positions_to_remove.append(trade_id)
+                    logger.info(f"   📤 Removing {ai_pos.symbol} - No longer in broker portfolio")
+                else:
+                    kept_count += 1
+            
+            # Actually remove the positions
+            for trade_id in positions_to_remove:
+                if trade_id in self.positions:
+                    del self.positions[trade_id]
+                    removed_count += 1
+            
+            # Add new positions from broker that aren't being monitored
+            added_count = 0
+            existing_symbols = {p.symbol.upper() for p in self.positions.values()}
+            
+            for symbol, broker_pos in broker_symbols.items():
+                if symbol not in existing_symbols:
+                    try:
+                        quantity = abs(int(broker_pos.get('quantity', 0)))
+                        if quantity == 0:
+                            continue
+                        
+                        # Determine side based on quantity sign
+                        side = "BUY" if broker_pos.get('quantity', 0) > 0 else "SELL"
+                        
+                        # Get cost basis and current price
+                        cost_basis = float(broker_pos.get('cost_basis', 0))
+                        current_price = float(broker_pos.get('current_price', 0))
+                        
+                        # Calculate entry price from cost basis
+                        entry_price = cost_basis / quantity if quantity > 0 else current_price
+                        if entry_price <= 0:
+                            entry_price = current_price
+                        
+                        # Calculate default stops (2% stop, 4% target)
+                        if side == "BUY":
+                            stop_loss = entry_price * 0.98
+                            take_profit = entry_price * 1.04
+                        else:
+                            stop_loss = entry_price * 1.02
+                            take_profit = entry_price * 0.96
+                        
+                        trade_id = f"BROKER_{symbol}_{int(time.time())}"
+                        
+                        position = StockPosition(
+                            trade_id=trade_id,
+                            symbol=symbol,
+                            side=side,
+                            quantity=quantity,
+                            entry_price=entry_price,
+                            entry_time=datetime.now(),
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            strategy="SYNCED_FROM_BROKER",
+                            current_price=current_price if current_price > 0 else entry_price,
+                            highest_price=max(entry_price, current_price) if current_price > 0 else entry_price,
+                            lowest_price=min(entry_price, current_price) if current_price > 0 else entry_price,
+                            status=StockPositionStatus.ACTIVE.value
+                        )
+                        
+                        self.positions[trade_id] = position
+                        added_count += 1
+                        
+                        pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                        pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                        logger.info(f"   📥 Added {symbol}: {quantity} shares @ ${entry_price:.2f} {pnl_emoji} ({pnl_pct:+.1f}%)")
+                        
+                    except Exception as e:
+                        logger.warning(f"   Failed to add broker position {symbol}: {e}")
+            
+            # Save state after sync
+            self._save_state()
+            
+            logger.info(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
+            return {'removed': removed_count, 'added': added_count, 'kept': kept_count}
+            
+        except Exception as e:
+            logger.error(f"Error syncing with broker: {e}")
+            return {'removed': 0, 'added': 0, 'kept': len(self.positions)}
+    
+    def get_broker_positions(self) -> List[Dict]:
+        """
+        Get current positions directly from broker
+        
+        Returns:
+            List of position dicts from broker
+        """
+        if not self.broker_adapter:
+            logger.warning("No broker adapter configured")
+            return []
+        
+        success, positions = self.broker_adapter.get_positions()
+        if success:
+            return positions
+        return []
+    
     def start_monitoring(self):
-        """Start background position monitoring"""
+        """Start background position monitoring (alias for start_monitoring_loop)"""
+        self.start_monitoring_loop()
+    
+    def start_monitoring_loop(self):
+        """
+        Start the monitoring loop in a background thread
+        Checks positions every check_interval_seconds
+        """
         if self.is_running:
             logger.warning("Stock position monitoring already running")
             return
         
-        self.is_running = True
-        self.thread = threading.Thread(target=self._monitoring_loop, daemon=True)
+        def monitoring_loop():
+            self.is_running = True
+            cycle_count = 0
+            logger.info("=" * 60)
+            logger.info("🚀 AI STOCK POSITION MANAGER MONITORING STARTED")
+            logger.info("=" * 60)
+            
+            while self.is_running:
+                try:
+                    cycle_count += 1
+                    logger.info("")
+                    logger.info(f"━━━ CHECK CYCLE #{cycle_count} ━━━")
+                    
+                    # Get active positions
+                    active_positions = self.get_active_positions()
+                    
+                    if active_positions:
+                        logger.info(f"📊 Checking {len(active_positions)} active position(s)...")
+                        self._check_positions(active_positions)
+                    else:
+                        logger.info("📭 No active positions to monitor")
+                    
+                    # Periodic broker sync (every 10 cycles)
+                    if cycle_count % 10 == 0:
+                        logger.info("🔄 Periodic broker sync...")
+                        self.sync_with_broker()
+                    
+                    logger.info(f"💤 Next check in {self.check_interval_seconds}s...")
+                    time.sleep(self.check_interval_seconds)
+                    
+                except Exception as e:
+                    logger.error(f"Error in monitoring loop: {e}", exc_info=True)
+                    time.sleep(self.check_interval_seconds)
+        
+        self.thread = threading.Thread(target=monitoring_loop, daemon=True)
         self.thread.start()
-        logger.info("🎯 Stock position monitoring started")
+        logger.info("🎯 Stock position monitoring thread started")
     
     def stop_monitoring(self):
         """Stop background position monitoring"""
@@ -824,6 +995,46 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
             return ((position.current_price - position.entry_price) / position.entry_price) * 100
         else:
             return ((position.entry_price - position.current_price) / position.entry_price) * 100
+    
+    def get_status(self) -> Dict:
+        """
+        Get current status of the position manager
+        
+        Returns:
+            Dict with status information
+        """
+        active_positions = self.get_active_positions()
+        
+        total_value = 0
+        total_pnl = 0
+        
+        for pos in active_positions:
+            value = pos.quantity * pos.current_price if pos.current_price > 0 else 0
+            total_value += value
+            
+            if pos.entry_price > 0 and pos.current_price > 0:
+                pnl_pct = self._calculate_pnl_pct(pos)
+                pnl_amount = (pnl_pct / 100) * (pos.quantity * pos.entry_price)
+                total_pnl += pnl_amount
+        
+        return {
+            'is_running': self.is_running,
+            'paper_mode': self.paper_mode,
+            'total_positions': len(self.positions),
+            'active_positions': len(active_positions),
+            'pending_approvals': len(self.pending_approvals),
+            'check_interval_seconds': self.check_interval_seconds,
+            'broker_connected': self.broker_adapter is not None,
+            'discord_enabled': self.discord_approval_manager is not None,
+            'total_value': total_value,
+            'total_pnl': total_pnl,
+            'stats': {
+                'total_trades': self.total_trades,
+                'winning_trades': self.winning_trades,
+                'losing_trades': self.losing_trades,
+                'win_rate': (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0
+            }
+        }
 
 
 # Singleton instance

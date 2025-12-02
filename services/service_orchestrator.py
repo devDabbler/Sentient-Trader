@@ -185,6 +185,14 @@ SERVICE_DEFINITIONS = {
         "conflicts_with": ["sentient-orb-fvg"],
         "depends_on": []
     },
+    "sentient-stock-ai-trader": {
+        "display_name": "AI Stock Position Manager",
+        "priority": ServicePriority.CRITICAL,
+        "default_interval": 60,
+        "category": "stocks",
+        "conflicts_with": [],  # Can run alongside monitors
+        "depends_on": []
+    },
     "sentient-orb-fvg": {
         "display_name": "ORB+FVG Scanner",
         "priority": ServicePriority.LOW,
