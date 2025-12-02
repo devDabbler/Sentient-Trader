@@ -1206,14 +1206,19 @@ class DiscordTradeApprovalBot(commands.Bot):
             side: "BUY" or "SELL" 
             paper_mode: If True, use paper trading regardless of config
         """
+        import asyncio
+        
         try:
             from services.ai_stock_position_manager import get_ai_stock_position_manager
             from services.service_orchestrator import get_orchestrator
             
-            # Get pending alert info for this symbol
-            orch = get_orchestrator()
-            orch.refresh_state()
-            pending = orch.get_pending_alerts(asset_type="stock")
+            # Run blocking initialization in thread pool to not block event loop
+            def _get_orchestrator_data():
+                orch = get_orchestrator()
+                orch.refresh_state()
+                return orch, orch.get_pending_alerts(asset_type="stock")
+            
+            orch, pending = await asyncio.to_thread(_get_orchestrator_data)
             
             # Find the alert for this symbol
             alert_info = None
@@ -1229,8 +1234,8 @@ class DiscordTradeApprovalBot(commands.Bot):
                 )
                 return
             
-            # Get stock position manager
-            stock_manager = get_ai_stock_position_manager()
+            # Get stock position manager (run in thread to avoid blocking)
+            stock_manager = await asyncio.to_thread(get_ai_stock_position_manager)
             
             if not stock_manager:
                 await message.channel.send(
@@ -1243,21 +1248,24 @@ class DiscordTradeApprovalBot(commands.Bot):
             use_paper = paper_mode or stock_manager.paper_mode
             mode_str = "📝 PAPER" if use_paper else "💰 LIVE"
             
-            # Get position sizing from risk profile
+            # Get position sizing from risk profile (run in thread to avoid blocking)
             try:
                 from services.risk_profile_config import get_risk_profile_manager
-                risk_manager = get_risk_profile_manager()
                 
-                # Calculate position size
-                confidence_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
-                entry_price = alert_info.price or 0.0
-                stop_loss = alert_info.stop_loss or (entry_price * 0.95)  # Default 5% stop
+                def _calculate_sizing():
+                    risk_manager = get_risk_profile_manager()
+                    confidence_score = float(alert_info.metadata.get('score', 75)) if alert_info.metadata else 75.0
+                    entry_price = alert_info.price or 0.0
+                    stop_loss = alert_info.stop_loss or (entry_price * 0.95)  # Default 5% stop
+                    
+                    sizing = risk_manager.calculate_position_size(
+                        price=entry_price,
+                        stop_loss=stop_loss,
+                        confidence=confidence_score
+                    )
+                    return sizing, entry_price, stop_loss
                 
-                sizing = risk_manager.calculate_position_size(
-                    price=entry_price,
-                    stop_loss=stop_loss,
-                    confidence=confidence_score
-                )
+                sizing, entry_price, stop_loss = await asyncio.to_thread(_calculate_sizing)
                 
                 recommended_shares = sizing['recommended_shares']
                 recommended_value = sizing['recommended_value']
@@ -1267,6 +1275,8 @@ class DiscordTradeApprovalBot(commands.Bot):
             except Exception as e:
                 logger.warning(f"Could not get position sizing: {e}")
                 # Fallback to default sizing
+                entry_price = alert_info.price or 0.0
+                stop_loss = alert_info.stop_loss or (entry_price * 0.95)
                 recommended_shares = int(stock_manager.default_position_size / alert_info.price) if alert_info.price else 10
                 recommended_value = stock_manager.default_position_size
                 position_pct = 10.0
