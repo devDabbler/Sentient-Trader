@@ -813,6 +813,14 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### Discord & Control Panel Fixes (December 2, 2025)
+- ✅ **Discord 'Analyze' Button Fixed**: Buttons now use unique IDs per message to prevent "interaction failed" errors
+- ✅ **Discord Analysis Results**: Analysis results now automatically send to Discord (enabled by default)
+- ✅ **Watchlist Sync**: Stocks/crypto added via Discord now sync to both Supabase AND service watchlists
+- ✅ **Crypto Watchlist Seeding**: New "Seed from Config" button when watchlist is empty - populates with top cryptos
+- ✅ **Auto-Refresh Enabled**: Analysis results auto-refresh now defaults to ON (15-second intervals)
+- ✅ **Improved Results Display**: Cleaner tabs, no duplicates, better labels, compact layout with action counts
+
 ### DEX Hunter v3 (Production Ready)
 - ✅ Phase 1, 2, 3 complete
 - ✅ Systemd service integration
@@ -836,6 +844,6 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Last Updated**: December 1, 2025  
+**Last Updated**: December 2, 2025  
 **Status**: ✅ Production Ready  
 **Phases Completed**: 1, 2, 3 ✅

@@ -33,11 +33,10 @@ from windows_services.runners.service_config_loader import (
     ANALYSIS_PRESETS
 )
 
-# Discord notifications (optional)
+# Discord notifications - ENABLED by default for analysis results
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-# DISABLED by default - the stock monitor already sends alerts
-# Only enable if you want duplicate "Analysis Complete" notifications
-ENABLE_DISCORD_ALERTS = os.getenv("ANALYSIS_QUEUE_DISCORD_ALERTS", "").lower() in ("true", "1", "yes")
+# Enable Discord alerts for analysis results - users want to see results in Discord
+ENABLE_DISCORD_ALERTS = os.getenv("ANALYSIS_QUEUE_DISCORD_ALERTS", "true").lower() in ("true", "1", "yes")
 
 # Configure logging
 LOG_FILE = PROJECT_ROOT / "logs" / "analysis_queue_processor.log"

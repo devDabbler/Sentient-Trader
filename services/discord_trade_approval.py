@@ -92,21 +92,71 @@ class AlertActionView(View):
         self.bot = bot
         self.symbol = symbol
         self.asset_type = asset_type
-
-    @discord.ui.button(label="👀 Watch", style=discord.ButtonStyle.primary, custom_id="btn_watch")
-    async def watch_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(f"👀 Adding **{self.symbol}** to watchlist...", ephemeral=True)
-        await self.bot._handle_watch_command(interaction.message, self.symbol)
-
-    @discord.ui.button(label="🔍 Analyze", style=discord.ButtonStyle.secondary, custom_id="btn_analyze")
-    async def analyze_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(f"🔍 Queuing analysis for **{self.symbol}**...", ephemeral=True)
-        await self.bot._handle_analyze_command(interaction.message, self.symbol)
-
-    @discord.ui.button(label="🗑️ Dismiss", style=discord.ButtonStyle.gray, custom_id="btn_dismiss")
-    async def dismiss_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(f"🗑️ Dismissing alert for **{self.symbol}**...", ephemeral=True)
-        await self.bot._handle_dismiss_command(interaction.message, self.symbol)
+        
+        # Create buttons dynamically with unique custom_ids per symbol
+        # This fixes "interaction failed" when multiple alerts have buttons
+        clean_symbol = symbol.replace("/", "_").replace(" ", "_")[:20]  # Discord limits custom_id to 100 chars
+        timestamp = int(time.time())
+        
+        watch_btn = Button(
+            label="👀 Watch", 
+            style=discord.ButtonStyle.primary, 
+            custom_id=f"watch_{clean_symbol}_{timestamp}"
+        )
+        watch_btn.callback = self._watch_callback
+        self.add_item(watch_btn)
+        
+        analyze_btn = Button(
+            label="🔍 Analyze", 
+            style=discord.ButtonStyle.secondary, 
+            custom_id=f"analyze_{clean_symbol}_{timestamp}"
+        )
+        analyze_btn.callback = self._analyze_callback
+        self.add_item(analyze_btn)
+        
+        dismiss_btn = Button(
+            label="🗑️ Dismiss", 
+            style=discord.ButtonStyle.gray, 
+            custom_id=f"dismiss_{clean_symbol}_{timestamp}"
+        )
+        dismiss_btn.callback = self._dismiss_callback
+        self.add_item(dismiss_btn)
+    
+    async def _watch_callback(self, interaction: discord.Interaction):
+        """Handle Watch button click"""
+        try:
+            await interaction.response.send_message(f"👀 Adding **{self.symbol}** to watchlist...", ephemeral=True)
+            await self.bot._handle_watch_command(interaction.message, self.symbol)
+        except Exception as e:
+            logger.error(f"Error in watch callback: {e}")
+            try:
+                await interaction.followup.send(f"❌ Error: {str(e)[:100]}", ephemeral=True)
+            except:
+                pass
+    
+    async def _analyze_callback(self, interaction: discord.Interaction):
+        """Handle Analyze button click"""
+        try:
+            await interaction.response.send_message(f"🔍 Queuing analysis for **{self.symbol}**...", ephemeral=True)
+            await self.bot._handle_analyze_command(interaction.message, self.symbol)
+        except Exception as e:
+            logger.error(f"Error in analyze callback: {e}")
+            try:
+                await interaction.followup.send(f"❌ Error: {str(e)[:100]}", ephemeral=True)
+            except:
+                pass
+    
+    async def _dismiss_callback(self, interaction: discord.Interaction):
+        """Handle Dismiss button click"""
+        try:
+            await interaction.response.send_message(f"🗑️ Dismissing alert for **{self.symbol}**...", ephemeral=True)
+            await self.bot._handle_dismiss_command(interaction.message, self.symbol)
+        except Exception as e:
+            logger.error(f"Error in dismiss callback: {e}")
+            try:
+                await interaction.followup.send(f"❌ Error: {str(e)[:100]}", ephemeral=True)
+            except:
+                pass
 
 
 class DiscordTradeApprovalBot(commands.Bot):
@@ -501,23 +551,50 @@ class DiscordTradeApprovalBot(commands.Bot):
             await self._handle_sync_command(message)
 
     async def _handle_watch_command(self, message: discord.Message, symbol: str):
-        """Handle WATCH command"""
-        # Add to watchlist via orchestrator helper (handles both crypto and stock)
+        """Handle WATCH command - adds to BOTH database and service watchlist"""
         try:
             if "/" in symbol:
-                # Crypto
+                # Crypto - add to crypto watchlist manager
                 from services.crypto_watchlist_manager import CryptoWatchlistManager
                 wm = CryptoWatchlistManager()
                 if wm.add_crypto(symbol):
-                    await message.channel.send(f"✅ **{symbol}** added to Crypto Watchlist")
+                    # Also add to service watchlist for crypto monitor
+                    try:
+                        from windows_services.runners.service_config_loader import load_service_watchlist
+                        from service_control_panel import set_service_watchlist
+                        current_watchlist = load_service_watchlist('sentient-crypto-breakout') or []
+                        if symbol not in current_watchlist:
+                            current_watchlist.append(symbol)
+                            set_service_watchlist('sentient-crypto-breakout', current_watchlist)
+                            logger.info(f"✅ {symbol} also added to crypto service watchlist")
+                    except Exception as e:
+                        logger.warning(f"Could not add to service watchlist: {e}")
+                    
+                    await message.channel.send(f"✅ **{symbol}** added to Crypto Watchlist + Service Monitor")
                 else:
                     await message.channel.send(f"⚠️ Failed to add {symbol} (duplicate?)")
             else:
-                # Stock or Crypto without /
+                # Stock - add to BOTH TickerManager (Supabase) AND Stock Monitor service watchlist
                 from services.ticker_manager import TickerManager
                 tm = TickerManager()
-                tm.add_ticker(symbol)
-                await message.channel.send(f"✅ **{symbol}** added to Watchlist (TickerManager)")
+                success = tm.add_ticker(symbol)
+                
+                if success:
+                    # Also add to Stock Monitor service watchlist so it gets scanned
+                    try:
+                        from windows_services.runners.service_config_loader import load_service_watchlist
+                        from service_control_panel import set_service_watchlist
+                        current_watchlist = load_service_watchlist('sentient-stock-monitor') or []
+                        if symbol not in current_watchlist:
+                            current_watchlist.append(symbol)
+                            set_service_watchlist('sentient-stock-monitor', current_watchlist)
+                            logger.info(f"✅ {symbol} also added to stock service watchlist")
+                    except Exception as e:
+                        logger.warning(f"Could not add to service watchlist: {e}")
+                    
+                    await message.channel.send(f"✅ **{symbol}** added to Stock Watchlist + Service Monitor")
+                else:
+                    await message.channel.send(f"⚠️ Failed to add {symbol} to watchlist")
                 
         except Exception as e:
             logger.error(f"Error processing WATCH {symbol}: {e}")

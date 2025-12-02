@@ -494,6 +494,61 @@ class CryptoWatchlistManager:
             logger.error(f"Error getting watchlist count: {e}")
             return 0
     
+    def seed_from_config(self, force: bool = False) -> int:
+        """
+        Seed the watchlist from crypto_config.CRYPTO_WATCHLIST if empty or forced.
+        
+        Args:
+            force: If True, add all config tickers even if watchlist isn't empty
+            
+        Returns:
+            Number of tickers added
+        """
+        if not self._check_client():
+            return 0
+        
+        try:
+            # Check if watchlist is empty (or force mode)
+            current_count = self.get_count()
+            if current_count > 0 and not force:
+                logger.info(f"Watchlist already has {current_count} coins, skipping seed (use force=True to override)")
+                return 0
+            
+            # Import crypto config
+            try:
+                import config_crypto_trading as crypto_config
+                config_watchlist = getattr(crypto_config, 'CRYPTO_WATCHLIST', [])
+            except ImportError:
+                logger.warning("Could not import crypto_config for seeding")
+                # Fallback to common cryptos
+                config_watchlist = [
+                    'BTC/USD', 'ETH/USD', 'SOL/USD', 'XRP/USD', 'ADA/USD',
+                    'AVAX/USD', 'DOT/USD', 'MATIC/USD', 'LINK/USD', 'ATOM/USD',
+                    'DOGE/USD', 'LTC/USD'
+                ]
+            
+            if not config_watchlist:
+                logger.warning("No tickers found in crypto_config.CRYPTO_WATCHLIST")
+                return 0
+            
+            # Get existing symbols to avoid duplicates
+            existing = self.get_watchlist_symbols()
+            existing_set = set(existing)
+            
+            added_count = 0
+            for symbol in config_watchlist:
+                if symbol not in existing_set:
+                    if self.add_crypto(symbol):
+                        added_count += 1
+                        logger.info(f"✅ Seeded {symbol} to watchlist")
+            
+            logger.info(f"🌱 Seeded {added_count} cryptos from config to watchlist")
+            return added_count
+            
+        except Exception as e:
+            logger.error(f"Error seeding watchlist from config: {e}")
+            return 0
+    
     def clear_watchlist(self) -> bool:
         """Clear all cryptos from watchlist"""
         if not self._check_client():

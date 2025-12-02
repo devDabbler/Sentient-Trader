@@ -1165,6 +1165,32 @@ def render_crypto_watchlist_tab(
     """
     display_crypto_watchlist_header()
     
+    # Check if watchlist is empty or very small - offer to seed from config
+    try:
+        current_count = manager.get_count()
+        if current_count <= 1:
+            st.warning(f"⚠️ Your crypto watchlist only has {current_count} coin(s)!")
+            
+            col_seed1, col_seed2 = st.columns([2, 1])
+            with col_seed1:
+                st.info("""
+                **Seed your watchlist with popular cryptocurrencies:**
+                - BTC, ETH, SOL, XRP, ADA, AVAX
+                - LINK, DOGE, LTC, and more!
+                """)
+            with col_seed2:
+                if st.button("🌱 Seed Watchlist from Config", key="seed_crypto_watchlist", type="primary"):
+                    added = manager.seed_from_config(force=True)
+                    if added > 0:
+                        st.success(f"✅ Added {added} cryptocurrencies to your watchlist!")
+                        st.rerun()
+                    else:
+                        st.warning("No new cryptocurrencies to add.")
+            
+            st.divider()
+    except Exception as e:
+        logger.warning(f"Could not check watchlist count: {e}")
+    
     # Show refresh status messages if refresh was just completed
     if st.session_state.get('crypto_refresh_status'):
         status = st.session_state.crypto_refresh_status

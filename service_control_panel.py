@@ -2631,76 +2631,132 @@ def main():
     # ANALYSIS RESULTS VIEWER (with Auto-Refresh)
     # ============================================================
     # Create columns for header and refresh control
-    res_col1, res_col2, res_col3 = st.columns([2, 1, 1])
+    res_col1, res_col2, res_col3, res_col4 = st.columns([2, 1, 1, 1])
     with res_col1:
         st.markdown("## 📈 Recent Analysis Results")
     with res_col2:
         if st.button("🔄 Refresh", key="refresh_results"):
             st.rerun()
     with res_col3:
-        # Auto-refresh toggle
-        auto_refresh = st.checkbox("Auto-refresh", value=False, key="auto_refresh_results")
+        # Auto-refresh toggle - DEFAULT ON for better UX
+        auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_results")
         if auto_refresh:
-            st.session_state.last_refresh_time = time.time()
+            if 'last_refresh_time' not in st.session_state:
+                st.session_state.last_refresh_time = time.time()
+    with res_col4:
+        # Show countdown to next refresh
+        if auto_refresh and 'last_refresh_time' in st.session_state:
+            remaining = max(0, 15 - (time.time() - st.session_state.last_refresh_time))
+            st.caption(f"⏱️ {remaining:.0f}s")
     
-    # Auto-refresh logic
+    # Auto-refresh logic - every 15 seconds
     if auto_refresh and 'last_refresh_time' in st.session_state:
         elapsed = time.time() - st.session_state.last_refresh_time
-        if elapsed > 15:  # Refresh every 15 seconds
+        if elapsed > 15:
             st.session_state.last_refresh_time = time.time()
             st.rerun()
     
     analysis_results = get_analysis_results()
     
-    # Build service label map for better organization
+    # Build service label map for better organization - NO DUPLICATES
     SERVICE_LABELS = {
-        'latest': '⏱️ Latest Results',
-        'queue_latest': '⏱️ Latest Queue',
-        'Crypto Standard': '🔍 Crypto Standard',
-        'Crypto Multi-Config': '🎯 Crypto Multi-Config',
-        'Crypto Ultimate': '🚀 Crypto Ultimate',
-        'Stock Momentum': '📈 Stock Momentum',
-        'queue_': '📊 Queue Analysis'
+        'queue_latest': '⏱️ Latest',  # Most recent queue result
+        'crypto_standard': '🔬 Crypto Std',
+        'crypto_multi': '🎯 Crypto Multi',
+        'crypto_ultimate': '🚀 Crypto Ult',
+        'stock_standard': '🔬 Stock Std',
+        'stock_multi': '🎯 Stock Multi',
+        'stock_ultimate': '🚀 Stock Ult',
+        'stock_momentum': '📈 Momentum',
+        'orb_fvg_scan': '🎯 ORB+FVG',
+        'quick_crypto': '⚡ Quick Crypto',
     }
     
     def get_service_label(service_key: str) -> str:
-        """Get a better label for the service"""
+        """Get a better label for the service - avoid duplicates"""
+        # Skip 'latest' - we show queue_latest instead
+        if service_key == 'latest':
+            return None  # Skip this key
+        
         # Check for exact matches first
         if service_key in SERVICE_LABELS:
             return SERVICE_LABELS[service_key]
         
-        # Check for partial matches
+        # Check for queue_YYYYMMDD_HHMMSS pattern
+        if service_key.startswith('queue_') and service_key != 'queue_latest':
+            # Extract timestamp and format nicely
+            parts = service_key.replace('queue_', '').split('_')
+            if len(parts) == 2 and len(parts[0]) == 8 and len(parts[1]) >= 4:
+                try:
+                    date_part = parts[0]  # YYYYMMDD
+                    time_part = parts[1][:4]  # HHMM
+                    return f"📊 {date_part[4:6]}/{date_part[6:8]} {time_part[:2]}:{time_part[2:4]}"
+                except:
+                    pass
+            return f"📊 Queue {service_key[-6:]}"  # Use last 6 chars as ID
+        
+        # For other patterns, check partial matches
+        lower_key = service_key.lower()
         for pattern, label in SERVICE_LABELS.items():
-            if pattern in service_key.lower():
+            if pattern in lower_key:
                 return label
         
-        # Clean up the raw key
-        clean_label = service_key.replace('_', ' ').title()
+        # Clean up the raw key - make it shorter
+        clean_label = service_key.replace('_', ' ').replace('queue ', '').title()
+        if len(clean_label) > 15:
+            clean_label = clean_label[:12] + "..."
         return f"📊 {clean_label}"
     
     if analysis_results:
-        # Initialize session state for stable tab keys - prioritize special keys
-        if 'analysis_tab_keys' not in st.session_state:
-            all_keys = list(analysis_results.keys())
-            # Sort with 'latest' first, then 'queue_latest', then others
-            special_keys = [k for k in all_keys if k in ['latest', 'queue_latest']]
-            other_keys = [k for k in all_keys if k not in ['latest', 'queue_latest']]
-            st.session_state.analysis_tab_keys = special_keys + sorted(other_keys)
+        # Filter and sort keys - avoid duplicates, prioritize queue_latest
+        all_keys = list(analysis_results.keys())
         
-        # Update keys if they've changed, but maintain order
-        current_keys = list(analysis_results.keys())
-        if set(current_keys) != set(st.session_state.analysis_tab_keys):
-            # Merge: keep existing order, add new keys at end
-            existing_keys = [k for k in st.session_state.analysis_tab_keys if k in current_keys]
-            new_keys = [k for k in current_keys if k not in st.session_state.analysis_tab_keys]
-            st.session_state.analysis_tab_keys = existing_keys + new_keys
+        # Filter out 'latest' (we use queue_latest), and keys with None labels
+        filtered_keys = []
+        for key in all_keys:
+            label = get_service_label(key)
+            if label is not None and key != 'latest':  # Skip 'latest' duplicate
+                filtered_keys.append(key)
         
-        # Create tabs with improved labels
-        tab_labels = [get_service_label(key) for key in st.session_state.analysis_tab_keys] + ["📋 All Results"]
+        # Sort: queue_latest first, then recent queue results (by timestamp), then others
+        def sort_key(k):
+            if k == 'queue_latest':
+                return (0, '')
+            elif k.startswith('queue_'):
+                return (1, k)  # Recent queues sorted alphabetically (newer timestamp = later in sort)
+            else:
+                return (2, k)
+        
+        sorted_keys = sorted(filtered_keys, key=sort_key)
+        
+        # Limit to prevent too many tabs (keep last 5 queue results + special tabs)
+        queue_keys = [k for k in sorted_keys if k.startswith('queue_') and k != 'queue_latest']
+        other_keys = [k for k in sorted_keys if not k.startswith('queue_')]
+        
+        # Take queue_latest + last 4 queue results + all other keys
+        final_keys = []
+        if 'queue_latest' in sorted_keys:
+            final_keys.append('queue_latest')
+        final_keys.extend(queue_keys[-4:])  # Last 4 queue results
+        final_keys.extend(other_keys)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_keys = []
+        for k in final_keys:
+            if k not in seen:
+                seen.add(k)
+                unique_keys.append(k)
+        
+        # Create tabs with improved labels - no duplicates
+        tab_labels = [get_service_label(key) for key in unique_keys] + ["📋 All Results"]
         result_tabs = st.tabs(tab_labels)
         
+        # Store for iteration
+        st.session_state.analysis_tab_keys = unique_keys
+        
         # Map services to tabs (show message if service has no current data)
-        for i, service in enumerate(st.session_state.analysis_tab_keys):
+        for i, service in enumerate(unique_keys):
             with result_tabs[i]:
                 if service not in analysis_results:
                     st.info(f"No current results for {get_service_label(service)}. Results will appear here when available.")
@@ -2719,20 +2775,21 @@ def main():
                     st.warning(f"Invalid results list for {service}")
                     results = []
                 
-                # Enhanced header with status indicators
-                st.markdown(f"### {get_service_label(service)}")
+                # Compact header with key stats
+                header_col1, header_col2, header_col3, header_col4 = st.columns([2, 1, 1, 1])
+                with header_col1:
+                    st.markdown(f"### {get_service_label(service)}")
+                with header_col2:
+                    st.metric("📊 Results", len(results))
+                with header_col3:
+                    # Count by action type for quick summary
+                    enter_count = sum(1 for r in results if r.get('action') in ['ENTER_NOW', 'BUY', 'LONG'])
+                    st.metric("🟢 Entry", enter_count)
+                with header_col4:
+                    wait_count = sum(1 for r in results if 'WAIT' in str(r.get('action', '')))
+                    st.metric("🟡 Wait", wait_count)
                 
-                # Status badges
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.caption(f"📅 Updated: {updated}")
-                with col2:
-                    st.metric("Total", len(results), f"{count if count else len(results)} stored")
-                with col3:
-                    if results:
-                        st.metric("Latest", results[-1].get('ticker', 'N/A'))
-                
-                st.divider()
+                st.caption(f"📅 Last updated: {updated}")
                 
                 if results:
                     # Display last 15 results in a better format
