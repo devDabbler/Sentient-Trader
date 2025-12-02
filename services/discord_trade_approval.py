@@ -345,6 +345,17 @@ class DiscordTradeApprovalBot(commands.Bot):
             return
         
         # ============================================================
+        # STANDALONE YES/NO - Apply to most recent pending approval
+        # ============================================================
+        if content in ['APPROVE', 'YES', 'GO', 'EXECUTE', 'Y', '✅', 'OK']:
+            if await self._handle_standalone_approval(message, approve=True):
+                return
+        
+        if content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N', '❌']:
+            if await self._handle_standalone_approval(message, approve=False):
+                return
+        
+        # ============================================================
         # STANDALONE COMMANDS (no reply needed)
         # ============================================================
         
@@ -388,6 +399,14 @@ class DiscordTradeApprovalBot(commands.Bot):
         # AI validation toggle
         if content == 'AICHECK':
             await self._handle_aicheck_command(message)
+            return
+        
+        # ============================================================
+        # STANDALONE POSITION MODIFICATION COMMANDS (no reply needed)
+        # These apply to the most recent pending approval
+        # ============================================================
+        original_content = message.content.strip()
+        if await self._handle_standalone_position_modification(message, content, original_content):
             return
         
         # Check for specific trade approval: "APPROVE 1" or "APPROVE BTC" or "1 APPROVE"
@@ -1242,10 +1261,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"   Entry: {entry_str}\n"
                 f"   Stop: ${stop_loss:.2f}\n"
                 f"   Confidence: {alert_info.confidence}\n\n"
-                f"**Reply to this message:**\n"
+                f"**Commands (reply or just type):**\n"
                 f"• `YES` - ✅ Confirm trade as shown\n"
                 f"• `NO` - ❌ Cancel trade\n"
-                f"• `SHARES 50` - Change to 50 shares\n"
+                f"• `SHARES 50` or `50` - Change to 50 shares\n"
                 f"• `$2000` - Change to $2,000 position\n"
                 f"• `HALF` / `DOUBLE` - Adjust size"
             )
@@ -1335,6 +1354,98 @@ class DiscordTradeApprovalBot(commands.Bot):
 **After modifying, reply `YES` to confirm or `NO` to cancel.**
 """
         await message.channel.send(help_text)
+    
+    async def _handle_standalone_approval(self, message: discord.Message, approve: bool) -> bool:
+        """
+        Handle standalone YES/NO commands for the most recent pending approval.
+        
+        Returns True if there was a pending approval to act on, False otherwise.
+        """
+        # Get the most recent pending approval
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
+        
+        if not pending:
+            return False
+        
+        # Sort by created_time to get most recent
+        pending.sort(key=lambda x: x[1].created_time, reverse=True)
+        approval_id, approval = pending[0]
+        
+        action_str = "APPROVED" if approve else "REJECTED"
+        logger.info(f"📝 Standalone {action_str} command applied to {approval.pair}")
+        
+        # Use existing reply approval handler
+        await self._handle_reply_approval(message, approval_id, approval, approve)
+        return True
+    
+    async def _handle_standalone_position_modification(self, message: discord.Message, content: str, original_content: str) -> bool:
+        """
+        Handle position modification commands sent as standalone messages (not replies).
+        Applies the modification to the most recent pending approval.
+        
+        Returns True if the message was handled, False otherwise.
+        """
+        import re
+        
+        # Get the most recent pending approval
+        pending = [(aid, a) for aid, a in self.pending_approvals.items() 
+                   if not a.approved and not a.rejected and not a.is_expired()]
+        
+        if not pending:
+            # No pending approvals - don't handle these commands
+            return False
+        
+        # Sort by created_time to get most recent
+        pending.sort(key=lambda x: x[1].created_time, reverse=True)
+        approval_id, approval = pending[0]
+        
+        # Pattern 1: Just a number (interpreted as shares) - e.g., "50" or "100"
+        if content.isdigit():
+            new_shares = int(content)
+            await self._modify_position_shares(message, approval_id, approval, new_shares)
+            logger.info(f"📝 Standalone SHARES command applied to {approval.pair}: {new_shares}")
+            return True
+        
+        # Pattern 2: SHARES 50 or 50 SHARES or SHARE 50
+        shares_match = re.match(r'(?:SHARES?\s+)?(\d+)(?:\s+SHARES?)?$', content)
+        if shares_match and 'SHARE' in content:
+            new_shares = int(shares_match.group(1))
+            await self._modify_position_shares(message, approval_id, approval, new_shares)
+            logger.info(f"📝 Standalone SHARES command applied to {approval.pair}: {new_shares}")
+            return True
+        
+        # Pattern 3: $2000 or $2,000 or $2000.00 (dollar sign with amount)
+        dollar_match = re.match(r'\$\s*(\d+(?:,\d{3})*(?:\.\d{2})?)', original_content)
+        if dollar_match:
+            new_value = float(dollar_match.group(1).replace(',', ''))
+            await self._modify_position_value(message, approval_id, approval, new_value)
+            logger.info(f"📝 Standalone $ command applied to {approval.pair}: ${new_value:,.2f}")
+            return True
+        
+        # Pattern 4: VALUE 2000 or VAL 2000
+        value_match = re.match(r'(?:VALUE?|VAL)\s+(\d+(?:,\d{3})*(?:\.\d{2})?)', content)
+        if value_match:
+            new_value = float(value_match.group(1).replace(',', ''))
+            await self._modify_position_value(message, approval_id, approval, new_value)
+            logger.info(f"📝 Standalone VALUE command applied to {approval.pair}: ${new_value:,.2f}")
+            return True
+        
+        # Pattern 5: HALF, DOUBLE, 2X, 0.5X, 1.5X, 3X, etc.
+        multiplier_match = re.match(r'(HALF|DOUBLE|(\d+(?:\.\d+)?)\s*X)', content)
+        if multiplier_match:
+            if multiplier_match.group(1) == 'HALF':
+                multiplier = 0.5
+            elif multiplier_match.group(1) == 'DOUBLE':
+                multiplier = 2.0
+            else:
+                multiplier = float(multiplier_match.group(2))
+            await self._modify_position_multiplier(message, approval_id, approval, multiplier)
+            logger.info(f"📝 Standalone multiplier command applied to {approval.pair}: {multiplier}x")
+            return True
+        
+        # Not a position modification command
+        return False
     
     async def _modify_position_shares(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', new_shares: int):
         """Modify position to specific number of shares"""
