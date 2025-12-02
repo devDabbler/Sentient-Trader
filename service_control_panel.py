@@ -1150,8 +1150,7 @@ def check_password():
                                 st.experimental_set_query_params(auth_token=token)
                                 
                             st.session_state.auth_token = token
-                            st.success("✅ Login successful! Bookmark this URL to stay logged in.")
-                            time.sleep(1)
+                            st.toast("✅ Login successful!")
                         
                         st.rerun()
                     else:
@@ -1464,9 +1463,6 @@ def render_watchlist_manager():
                     st.toast(f"Watchlist updated & synced to Supabase! (+{len(to_add)} / -{len(to_remove)})")
                 else:
                     st.toast("Watchlist updated locally!")
-                    
-                time.sleep(0.5)
-                st.rerun()
 
     # Tab 3: AI Monitor Exclusions
     with tab3:
@@ -1509,8 +1505,7 @@ def render_watchlist_manager():
                         # Offer to restart service
                         if st.button("Restart AI Trader Service?"):
                             control_service("sentient-crypto-ai-trader", "restart")
-                        time.sleep(1)
-                        st.rerun()
+                            st.toast("🔄 AI Trader service restarted")
                     else:
                         st.error("Failed to save changes")
         else:
@@ -1567,13 +1562,24 @@ def main():
         if st.button("🔄 Refresh Status"):
             st.rerun()
         
-        # Auto-refresh option - uses query param trick
+        # Auto-refresh option - NON-BLOCKING implementation
         st.markdown("---")
-        auto_refresh = st.checkbox("🔄 Auto-refresh", value=False, key="auto_refresh", 
+        auto_refresh = st.checkbox("🔄 Auto-refresh (30s)", value=False, key="auto_refresh", 
                                  help="Auto-refresh every 30 seconds")
+        
+        # Non-blocking auto-refresh using session state timer
         if auto_refresh:
-            time.sleep(30)
-            st.rerun()
+            if 'last_auto_refresh' not in st.session_state:
+                st.session_state.last_auto_refresh = time.time()
+            
+            elapsed = time.time() - st.session_state.last_auto_refresh
+            remaining = max(0, 30 - elapsed)
+            
+            if elapsed >= 30:
+                st.session_state.last_auto_refresh = time.time()
+                st.rerun()
+            else:
+                st.caption(f"⏱️ Next refresh in {remaining:.0f}s")
 
     # Tabs
     tab_workflow, tab_status, tab_watchlist, tab_analysis, tab_risk, tab_discord, tab_logs = st.tabs([
@@ -1656,8 +1662,7 @@ def main():
                             elif mode_key == "aggressive":
                                 for svc in SERVICES.values():
                                     control_service(svc["name"], "start")
-                            time.sleep(1)
-                            st.rerun()
+                            st.toast(f"✅ {mode_name} mode activated")
                     st.caption(desc)
             
             st.markdown("---")
@@ -1700,14 +1705,10 @@ def main():
                 if st.button("🗑️ Clear All Crypto", key="clear_all_crypto", use_container_width=True, disabled=len(pending_crypto)==0):
                     cleared = bulk_clear_alerts("crypto")
                     st.toast(f"❌ Cleared {cleared} crypto alerts")
-                    time.sleep(0.3)
-                    st.rerun()
             with bulk_col2:
                 if st.button("🗑️ Clear All Stocks", key="clear_all_stocks", use_container_width=True, disabled=len(pending_stocks)==0):
                     cleared = bulk_clear_alerts("stock")
                     st.toast(f"❌ Cleared {cleared} stock alerts")
-                    time.sleep(0.3)
-                    st.rerun()
             with bulk_col3:
                 st.caption(f"Total: {len(pending_crypto) + len(pending_stocks)} pending alerts")
             
@@ -1770,8 +1771,6 @@ def main():
                     if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss This Alert"):
                         if reject_alert(alert['id']):
                             st.toast(f"❌ {alert['symbol']} dismissed")
-                            time.sleep(0.5)
-                            st.rerun()
                 
                 with col_acts[5]:
                     # Show button to remove all alerts for this symbol if there are multiple
@@ -1781,8 +1780,6 @@ def main():
                             count = reject_all_alerts_for_symbol(symbol)
                             if count > 0:
                                 st.toast(f"❌ Removed {count} alert(s) for {symbol}")
-                                time.sleep(0.5)
-                                st.rerun()
                             else:
                                 st.error("Failed to remove alerts")
                     else:
@@ -1911,15 +1908,13 @@ def main():
                 if status['memory'] != 'N/A':
                     st.markdown(f"**Memory:** {status['memory']}")
                 
-                # Controls
+                # Controls - use toast instead of blocking rerun
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     if st.button("Start", key=f"tab_start_{svc_name}", disabled=status['active']):
                         ok, msg = control_service(svc_name, "start")
                         if ok:
-                            st.success("Started")
-                            time.sleep(1)
-                            st.rerun()
+                            st.toast(f"✅ {svc_label} started")
                         else:
                             st.error(f"Error: {msg}")
                 
@@ -1927,9 +1922,7 @@ def main():
                     if st.button("Stop", key=f"tab_stop_{svc_name}", disabled=not status['active']):
                         ok, msg = control_service(svc_name, "stop")
                         if ok:
-                            st.success("Stopped")
-                            time.sleep(1)
-                            st.rerun()
+                            st.toast(f"⏹️ {svc_label} stopped")
                         else:
                             st.error(f"Error: {msg}")
                 
@@ -1937,9 +1930,7 @@ def main():
                     if st.button("Restart", key=f"tab_restart_{svc_name}"):
                         ok, msg = control_service(svc_name, "restart")
                         if ok:
-                            st.success("Restarted")
-                            time.sleep(1)
-                            st.rerun()
+                            st.toast(f"🔄 {svc_label} restarted")
                         else:
                             st.error(f"Error: {msg}")
                 
@@ -1961,9 +1952,7 @@ def main():
                     if new_interval != current_interval:
                         if st.button("Update Interval", key=f"tab_update_{svc_name}"):
                             if set_service_interval(svc_name, svc_info, int(new_interval)):
-                                st.success("Interval updated")
-                                time.sleep(1)
-                                st.rerun()
+                                st.toast(f"✅ Interval set to {new_interval}s")
                 
                 st.markdown("---")
 
@@ -1977,12 +1966,12 @@ def main():
             if st.button("▶️ Start\nAll", use_container_width=True):
                 for svc in SERVICES.values():
                     control_service(svc["name"], "start")
-                st.rerun()
+                st.toast("✅ Started all services")
         with col2:
             if st.button("⏹️ Stop\nAll", use_container_width=True):
                 for svc in SERVICES.values():
                     control_service(svc["name"], "stop")
-                st.rerun()
+                st.toast("⏹️ Stopped all services")
         
         st.markdown("---")
         st.markdown("### 📊 Overview")
@@ -2103,8 +2092,6 @@ def main():
             if st.button("🗑️ Clear Queue", key="clear_analysis_queue"):
                 if clear_analysis_requests():
                     st.toast("✅ Queue cleared!")
-                time.sleep(0.3)
-                st.rerun()
     
     # Main content - Service Cards by Category
     st.markdown("---")
@@ -2150,7 +2137,6 @@ def main():
                                 st.toast(f"✅ {display_name} started!")
                             else:
                                 st.error(msg)
-                            st.rerun()
                     
                     with btn_col2:
                         if st.button("⏹️", key=f"main_stop_{service_name}", help="Stop"):
@@ -2159,7 +2145,6 @@ def main():
                                 st.toast(f"⏹️ {display_name} stopped!")
                             else:
                                 st.error(msg)
-                            st.rerun()
                     
                     with btn_col3:
                         if st.button("🔄", key=f"main_restart_{service_name}", help="Restart"):
@@ -2168,7 +2153,6 @@ def main():
                                 st.toast(f"🔄 {display_name} restarted!")
                             else:
                                 st.error(msg)
-                            st.rerun()
                 
                 with col3:
                     st.markdown("**Auto-Start**")
@@ -2180,11 +2164,11 @@ def main():
                     if status["enabled"]:
                         if st.button("🔕 Disable", key=f"main_disable_{service_name}"):
                             control_service(service_name, "disable")
-                            st.rerun()
+                            st.toast(f"🔕 {display_name} auto-start disabled")
                     else:
                         if st.button("🔔 Enable", key=f"main_enable_{service_name}"):
                             control_service(service_name, "enable")
-                            st.rerun()
+                            st.toast(f"🔔 {display_name} auto-start enabled")
                 
                 # Expandable logs section
                 with st.expander(f"📜 View Logs - {display_name}"):
@@ -2205,11 +2189,10 @@ def main():
                                 st.toast(f"✅ {msg}")
                             else:
                                 st.error(msg)
-                            st.rerun()
                     
-                    # Refresh button in its own row
+                    # Refresh button in its own row - only this needs rerun to reload logs
                     if st.button("🔄 Refresh Logs", key=f"refresh_logs_{service_name}", use_container_width=True):
-                        st.rerun()
+                        pass  # Just clicking refreshes the UI naturally
                     
                     logs = get_service_logs(service_name, log_lines)
                     
@@ -2295,7 +2278,6 @@ def main():
                                         st.toast(f"✅ Interval set to {new_interval}s and service restarted!")
                                     else:
                                         st.warning(f"Interval saved but restart failed: {msg}")
-                                    st.rerun()
                                 else:
                                     st.error("Failed to save interval")
                         
@@ -2304,7 +2286,7 @@ def main():
                             if st.button(f"↩️ Reset to Default ({default_val}s)", key=f"main_reset_{service_name}"):
                                 set_service_interval(service_name, svc_info, default_val)
                                 control_service(service_name, "restart")
-                                st.rerun()
+                                st.toast(f"↩️ Reset to {default_val}s and restarted")
                         
                         # Quick presets
                         st.markdown("---")
@@ -2612,16 +2594,12 @@ def main():
                     st.toast("✅ Analysis queue cleared!")
                 else:
                     st.error("❌ Failed to clear queue")
-                time.sleep(0.3)
-                st.rerun()
         with col_clear2:
             if st.button("🗑️ Clear Results", use_container_width=True):
                 if clear_analysis_results():
                     st.toast("✅ Analysis results cleared!")
                 else:
                     st.error("❌ Failed to clear results")
-                time.sleep(0.3)
-                st.rerun()
     else:
         st.info("No analysis requests queued. Use the sidebar to trigger scans from your phone! 📱")
     
@@ -2924,9 +2902,7 @@ def main():
         with button_col2:
             if st.button("🗑️ Clear All Results", key="clear_all_results"):
                 clear_analysis_results()
-                st.success("✅ All analysis results cleared!")
-                time.sleep(1)
-                st.rerun()
+                st.toast("✅ All analysis results cleared!")
         
         with button_col3:
             st.caption("⚠️ Use sparingly")
