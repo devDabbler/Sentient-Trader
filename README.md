@@ -185,6 +185,7 @@ The platform runs multiple background services for continuous analysis and tradi
 | **EMA Power Zone** | Swing trading based on 8/21 EMA & DeMarker | ✅ Active | `config_swing_trader.py` |
 | **Options Premium** | Wheel strategy and credit spreads | ✅ Active | `config_options_premium.py` |
 | **Stock Intelligence** | 🆕 Multi-pronged opportunity detection + discovery | ✅ PRODUCTION | `services/stock_informational_monitor.py` |
+| **AI Stock Trader** | 🆕 Position monitoring with broker sync (Tradier/IBKR) | ✅ PRODUCTION | `services/ai_stock_position_manager.py` |
 | **Crypto Breakout** | 24/7 Scanner for crypto pairs | ✅ Active | `services/crypto_breakout_service.py` |
 | **DEX Hunter** | 🆕 Production Solana token launch detection | ✅ PRODUCTION | `services/dex_launch_hunter.py` |
 
@@ -194,6 +195,7 @@ The platform runs multiple background services for continuous analysis and tradi
 ```powershell
 START_SERVICES.bat              # Start all services
 START_STOCK_MONITOR.bat         # Start enhanced stock intelligence monitor (with discovery)
+START_STOCK_AI_TRADER.bat       # Start AI stock position manager (monitors your trades)
 START_DEX_HUNTER.bat            # Start DEX Hunter only
 START_CRYPTO_AI_TRADER.bat      # Start crypto trader
 service_control_panel.py        # Streamlit UI for configuring all services
@@ -309,9 +311,10 @@ START_STOCK_MONITOR.bat
 |:----------|:-----|:------------|
 | Stock Monitor | `services/stock_informational_monitor.py` | Detects opportunities |
 | AI Stock Entry | `services/ai_stock_entry_assistant.py` | Analyzes entry timing |
-| Position Manager | `services/ai_stock_position_manager.py` | **NEW:** Executes trades via broker |
+| **Position Manager** | `services/ai_stock_position_manager.py` | **Monitors & manages positions with broker sync** |
 | Discord Approval | `services/discord_trade_approval.py` | Handles approval workflow |
 | Broker Adapter | `src/integrations/broker_adapter.py` | Unified Tradier/IBKR interface |
+| **Runner Script** | `windows_services/runners/run_stock_ai_trader_simple.py` | **Service startup script** |
 
 ### Analysis Modes
 
@@ -320,6 +323,92 @@ START_STOCK_MONITOR.bat
 | **Standard** | Single strategy, one timeframe | Quick scan, high-volume opportunities |
 | **Multi** | Long + Short analysis, multiple timeframes | Swing trades, position sizing |
 | **Ultimate** | ALL strategies + directions + timeframes | Deep research, confident entries |
+
+---
+
+## 🤖 AI Stock Position Manager (NEW - December 2025) ✅ PRODUCTION READY
+
+The **AI Stock Position Manager** actively monitors your stock positions (paper and live) and applies intelligent risk management.
+
+### Key Features
+
+* **🔄 Broker Sync:** Automatically syncs with Tradier or IBKR on startup and periodically
+* **📊 Position Monitoring:** Tracks all open positions with real-time price updates
+* **🛡️ Stop Loss & Take Profit:** Automated position management with configurable thresholds
+* **📈 Trailing Stops:** Dynamically adjusts stops as positions move in your favor
+* **🎯 Breakeven Protection:** Moves stop to entry price after configurable profit threshold
+* **📱 Discord Integration:** Sends alerts for trade recommendations and requires approval before execution
+
+### How It Works
+
+```
+Startup
+    ↓ Connects to broker (Tradier/IBKR)
+    ↓ Syncs all open positions
+Monitoring Loop (every 60s)
+    ↓ Checks each position for:
+    │   - Stop loss triggers
+    │   - Take profit triggers
+    │   - Breakeven conditions
+    │   - Trailing stop adjustments
+    ↓ Every 10 cycles: Re-sync with broker
+    ↓ Discord alerts for recommendations
+```
+
+### Starting the Service
+
+**Windows:**
+```powershell
+START_STOCK_AI_TRADER.bat
+# Or directly:
+python windows_services\runners\run_stock_ai_trader_simple.py
+```
+
+**Linux (background):**
+```bash
+nohup python windows_services/runners/run_stock_ai_trader_simple.py > logs/stock_ai_trader_service.log 2>&1 &
+```
+
+### Configuration
+
+Set in `.env`:
+```bash
+# Broker Selection
+BROKER_TYPE=TRADIER           # or IBKR
+
+# Trading Mode
+STOCK_PAPER_MODE=true         # true = paper, false = LIVE TRADING
+
+# For Tradier
+TRADIER_PAPER_ACCOUNT_ID=...
+TRADIER_PAPER_ACCESS_TOKEN=...
+# For live:
+TRADIER_PROD_ACCOUNT_ID=...
+TRADIER_PROD_ACCESS_TOKEN=...
+
+# For IBKR
+IBKR_PAPER_PORT=7497
+IBKR_PAPER_CLIENT_ID=1
+IBKR_LIVE_PORT=7496
+IBKR_LIVE_CLIENT_ID=2
+```
+
+### Sync Behavior
+
+| Event | Action |
+|:------|:-------|
+| **Startup** | Full sync with broker - imports all positions |
+| **Every 10 cycles** | Re-sync to catch manual trades or external changes |
+| **Position not in broker** | Removed from AI tracking |
+| **New broker position** | Added with default 2% stop / 4% target |
+
+### Service Control Panel
+
+The AI Stock Trader appears in the Service Control Panel under "Stocks" category:
+- View real-time status
+- Start/stop the service
+- Adjust check interval (30s - 5min)
+- View logs
 
 **Linux (Systemd):**
 ```bash
@@ -812,6 +901,15 @@ MIT License - See LICENSE file for details
 ---
 
 ## ✨ Recent Updates (December 2025)
+
+### AI Stock Position Manager (December 2, 2025)
+- ✅ **Broker Sync:** New `sync_with_broker()` method syncs positions from Tradier/IBKR on startup and periodically
+- ✅ **Position Monitoring:** Monitors all open stock positions (paper and live) with stop loss/take profit management
+- ✅ **Trailing Stops:** Automatic trailing stop adjustments as positions move in your favor
+- ✅ **Breakeven Protection:** Moves stop to entry price after configurable profit threshold
+- ✅ **Runner Script:** New `run_stock_ai_trader_simple.py` for easy service startup
+- ✅ **Batch File:** `START_STOCK_AI_TRADER.bat` for Windows quick-start
+- ✅ **Service Integration:** Added to Service Control Panel and Service Orchestrator
 
 ### Discord & Control Panel Fixes (December 2, 2025)
 - ✅ **Discord 'Analyze' Button Fixed**: Buttons now use unique IDs per message to prevent "interaction failed" errors
