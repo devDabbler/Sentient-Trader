@@ -184,6 +184,10 @@ class DiscordTradeApprovalBot(commands.Bot):
         self.pending_approvals: Dict[str, PendingTradeApproval] = {}
         self.bot_ready = False  # Renamed from is_ready to avoid shadowing inherited method
         
+        # Message deduplication - prevent processing same message twice
+        self._processed_messages: set = set()
+        self._max_processed_cache = 100  # Keep last 100 message IDs
+        
         logger.info(f"🤖 Discord Trade Approval Bot initialized")
         logger.info(f"   Channel ID: {channel_id}")
     
@@ -207,6 +211,23 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Check if it's in our channel
         if message.channel.id != self.channel_id:
             return
+        
+        # MESSAGE DEDUPLICATION: Prevent processing same message twice
+        # (can happen due to Discord reconnects or network issues)
+        msg_id = str(message.id)
+        if msg_id in self._processed_messages:
+            logger.debug(f"Skipping duplicate message: {msg_id}")
+            return
+        
+        # Add to processed set
+        self._processed_messages.add(msg_id)
+        
+        # Trim cache if too large
+        if len(self._processed_messages) > self._max_processed_cache:
+            # Remove oldest entries (convert to list, remove first half)
+            to_remove = list(self._processed_messages)[:self._max_processed_cache // 2]
+            for old_id in to_remove:
+                self._processed_messages.discard(old_id)
         
         content = message.content.upper().strip()
         

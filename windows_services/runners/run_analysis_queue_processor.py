@@ -476,29 +476,51 @@ def send_discord_notification(results: list, request: dict):
             action = result.get('action', 'UNKNOWN')
             confidence = result.get('confidence', 0)
             reasoning = result.get('reasoning', 'No analysis provided')
+            result_mode = result.get('mode', mode)
             
-            # Determine color based on action
+            # Determine trade direction and color based on action
             if action in ['LONG', 'BUY', 'BULLISH', 'ENTER_NOW']:
                 color = 65280  # Green
                 emoji = "🟢"
-            elif action in ['SHORT', 'SELL', 'BEARISH', 'DO_NOT_ENTER']:
+                trade_direction = "📈 LONG/BUY"
+            elif action in ['SHORT', 'SELL', 'BEARISH']:
                 color = 16711680  # Red
                 emoji = "🔴"
-            else:
+                trade_direction = "📉 SHORT/SELL"
+            elif action in ['DO_NOT_ENTER', 'WAIT', 'WAIT_FOR_PULLBACK']:
                 color = 16776960  # Yellow
                 emoji = "🟡"
+                trade_direction = "⏸️ WAIT/NO TRADE"
+            else:
+                color = 8421504  # Gray
+                emoji = "⚪"
+                trade_direction = "❓ UNDETERMINED"
+            
+            # Mode descriptions
+            mode_labels = {
+                "standard": "🔬 Standard",
+                "multi": "🎯 Multi-Strategy",
+                "multi_config": "🎯 Multi-Strategy",
+                "ultimate": "🚀 Ultimate"
+            }
+            mode_label = mode_labels.get(result_mode, f"📊 {result_mode}")
             
             # Build fields with available data
             fields = [
                 {"name": "Signal", "value": f"{emoji} {action}", "inline": True},
-                {"name": "Confidence", "value": f"{confidence:.0f}%" if isinstance(confidence, (int, float)) else str(confidence), "inline": True}
+                {"name": "Confidence", "value": f"{confidence:.0f}%" if isinstance(confidence, (int, float)) else str(confidence), "inline": True},
+                {"name": "Trade Direction", "value": trade_direction, "inline": True}
             ]
             
-            # Add optional detailed fields
+            # Add urgency
             if result.get('urgency'):
                 fields.append({"name": "Urgency", "value": result.get('urgency'), "inline": True})
             
-            if result.get('suggested_entry') is not None and action not in ['DO_NOT_ENTER']:
+            # Add analysis mode
+            fields.append({"name": "Analysis Mode", "value": mode_label, "inline": True})
+            
+            # Add entry/stop/target for actionable signals
+            if result.get('suggested_entry') is not None and action not in ['DO_NOT_ENTER', 'WAIT', 'WAIT_FOR_PULLBACK']:
                 entry = result.get('suggested_entry')
                 entry_str = f"${entry:.4f}" if isinstance(entry, (int, float)) else str(entry)
                 fields.append({"name": "Entry Point", "value": entry_str, "inline": True})
@@ -513,10 +535,22 @@ def send_discord_notification(results: list, request: dict):
                 target_str = f"${target:.4f}" if isinstance(target, (int, float)) else str(target)
                 fields.append({"name": "Target", "value": target_str, "inline": True})
             
-            if result.get('risk_reward_ratio') is not None and action not in ['DO_NOT_ENTER']:
-                rr = result.get('risk_reward_ratio')
-                rr_str = f"{rr:.2f}" if isinstance(rr, (int, float)) else str(rr)
+            if result.get('risk_reward') is not None and action not in ['DO_NOT_ENTER', 'WAIT']:
+                rr = result.get('risk_reward')
+                rr_str = f"{rr:.2f}:1" if isinstance(rr, (int, float)) else str(rr)
                 fields.append({"name": "Risk/Reward", "value": rr_str, "inline": True})
+            
+            # Add technical scores if available
+            scores = []
+            if result.get('technical_score') is not None:
+                scores.append(f"Tech: {result.get('technical_score'):.0f}")
+            if result.get('trend_score') is not None:
+                scores.append(f"Trend: {result.get('trend_score'):.0f}")
+            if result.get('timing_score') is not None:
+                scores.append(f"Timing: {result.get('timing_score'):.0f}")
+            
+            if scores:
+                fields.append({"name": "Scores", "value": " | ".join(scores), "inline": True})
             
             # Add reasoning as main field (Discord truncates at 2048 chars per field)
             reasoning_text = reasoning[:1024] if len(reasoning) > 1024 else reasoning
