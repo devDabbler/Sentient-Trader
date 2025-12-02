@@ -385,12 +385,19 @@ def get_service_watchlist(service_name: str, category: str = "stocks") -> list:
 
 def set_service_watchlist(service_name: str, tickers: list) -> bool:
     """Set watchlist for a specific service"""
-    watchlists = load_service_watchlists()
-    if service_name not in watchlists:
-        watchlists[service_name] = {}
-    watchlists[service_name]["tickers"] = tickers
-    watchlists[service_name]["updated"] = datetime.now().isoformat()
-    return save_service_watchlists(watchlists)
+    try:
+        watchlists = load_service_watchlists()
+        if service_name not in watchlists:
+            watchlists[service_name] = {}
+        watchlists[service_name]["tickers"] = tickers
+        watchlists[service_name]["updated"] = datetime.now().isoformat()
+        result = save_service_watchlists(watchlists)
+        print(f"[WATCHLIST] Saved {len(tickers)} tickers for {service_name}: {result}")
+        print(f"[WATCHLIST] File: {SERVICE_WATCHLISTS_FILE}")
+        return result
+    except Exception as e:
+        print(f"[WATCHLIST] Error saving: {e}")
+        return False
 
 
 # ============================================================
@@ -2479,38 +2486,51 @@ def main():
                         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                         with btn_col1:
                             if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True, help=f"Select all {len(all_tickers)} tickers"):
-                                set_service_watchlist(service_name, all_tickers)
-                                # Clear session state so multiselect refreshes
-                                if multiselect_key in st.session_state:
-                                    del st.session_state[multiselect_key]
-                                st.toast(f"✅ Selected all {len(all_tickers)} tickers!")
+                                if set_service_watchlist(service_name, all_tickers):
+                                    # Clear multiselect session state - must convert to list to avoid iteration issues
+                                    if multiselect_key in st.session_state:
+                                        del st.session_state[multiselect_key]
+                                    st.success(f"✅ Selected all {len(all_tickers)} tickers!")
+                                    time.sleep(0.5)  # Brief pause so user sees message
+                                else:
+                                    st.error("❌ Failed to save watchlist!")
+                                    time.sleep(1)
                                 st.rerun()
                         with btn_col2:
                             if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True, help="Clear all tickers"):
-                                set_service_watchlist(service_name, [])
-                                # Clear session state so multiselect refreshes
-                                if multiselect_key in st.session_state:
-                                    del st.session_state[multiselect_key]
-                                st.toast("🗑️ Watchlist cleared!")
+                                if set_service_watchlist(service_name, []):
+                                    if multiselect_key in st.session_state:
+                                        del st.session_state[multiselect_key]
+                                    st.success("🗑️ Watchlist cleared!")
+                                    time.sleep(0.5)
+                                else:
+                                    st.error("❌ Failed to save watchlist!")
+                                    time.sleep(1)
                                 st.rerun()
                         with btn_col3:
                             top_5 = all_tickers[:5]
                             if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True, help=f"Select: {', '.join(top_5)}"):
-                                set_service_watchlist(service_name, top_5)
-                                # Clear session state so multiselect refreshes
-                                if multiselect_key in st.session_state:
-                                    del st.session_state[multiselect_key]
-                                st.toast(f"✅ Selected top 5: {', '.join(top_5)}")
+                                if set_service_watchlist(service_name, top_5):
+                                    if multiselect_key in st.session_state:
+                                        del st.session_state[multiselect_key]
+                                    st.success(f"✅ Selected top 5: {', '.join(top_5)}")
+                                    time.sleep(0.5)
+                                else:
+                                    st.error("❌ Failed to save watchlist!")
+                                    time.sleep(1)
                                 st.rerun()
                         with btn_col4:
                             # Sync from Supabase button - use all Supabase tickers
                             if supabase_tickers:
                                 if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help=f"Sync {len(supabase_tickers)} tickers from Supabase"):
-                                    set_service_watchlist(service_name, supabase_tickers)
-                                    # Clear session state so multiselect refreshes
-                                    if multiselect_key in st.session_state:
-                                        del st.session_state[multiselect_key]
-                                    st.toast(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
+                                    if set_service_watchlist(service_name, supabase_tickers):
+                                        if multiselect_key in st.session_state:
+                                            del st.session_state[multiselect_key]
+                                        st.success(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
+                                        time.sleep(0.5)
+                                    else:
+                                        st.error("❌ Failed to save watchlist!")
+                                        time.sleep(1)
                                     st.rerun()
                             else:
                                 # Show disabled-looking button when no Supabase data
