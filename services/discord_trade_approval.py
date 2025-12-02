@@ -239,9 +239,11 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         content = message.content.upper().strip()
         logger.info(f"   Content (upper): '{content}' | Pending approvals: {len(self.pending_approvals)}")
-        
+        logger.info(f"   Message reference: {message.reference}")
+
         # 🔔 CHECK IF THIS IS A REPLY TO A SPECIFIC APPROVAL MESSAGE
         if message.reference and message.reference.message_id:
+            logger.info(f"   📎 This is a REPLY to message: {message.reference.message_id}")
             replied_to_id = str(message.reference.message_id)
             
             # 1. Check pending trade approvals (internal memory)
@@ -352,6 +354,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         if content in ['LIST', 'PENDING', 'TRADES']:
             await self._list_pending_trades(message)
             return
+        
+        logger.info(f"   🔍 Checking standalone commands for: '{content}'")
         
         # ============================================================
         # STANDALONE YES/NO - Apply to most recent pending approval
