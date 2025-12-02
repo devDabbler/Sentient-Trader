@@ -546,11 +546,11 @@ def send_discord_notification(results: list, request: dict):
 
 
 def mark_request_complete(request_id: str):
-    """Mark a request as complete in the queue file"""
+    """Mark a request as complete in the queue file with proper file flushing"""
     try:
         if not ANALYSIS_REQUESTS_FILE.exists():
             logger.warning(f"Analysis requests file doesn't exist, can't mark {request_id} complete")
-            return
+            return False
         
         with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
             requests = json.load(f)
@@ -561,21 +561,37 @@ def mark_request_complete(request_id: str):
                 req["status"] = "complete"
                 req["completed"] = datetime.now().isoformat()
                 found = True
-                logger.info(f"✅ Marked request {request_id} as complete")
                 break
         
         if not found:
             logger.warning(f"Request {request_id} not found in analysis queue")
-            return
+            return False
         
-        # Write back to file - ensure it's persisted
+        # Write back to file with explicit flush to ensure Windows file system persists
+        import os
         with open(ANALYSIS_REQUESTS_FILE, 'w') as f:
             json.dump(requests, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())  # Force OS to write to disk
         
-        logger.debug(f"✅ Request {request_id} status persisted to file")
+        logger.info(f"✅ Marked request {request_id} as complete (file synced)")
+        
+        # Verify the write by re-reading (debug for Windows file system issues)
+        with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
+            verify = json.load(f)
+        for req in verify:
+            if req.get("id") == request_id:
+                if req.get("status") == "complete":
+                    logger.debug(f"✅ Verified: request {request_id} is complete in file")
+                else:
+                    logger.error(f"❌ VERIFICATION FAILED: request {request_id} still shows status={req.get('status')}")
+                break
+        
+        return True
             
     except Exception as e:
         logger.error(f"Error marking request complete: {e}", exc_info=True)
+        return False
 
 
 def main_loop():

@@ -5,8 +5,20 @@ Handles the connection and interaction with the Supabase backend.
 """
 
 import os
+from pathlib import Path
 from supabase import create_client, Client
 from loguru import logger
+
+# Auto-load .env file for standalone scripts
+try:
+    from dotenv import load_dotenv
+    # Find project root (where .env is located)
+    project_root = Path(__file__).parent.parent
+    env_file = project_root / ".env"
+    if env_file.exists():
+        load_dotenv(env_file)
+except ImportError:
+    pass  # dotenv not installed, rely on pre-set environment variables
 
 
 def get_supabase_client() -> Client:

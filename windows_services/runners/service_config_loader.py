@@ -110,6 +110,7 @@ def mark_analysis_complete(request_id: str, results: Optional[Dict] = None) -> b
     Returns:
         True if successful
     """
+    import os
     requests_file = PROJECT_ROOT / 'data' / 'analysis_requests.json'
     
     try:
@@ -119,16 +120,26 @@ def mark_analysis_complete(request_id: str, results: Optional[Dict] = None) -> b
                 requests = json.load(f)
         
         # Find and update the request
+        found = False
         for req in requests:
             if req.get('id') == request_id:
                 req['status'] = 'complete'
                 req['completed'] = datetime.now().isoformat()
                 if results:
                     req['results'] = results
+                found = True
                 break
         
+        if not found:
+            print(f"[service_config_loader] Request {request_id} not found")
+            return False
+        
+        # Write with explicit flush for Windows file system
         with open(requests_file, 'w') as f:
             json.dump(requests, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())  # Force OS to write to disk
+        
         return True
         
     except Exception as e:

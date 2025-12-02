@@ -114,7 +114,7 @@ USE_ML_ENHANCED_SCANNER = True  # ML model for scoring
 USE_AI_VALIDATION = True        # LLM for qualitative analysis
 
 # Minimum ensemble score to trigger alert (0-100)
-MIN_ENSEMBLE_SCORE = 60
+MIN_ENSEMBLE_SCORE = 75
 
 # Minimum confidence for alerts (0-1.0)
 MIN_ALERT_CONFIDENCE = 0.65
