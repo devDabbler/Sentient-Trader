@@ -698,7 +698,7 @@ class CryptoBreakoutMonitor:
                 if breakout.ai_reasoning:
                     message_text += f"\n\n🤖 **AI:** {breakout.ai_reasoning[:200]}"
                 
-                message_text += "\n\n**Reply with:** `1`=Standard `2`=Multi `3`=Ultimate | `W`=Watch | `X`=Dismiss"
+                message_text += "\n\n**Actions:** `1`=Standard `2`=Multi `3`=Ultimate | `W`=Watch | `🚀`=Trade | `X`=Dismiss"
                 
                 # Color based on score
                 if breakout.score >= 90:
@@ -710,14 +710,30 @@ class CryptoBreakoutMonitor:
                 else:
                     color = 0xFFA500  # Orange
                 
-                # Send via bot (has buttons)
+                # Build alert data for Trade button functionality
+                alert_data = {
+                    'symbol': breakout.symbol,
+                    'alert_type': breakout.alert_type,
+                    'score': breakout.score,
+                    'confidence': breakout.confidence,
+                    'price': breakout.price,
+                    'change_24h': breakout.change_24h,
+                    'volume_ratio': breakout.volume_ratio,
+                    'rsi': breakout.rsi,
+                    'ai_confidence': breakout.ai_confidence,
+                    'ai_reasoning': breakout.ai_reasoning
+                }
+                
+                # Send via bot (has buttons including Trade for crypto)
                 async def send_bot_alert():
                     return await self.discord_bot_manager.bot.send_alert_notification(
                         symbol=breakout.symbol,
                         alert_type=f"{emoji} {breakout.alert_type}",
                         message_text=message_text,
                         confidence=breakout.confidence,
-                        color=color
+                        color=color,
+                        asset_type="crypto",
+                        alert_data=alert_data
                     )
                 
                 if self.discord_bot_manager.loop:

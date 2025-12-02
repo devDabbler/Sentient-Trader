@@ -902,6 +902,14 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### Crypto Breakout Trade Execution from Discord (December 2, 2025)
+- ✅ **Trade Button Added:** Crypto breakout alerts now have a 🚀 Trade button for direct execution
+- ✅ **One-Click Trading:** Click Trade on any crypto alert to execute via AI Crypto Position Manager
+- ✅ **Auto Risk Calculation:** Position size calculated from risk profile, 2% stop, 4% target by default
+- ✅ **Alert Data Passed:** Price, score, confidence passed to trade execution for optimal sizing
+- ✅ **AI Position Monitoring:** Trades automatically monitored with trailing stops, breakeven moves
+- ✅ **Mirrors Stock Implementation:** Same Discord-to-execution flow as stock AI trader
+
 ### Unified Trade Journal Integration (December 2, 2025)
 - ✅ **Stock Trades Now Journaled:** AI Stock Position Manager now logs all trades to the UnifiedTradeJournal (matching crypto)
 - ✅ **Entry & Exit Logging:** Both trade entries and exits are recorded with full P&L, R-multiple, and market conditions

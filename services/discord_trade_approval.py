@@ -86,12 +86,13 @@ class TradeActionView(View):
 
 
 class AlertActionView(View):
-    """Interactive buttons for General Alerts (Watch/Analyze/Dismiss)"""
-    def __init__(self, bot, symbol: str, asset_type: str = "crypto"):
+    """Interactive buttons for General Alerts (Watch/Analyze/Trade/Dismiss)"""
+    def __init__(self, bot, symbol: str, asset_type: str = "crypto", alert_data: dict = None):
         super().__init__(timeout=7200)  # 2 hour timeout
         self.bot = bot
         self.symbol = symbol
         self.asset_type = asset_type
+        self.alert_data = alert_data or {}  # Store alert data for trade execution
         
         # Create buttons dynamically with unique custom_ids per symbol
         # This fixes "interaction failed" when multiple alerts have buttons
@@ -113,6 +114,16 @@ class AlertActionView(View):
         )
         analyze_btn.callback = self._analyze_callback
         self.add_item(analyze_btn)
+        
+        # Add TRADE button for crypto assets - executes via AI Position Manager
+        if asset_type == "crypto":
+            trade_btn = Button(
+                label="🚀 Trade", 
+                style=discord.ButtonStyle.success,  # Green button
+                custom_id=f"trade_{clean_symbol}_{timestamp}"
+            )
+            trade_btn.callback = self._trade_callback
+            self.add_item(trade_btn)
         
         dismiss_btn = Button(
             label="🗑️ Dismiss", 
@@ -155,6 +166,42 @@ class AlertActionView(View):
             logger.error(f"Error in dismiss callback: {e}")
             try:
                 await interaction.followup.send(f"❌ Error: {str(e)[:100]}", ephemeral=True)
+            except:
+                pass
+    
+    async def _trade_callback(self, interaction: discord.Interaction):
+        """Handle Trade button click - queues trade for execution via AI Position Manager"""
+        try:
+            await interaction.response.send_message(
+                f"🚀 Preparing trade for **{self.symbol}**...\n"
+                f"_Calculating position size and risk parameters..._", 
+                ephemeral=True
+            )
+            
+            # Execute trade via AI Crypto Position Manager
+            result = await self.bot._handle_trade_command(interaction.message, self.symbol, self.alert_data)
+            
+            if result.get('success'):
+                await interaction.followup.send(
+                    f"✅ **Trade Queued:** {self.symbol}\n"
+                    f"**Side:** {result.get('side', 'BUY')}\n"
+                    f"**Size:** ${result.get('position_size', 0):,.2f}\n"
+                    f"**Stop:** ${result.get('stop_loss', 0):,.4f}\n"
+                    f"**Target:** ${result.get('take_profit', 0):,.4f}\n\n"
+                    f"_Awaiting approval or auto-execution..._",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"❌ **Trade Failed:** {result.get('error', 'Unknown error')}\n"
+                    f"_Check logs for details._",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in trade callback: {e}")
+            try:
+                await interaction.followup.send(f"❌ Trade error: {str(e)[:100]}", ephemeral=True)
             except:
                 pass
 
@@ -1209,6 +1256,154 @@ class DiscordTradeApprovalBot(commands.Bot):
         else:
              await message.channel.send(f"ℹ️ No pending alerts found for **{symbol}**")
     
+    async def _handle_trade_command(self, message: discord.Message, symbol: str, alert_data: dict = None) -> dict:
+        """
+        Handle TRADE command for CRYPTO - Execute trade via AI Crypto Position Manager
+        Mirrors the stock trade execution flow for consistent experience
+        
+        Args:
+            message: Discord message
+            symbol: Crypto pair (e.g., BTC/USD, ETH/USD)
+            alert_data: Optional data from the alert (price, score, etc.)
+            
+        Returns:
+            dict with success, side, position_size, stop_loss, take_profit, or error
+        """
+        import asyncio
+        
+        try:
+            # Ensure we have a valid crypto pair format
+            if "/" not in symbol:
+                symbol = f"{symbol}/USD"
+            
+            await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
+            
+            # Get current price and calculate trade parameters
+            def _get_trade_params():
+                try:
+                    from clients.kraken_client import KrakenClient
+                    from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                    from services.risk_profile_config import get_risk_profile_manager
+                    
+                    # Get current price
+                    kraken = KrakenClient()
+                    ticker_info = kraken.get_ticker_info(symbol)
+                    if not ticker_info:
+                        return {'success': False, 'error': f"Could not get price for {symbol}"}
+                    
+                    current_price = float(ticker_info.get('c', [0])[0])
+                    if current_price <= 0:
+                        return {'success': False, 'error': f"Invalid price for {symbol}"}
+                    
+                    # Use alert data if available, otherwise use defaults
+                    score = alert_data.get('score', 75) if alert_data else 75
+                    
+                    # Calculate stop loss and take profit (2% stop, 4% target default)
+                    stop_loss_pct = 0.02
+                    take_profit_pct = 0.04
+                    
+                    stop_loss = current_price * (1 - stop_loss_pct)
+                    take_profit = current_price * (1 + take_profit_pct)
+                    
+                    # Get position sizing from risk profile
+                    try:
+                        risk_manager = get_risk_profile_manager()
+                        sizing = risk_manager.calculate_position_size(
+                            price=current_price,
+                            stop_loss=stop_loss,
+                            confidence=float(score)
+                        )
+                        position_value = sizing.get('recommended_value', 100.0)
+                    except Exception as e:
+                        logger.warning(f"Risk profile sizing failed: {e}, using default")
+                        position_value = 100.0  # Default $100 position
+                    
+                    # Calculate volume
+                    volume = position_value / current_price if current_price > 0 else 0
+                    
+                    return {
+                        'success': True,
+                        'symbol': symbol,
+                        'side': 'BUY',
+                        'price': current_price,
+                        'volume': volume,
+                        'position_size': position_value,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'score': score
+                    }
+                    
+                except Exception as e:
+                    logger.error(f"Error getting trade params: {e}")
+                    return {'success': False, 'error': str(e)}
+            
+            # Run in thread to avoid blocking
+            params = await asyncio.to_thread(_get_trade_params)
+            
+            if not params.get('success'):
+                return params
+            
+            # Queue trade to AI Crypto Position Manager
+            def _queue_crypto_trade():
+                try:
+                    from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                    
+                    manager = get_ai_crypto_position_manager()
+                    if not manager:
+                        return {'success': False, 'error': 'Crypto Position Manager not available'}
+                    
+                    # Add position for monitoring (this will queue for execution)
+                    success = manager.add_position(
+                        pair=params['symbol'],
+                        side=params['side'],
+                        volume=params['volume'],
+                        entry_price=params['price'],
+                        stop_loss=params['stop_loss'],
+                        take_profit=params['take_profit'],
+                        strategy="DISCORD_TRADE",
+                        trailing_stop_pct=2.0,
+                        breakeven_trigger_pct=3.0
+                    )
+                    
+                    if success:
+                        return {
+                            'success': True,
+                            'side': params['side'],
+                            'position_size': params['position_size'],
+                            'stop_loss': params['stop_loss'],
+                            'take_profit': params['take_profit'],
+                            'volume': params['volume'],
+                            'price': params['price']
+                        }
+                    else:
+                        return {'success': False, 'error': 'Failed to add position to manager'}
+                        
+                except Exception as e:
+                    logger.error(f"Error queuing crypto trade: {e}")
+                    return {'success': False, 'error': str(e)}
+            
+            result = await asyncio.to_thread(_queue_crypto_trade)
+            
+            if result.get('success'):
+                # Send confirmation to channel
+                await message.channel.send(
+                    f"✅ **Crypto Trade Queued:** {symbol}\n"
+                    f"**Side:** {result['side']} | **Price:** ${result['price']:,.4f}\n"
+                    f"**Volume:** {result['volume']:.6f} | **Value:** ${result['position_size']:,.2f}\n"
+                    f"**Stop:** ${result['stop_loss']:,.4f} | **Target:** ${result['take_profit']:,.4f}\n\n"
+                    f"🤖 _AI Position Manager is now monitoring this trade_"
+                )
+            else:
+                await message.channel.send(f"❌ **Trade Failed:** {result.get('error', 'Unknown error')}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in _handle_trade_command: {e}")
+            error_result = {'success': False, 'error': str(e)}
+            await message.channel.send(f"❌ **Trade Error:** {str(e)[:100]}")
+            return error_result
+    
     async def _handle_stock_trade_execution(self, message: discord.Message, symbol: str, side: str = "BUY", paper_mode: bool = False):
         """
         Handle TRADE command - Execute stock trade via broker adapter
@@ -1920,9 +2115,22 @@ class DiscordTradeApprovalBot(commands.Bot):
         alert_type: str,
         message_text: str,
         confidence: str = "MEDIUM",
-        color: int = 3447003
+        color: int = 3447003,
+        asset_type: str = "crypto",
+        alert_data: dict = None
     ) -> bool:
-        """Send a generic alert notification with action buttons"""
+        """
+        Send a generic alert notification with action buttons
+        
+        Args:
+            symbol: Trading symbol (e.g., BTC/USD, GME)
+            alert_type: Type of alert (BREAKOUT, BUZZING, etc.)
+            message_text: Alert message content
+            confidence: Confidence level (HIGH, MEDIUM, LOW)
+            color: Embed color
+            asset_type: 'crypto' or 'stock' - determines available buttons
+            alert_data: Optional dict with price, score, etc. for trade execution
+        """
         try:
             if not self.bot_ready:
                 return False
@@ -1930,6 +2138,14 @@ class DiscordTradeApprovalBot(commands.Bot):
             channel = self.get_channel(self.channel_id)
             if not channel:
                 return False
+            
+            # Build alert data from parameters if not provided
+            if alert_data is None:
+                alert_data = {
+                    'symbol': symbol,
+                    'alert_type': alert_type,
+                    'confidence': confidence
+                }
                 
             embed = discord.Embed(
                 title=f"🔔 {alert_type}: {symbol}",
@@ -1938,7 +2154,8 @@ class DiscordTradeApprovalBot(commands.Bot):
                 timestamp=datetime.now()
             )
             
-            view = AlertActionView(self, symbol)
+            # Pass asset_type and alert_data to view for Trade button functionality
+            view = AlertActionView(self, symbol, asset_type=asset_type, alert_data=alert_data)
             await channel.send(embed=embed, view=view)
             return True
             
