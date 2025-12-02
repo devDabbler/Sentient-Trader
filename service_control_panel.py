@@ -2480,12 +2480,15 @@ def main():
                                 st.toast(f"✅ Selected all {len(all_tickers)} tickers!")
                                 st.rerun()
                         with btn_col2:
-                            if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True):
+                            if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True, help="Clear all tickers"):
                                 set_service_watchlist(service_name, [])
+                                st.toast("🗑️ Watchlist cleared!")
                                 st.rerun()
                         with btn_col3:
-                            if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True):
-                                set_service_watchlist(service_name, all_tickers[:5])
+                            top_5 = all_tickers[:5]
+                            if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True, help=f"Select: {', '.join(top_5)}"):
+                                set_service_watchlist(service_name, top_5)
+                                st.toast(f"✅ Selected top 5: {', '.join(top_5)}")
                                 st.rerun()
                         with btn_col4:
                             # Sync from Supabase button - use all Supabase tickers
@@ -2494,6 +2497,9 @@ def main():
                                     set_service_watchlist(service_name, supabase_tickers)
                                     st.toast(f"✅ Synced {len(supabase_tickers)} tickers from Supabase!")
                                     st.rerun()
+                            else:
+                                # Show disabled-looking button when no Supabase data
+                                st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, disabled=True, help="No Supabase tickers found - connect to Supabase first")
                         
                         # ============================================================
                         # BROKER SYNC (AI Stock Trader only)
