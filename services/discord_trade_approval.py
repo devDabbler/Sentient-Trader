@@ -358,12 +358,22 @@ class DiscordTradeApprovalBot(commands.Bot):
         # ============================================================
         if content in ['APPROVE', 'YES', 'GO', 'EXECUTE', 'Y', '✅', 'OK']:
             logger.info(f"   🔍 Matched standalone APPROVE command")
-            if await self._handle_standalone_approval(message, approve=True):
+            try:
+                if await self._handle_standalone_approval(message, approve=True):
+                    return
+            except Exception as e:
+                logger.error(f"   ❌ Error in standalone approval: {e}", exc_info=True)
+                await message.channel.send(f"❌ Error: {str(e)[:100]}")
                 return
         
         if content in ['REJECT', 'NO', 'CANCEL', 'SKIP', 'N', '❌']:
             logger.info(f"   🔍 Matched standalone REJECT command")
-            if await self._handle_standalone_approval(message, approve=False):
+            try:
+                if await self._handle_standalone_approval(message, approve=False):
+                    return
+            except Exception as e:
+                logger.error(f"   ❌ Error in standalone rejection: {e}", exc_info=True)
+                await message.channel.send(f"❌ Error: {str(e)[:100]}")
                 return
         
         # ============================================================
@@ -1656,10 +1666,11 @@ class DiscordTradeApprovalBot(commands.Bot):
             )
             logger.info(f"❌ User rejected trade via reply: {approval_id} ({approval.pair})")
         
-        # Call approval callback to execute/cancel the trade
+        # Call approval callback to execute/cancel the trade (run in thread to avoid blocking)
         if self.approval_callback:
             try:
-                self.approval_callback(approval_id, approve)
+                import asyncio
+                await asyncio.to_thread(self.approval_callback, approval_id, approve)
             except Exception as e:
                 logger.error(f"Error in approval callback: {e}", exc_info=True)
                 await message.channel.send(f"⚠️ Error processing trade: {str(e)[:100]}")
