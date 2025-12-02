@@ -47,7 +47,8 @@ _debug_file.flush()
 from services.macro_market_filter import get_macro_market_filter, MacroMarketHealth, MacroRegime
 _debug_file.write("[TRACE] stock_informational_monitor.py: Imported macro_market_filter\n")
 _debug_file.flush()
-from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
+from windows_services.runners.service_config_loader import save_analysis_results
+# NOTE: get_pending_analysis_requests and mark_analysis_complete are handled by run_analysis_queue_processor.py
 
 _debug_file.write("[TRACE] stock_informational_monitor.py: About to import config_stock_informational\n")
 _debug_file.flush()
@@ -1565,53 +1566,6 @@ class StockInformationalMonitor(LLMServiceMixin):
         except Exception as e:
             logger.error(f"Error logging opportunity: {e}")
     
-    def _process_analysis_queue(self):
-        """Process pending analysis requests"""
-        try:
-            requests = get_pending_analysis_requests()
-            
-            # Filter for stock requests
-            my_requests = []
-            for req in requests:
-                preset = req.get('preset', '')
-                tickers = req.get('tickers', [])
-                is_stock = preset == 'stock_momentum'
-                is_custom_stock = preset == 'custom' and tickers and not any('/' in t for t in tickers)
-                
-                if (is_stock or is_custom_stock) and tickers:
-                    my_requests.append(req)
-            
-            if not my_requests:
-                return
-                
-            for req in my_requests:
-                logger.info(f"Processing request {req['id']}...")
-                tickers = req.get('tickers', [])
-                results = []
-                
-                for ticker in tickers:
-                    try:
-                        opp = self.scan_ticker(ticker)
-                        if opp:
-                            results.append({
-                                'ticker': opp.symbol,
-                                'signal': f"{opp.opportunity_type}",
-                                'confidence': int(opp.ensemble_score),
-                                'price': opp.price,
-                                'change_24h': 0.0,
-                                'volume_24h': 0.0,
-                                'timestamp': datetime.now().isoformat()
-                            })
-                    except Exception as e:
-                        logger.error(f"Error scanning {ticker}: {e}")
-                
-                save_analysis_results('Stock Info Monitor (On-Demand)', results)
-                mark_analysis_complete(req['id'], {'count': len(results)})
-                logger.info(f"Completed request {req['id']}")
-                
-        except Exception as e:
-            logger.error(f"Error processing analysis queue: {e}")
-
     def run_continuous(self):
         """
         Run continuous monitoring loop with resilience and health tracking
@@ -1628,8 +1582,8 @@ class StockInformationalMonitor(LLMServiceMixin):
                 cycle_start = time.time()
                 
                 try:
-                    # Check analysis queue from Control Panel (only runs analysis when explicitly requested)
-                    self._process_analysis_queue()
+                    # NOTE: Analysis queue processing is handled EXCLUSIVELY by run_analysis_queue_processor.py
+                    # This prevents duplicate analyses when user clicks "1/2/3" on a single ticker
                     
                     # Sync watchlist and discovery config from Control Panel
                     self._sync_watchlist_from_config()

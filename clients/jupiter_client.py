@@ -44,9 +44,14 @@ class JupiterClient:
     - Price impact calculation
     - Liquidity depth analysis
     - Token routing optimization
+    
+    NOTE: Jupiter API endpoints have changed (Dec 2024):
+    - Old: https://api.jup.ag/price (DEPRECATED - returns 401)
+    - New: https://price.jup.ag/v6/price
     """
     
-    BASE_URL = "https://api.jup.ag/price"
+    # Updated: Jupiter moved price API to price.jup.ag in late 2024
+    BASE_URL = "https://price.jup.ag/v6/price"
     QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
     
     # Solana token mint addresses for common tokens
@@ -129,13 +134,22 @@ class JupiterClient:
             # Rate limiting
             await self._apply_rate_limit()
             
+            # Jupiter v6 uses 'ids' as comma-separated list (no vsToken param needed)
             params = {
-                "ids": actual_mint,
-                "vsToken": vs_token
+                "ids": actual_mint
             }
             
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.get(self.BASE_URL, params=params)
+                
+                # Handle API errors gracefully
+                if response.status_code == 401:
+                    logger.debug(f"[JUPITER] API returned 401 - endpoint may require API key or be unavailable")
+                    return None
+                elif response.status_code == 429:
+                    logger.debug(f"[JUPITER] Rate limited, backing off...")
+                    return None
+                
                 response.raise_for_status()
                 
                 data = response.json()
@@ -146,8 +160,15 @@ class JupiterClient:
                     
                 return None
                 
+        except httpx.HTTPStatusError as e:
+            # Don't spam logs for known API issues
+            if e.response.status_code in [401, 403, 429]:
+                logger.debug(f"[JUPITER] API unavailable ({e.response.status_code}) for {mint_id}")
+            else:
+                logger.warning(f"[JUPITER] Price fetch failed for {mint_id}: {e}")
+            return None
         except Exception as e:
-            logger.warning(f"[JUPITER] Price fetch failed for {mint_id}: {e}")
+            logger.debug(f"[JUPITER] Price fetch failed for {mint_id}: {e}")
             return None
     
     async def get_quote(

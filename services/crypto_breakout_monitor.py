@@ -37,7 +37,8 @@ from services.crypto_watchlist_manager import CryptoWatchlistManager
 from services.ticker_manager import TickerManager
 from utils.crypto_pair_utils import normalize_crypto_pair, extract_base_asset
 from clients.supabase_client import get_supabase_client
-from windows_services.runners.service_config_loader import save_analysis_results, get_pending_analysis_requests, mark_analysis_complete
+from windows_services.runners.service_config_loader import save_analysis_results
+# NOTE: get_pending_analysis_requests and mark_analysis_complete are handled by run_analysis_queue_processor.py
 
 
 load_dotenv()
@@ -237,8 +238,8 @@ class CryptoBreakoutMonitor:
                 scan_start = time.time()
                 
                 try:
-                    # Process any pending analysis requests from Control Panel
-                    self._process_analysis_queue()
+                    # NOTE: Analysis queue processing is handled by run_analysis_queue_processor.py
+                    # Do NOT process here to avoid duplicate analyses
                     
                     # Perform scan
                     self._scan_and_alert()
@@ -274,122 +275,10 @@ class CryptoBreakoutMonitor:
             raise
     
     def scan_and_alert(self):
-        """Public method to run a single scan cycle with queue processing"""
-        # First process any pending queue requests
-        self._process_analysis_queue()
-        
-        # Then run the regular scan
+        """Public method to run a single scan cycle"""
+        # NOTE: Analysis queue processing is handled EXCLUSIVELY by run_analysis_queue_processor.py
+        # This prevents duplicate analyses when user clicks "3" (ultimate) on a single coin
         return self._scan_and_alert()
-
-    def _process_analysis_queue(self):
-        """Process pending analysis requests from control panel"""
-        try:
-            requests = get_pending_analysis_requests()
-            
-            # Filter for crypto requests
-            # New presets: 'crypto_standard', 'crypto_multi', 'crypto_ultimate', 'quick_crypto'
-            # Legacy: 'full_crypto', 'custom' with USD pairs
-            my_requests = []
-            for req in requests:
-                preset = req.get('preset', '')
-                tickers = req.get('tickers', [])
-                asset_type = req.get('asset_type', 'crypto')
-                
-                # New crypto analysis modes
-                is_new_crypto = preset in ['crypto_standard', 'crypto_multi', 'crypto_ultimate', 'quick_crypto']
-                # Legacy presets
-                is_legacy_crypto = preset in ['full_crypto']
-                # Custom with crypto tickers
-                is_custom_crypto = preset == 'custom' and asset_type == 'crypto'
-                is_custom_usd = preset == 'custom' and tickers and any('USD' in t.upper() for t in tickers)
-                
-                if is_new_crypto or is_legacy_crypto or is_custom_crypto or is_custom_usd:
-                    my_requests.append(req)
-            
-            if not my_requests:
-                return
-
-            logger.info(f"📋 Processing {len(my_requests)} on-demand analysis requests...")
-            
-            for req in my_requests:
-                try:
-                    tickers = req.get('tickers', [])
-                    preset = req.get('preset', '')
-                    analysis_mode = req.get('analysis_mode', 'standard')
-                    
-                    # Get tickers from watchlist for presets that don't specify tickers
-                    if not tickers and preset in ['crypto_standard', 'crypto_multi', 'crypto_ultimate', 'full_crypto']:
-                        if self.watchlist_manager:
-                            tickers = self.watchlist_manager.get_watchlist_symbols()
-                        else:
-                            # Try to get from service watchlist config
-                            try:
-                                from windows_services.runners.service_config_loader import load_service_watchlist
-                                tickers = load_service_watchlist('sentient-crypto-breakout') or []
-                            except:
-                                pass
-                        
-                        # Fallback to some defaults if still empty
-                        if not tickers:
-                            tickers = ['BTC/USD', 'ETH/USD', 'SOL/USD', 'AVAX/USD', 'LINK/USD']
-                    
-                    if not tickers:
-                        logger.warning(f"   Skipping request {req['id']} - no tickers")
-                        mark_analysis_complete(req['id'], {'error': 'No tickers provided'})
-                        continue
-                    
-                    # Log analysis mode
-                    mode_emoji = {'standard': '🔬', 'multi_config': '🎯', 'ultimate': '🚀'}.get(analysis_mode, '📊')
-                    logger.info(f"   {mode_emoji} {analysis_mode.upper()} analysis: {len(tickers)} tickers for request {req['id']}...")
-                    
-                    results = []
-                    
-                    # access the base scanner to analyze specific pairs
-                    base_scanner = None
-                    if hasattr(self.scanner, 'base_scanner'):
-                        base_scanner = self.scanner.base_scanner
-                    elif isinstance(self.scanner, CryptoOpportunityScanner):
-                        base_scanner = self.scanner
-                    
-                    if base_scanner:
-                        for ticker in tickers:
-                            try:
-                                # Normalize ticker (ensure /USD)
-                                pair = normalize_crypto_pair(ticker)
-                                
-                                # Analyze
-                                # Note: _analyze_crypto_pair is technically internal but we need it here
-                                # Or we can use public API if available. 
-                                # CryptoOpportunityScanner doesn't expose single pair scan publicly except via _analyze_crypto_pair
-                                if hasattr(base_scanner, '_analyze_crypto_pair'):
-                                    opp = base_scanner._analyze_crypto_pair(pair, 'ALL')
-                                    
-                                    if opp:
-                                        results.append({
-                                            'ticker': opp.symbol,
-                                            'signal': opp.reason if hasattr(opp, 'reason') else 'ANALYSIS',
-                                            'confidence': int(opp.score),
-                                            'price': opp.current_price,
-                                            'change_24h': opp.change_pct_24h,
-                                            'volume_24h': getattr(opp, 'volume_ratio', 0),
-                                            'timestamp': datetime.now().isoformat()
-                                        })
-                            except Exception as e:
-                                logger.error(f"Error analyzing {ticker}: {e}")
-                    
-                    # Save specific results for this request
-                    save_analysis_results('Crypto Breakout (On-Demand)', results)
-                    
-                    # Mark complete
-                    mark_analysis_complete(req['id'], {'count': len(results)})
-                    logger.info(f"   ✅ Request {req['id']} complete - {len(results)} results")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing request {req['id']}: {e}")
-                    mark_analysis_complete(req['id'], {'error': str(e)})
-                    
-        except Exception as e:
-            logger.error(f"Error processing analysis queue: {e}")
 
     def _scan_and_alert(self):
         """Perform a single scan and send alerts for breakouts"""
