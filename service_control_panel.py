@@ -2854,6 +2854,65 @@ def main():
                             st.caption("💡 To manage your crypto watchlist, use the Watchlist section above or go to the **Watchlists** tab")
                         
                         # ============================================================
+                        # KRAKEN SYNC (AI Crypto Trader only)
+                        # ============================================================
+                        if service_name == "sentient-crypto-ai-trader":
+                            st.markdown("---")
+                            st.markdown("**🔄 Kraken Position Sync**")
+                            st.caption("Sync your active crypto positions from Kraken to monitor them with AI")
+                            
+                            kraken_col1, kraken_col2 = st.columns(2)
+                            with kraken_col1:
+                                if st.button("🔄 Sync Kraken Positions", key="sync_kraken_positions", type="primary", use_container_width=True):
+                                    try:
+                                        from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                                        manager = get_ai_crypto_position_manager()
+                                        if manager:
+                                            sync_result = manager.sync_with_kraken()
+                                            st.success(f"✅ Synced! Added: {sync_result['added']}, Removed: {sync_result['removed']}, Kept: {sync_result['kept']}")
+                                            
+                                            # Show current positions
+                                            positions = [p for p in manager.positions.values() if p.status == 'ACTIVE']
+                                            if positions:
+                                                st.markdown("**📊 Active Positions:**")
+                                                for pos in positions:
+                                                    pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
+                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                                    st.write(f"  {emoji} **{pos.pair}**: {pos.volume:.6f} @ ${pos.entry_price:,.4f} ({pnl_pct:+.1f}%)")
+                                            else:
+                                                st.info("📭 No active positions found in Kraken")
+                                        else:
+                                            st.warning("⚠️ Could not initialize position manager - check Kraken API config in .env")
+                                    except Exception as e:
+                                        st.error(f"❌ Error syncing: {e}")
+                            
+                            with kraken_col2:
+                                if st.button("📊 View Positions", key="view_kraken_positions", use_container_width=True):
+                                    try:
+                                        from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                                        manager = get_ai_crypto_position_manager()
+                                        if manager:
+                                            status = manager.get_status()
+                                            
+                                            st.markdown(f"**Status:** {'🟢 Running' if status['is_running'] else '🔴 Stopped'}")
+                                            st.markdown(f"**Active Positions:** {status['active_positions']}")
+                                            st.markdown(f"**Excluded Pairs:** {len(status['excluded_pairs'])}")
+                                            
+                                            positions = status.get('positions', {})
+                                            if positions:
+                                                total_value = 0
+                                                for tid, pos in positions.items():
+                                                    pnl_pct = pos.get('pnl_pct', 0)
+                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                                    st.write(f"  {emoji} {pos['pair']}: ${pos.get('current_price', 0):,.4f} ({pnl_pct:+.1f}%)")
+                                            else:
+                                                st.info("📭 No positions being monitored")
+                                        else:
+                                            st.warning("⚠️ Position manager not available")
+                                    except Exception as e:
+                                        st.error(f"❌ Error: {e}")
+                        
+                        # ============================================================
                         # CRYPTO TRADE JOURNAL (AI Crypto Trader)
                         # ============================================================
                         if service_name == "sentient-crypto-ai-trader":

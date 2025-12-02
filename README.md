@@ -902,6 +902,14 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### Kraken Position Sync UI (December 2, 2025)
+- ✅ **Kraken Sync Button:** Control Panel now has "🔄 Sync Kraken Positions" button for AI Crypto Trader
+- ✅ **Discord Notifications:** Synced positions announced to Discord with entry price, P&L, stop/target
+- ✅ **Auto-Import:** All Kraken positions automatically added to AI monitoring with 5% stop, 10% target
+- ✅ **View Positions:** See all monitored crypto positions with real-time P&L in Control Panel
+- ✅ **Sync Summary:** Discord notification shows total added, removed, kept positions
+- ✅ **Mirrors Stock UI:** Same layout and functionality as Tradier/IBKR broker sync
+
 ### Crypto Breakout Trade Execution from Discord (December 2, 2025)
 - ✅ **Trade Button Added:** Crypto breakout alerts now have a 🚀 Trade button for direct execution
 - ✅ **One-Click Trading:** Click Trade on any crypto alert to execute via AI Crypto Position Manager

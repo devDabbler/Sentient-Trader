@@ -2080,26 +2080,54 @@ Analyze the position using these factors:
                     # Calculate stop loss and take profit (5% and 10% from current)
                     stop_loss = pos.current_price * 0.95
                     take_profit = pos.current_price * 1.10
+                    entry_price = pos.entry_price if pos.entry_price > 0 else pos.current_price
                     
-                    log_and_print(f"   📥 Adding {pos.pair} - Volume: {pos.volume:.6f}, Entry: ${pos.entry_price:,.4f}")
+                    log_and_print(f"   📥 Adding {pos.pair} - Volume: {pos.volume:.6f}, Entry: ${entry_price:,.4f}")
                     
                     success = self.add_position(
                         trade_id=trade_id,
                         pair=pos.pair,
                         side='BUY',
                         volume=pos.volume,
-                        entry_price=pos.entry_price if pos.entry_price > 0 else pos.current_price,
+                        entry_price=entry_price,
                         stop_loss=stop_loss,
                         take_profit=take_profit,
-                        strategy='Synced',
+                        strategy='SYNCED_FROM_KRAKEN',
                         entry_order_id=f"synced_{added_count}"
                     )
                     
                     if success:
                         added_count += 1
                         log_and_print(f"   ✅ Added {pos.pair} to AI monitoring")
+                        
+                        # Calculate P&L for notification
+                        pnl_pct = ((pos.current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                        pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                        
+                        # Send Discord notification for synced position
+                        self._send_notification(
+                            f"📥 POSITION SYNCED: {pos.pair}",
+                            f"**Imported from Kraken!**\n"
+                            f"**Volume:** {pos.volume:.6f}\n"
+                            f"**Entry:** ${entry_price:,.4f}\n"
+                            f"**Current:** ${pos.current_price:,.4f} ({pnl_emoji} {pnl_pct:+.1f}%)\n"
+                            f"**Stop:** ${stop_loss:,.4f} | **Target:** ${take_profit:,.4f}\n\n"
+                            f"_AI monitoring now active for this position_",
+                            color=3447003  # Blue
+                        )
             
             self._save_state()
+            
+            # Send summary notification if positions were synced
+            if added_count > 0:
+                self._send_notification(
+                    f"✅ KRAKEN SYNC COMPLETE",
+                    f"**Added:** {added_count} position(s)\n"
+                    f"**Removed:** {removed_count}\n"
+                    f"**Kept:** {kept_count}\n\n"
+                    f"_All positions now being monitored by AI_",
+                    color=3066993  # Green
+                )
             
             log_and_print(f"✅ Sync complete: {added_count} added, {removed_count} removed, {kept_count} kept")
             
