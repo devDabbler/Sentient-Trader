@@ -1589,9 +1589,17 @@ class StockInformationalMonitor(LLMServiceMixin):
                     self._sync_watchlist_from_config()
                     self._sync_discovery_config()
                     
-                    # NOTE: Automatic scanning removed - analysis only runs when explicitly requested
-                    # via Discord commands (1-3) or Control Panel analysis queue
-                    # opportunities = self.scan_all_tickers()  # REMOVED: Auto-analysis disabled
+                    # Run automatic scanning for opportunities (this is the main function!)
+                    # This scans watchlist + discovery stocks and sends alerts for high-confidence signals
+                    opportunities = self.scan_all_tickers()
+                    
+                    if opportunities:
+                        logger.info(f"📊 Found {len(opportunities)} opportunities this cycle")
+                        self.stats.scans += 1
+                        self.stats.consecutive_errors = 0  # Reset on success
+                    else:
+                        logger.info("📊 No opportunities found this cycle")
+                        self.stats.scans += 1
                     
                 except Exception as e:
                     logger.error("❌ Error during scan: {}", str(e), exc_info=True)
