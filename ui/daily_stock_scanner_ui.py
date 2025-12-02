@@ -81,7 +81,11 @@ def render_daily_stock_scanner():
 def display_tier1_quick_filter(scanner):
     """Tier 1: Quick filter interface"""
     st.subheader("🏃 Tier 1: Quick Filter")
-    st.markdown("Lightweight scan using **only** price, volume, and momentum.")
+    st.markdown("""
+    Lightweight scan using price, volume, momentum, **5-day trend**, and **closing strength**.
+    
+    ✅ **Works after hours** - Uses historical patterns, not just intraday activity.
+    """)
     
     col1, col2 = st.columns(2)
     
@@ -159,7 +163,7 @@ def _display_tier1_results(results: List[Dict]):
     st.markdown(f"**Last scan:** {timestamp.strftime('%H:%M:%S')}")
     
     # Metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Found", len(results))
     with col2:
@@ -169,17 +173,31 @@ def _display_tier1_results(results: List[Dict]):
         st.metric("Gainers", sum(1 for r in results if r.get('change_pct', 0) > 0))
     with col4:
         st.metric("High Vol", sum(1 for r in results if r.get('volume_ratio', 0) > 2))
+    with col5:
+        # Count stocks with strong 5-day momentum
+        st.metric("5D Momentum", sum(1 for r in results if r.get('hist_momentum', 0) > 5))
     
     for i, result in enumerate(results[:15], 1):
         emoji = "🟢" if result.get('change_pct', 0) > 0 else "🔴"
-        with st.expander(f"#{i} {emoji} **{result['ticker']}** - Score: {result['score']:.0f} | ${result['price']:.2f}", expanded=(i <= 3)):
-            c1, c2, c3 = st.columns(3)
+        # Add 5-day momentum indicator
+        momentum_5d = result.get('hist_momentum', 0)
+        momentum_emoji = "🚀" if momentum_5d > 10 else "📈" if momentum_5d > 5 else ""
+        
+        with st.expander(f"#{i} {emoji} **{result['ticker']}** {momentum_emoji} - Score: {result['score']:.0f} | ${result['price']:.2f}", expanded=(i <= 3)):
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 st.metric("Price", f"${result['price']:.2f}", f"{result['change_pct']:+.1f}%")
             with c2:
                 st.metric("Vol Ratio", f"{result.get('volume_ratio', 0):.1f}x")
             with c3:
-                st.metric("Score", f"{result['score']:.0f}")
+                st.metric("5D Momentum", f"{momentum_5d:+.1f}%")
+            with c4:
+                close_strength = result.get('close_strength', 0.5)
+                close_label = "High" if close_strength > 0.75 else "Mid" if close_strength > 0.4 else "Low"
+                st.metric("Close", close_label)
+            
+            # Show score breakdown
+            st.caption(f"Score: {result['score']:.0f}/100")
             
             if st.button(f"⭐ Watch", key=f"w1_{result['ticker']}"):
                 if hasattr(st.session_state, 'ticker_manager'):

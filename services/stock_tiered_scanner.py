@@ -40,8 +40,9 @@ class TieredStockScanner:
         self.use_ai = use_ai
         
         # Tier 1 configuration - FAST
-        self.tier1_indicators = ['price', 'volume', 'change_pct', 'volume_ratio']
-        self.tier1_min_score = 30  # Low bar for initial filter
+        # Enhanced to work well both during market hours AND after hours
+        self.tier1_indicators = ['price', 'volume', 'change_pct', 'volume_ratio', 'hist_momentum', 'close_strength']
+        self.tier1_min_score = 25  # Lower bar to catch more opportunities, especially after hours
         
         # Tier 2 configuration - MEDIUM  
         self.tier2_indicators = ['rsi', 'macd', 'ema_20', 'ema_50', 'volume_ratio', 'atr']
@@ -326,7 +327,12 @@ class TieredStockScanner:
     # ============= HELPER METHODS =============
     
     def _fetch_quick_data(self, ticker) -> Optional[Dict]:
-        """Fetch quick data for a single ticker"""
+        """
+        Fetch quick data for a single ticker
+        
+        Enhanced to include historical momentum and closing strength
+        for better after-hours discovery
+        """
         try:
             # Handle dict input (watchlist items) - extract ticker string
             if isinstance(ticker, dict):
@@ -347,8 +353,8 @@ class TieredStockScanner:
             except:
                 pass
             
-            # Get recent history for volume
-            hist = stock.history(period='5d')
+            # Get recent history for volume and momentum
+            hist = stock.history(period='10d')  # Extended to 10 days for momentum calc
             if hist.empty:
                 return None
             
@@ -359,6 +365,21 @@ class TieredStockScanner:
             current_volume = hist['Volume'].iloc[-1]
             avg_volume = hist['Volume'].mean()
             
+            # NEW: Calculate 5-day historical momentum
+            hist_momentum = 0
+            if len(hist) >= 5:
+                price_5d_ago = hist['Close'].iloc[-5]
+                hist_momentum = ((current_price / price_5d_ago - 1) * 100) if price_5d_ago > 0 else 0
+            
+            # NEW: Calculate closing strength (where did price close within day's range)
+            # 1.0 = closed at day's high, 0.0 = closed at day's low
+            close_strength = 0.5  # default to middle
+            today_high = hist['High'].iloc[-1]
+            today_low = hist['Low'].iloc[-1]
+            today_range = today_high - today_low
+            if today_range > 0:
+                close_strength = (current_price - today_low) / today_range
+            
             return {
                 'ticker': ticker,
                 'price': float(current_price),
@@ -368,6 +389,9 @@ class TieredStockScanner:
                 'volume_ratio': float(current_volume / avg_volume) if avg_volume > 0 else 0,
                 'market_cap': info.get('marketCap'),
                 'sector': info.get('sector', 'Unknown'),
+                # NEW: Historical metrics for after-hours discovery
+                'hist_momentum': float(hist_momentum),
+                'close_strength': float(close_strength),
             }
             
         except Exception as e:
@@ -392,42 +416,79 @@ class TieredStockScanner:
             return None
     
     def _calculate_tier1_score(self, data: Dict) -> float:
-        """Calculate quick score based on basic indicators"""
+        """
+        Calculate quick score based on basic indicators
+        
+        Enhanced to work better after hours by also considering:
+        - Historical momentum (multi-day trends)
+        - Closing strength (not just intraday)
+        - Technical positioning
+        """
         score = 0
         
-        # Price momentum (40 points max)
+        # Price momentum (25 points max) - reduced weight, still important
         change_pct = data.get('change_pct', 0)
         if change_pct > 10:
-            score += 40
+            score += 25
         elif change_pct > 5:
-            score += 30
-        elif change_pct > 2:
             score += 20
+        elif change_pct > 2:
+            score += 15
         elif change_pct > 0:
             score += 10
-        
-        # Volume ratio (35 points max)
-        volume_ratio = data.get('volume_ratio', 1)
-        if volume_ratio > 3:
-            score += 35
-        elif volume_ratio > 2:
-            score += 25
-        elif volume_ratio > 1.5:
-            score += 15
-        elif volume_ratio > 1:
+        elif change_pct > -2:  # Slight pullback can be an opportunity
             score += 5
         
-        # Market cap bonus for different plays (25 points max)
+        # Volume ratio (20 points max) - reduced weight for after-hours
+        volume_ratio = data.get('volume_ratio', 1)
+        if volume_ratio > 3:
+            score += 20
+        elif volume_ratio > 2:
+            score += 15
+        elif volume_ratio > 1.5:
+            score += 10
+        elif volume_ratio > 1:
+            score += 5
+        elif volume_ratio > 0.5:  # Even low volume stocks can be interesting
+            score += 3
+        
+        # Market cap bonus for different plays (15 points max)
         market_cap = data.get('market_cap', 0)
         if market_cap:
             if market_cap < 300_000_000:  # Under 300M (penny stock territory)
-                score += 25  # High upside potential
+                score += 15  # High upside potential
             elif market_cap < 2_000_000_000:  # Small cap
-                score += 20
+                score += 12
             elif market_cap < 10_000_000_000:  # Mid cap
-                score += 15
-            else:  # Large cap (stable for options)
                 score += 10
+            else:  # Large cap (stable for options)
+                score += 8
+        
+        # NEW: Historical momentum bonus (20 points max)
+        # Check 5-day price trend from historical data
+        hist_momentum = data.get('hist_momentum', 0)
+        if hist_momentum > 15:  # Up >15% in 5 days
+            score += 20
+        elif hist_momentum > 10:
+            score += 15
+        elif hist_momentum > 5:
+            score += 10
+        elif hist_momentum > 0:
+            score += 5
+        
+        # NEW: Closing strength bonus (10 points max)
+        # Did stock close near day's high?
+        close_strength = data.get('close_strength', 0.5)  # 0-1, 1 = closed at high
+        if close_strength > 0.9:
+            score += 10
+        elif close_strength > 0.75:
+            score += 7
+        elif close_strength > 0.5:
+            score += 4
+        
+        # NEW: Base score for all stocks (10 points)
+        # Ensures stocks aren't filtered out just for being quiet
+        score += 10
         
         return min(score, 100)
     

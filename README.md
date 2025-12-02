@@ -68,6 +68,7 @@ The platform supports:
   - **High IV Options** - High implied volatility for options trading
   - **Penny Stocks** - Low-priced stocks under $5
   - All 11 categories independently toggleable via Control Panel
+  - **Works after hours** - Uses historical momentum & closing strength, not just intraday
 * **⚙️ Service Control Panel Integration:** Full discovery configuration UI
   - **3 Scan Modes:** Watchlist Only | Discovery Only | Both (Watchlist + Discovery)
   - Enable/disable individual discovery categories
