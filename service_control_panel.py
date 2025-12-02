@@ -2064,6 +2064,40 @@ def main():
                     with col3:
                         st.caption(f"❌ {health.get('error_count', 0)} errors")
             
+            # ============================================================
+            # CURRENT WATCHLISTS (Quick View)
+            # ============================================================
+            st.markdown("---")
+            st.markdown("### 📋 Current Watchlists")
+            
+            watchlist_col1, watchlist_col2 = st.columns(2)
+            
+            with watchlist_col1:
+                st.markdown("**🪙 Crypto Watchlist**")
+                try:
+                    from windows_services.runners.service_config_loader import load_service_watchlist
+                    crypto_watchlist = load_service_watchlist('sentient-crypto-breakout') or []
+                    if crypto_watchlist:
+                        st.write(f"**{len(crypto_watchlist)}** pairs: " + ", ".join(crypto_watchlist[:10]) + ("..." if len(crypto_watchlist) > 10 else ""))
+                    else:
+                        st.caption("No crypto pairs in watchlist")
+                except Exception as e:
+                    st.caption(f"⚠️ Could not load: {e}")
+            
+            with watchlist_col2:
+                st.markdown("**📈 Stock Watchlist**")
+                try:
+                    from windows_services.runners.service_config_loader import load_service_watchlist
+                    stock_watchlist = load_service_watchlist('sentient-stock-monitor') or []
+                    if stock_watchlist:
+                        st.write(f"**{len(stock_watchlist)}** tickers: " + ", ".join(stock_watchlist[:10]) + ("..." if len(stock_watchlist) > 10 else ""))
+                    else:
+                        st.caption("No stocks in watchlist")
+                except Exception as e:
+                    st.caption(f"⚠️ Could not load: {e}")
+            
+            st.caption("_Manage watchlists in the **Watchlists** tab or expand services in **Service Status**_")
+            
         else:
             st.warning("⚠️ Orchestrator not available. Using legacy service control.")
             st.info("The orchestrator provides unified service management. Check if `services/service_orchestrator.py` exists.")

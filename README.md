@@ -909,6 +909,9 @@ MIT License - See LICENSE file for details
 - ✅ **View Positions:** See all monitored crypto positions with real-time P&L in Control Panel
 - ✅ **Sync Summary:** Discord notification shows total added, removed, kept positions
 - ✅ **Mirrors Stock UI:** Same layout and functionality as Tradier/IBKR broker sync
+- ✅ **Singleton Function:** Added `get_ai_crypto_position_manager()` for easy integration from Control Panel
+- ✅ **Auto Kraken Init:** Function auto-creates Kraken client from environment variables if not provided
+- ✅ **Workflow Watchlists:** Workflow tab now shows quick-view of current crypto and stock watchlists
 
 ### Crypto Breakout Trade Execution from Discord (December 2, 2025)
 - ✅ **Trade Button Added:** Crypto breakout alerts now have a 🚀 Trade button for direct execution

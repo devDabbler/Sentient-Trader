@@ -2195,6 +2195,30 @@ Analyze the position using these factors:
 _ai_position_manager: Optional[AICryptoPositionManager] = None
 
 
+def _create_kraken_client():
+    """Create Kraken client from environment configuration"""
+    try:
+        from clients.kraken_client import KrakenClient
+        
+        api_key = os.getenv('KRAKEN_API_KEY')
+        api_secret = os.getenv('KRAKEN_API_SECRET')
+        
+        if not api_key or not api_secret:
+            logger.warning("Kraken API credentials not found in environment")
+            return None
+        
+        client = KrakenClient(
+            api_key=api_key,
+            api_secret=api_secret
+        )
+        logger.info("✅ Kraken client created for crypto position manager")
+        return client
+        
+    except Exception as e:
+        logger.error(f"Failed to create Kraken client: {e}")
+        return None
+
+
 def get_ai_position_manager(
     kraken_client=None,
     llm_analyzer=None,
@@ -2212,6 +2236,47 @@ def get_ai_position_manager(
             llm_analyzer=llm_analyzer,
             **kwargs
         )
+    
+    return _ai_position_manager
+
+
+def get_ai_crypto_position_manager(
+    kraken_client=None,
+    **kwargs
+) -> Optional[AICryptoPositionManager]:
+    """
+    Get or create singleton AI Crypto Position Manager instance
+    
+    This function auto-initializes the Kraken client from environment variables
+    if not provided, making it easy to use from the Service Control Panel.
+    
+    Args:
+        kraken_client: Optional KrakenClient instance
+        **kwargs: Additional configuration options
+        
+    Returns:
+        AICryptoPositionManager instance or None if Kraken not configured
+    """
+    global _ai_position_manager
+    
+    # Auto-create Kraken client if not provided and not already initialized
+    if _ai_position_manager is None:
+        if kraken_client is None:
+            kraken_client = _create_kraken_client()
+        
+        if kraken_client is None:
+            logger.warning("Cannot initialize AI Crypto Position Manager - Kraken client not available")
+            return None
+        
+        try:
+            _ai_position_manager = AICryptoPositionManager(
+                kraken_client=kraken_client,
+                **kwargs
+            )
+            logger.info("✅ AI Crypto Position Manager initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize AI Crypto Position Manager: {e}")
+            return None
     
     return _ai_position_manager
 
