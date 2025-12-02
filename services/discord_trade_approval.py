@@ -1521,12 +1521,15 @@ class DiscordTradeApprovalBot(commands.Bot):
         approval.position_size = new_value
         approval.reasoning = f"Modified: {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
         
-        await message.channel.send(
+        # Send confirmation and update discord_message_id so replies to THIS message work
+        confirm_msg = await message.channel.send(
             f"✅ **Position Modified for {approval.pair}:**\n"
             f"   Shares: {old_shares:,} → **{new_shares:,}**\n"
             f"   Value: ${new_value:,.2f}\n\n"
             f"Reply **YES** to confirm this trade or **NO** to cancel."
         )
+        # Update the stored message ID so user can reply to this message
+        approval.discord_message_id = str(confirm_msg.id)
         logger.info(f"📊 Position modified: {approval.pair} → {new_shares} shares (${new_value:,.2f})")
     
     async def _modify_position_value(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', new_value: float):
@@ -1542,12 +1545,15 @@ class DiscordTradeApprovalBot(commands.Bot):
         approval.position_size = new_value
         approval.reasoning = f"Modified: {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
         
-        await message.channel.send(
+        # Send confirmation and update discord_message_id so replies to THIS message work
+        confirm_msg = await message.channel.send(
             f"✅ **Position Modified for {approval.pair}:**\n"
             f"   Value: ${old_value:,.2f} → **${new_value:,.2f}**\n"
             f"   Shares: **{new_shares:,}**\n\n"
             f"Reply **YES** to confirm this trade or **NO** to cancel."
         )
+        # Update the stored message ID so user can reply to this message
+        approval.discord_message_id = str(confirm_msg.id)
         logger.info(f"📊 Position modified: {approval.pair} → ${new_value:,.2f} ({new_shares} shares)")
     
     async def _modify_position_multiplier(self, message: discord.Message, approval_id: str, approval: 'PendingTradeApproval', multiplier: float):
@@ -1562,12 +1568,15 @@ class DiscordTradeApprovalBot(commands.Bot):
         approval.position_size = new_value
         approval.reasoning = f"Modified ({multiplier_str}): {new_shares} shares @ ${new_value:,.2f} | {approval.reasoning.split('|')[-1].strip() if '|' in approval.reasoning else approval.reasoning}"
         
-        await message.channel.send(
+        # Send confirmation and update discord_message_id so replies to THIS message work
+        confirm_msg = await message.channel.send(
             f"✅ **Position Modified ({multiplier_str}) for {approval.pair}:**\n"
             f"   Value: ${old_value:,.2f} → **${new_value:,.2f}**\n"
             f"   Shares: **{new_shares:,}**\n\n"
             f"Reply **YES** to confirm this trade or **NO** to cancel."
         )
+        # Update the stored message ID so user can reply to this message
+        approval.discord_message_id = str(confirm_msg.id)
         logger.info(f"📊 Position modified ({multiplier_str}): {approval.pair} → ${new_value:,.2f} ({new_shares} shares)")
     
     async def _handle_specific_approval(self, message: discord.Message, identifier: str, approve: bool):
