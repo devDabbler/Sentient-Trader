@@ -747,8 +747,40 @@ class DiscordTradeApprovalBot(commands.Bot):
                 await message.channel.send(f"⚠️ No pending alert found for {target_symbol} to dismiss, but noted.")
         
         elif content in ['?', 'HELP', 'H']:
-            # Show available commands
-            help_text = f"""📋 **Commands for {target_symbol}:**
+            # Show available commands - different for crypto vs stocks
+            is_crypto = "/" in target_symbol
+            
+            if is_crypto:
+                help_text = f"""📋 **Commands for {target_symbol}:** (Crypto)
+
+**Watchlist:**
+`W` or `WATCH` - Add to watchlist
+
+**Analysis (reply with):**
+`1` or `S` - 🔬 Standard (single strategy)
+`2` or `M` - 🎯 Multi (Long/Short + timeframes)
+`3` or `U` - 🚀 Ultimate (ALL combinations)
+
+**Trade (after analysis):**
+`T` or `TRADE` - Queue BUY trade for approval
+
+**After Trade Queued:**
+`YES` - ✅ Confirm and execute trade
+`NO` - ❌ Cancel trade
+`100` or `TOKENS 100` - Change to 100 tokens
+`$500` - Change to $500 position
+`HALF` / `DOUBLE` - Adjust size
+
+**Position Sizing & Account:**
+`SIZE` or `SIZING` - Show recommended position size
+`RISK` - Show current risk profile
+`BALANCE` or `BAL` - Show broker account balance
+
+**Other:**
+`X` or `D` - Dismiss alert
+"""
+            else:
+                help_text = f"""📋 **Commands for {target_symbol}:** (Stock)
 
 **Watchlist:**
 `W` or `WATCH` - Add to watchlist
@@ -759,9 +791,16 @@ class DiscordTradeApprovalBot(commands.Bot):
 `3` or `U` - 🚀 Ultimate (ALL combinations)
 
 **Trade Execution (after analysis):**
-`T` or `TRADE` - Execute BUY trade
+`T` or `TRADE` - Queue BUY trade for approval
 `SHORT` - Execute SHORT/SELL trade
 `P` or `PAPER` - Paper trade (test mode)
+
+**After Trade Queued:**
+`YES` - ✅ Confirm and execute trade
+`NO` - ❌ Cancel trade
+`50` or `SHARES 50` - Change to 50 shares
+`$2000` - Change to $2,000 position
+`HALF` / `DOUBLE` - Adjust size
 
 **Position Sizing & Account:**
 `SIZE` or `SIZING` - Show recommended position size
@@ -1138,16 +1177,25 @@ class DiscordTradeApprovalBot(commands.Bot):
 
 **📋 Trades & Alerts:**
 `LIST` or `PENDING` - Show pending trade approvals
-`WATCH AAPL` - Add symbol to watchlist
-`ANALYZE NVDA` - Run standard analysis
+`WATCH AAPL` or `WATCH BTC/USD` - Add symbol to watchlist
+`ANALYZE NVDA` or `ANALYZE ETH/USD` - Run standard analysis
+`MULTI BTC/USD` - Run multi-strategy analysis
+`ULTIMATE SOL/USD` - Run ultimate analysis
 
 **Reply to Alerts with:**
 `1` / `2` / `3` - Standard / Multi / Ultimate analysis
-`T` or `TRADE` - Execute long trade
-`SHORT` - Execute short trade
-`APPROVE` / `REJECT` - For trade approvals
+`T` or `TRADE` - Queue trade for approval
+`SHORT` - Execute short trade (stocks only)
 `?` - Show alert-specific help
 
+**After Trade is Queued:**
+`YES` - ✅ Confirm and execute trade
+`NO` - ❌ Cancel trade
+`100` or `TOKENS 100` - Change to 100 tokens/shares
+`$500` - Change to $500 position
+`HALF` / `DOUBLE` - Adjust size
+
+💡 *Crypto trades require confirmation before execution!*
 💡 *Type any command directly - no need to reply!*
 """
         await message.channel.send(help_text)
@@ -1362,8 +1410,8 @@ class DiscordTradeApprovalBot(commands.Bot):
     
     async def _handle_trade_command(self, message: discord.Message, symbol: str, alert_data: dict = None) -> dict:
         """
-        Handle TRADE command for CRYPTO - Execute trade via AI Crypto Position Manager
-        Mirrors the stock trade execution flow for consistent experience
+        Handle TRADE command for CRYPTO - Queue trade for approval (mirrors stock workflow)
+        Does NOT execute immediately - waits for user confirmation with YES
         
         Args:
             message: Discord message
@@ -1371,7 +1419,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             alert_data: Optional data from the alert (price, score, etc.)
             
         Returns:
-            dict with success, side, position_size, stop_loss, take_profit, or error
+            dict with success status
         """
         import asyncio
         
@@ -1427,52 +1475,13 @@ class DiscordTradeApprovalBot(commands.Bot):
             
             await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
             
-            # Check Signal Memory for historical pattern performance (RAG)
-            historical_adjustment = 1.0
-            historical_info = ""
-            try:
-                from services.signal_memory import get_crypto_historical_performance
-                
-                # Get alert data values or defaults
-                score = alert_data.get('score', 75) if alert_data else 75
-                rsi = alert_data.get('rsi', 50) if alert_data else 50
-                change_24h = alert_data.get('change_24h', 0) if alert_data else 0
-                volume_ratio = alert_data.get('volume_ratio', 1) if alert_data else 1
-                price = alert_data.get('price', 0) if alert_data else 0
-                
-                history = get_crypto_historical_performance(
-                    symbol=symbol,
-                    strategy=alert_data.get('alert_type', 'DISCORD_TRADE') if alert_data else 'DISCORD_TRADE',
-                    signal_type='BUY',
-                    price=price,
-                    rsi=rsi,
-                    volume_ratio=volume_ratio,
-                    change_24h=change_24h
-                )
-                
-                if history.get('sample_size', 0) >= 3:
-                    recommendation = history.get('recommendation', 'NEUTRAL')
-                    win_rate = history.get('win_rate', 0)
-                    historical_adjustment = history.get('confidence_adjustment', 1.0)
-                    
-                    if recommendation == 'BOOST':
-                        historical_info = f"📈 Historical: {win_rate:.0%} win rate on similar patterns"
-                        await message.channel.send(f"🧠 {historical_info}")
-                    elif recommendation == 'REDUCE':
-                        historical_info = f"⚠️ Historical: {win_rate:.0%} win rate on similar patterns"
-                        await message.channel.send(f"🧠 {historical_info}")
-                        
-            except Exception as hist_err:
-                logger.debug(f"Could not check signal memory (non-critical): {hist_err}")
-            
             # Get current price and calculate trade parameters
             def _get_trade_params():
                 try:
                     from clients.kraken_client import KrakenClient
-                    from services.ai_crypto_position_manager import get_ai_crypto_position_manager
                     from services.risk_profile_config import get_risk_profile_manager
                     
-                    # Get Kraken credentials from environment (mirrors stock broker pattern)
+                    # Get Kraken credentials from environment
                     api_key = os.getenv('KRAKEN_API_KEY')
                     api_secret = os.getenv('KRAKEN_API_SECRET')
                     
@@ -1492,9 +1501,6 @@ class DiscordTradeApprovalBot(commands.Bot):
                     # Use alert data if available, otherwise use defaults
                     score = alert_data.get('score', 75) if alert_data else 75
                     
-                    # Apply historical adjustment to score
-                    adjusted_score = min(100, score * historical_adjustment)
-                    
                     # Calculate stop loss and take profit (2% stop, 4% target default)
                     stop_loss_pct = 0.02
                     take_profit_pct = 0.04
@@ -1511,11 +1517,15 @@ class DiscordTradeApprovalBot(commands.Bot):
                             confidence=float(score)
                         )
                         position_value = sizing.get('recommended_value', 100.0)
+                        position_pct = sizing.get('position_pct', 5.0)
+                        risk_pct = sizing.get('risk_pct', 1.0)
                     except Exception as e:
                         logger.warning(f"Risk profile sizing failed: {e}, using default")
-                        position_value = 100.0  # Default $100 position
+                        position_value = 100.0
+                        position_pct = 5.0
+                        risk_pct = 1.0
                     
-                    # Calculate volume
+                    # Calculate volume (number of tokens)
                     volume = position_value / current_price if current_price > 0 else 0
                     
                     return {
@@ -1525,6 +1535,8 @@ class DiscordTradeApprovalBot(commands.Bot):
                         'price': current_price,
                         'volume': volume,
                         'position_size': position_value,
+                        'position_pct': position_pct,
+                        'risk_pct': risk_pct,
                         'stop_loss': stop_loss,
                         'take_profit': take_profit,
                         'score': score
@@ -1538,67 +1550,58 @@ class DiscordTradeApprovalBot(commands.Bot):
             params = await asyncio.to_thread(_get_trade_params)
             
             if not params.get('success'):
+                await message.channel.send(f"❌ **Trade Failed:** {params.get('error', 'Unknown error')}")
                 return params
             
-            # Queue trade to AI Crypto Position Manager
-            def _queue_crypto_trade():
-                try:
-                    from services.ai_crypto_position_manager import get_ai_crypto_position_manager
-                    import uuid
-                    
-                    manager = get_ai_crypto_position_manager()
-                    if not manager:
-                        return {'success': False, 'error': 'Crypto Position Manager not available'}
-                    
-                    # Generate unique trade ID
-                    trade_id = f"discord_{params['symbol'].replace('/', '_')}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-                    
-                    # Add position for monitoring (this will queue for execution)
-                    success = manager.add_position(
-                        trade_id=trade_id,
-                        pair=params['symbol'],
-                        side=params['side'],
-                        volume=params['volume'],
-                        entry_price=params['price'],
-                        stop_loss=params['stop_loss'],
-                        take_profit=params['take_profit'],
-                        strategy="DISCORD_TRADE",
-                        trailing_stop_pct=2.0,
-                        breakeven_trigger_pct=3.0
-                    )
-                    
-                    if success:
-                        return {
-                            'success': True,
-                            'side': params['side'],
-                            'position_size': params['position_size'],
-                            'stop_loss': params['stop_loss'],
-                            'take_profit': params['take_profit'],
-                            'volume': params['volume'],
-                            'price': params['price']
-                        }
-                    else:
-                        return {'success': False, 'error': 'Failed to add position to manager'}
-                        
-                except Exception as e:
-                    logger.error(f"Error queuing crypto trade: {e}")
-                    return {'success': False, 'error': str(e)}
+            # Format price based on magnitude
+            def fmt_price(p):
+                if p >= 1000: return f"${p:,.2f}"
+                elif p >= 1: return f"${p:.4f}"
+                elif p >= 0.01: return f"${p:.6f}"
+                else: return f"${p:.8f}"
             
-            result = await asyncio.to_thread(_queue_crypto_trade)
+            # Send trade details and wait for approval (mirrors stock workflow)
+            sent_msg = await message.channel.send(
+                f"🚀 **CRYPTO TRADE QUEUED: {symbol}**\n\n"
+                f"📊 **Position Sizing:**\n"
+                f"   Tokens: **{params['volume']:,.6f}**\n"
+                f"   Value: **${params['position_size']:,.2f}** ({params['position_pct']:.1f}% of portfolio)\n"
+                f"   Risk: **{params['risk_pct']:.1f}%**\n\n"
+                f"📈 **Trade Details:**\n"
+                f"   Side: **{params['side']}**\n"
+                f"   Entry: {fmt_price(params['price'])}\n"
+                f"   Stop: {fmt_price(params['stop_loss'])}\n"
+                f"   Target: {fmt_price(params['take_profit'])}\n"
+                f"   Confidence: {params['score']}%\n\n"
+                f"**Commands (reply or just type):**\n"
+                f"• `YES` - ✅ Confirm trade as shown\n"
+                f"• `NO` - ❌ Cancel trade\n"
+                f"• `100` or `TOKENS 100` - Change to 100 tokens\n"
+                f"• `$500` - Change to $500 position\n"
+                f"• `HALF` / `DOUBLE` - Adjust size"
+            )
             
-            if result.get('success'):
-                # Send confirmation to channel
-                await message.channel.send(
-                    f"✅ **Crypto Trade Queued:** {symbol}\n"
-                    f"**Side:** {result['side']} | **Price:** ${result['price']:,.4f}\n"
-                    f"**Volume:** {result['volume']:.6f} | **Value:** ${result['position_size']:,.2f}\n"
-                    f"**Stop:** ${result['stop_loss']:,.4f} | **Target:** ${result['take_profit']:,.4f}\n\n"
-                    f"🤖 _AI Position Manager is now monitoring this trade_"
-                )
-            else:
-                await message.channel.send(f"❌ **Trade Failed:** {result.get('error', 'Unknown error')}")
+            # Create pending trade approval (same as stock workflow)
+            approval_id = f"crypto_{symbol.replace('/', '_')}_{int(datetime.now().timestamp())}"
             
-            return result
+            self.pending_approvals[approval_id] = PendingTradeApproval(
+                approval_id=approval_id,
+                pair=symbol,
+                side=params['side'],
+                entry_price=params['price'],
+                position_size=params['position_size'],
+                stop_loss=params['stop_loss'],
+                take_profit=params['take_profit'],
+                strategy="DISCORD_TRADE",
+                confidence=params['score'],
+                reasoning=f"Crypto trade: {params['volume']:.6f} tokens @ ${params['position_size']:,.2f}",
+                created_time=datetime.now(),
+                discord_message_id=str(sent_msg.id)
+            )
+            
+            logger.info(f"📊 Crypto trade queued for approval: {symbol} (approval_id={approval_id})")
+            
+            return {'success': True, 'queued': True, 'approval_id': approval_id}
             
         except Exception as e:
             logger.error(f"Error in _handle_trade_command: {e}")
@@ -2091,6 +2094,19 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"🚀 Executing trade now..."
             )
             logger.info(f"✅ User approved trade via reply: {approval_id} ({approval.pair})")
+            
+            # Check if this is a crypto trade (contains /) and execute it
+            if "/" in approval.pair:
+                await self._execute_crypto_trade(message, approval)
+            else:
+                # Stock trade - use callback
+                if self.approval_callback:
+                    try:
+                        import asyncio
+                        await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                    except Exception as e:
+                        logger.error(f"Error in approval callback: {e}", exc_info=True)
+                        await message.channel.send(f"⚠️ Error processing trade: {str(e)[:100]}")
         else:
             approval.rejected = True
             await message.reply(
@@ -2098,15 +2114,67 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"Trade cancelled."
             )
             logger.info(f"❌ User rejected trade via reply: {approval_id} ({approval.pair})")
+    
+    async def _execute_crypto_trade(self, message: discord.Message, approval: 'PendingTradeApproval'):
+        """Execute an approved crypto trade via AI Crypto Position Manager"""
+        import asyncio
+        import uuid
         
-        # Call approval callback to execute/cancel the trade (run in thread to avoid blocking)
-        if self.approval_callback:
+        def _do_execute():
             try:
-                import asyncio
-                await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                
+                manager = get_ai_crypto_position_manager()
+                if not manager:
+                    return {'success': False, 'error': 'Crypto Position Manager not available'}
+                
+                # Generate unique trade ID
+                trade_id = f"discord_{approval.pair.replace('/', '_')}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                
+                # Calculate volume from position size and price
+                volume = approval.position_size / approval.entry_price if approval.entry_price > 0 else 0
+                
+                # Add position for monitoring and execution
+                success = manager.add_position(
+                    trade_id=trade_id,
+                    pair=approval.pair,
+                    side=approval.side,
+                    volume=volume,
+                    entry_price=approval.entry_price,
+                    stop_loss=approval.stop_loss,
+                    take_profit=approval.take_profit,
+                    strategy="DISCORD_TRADE",
+                    trailing_stop_pct=2.0,
+                    breakeven_trigger_pct=3.0
+                )
+                
+                if success:
+                    return {
+                        'success': True,
+                        'trade_id': trade_id,
+                        'volume': volume,
+                        'price': approval.entry_price,
+                        'position_size': approval.position_size
+                    }
+                else:
+                    return {'success': False, 'error': 'Failed to add position to manager'}
+                    
             except Exception as e:
-                logger.error(f"Error in approval callback: {e}", exc_info=True)
-                await message.channel.send(f"⚠️ Error processing trade: {str(e)[:100]}")
+                logger.error(f"Error executing crypto trade: {e}")
+                return {'success': False, 'error': str(e)}
+        
+        result = await asyncio.to_thread(_do_execute)
+        
+        if result.get('success'):
+            await message.channel.send(
+                f"✅ **Crypto Trade Executed:** {approval.pair}\n"
+                f"**Side:** {approval.side} | **Price:** ${result['price']:,.4f}\n"
+                f"**Volume:** {result['volume']:.6f} | **Value:** ${result['position_size']:,.2f}\n"
+                f"**Stop:** ${approval.stop_loss:,.4f} | **Target:** ${approval.take_profit:,.4f}\n\n"
+                f"🤖 _AI Position Manager is now monitoring this trade_"
+            )
+        else:
+            await message.channel.send(f"❌ **Trade Execution Failed:** {result.get('error', 'Unknown error')}")
 
     async def _handle_approve_all(self, message: discord.Message, approve: bool):
         """Approve or reject all pending trades"""
