@@ -1986,36 +1986,49 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             # Determine order side (opposite of entry)
             order_side = OrderSide.SELL if position.side == 'BUY' else OrderSide.BUY
             
+            # Calculate P&L before attempting order (needed for notification even if order fails)
+            exit_price = position.current_price if position.current_price else position.entry_price
+            if position.side == 'BUY':
+                pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+                pnl_usd = (exit_price - position.entry_price) * position.volume
+            else:
+                pnl_pct = ((position.entry_price - exit_price) / position.entry_price) * 100
+                pnl_usd = (position.entry_price - exit_price) * position.volume
+            
+            # Check if this is a hard trigger (stop loss/take profit)
+            is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
+            hold_time_hours = self._get_hold_time_hours(position)
+            
             # Place market order to close
-            result = self.kraken_client.place_order(
-                pair=position.pair,
-                side=order_side,
-                order_type=OrderType.MARKET,
-                volume=position.volume
-            )
+            result = None
+            order_error = None
+            try:
+                result = self.kraken_client.place_order(
+                    pair=position.pair,
+                    side=order_side,
+                    order_type=OrderType.MARKET,
+                    volume=position.volume
+                )
+            except Exception as order_ex:
+                order_error = str(order_ex)
+                logger.error(f"❌ Error placing close order for {position.pair}: {order_ex}", exc_info=True)
             
             if result:
                 logger.info(f"✅ Position closed: {position.pair} - Order ID: {result.order_id}")
                 
-                # Calculate final P&L
-                # Use current_price as exit price (most accurate for market orders)
-                # result.price may be None for market orders or may be limit price
-                exit_price = position.current_price if position.current_price else (
-                    result.price if (hasattr(result, 'price') and result.price) else position.entry_price
-                )
-                if position.side == 'BUY':
-                    pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
-                    pnl_usd = (exit_price - position.entry_price) * position.volume
-                else:
-                    pnl_pct = ((position.entry_price - exit_price) / position.entry_price) * 100
-                    pnl_usd = (position.entry_price - exit_price) * position.volume
+                # Update exit price if we have order result price (more accurate)
+                if hasattr(result, 'price') and result.price:
+                    exit_price = result.price
+                    # Recalculate P&L with actual exit price
+                    if position.side == 'BUY':
+                        pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+                        pnl_usd = (exit_price - position.entry_price) * position.volume
+                    else:
+                        pnl_pct = ((position.entry_price - exit_price) / position.entry_price) * 100
+                        pnl_usd = (position.entry_price - exit_price) * position.volume
                 
                 # Update statistics
                 self.ai_exit_signals += 1
-                
-                # Check if this is a hard trigger (stop loss/take profit)
-                is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
-                hold_time_hours = self._get_hold_time_hours(position)
                 
                 # Determine exit type and emoji
                 if is_hard_trigger:
@@ -2112,11 +2125,81 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 
                 return True
             else:
-                logger.error(f"Failed to close position {position.pair}")
+                # Order failed - still send notification about the stop loss trigger
+                logger.error(f"❌ Failed to close position {position.pair} - Order placement failed")
+                if order_error:
+                    logger.error(f"   Order error: {order_error}")
+                
+                # Determine exit type and emoji (same logic as successful close)
+                if is_hard_trigger:
+                    if "stop loss" in decision.reasoning.lower() or "stop" in decision.reasoning.lower():
+                        exit_type = "🛑 STOP LOSS (ORDER FAILED)"
+                        color = 16711680  # Red
+                    elif "take profit" in decision.reasoning.lower() or "target" in decision.reasoning.lower():
+                        exit_type = "🎯 TAKE PROFIT (ORDER FAILED)"
+                        color = 65280  # Green
+                    else:
+                        exit_type = "🚨 HARD TRIGGER (ORDER FAILED)"
+                        color = 16711680  # Red
+                else:
+                    exit_type = "🤖 AI EXIT (ORDER FAILED)"
+                    color = 16711680  # Red
+                
+                # Build notification message for failed order
+                message_parts = [
+                    f"**⚠️ ALERT: Stop Loss/Take Profit Triggered**",
+                    f"**Exit Type:** {exit_type}",
+                    f"**Pair:** {position.pair}",
+                    f"**Side:** {position.side}",
+                    f"**Volume:** {position.volume:.6f}",
+                    "",
+                    f"**Entry Price:** ${position.entry_price:,.6f}",
+                    f"**Current Price:** ${exit_price:,.6f}",
+                    f"**P&L:** {pnl_pct:+.2f}% (${pnl_usd:+.2f})",
+                    "",
+                    f"**Hold Time:** {hold_time_hours:.1f} hours",
+                    f"**Reason:** {decision.reasoning}",
+                    "",
+                    f"**❌ ORDER PLACEMENT FAILED**",
+                    f"**Error:** {order_error if order_error else 'Order returned None - check Kraken account manually'}",
+                    "",
+                    f"⚠️ **ACTION REQUIRED:** Please manually close this position on Kraken!"
+                ]
+                
+                # Send notification even though order failed
+                self._send_notification(
+                    f"{exit_type}: {position.pair}",
+                    "\n".join(message_parts),
+                    color=color
+                )
+                
                 return False
                 
         except Exception as e:
             logger.error("Error closing position: {}", str(e), exc_info=True)
+            
+            # Try to send notification even on exception
+            try:
+                is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
+                if is_hard_trigger:
+                    exit_type = "🚨 STOP LOSS TRIGGER (EXCEPTION)"
+                    color = 16711680  # Red
+                else:
+                    exit_type = "🤖 AI EXIT (EXCEPTION)"
+                    color = 16711680  # Red
+                
+                self._send_notification(
+                    f"{exit_type}: {position.pair}",
+                    f"**⚠️ CRITICAL ALERT**\n\n"
+                    f"**Pair:** {position.pair}\n"
+                    f"**Reason:** {decision.reasoning}\n"
+                    f"**Error:** {str(e)}\n\n"
+                    f"⚠️ **ACTION REQUIRED:** Check position status manually!",
+                    color=color
+                )
+            except:
+                pass  # Don't fail if notification also fails
+            
             return False
     
     def _execute_tighten_stop(
@@ -2282,7 +2365,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             
             webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
             if not webhook_url:
-                logger.debug("DISCORD_WEBHOOK_URL not set, skipping notification")
+                logger.warning(f"⚠️ DISCORD_WEBHOOK_URL not set, cannot send notification: {title}")
                 return
             
             embed = {
