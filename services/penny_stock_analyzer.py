@@ -147,8 +147,15 @@ class PennyStockScorer:
         score = 50  # Base score
         data_points = 0
         
-        # P/E Ratio (25 points)
+        # P/E Ratio (25 points) - handle string values like 'Infinity'
         pe_ratio = data.get('pe_ratio', -1)
+        try:
+            pe_ratio = float(pe_ratio) if pe_ratio is not None else -1
+            if pe_ratio == float('inf') or pe_ratio == float('-inf'):
+                pe_ratio = -1  # Treat infinity as no data
+        except (ValueError, TypeError):
+            pe_ratio = -1  # Handle string values like 'Infinity'
+        
         if pe_ratio > 0:
             data_points += 1
             if pe_ratio < 10:
@@ -637,7 +644,23 @@ class PennyStockAnalyzer:
             is_healthcare, healthcare_sector = self.fda_detector.is_healthcare_stock(ticker, info)
             fda_catalyst_info = self.fda_detector.get_catalyst_summary(ticker)
             
+            # Helper to safely get numeric values (yfinance sometimes returns 'Infinity' strings)
+            def safe_numeric(value, default=None):
+                if value is None:
+                    return default
+                try:
+                    num = float(value)
+                    if num == float('inf') or num == float('-inf') or num != num:  # Check for inf/nan
+                        return default
+                    return num
+                except (ValueError, TypeError):
+                    return default
+            
             # Prepare data dictionary
+            pe_raw = info.get('trailingPE', info.get('forwardPE', None))
+            revenue_growth_raw = info.get('revenueGrowth', 0)
+            profit_margin_raw = info.get('profitMargins', 0)
+            
             data = {
                 'ticker': ticker,
                 'price': current_price,
@@ -647,9 +670,9 @@ class PennyStockAnalyzer:
                 'rsi': rsi,
                 'atr': atr,
                 'technical_score': self._calculate_technical_score(hist),
-                'pe_ratio': info.get('trailingPE', info.get('forwardPE', None)),
-                'revenue_growth': info.get('revenueGrowth', 0) * 100 if info.get('revenueGrowth') else None,
-                'profit_margin': info.get('profitMargins', 0) * 100 if info.get('profitMargins') else None,
+                'pe_ratio': safe_numeric(pe_raw, -1),
+                'revenue_growth': safe_numeric(revenue_growth_raw, 0) * 100 if revenue_growth_raw else None,
+                'profit_margin': safe_numeric(profit_margin_raw, 0) * 100 if profit_margin_raw else None,
                 'market_cap': market_cap,
                 'float_m': float_shares / 1_000_000 if float_shares else 0,
                 'exchange': exchange,
