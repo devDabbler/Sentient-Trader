@@ -101,7 +101,7 @@ class UnifiedPennyStockAnalysis:
                 'atr_target_pct': base_analysis.get('atr_target_pct'),
                 'atr_risk_reward': base_analysis.get('atr_risk_reward'),
             }
-            logger.info("✅ ATR stops: stop=${}, stop_pct={atr_stops['atr_stop_pct']}%", str(atr_stops['atr_stop_loss']))
+            logger.info(f"✅ ATR stops: stop=${atr_stops.get('atr_stop_loss', 'N/A')}, stop_pct={atr_stops.get('atr_stop_pct', 'N/A')}%")
             
             # 5. Trading recommendation based on stops
             stop_pct = base_analysis.get('atr_stop_pct', 8.0)
