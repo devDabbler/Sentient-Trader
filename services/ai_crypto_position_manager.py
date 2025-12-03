@@ -254,6 +254,7 @@ class AITradeDecision:
     risk_score: float = 0.0
     metadata: Optional[Dict[str, Any]] = None
     enhanced_reasoning: Optional[EnhancedExitReasoning] = None  # Detailed sell/hold analysis
+    is_hard_trigger: bool = False  # True for stop loss/take profit hits (bypasses cooldown)
 
 
 def _load_service_interval(service_name: str = "sentient-crypto-ai-trader") -> int:
@@ -828,10 +829,16 @@ class AICryptoPositionManager:
     def _should_suppress_alert(
         self,
         position: MonitoredCryptoPosition,
-        action: str
+        action: str,
+        is_hard_trigger: bool = False
     ) -> Tuple[bool, str]:
         """
         Check if an alert should be suppressed based on cooldown and minimum hold time.
+        
+        Args:
+            position: Position being checked
+            action: Action type (CLOSE_NOW, TIGHTEN_STOP, etc.)
+            is_hard_trigger: True if this is a stop loss/take profit hit (bypasses cooldown)
         
         Returns:
             Tuple of (should_suppress, reason)
@@ -841,14 +848,17 @@ class AICryptoPositionManager:
         
         # 1. Check minimum hold time for CLOSE_NOW
         if action == PositionAction.CLOSE_NOW.value:
-            if hold_time_hours < style_config.min_hold_hours_before_close:
+            # Hard triggers (stop loss/take profit) bypass minimum hold time check
+            if not is_hard_trigger and hold_time_hours < style_config.min_hold_hours_before_close:
                 return (True, f"Position held {hold_time_hours:.1f}h, need {style_config.min_hold_hours_before_close}h minimum for {position.position_intent} style")
             
-            # Check cooldown since last close alert
-            if position.last_close_alert_time:
-                minutes_since_last = (datetime.now() - position.last_close_alert_time).total_seconds() / 60
-                if minutes_since_last < style_config.alert_cooldown_minutes:
-                    return (True, f"Cooldown: {minutes_since_last:.0f}m since last close alert (need {style_config.alert_cooldown_minutes}m)")
+            # Hard triggers (stop loss/take profit) bypass cooldown - they're critical exits
+            if not is_hard_trigger:
+                # Check cooldown since last close alert (only for AI recommendations)
+                if position.last_close_alert_time:
+                    minutes_since_last = (datetime.now() - position.last_close_alert_time).total_seconds() / 60
+                    if minutes_since_last < style_config.alert_cooldown_minutes:
+                        return (True, f"Cooldown: {minutes_since_last:.0f}m since last close alert (need {style_config.alert_cooldown_minutes}m)")
         
         # 2. Check minimum hold time for TIGHTEN_STOP
         elif action == PositionAction.TIGHTEN_STOP.value:
@@ -929,7 +939,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=90.0,
                     reasoning=f"HODL position hit catastrophic loss of {pnl_pct:.1f}% - this exceeds normal volatility",
-                    urgency="HIGH"
+                    urgency="HIGH",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
             
             # For HODL, still check take profit but log that we're respecting intent
@@ -938,7 +949,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
                     reasoning=f"Take profit target reached at ${current_price:,.2f} - HODL goal achieved!",
-                    urgency="MEDIUM"
+                    urgency="MEDIUM",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
             
             # HODL positions ignore normal stop loss
@@ -954,7 +966,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
                     reasoning=f"Stop loss hit at ${current_price:,.2f}",
-                    urgency="HIGH"
+                    urgency="HIGH",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
         else:  # SELL
             if current_price >= position.stop_loss:
@@ -962,7 +975,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
                     reasoning=f"Stop loss hit at ${current_price:,.2f}",
-                    urgency="HIGH"
+                    urgency="HIGH",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
         
         # Take profit check
@@ -972,7 +986,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
                     reasoning=f"Take profit target reached at ${current_price:,.2f}",
-                    urgency="MEDIUM"
+                    urgency="MEDIUM",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
         else:  # SELL
             if current_price <= position.take_profit:
@@ -980,7 +995,8 @@ class AICryptoPositionManager:
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
                     reasoning=f"Take profit target reached at ${current_price:,.2f}",
-                    urgency="MEDIUM"
+                    urgency="MEDIUM",
+                    is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
         
         return None
@@ -1758,8 +1774,10 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         # 🛡️ ALERT COOLDOWN CHECK: Prevent spam and premature exit recommendations
         # Skip this check if action is already approved (skip_approval=True)
         # Only check for HOLD, as HOLD should never be suppressed
+        # Hard triggers (stop loss/take profit) bypass cooldown - they're critical exits
         if not skip_approval and decision.action != PositionAction.HOLD.value:
-            should_suppress, suppress_reason = self._should_suppress_alert(position, decision.action)
+            is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
+            should_suppress, suppress_reason = self._should_suppress_alert(position, decision.action, is_hard_trigger=is_hard_trigger)
             if should_suppress:
                 position.alert_suppressed_count += 1
                 log_and_print(f"🔇 Alert suppressed for {position.pair}: {suppress_reason}", "DEBUG")
