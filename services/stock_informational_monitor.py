@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict, field
 import json
 import os
+import shutil
 
 from loguru import logger
 import requests
@@ -1539,29 +1540,72 @@ class StockInformationalMonitor(LLMServiceMixin):
             logger.debug(f"   Could not save to analysis results: {e}")
     
     def _log_opportunity(self, opportunity: StockOpportunity):
-        """Log opportunity to file"""
+        """Log opportunity to file with corruption recovery"""
         try:
             log_path = OPPORTUNITIES_LOG_PATH
             
             # Create logs directory if needed
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             
-            # Load existing logs
+            # Load existing logs with corruption handling
+            logs = []
             if os.path.exists(log_path):
-                with open(log_path, 'r') as f:
-                    logs = json.load(f)
-            else:
-                logs = []
+                try:
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        logs = json.load(f)
+                    # Validate it's a list
+                    if not isinstance(logs, list):
+                        logger.warning(f"Invalid log format, resetting to empty list")
+                        logs = []
+                except json.JSONDecodeError as e:
+                    # JSON is corrupted - try to recover or start fresh
+                    logger.warning(f"Corrupted JSON file detected at {log_path}: {e}")
+                    # Backup corrupted file
+                    backup_path = f"{log_path}.corrupted_{int(time.time())}"
+                    try:
+                        shutil.copy2(log_path, backup_path)
+                        logger.info(f"Backed up corrupted file to {backup_path}")
+                    except Exception as backup_error:
+                        logger.error(f"Failed to backup corrupted file: {backup_error}")
+                    # Start fresh
+                    logs = []
+                except Exception as e:
+                    logger.error(f"Unexpected error reading log file: {e}")
+                    logs = []
+            
+            # Convert opportunity to dict and validate
+            try:
+                opp_dict = opportunity.to_dict()
+                # Ensure all values are JSON serializable
+                opp_dict = json.loads(json.dumps(opp_dict))
+            except Exception as e:
+                logger.error(f"Error serializing opportunity: {e}")
+                return
             
             # Append new opportunity
-            logs.append(opportunity.to_dict())
+            logs.append(opp_dict)
             
             # Keep last 1000 entries
             logs = logs[-1000:]
             
-            # Save
-            with open(log_path, 'w') as f:
-                json.dump(logs, f, indent=2)
+            # Save with atomic write (write to temp file first, then rename)
+            try:
+                temp_path = f"{log_path}.tmp"
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(logs, f, indent=2, ensure_ascii=False)
+                # Atomic replace
+                if os.path.exists(log_path):
+                    os.replace(temp_path, log_path)
+                else:
+                    os.rename(temp_path, log_path)
+            except Exception as e:
+                logger.error(f"Error writing log file: {e}")
+                # Clean up temp file if it exists
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
         
         except Exception as e:
             logger.error(f"Error logging opportunity: {e}")
