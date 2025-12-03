@@ -1595,11 +1595,11 @@ class StockInformationalMonitor(LLMServiceMixin):
                     
                     if opportunities:
                         logger.info(f"📊 Found {len(opportunities)} opportunities this cycle")
-                        self.stats.scans += 1
+                        self.stats.scans_completed += 1
                         self.stats.consecutive_errors = 0  # Reset on success
                     else:
                         logger.info("📊 No opportunities found this cycle")
-                        self.stats.scans += 1
+                        self.stats.scans_completed += 1
                     
                 except Exception as e:
                     logger.error("❌ Error during scan: {}", str(e), exc_info=True)

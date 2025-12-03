@@ -58,11 +58,20 @@ class UnifiedPennyStockAnalysis:
                 logger.error(f"❌ Base analysis returned None for {ticker}")
                 return {'ticker': ticker, 'error': 'Base analysis returned None'}
             
+            # Check if result is a dict
+            if not isinstance(base_analysis, dict):
+                logger.error(f"❌ Base analysis returned non-dict type: {type(base_analysis)}")
+                return {'ticker': ticker, 'error': f'Base analysis returned {type(base_analysis)}'}
+            
             if 'error' in base_analysis:
                 logger.error(f"❌ Base analysis error for {ticker}: {base_analysis['error']}")
                 return base_analysis
             
-            logger.info("✅ Base analysis completed for {}: price=${base_analysis.get('price', 'N/A')}, classification={base_analysis.get('classification', 'N/A')}", str(ticker))
+            # Ensure ticker is in result
+            if 'ticker' not in base_analysis:
+                base_analysis['ticker'] = ticker
+            
+            logger.info(f"✅ Base analysis completed for {ticker}: price=${base_analysis.get('price', 'N/A')}, classification={base_analysis.get('classification', 'N/A')}")
             
             # 2. Stock classification (using enhanced classifier)
             classification = base_analysis.get('classification', 'UNKNOWN')

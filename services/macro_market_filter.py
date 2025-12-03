@@ -550,7 +550,7 @@ class MacroMarketFilter:
         
         try:
             # Fetch data
-            data = yf.download(symbol, period="1y", progress=False, threads=False)
+            data = yf.download(symbol, period="1y", progress=False, threads=False, auto_adjust=False)
             
             if data is None or data.empty:
                 logger.debug(f"No data for {symbol}")
@@ -620,7 +620,7 @@ class MacroMarketFilter:
         
         try:
             # Fetch VIX data
-            data = yf.download("^VIX", period="1y", progress=False, threads=False)
+            data = yf.download("^VIX", period="1y", progress=False, threads=False, auto_adjust=False)
             
             if data is None or data.empty:
                 logger.debug("No VIX data")
@@ -675,7 +675,7 @@ class MacroMarketFilter:
         
         try:
             # Use ^TNX for 10Y Treasury yield
-            data = yf.download("^TNX", period="3mo", progress=False, threads=False)
+            data = yf.download("^TNX", period="3mo", progress=False, threads=False, auto_adjust=False)
             
             if data is None or data.empty:
                 logger.debug("No Treasury data")
@@ -725,7 +725,7 @@ class MacroMarketFilter:
         
         try:
             # Use UUP (Dollar Bull ETF) as DXY proxy
-            data = yf.download("UUP", period="3mo", progress=False, threads=False)
+            data = yf.download("UUP", period="3mo", progress=False, threads=False, auto_adjust=False)
             
             if data is None or data.empty:
                 logger.debug("No dollar data")
@@ -776,7 +776,7 @@ class MacroMarketFilter:
             # Get 1-month returns for each sector
             for sector, etf in self.SECTOR_ETFS.items():
                 try:
-                    data = yf.download(etf, period="1mo", progress=False, threads=False)
+                    data = yf.download(etf, period="1mo", progress=False, threads=False, auto_adjust=False)
                     if data is not None and not data.empty:
                         if isinstance(data.columns, pd.MultiIndex):
                             data.columns = data.columns.get_level_values(0)
@@ -826,8 +826,8 @@ class MacroMarketFilter:
         
         try:
             # Use RSP (equal-weight S&P) vs SPY for breadth proxy
-            rsp = yf.download("RSP", period="1mo", progress=False, threads=False)
-            spy = yf.download("SPY", period="1mo", progress=False, threads=False)
+            rsp = yf.download("RSP", period="1mo", progress=False, threads=False, auto_adjust=False)
+            spy = yf.download("SPY", period="1mo", progress=False, threads=False, auto_adjust=False)
             
             if rsp is not None and spy is not None and not rsp.empty and not spy.empty:
                 # Handle multi-index

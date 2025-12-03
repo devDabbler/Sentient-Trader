@@ -445,7 +445,9 @@ class SocialSentimentAnalyzer:
         # Remove common suffixes/prefixes
         ticker_clean = ticker_upper.replace('/USD', '').replace('/USDT', '').replace('/USDC', '')
         
-        return ticker_clean in common_crypto or len(ticker_clean) <= 5  # Assume short symbols are crypto
+        # Only check against known crypto symbols - don't assume short tickers are crypto
+        # Most stock tickers are 1-5 chars, so length is not a good indicator
+        return ticker_clean in common_crypto
     
     def _get_subreddits_for_symbol(self, ticker: str, is_crypto: bool = False) -> List[str]:
         """Get appropriate subreddits based on symbol type (crypto vs stock)"""
