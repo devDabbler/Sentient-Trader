@@ -30,6 +30,12 @@ class TradingStyleAnalyzer:
             
             ml_score = 50
             
+            # Calculate volume ratio for risk assessment
+            volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 1
+            
+            # Check if penny stock (price < $5)
+            is_penny = analysis.price < 5.0
+            
             # Momentum Factor
             if abs(analysis.change_pct) > 5:
                 ml_score += 20
@@ -38,7 +44,6 @@ class TradingStyleAnalyzer:
                 ml_score += 10
             
             # Volume Profile
-            volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 1
             if volume_ratio > 2:
                 ml_score += 15
                 results['signals'].append(f"✅ Exceptional volume: {volume_ratio:.1f}x")
@@ -65,6 +70,25 @@ class TradingStyleAnalyzer:
             results['score'] = ml_score
             results['confidence'] = ml_score
             
+            # Determine risk level based on volatility, volume, and penny stock status
+            # This ensures consistency with Runner Metrics and Penny Stock Assessment
+            if is_penny and volume_ratio > 3:
+                results['risk_level'] = 'EXTREME'
+                results['signals'].append("⚠️ EXTREME RISK: Penny stock with explosive volume")
+            elif is_penny and (volume_ratio > 2 or abs(analysis.change_pct) > 10):
+                results['risk_level'] = 'VERY HIGH'
+                results['signals'].append("⚠️ VERY HIGH RISK: Penny stock with high volatility")
+            elif is_penny:
+                results['risk_level'] = 'HIGH'
+                results['signals'].append("⚠️ HIGH RISK: Penny stock")
+            elif volume_ratio > 3 and abs(analysis.change_pct) > 10:
+                results['risk_level'] = 'VERY HIGH'
+                results['signals'].append("⚠️ VERY HIGH RISK: Extreme volatility detected")
+            elif volume_ratio > 2 or abs(analysis.change_pct) > 5:
+                results['risk_level'] = 'HIGH'
+            else:
+                results['risk_level'] = 'MEDIUM'
+            
             if ml_score >= 75:
                 results['ml_prediction'] = "STRONG BUY"
                 results['recommendations'].append("🟢 **AI SIGNAL: STRONG BUY**")
@@ -77,6 +101,10 @@ class TradingStyleAnalyzer:
             else:
                 results['ml_prediction'] = "SELL"
                 results['recommendations'].append("🔴 **AI SIGNAL: SELL**")
+            
+            # Add risk-appropriate recommendation
+            if results['risk_level'] in ['EXTREME', 'VERY HIGH']:
+                results['recommendations'].append("⚠️ Use tight stops, small position size")
             
             return results
             
@@ -101,8 +129,13 @@ class TradingStyleAnalyzer:
             scalp_score = 0
             current_price = analysis.price
             
-            # Liquidity Check
+            # Check if penny stock
+            is_penny = current_price < 5.0
+            
+            # Calculate volume ratio
             volume_ratio = analysis.volume / analysis.avg_volume if analysis.avg_volume > 0 else 1
+            
+            # Liquidity Check
             if analysis.volume > 1_000_000 and volume_ratio > 1.5:
                 scalp_score += 30
                 results['signals'].append(f"✅ Excellent liquidity: {analysis.volume:,}")
@@ -120,8 +153,19 @@ class TradingStyleAnalyzer:
             if current_price > 10:
                 scalp_score += 15
                 results['signals'].append(f"✅ Good price: ${current_price:.2f}")
+            elif is_penny:
+                results['signals'].append(f"⚠️ Penny stock: ${current_price:.2f} - use caution")
             
             results['score'] = min(100, scalp_score)
+            
+            # Adjust risk level based on penny stock status and volatility
+            if is_penny and volume_ratio > 3:
+                results['risk_level'] = 'EXTREME'
+                results['signals'].append("⚠️ EXTREME RISK: Penny stock scalp")
+            elif is_penny or (volume_ratio > 3 and abs(analysis.change_pct) > 10):
+                results['risk_level'] = 'EXTREME'
+            else:
+                results['risk_level'] = 'VERY HIGH'
             
             if scalp_score >= 70:
                 results['recommendations'].append("🟢 **EXCELLENT for scalping**")
@@ -130,15 +174,23 @@ class TradingStyleAnalyzer:
             else:
                 results['recommendations'].append("🔴 **POOR for scalping**")
             
-            # Targets
-            target1 = current_price * 1.002
-            target2 = current_price * 1.005
-            results['targets'] = [
-                f"T1: ${target1:.2f} (+0.2%)",
-                f"T2: ${target2:.2f} (+0.5%)"
-            ]
-            
-            results['recommendations'].append("⚡ Use 1-5min charts, tight stops (0.2-0.3%)")
+            # Targets - adjust for penny stocks
+            if is_penny:
+                target1 = current_price * 1.005  # 0.5% for penny stocks
+                target2 = current_price * 1.01   # 1% for penny stocks
+                results['targets'] = [
+                    f"T1: ${target1:.4f} (+0.5%)",
+                    f"T2: ${target2:.4f} (+1%)"
+                ]
+                results['recommendations'].append("⚡ Penny stock scalp: Use 1min charts, tight stops (1-2%)")
+            else:
+                target1 = current_price * 1.002
+                target2 = current_price * 1.005
+                results['targets'] = [
+                    f"T1: ${target1:.2f} (+0.2%)",
+                    f"T2: ${target2:.2f} (+0.5%)"
+                ]
+                results['recommendations'].append("⚡ Use 1-5min charts, tight stops (0.2-0.3%)")
             
             return results
             
@@ -162,6 +214,11 @@ class TradingStyleAnalyzer:
             
             warrior_score = 0
             current_price = analysis.price
+            
+            # Check if penny stock
+            is_penny = current_price < 5.0
+            if is_penny:
+                results['signals'].append(f"💰 PENNY STOCK: ${current_price:.4f}")
             
             # Gap Analysis
             if len(hist) >= 2:
@@ -205,17 +262,27 @@ class TradingStyleAnalyzer:
             else:
                 results['recommendations'].append("❌ **POOR SETUP**")
             
-            # Targets
-            target1 = current_price * 1.01
-            target2 = current_price * 1.02
-            target3 = current_price * 1.03
-            results['targets'] = [
-                f"T1: ${target1:.2f} (+1%)",
-                f"T2: ${target2:.2f} (+2%)",
-                f"T3: ${target3:.2f} (+3%)"
-            ]
-            
-            results['recommendations'].append("⚔️ Trade first 30-60min, scale out at targets")
+            # Targets - adjust formatting for penny stocks
+            if is_penny:
+                target1 = current_price * 1.01
+                target2 = current_price * 1.02
+                target3 = current_price * 1.03
+                results['targets'] = [
+                    f"T1: ${target1:.4f} (+1%)",
+                    f"T2: ${target2:.4f} (+2%)",
+                    f"T3: ${target3:.4f} (+3%)"
+                ]
+                results['recommendations'].append("⚔️ PENNY WARRIOR: Smaller size, wider stops, quick exits")
+            else:
+                target1 = current_price * 1.01
+                target2 = current_price * 1.02
+                target3 = current_price * 1.03
+                results['targets'] = [
+                    f"T1: ${target1:.2f} (+1%)",
+                    f"T2: ${target2:.2f} (+2%)",
+                    f"T3: ${target3:.2f} (+3%)"
+                ]
+                results['recommendations'].append("⚔️ Trade first 30-60min, scale out at targets")
             
             return results
             

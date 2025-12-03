@@ -760,13 +760,41 @@ def render_tab():
 - ✅ Avoid stocks with no news/catalysts
                                         """)
                                     
-                                    # Calculate penny stock score
+                                    # Calculate penny stock score with tiered bonuses for extreme moves
                                     penny_score = 0
-                                    if volume_vs_avg > 100: penny_score += 25
-                                    if analysis.change_pct > 5: penny_score += 20
-                                    if analysis.rsi < 70: penny_score += 20
-                                    if len(analysis.recent_news) > 0: penny_score += 20
-                                    if analysis.sentiment_score > 0: penny_score += 15
+                                    
+                                    # Volume scoring - tiered for magnitude
+                                    if volume_vs_avg > 300:
+                                        penny_score += 30  # Extreme volume
+                                    elif volume_vs_avg > 200:
+                                        penny_score += 27
+                                    elif volume_vs_avg > 100:
+                                        penny_score += 25
+                                    elif volume_vs_avg > 50:
+                                        penny_score += 15
+                                    
+                                    # Price change scoring - tiered for magnitude
+                                    if abs(analysis.change_pct) > 50:
+                                        penny_score += 25  # Extreme move
+                                    elif abs(analysis.change_pct) > 20:
+                                        penny_score += 22
+                                    elif abs(analysis.change_pct) > 10:
+                                        penny_score += 20
+                                    elif abs(analysis.change_pct) > 5:
+                                        penny_score += 15
+                                    
+                                    # RSI check
+                                    if analysis.rsi < 70:
+                                        penny_score += 15
+                                    
+                                    # News and sentiment
+                                    if len(analysis.recent_news) > 0:
+                                        penny_score += 15
+                                    if analysis.sentiment_score > 0:
+                                        penny_score += 15
+                                    
+                                    # Cap at 100
+                                    penny_score = min(100, penny_score)
                                     
                                     st.metric("Penny Stock Opportunity Score", f"{penny_score}/100")
                                     
