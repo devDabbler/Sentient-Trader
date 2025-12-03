@@ -3104,28 +3104,28 @@ def main():
                                         emoji = "🟢" if pnl_pct >= 0 else "🔴"
                                         intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(position_intent, "📊")
                                         
-                                        # Enhanced position card display
+                                        # Enhanced position card display with high contrast text
                                         with st.container():
                                             st.markdown(f"""
 <div style="background: linear-gradient(135deg, {'#1a472a' if pnl_pct >= 0 else '#4a1a1a'} 0%, {'#0d2818' if pnl_pct >= 0 else '#2d0d0d'} 100%); 
-     border-radius: 10px; padding: 12px; margin-bottom: 8px; border-left: 4px solid {'#00ff88' if pnl_pct >= 0 else '#ff4444'};">
+     border-radius: 10px; padding: 12px; margin-bottom: 8px; border-left: 4px solid {'#00ff88' if pnl_pct >= 0 else '#ff4444'}; color: #ffffff;">
 <div style="display: flex; justify-content: space-between; align-items: center;">
     <div>
-        <span style="font-size: 1.1em; font-weight: bold;">{emoji} {pair}</span>
-        <span style="margin-left: 8px; opacity: 0.7;">{intent_emoji} {position_intent}</span>
+        <span style="font-size: 1.1em; font-weight: bold; color: #ffffff;">{emoji} {pair}</span>
+        <span style="margin-left: 8px; color: #cccccc;">{intent_emoji} {position_intent}</span>
     </div>
     <div style="text-align: right;">
-        <span style="font-size: 1.2em; font-weight: bold; color: {'#00ff88' if pnl_pct >= 0 else '#ff4444'};">{pnl_pct:+.2f}%</span>
-        <span style="margin-left: 8px; opacity: 0.8;">(${pnl_usd:+.2f})</span>
+        <span style="font-size: 1.2em; font-weight: bold; color: {'#00ff88' if pnl_pct >= 0 else '#ff6666'};">{pnl_pct:+.2f}%</span>
+        <span style="margin-left: 8px; color: #bbbbbb;">(${pnl_usd:+.2f})</span>
     </div>
 </div>
-<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; font-size: 0.85em;">
-    <div><span style="opacity: 0.6;">Entry:</span> ${entry_price:,.6f}</div>
-    <div><span style="opacity: 0.6;">Current:</span> ${current_price:,.6f}</div>
-    <div><span style="opacity: 0.6;">Stop:</span> ${stop_loss:,.6f}</div>
-    <div><span style="opacity: 0.6;">Target:</span> ${take_profit:,.6f}</div>
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; font-size: 0.85em; color: #ffffff;">
+    <div><span style="color: #aaaaaa;">Entry:</span> <span style="color: #ffffff;">${entry_price:,.6f}</span></div>
+    <div><span style="color: #aaaaaa;">Current:</span> <span style="color: #ffffff;">${current_price:,.6f}</span></div>
+    <div><span style="color: #aaaaaa;">Stop:</span> <span style="color: #ffffff;">${stop_loss:,.6f}</span></div>
+    <div><span style="color: #aaaaaa;">Target:</span> <span style="color: #ffffff;">${take_profit:,.6f}</span></div>
 </div>
-<div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.8em; opacity: 0.7;">
+<div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.8em; color: #cccccc;">
     <span>📦 Volume: {volume:.6f}</span>
     <span>💰 Value: ${position_value:,.2f}</span>
 </div>
