@@ -66,6 +66,122 @@ def render_greeks_calculator(quant: QuantAnalyticsService):
     st.subheader("Options Greeks Calculator")
     st.write("Calculate Delta, Gamma, Theta, Vega, and Rho for any option contract.")
     
+    # ==========================================================================
+    # OPTIONS 101 - LEARN THE BASICS
+    # ==========================================================================
+    with st.expander("📚 **OPTIONS 101 - Learn Before You Trade!**", expanded=False):
+        st.markdown("""
+        ## 🎓 What Are Options?
+        
+        An **option** is a contract giving you the **right** (not obligation) to buy or sell a stock at a specific price by a specific date.
+        
+        ---
+        
+        ### 📗 The Two Types
+        
+        | Type | What It Does | When to Buy | Example |
+        |------|-------------|-------------|---------|
+        | **CALL** 📈 | Right to **BUY** stock at strike price | You think stock will go **UP** | AAPL at $180, you buy $185 Call |
+        | **PUT** 📉 | Right to **SELL** stock at strike price | You think stock will go **DOWN** | AAPL at $180, you buy $175 Put |
+        
+        ---
+        
+        ### 💰 Key Terms (Plain English)
+        
+        | Term | What It Means | Example |
+        |------|--------------|---------|
+        | **Strike Price** | The price you can buy/sell the stock | $100 strike = you can buy at $100 |
+        | **Premium** | What you PAY for the option | You pay $3.50 per share ($350 total for 1 contract = 100 shares) |
+        | **Expiration** | When the option expires worthless if not used | "Dec 20 expiry" = useless after Dec 20 |
+        | **ITM (In The Money)** | Option has real value NOW | Stock $110, your $100 Call is ITM by $10 |
+        | **OTM (Out of The Money)** | Option has NO value yet | Stock $95, your $100 Call is OTM |
+        | **ATM (At The Money)** | Strike = Current stock price | Stock $100, your $100 Call is ATM |
+        
+        ---
+        
+        ### 📊 The Greeks - Your Risk Dashboard
+        
+        Think of Greeks as **dashboard gauges** showing how your option will react:
+        
+        | Greek | What It Tells You | Analogy | Good to Know |
+        |-------|------------------|---------|--------------|
+        | **Delta (Δ)** | How much option moves per $1 stock move | Speedometer | Delta 0.50 = option gains $0.50 when stock gains $1 |
+        | **Gamma (Γ)** | How fast Delta changes | Acceleration | High gamma = delta changes quickly |
+        | **Theta (Θ)** | How much you LOSE per day | Gas tank draining | Theta -$5 = lose $5/day just by holding |
+        | **Vega (ν)** | Sensitivity to volatility | Weather gauge | High vega = big swings when IV changes |
+        | **Rho (ρ)** | Sensitivity to interest rates | Usually ignore | Minor effect for most traders |
+        
+        ---
+        
+        ### 🎯 Delta Deep Dive (Most Important!)
+        
+        **Delta tells you TWO things:**
+        
+        1. **Price Movement**: Delta 0.50 = gain $50 per contract when stock goes up $1
+        2. **Probability of Profit**: Delta 0.30 ≈ 30% chance of expiring ITM
+        
+        | Delta Range | What It Means | Risk Level |
+        |-------------|---------------|------------|
+        | **0.80 - 1.00** | Deep ITM, acts like stock | Low risk, expensive |
+        | **0.50 - 0.80** | ITM, good directional bet | Medium risk |
+        | **0.30 - 0.50** | ATM, balanced | Medium-high risk |
+        | **0.10 - 0.30** | OTM, leveraged lottery | High risk, cheap |
+        | **0.00 - 0.10** | Far OTM, likely expires worthless | Very high risk |
+        
+        ---
+        
+        ### ⏰ Theta - Time Decay (Your Enemy as a Buyer!)
+        
+        **Options LOSE value every day** just from time passing. This is called **Theta Decay**.
+        
+        ```
+        🚨 CRITICAL: Theta accelerates in the last 30 days!
+        
+        Days to Expiry:  90 days → 60 days → 30 days → 7 days → 1 day
+        Daily Decay:     $2/day → $3/day → $5/day → $15/day → $50/day
+        ```
+        
+        **Rule of Thumb**: Don't hold options into the last 2 weeks unless you're very confident.
+        
+        ---
+        
+        ### 📈 Quick Example
+        
+        **Scenario**: NVDA is at $500. You're bullish.
+        
+        | You Buy | Cost | Delta | Max Loss | Breakeven | Risk |
+        |---------|------|-------|----------|-----------|------|
+        | $500 Call (ATM) | $15 ($1,500) | 0.50 | $1,500 | $515 | Medium |
+        | $520 Call (OTM) | $5 ($500) | 0.25 | $500 | $525 | High |
+        | $480 Call (ITM) | $30 ($3,000) | 0.75 | $3,000 | $510 | Lower |
+        
+        **If NVDA goes to $530:**
+        - $500 Call: Worth ~$30 → Profit $1,500 (100% gain)
+        - $520 Call: Worth ~$12 → Profit $700 (140% gain)  
+        - $480 Call: Worth ~$52 → Profit $2,200 (73% gain)
+        
+        ---
+        
+        ### ✅ Beginner Rules
+        
+        1. **Never risk more than 2-5% of account on one trade**
+        2. **Buy options with 30-60 days to expiry** (avoid last 2 weeks)
+        3. **Start with ATM or slightly ITM options** (Delta 0.40-0.60)
+        4. **Set a stop loss** - options can go to zero fast
+        5. **Understand max loss = premium paid** (for buying options)
+        
+        ---
+        
+        ### 🧮 Use the Calculator Below!
+        
+        Enter a real stock's info and see how the Greeks work. Try changing:
+        - Days to expiry (watch Theta change!)
+        - Strike price (watch Delta change!)
+        - Volatility (watch Vega impact!)
+        """)
+    
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     
     with col1:
