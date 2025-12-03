@@ -1276,33 +1276,36 @@ def _handle_analysis(search_ticker: str, trading_style: str):
                     st.write("📱 Fetching social sentiment (Reddit, StockTwits)...")
                     social_analyzer = SocialSentimentAnalyzer()
                     
-                    # Run async social analysis
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    # Run async social analysis - use nest_asyncio compatible approach
                     try:
-                        social_data = loop.run_until_complete(
-                            asyncio.wait_for(social_analyzer.analyze_social_buzz(analysis.ticker), timeout=20.0)
-                        )
-                        if social_data and social_data.get('total_mentions', 0) > 0:
-                            logger.info(f"📱 Social sentiment for {analysis.ticker}: {social_data.get('total_mentions', 0)} mentions, score: {social_data.get('sentiment_score', 0):.2f}")
-                            
-                            # Store social data in session for display
-                            st.session_state.social_sentiment_data = social_data
-                            
-                            # Blend social sentiment with news sentiment if we have social data
-                            if social_data.get('sentiment_score') is not None:
-                                # Weight: 60% news, 40% social (social is noisier)
-                                news_weight = 0.6
-                                social_weight = 0.4
-                                blended_score = (sentiment_data['score'] * news_weight) + (social_data.get('sentiment_score', 0) * social_weight)
-                                sentiment_data['score'] = blended_score
-                                sentiment_data['social_mentions'] = social_data.get('total_mentions', 0)
-                                logger.info(f"📊 Blended sentiment for {analysis.ticker}: {blended_score:.2f} (news + social)")
-                        else:
-                            logger.info(f"📭 No social mentions found for {analysis.ticker}")
-                            st.session_state.social_sentiment_data = {}
-                    finally:
-                        loop.close()
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    social_data = loop.run_until_complete(
+                        asyncio.wait_for(social_analyzer.analyze_social_buzz(analysis.ticker), timeout=20.0)
+                    )
+                    
+                    if social_data and social_data.get('total_mentions', 0) > 0:
+                        logger.info(f"📱 Social sentiment for {analysis.ticker}: {social_data.get('total_mentions', 0)} mentions, score: {social_data.get('sentiment_score', 0):.2f}")
+                        
+                        # Store social data in session for display
+                        st.session_state.social_sentiment_data = social_data
+                        
+                        # Blend social sentiment with news sentiment if we have social data
+                        if social_data.get('sentiment_score') is not None:
+                            # Weight: 60% news, 40% social (social is noisier)
+                            news_weight = 0.6
+                            social_weight = 0.4
+                            blended_score = (sentiment_data['score'] * news_weight) + (social_data.get('sentiment_score', 0) * social_weight)
+                            sentiment_data['score'] = blended_score
+                            sentiment_data['social_mentions'] = social_data.get('total_mentions', 0)
+                            logger.info(f"📊 Blended sentiment for {analysis.ticker}: {blended_score:.2f} (news + social)")
+                    else:
+                        logger.info(f"📭 No social mentions found for {analysis.ticker}")
+                        st.session_state.social_sentiment_data = {}
+                        
                 except asyncio.TimeoutError:
                     logger.warning(f"⏱️ Social sentiment timeout for {analysis.ticker}")
                     st.session_state.social_sentiment_data = {}

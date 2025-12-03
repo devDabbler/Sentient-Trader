@@ -71,13 +71,17 @@ class UnifiedPennyStockAnalysis:
             
             # 3. Stock liquidity check
             logger.info(f"💧 Step 3: Checking stock liquidity for {ticker}...")
-            liquidity_check = StockLiquidityChecker.check_stock_liquidity(
-                ticker=ticker,
-                current_price=base_analysis['price'],
-                volume=base_analysis['volume'],
-                avg_volume=base_analysis['avg_volume']
-            )
-            pass  # logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A'}"))
+            try:
+                liquidity_check = StockLiquidityChecker.check_stock_liquidity(
+                    ticker=ticker,
+                    current_price=base_analysis.get('price', 0),
+                    volume=base_analysis.get('volume', 0),
+                    avg_volume=base_analysis.get('avg_volume', 0)
+                )
+            except Exception as liq_error:
+                logger.warning(f"Liquidity check failed for {ticker}: {liq_error}")
+                liquidity_check = {'overall_risk': 'UNKNOWN', 'risk_factors': [], 'warnings': []}
+            pass  # logger.info(f"✅ Liquidity check completed: overall_risk={liquidity_check.get('overall_risk', 'N/A'})")
             
             # 4. ATR-based stops (already in base_analysis)
             logger.info(f"🎯 Step 4: Extracting ATR stops from base analysis...")
@@ -278,9 +282,10 @@ class UnifiedPennyStockAnalysis:
         technical_score = base_analysis.get('technical_score', 0)
         
         # 1. Check liquidity blockers
-        if liquidity_check['overall_risk'] == "CRITICAL":
+        overall_liq_risk = liquidity_check.get('overall_risk', 'UNKNOWN')
+        if overall_liq_risk == "CRITICAL":
             blockers.append("❌ ILLIQUID STOCK - Cannot execute safely")
-        elif liquidity_check['overall_risk'] == "HIGH":
+        elif overall_liq_risk == "HIGH":
             warnings.append("⚠️ Low liquidity - Use limit orders only")
         
         # 2. Check stop width
