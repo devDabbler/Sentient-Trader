@@ -1998,22 +1998,66 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 logger.info(f"✅ Position closed: {position.pair} - Order ID: {result.order_id}")
                 
                 # Calculate final P&L
+                # Use current_price as exit price (most accurate for market orders)
+                # result.price may be None for market orders or may be limit price
+                exit_price = position.current_price if position.current_price else (
+                    result.price if (hasattr(result, 'price') and result.price) else position.entry_price
+                )
                 if position.side == 'BUY':
-                    pnl_pct = ((position.current_price - position.entry_price) / position.entry_price) * 100
+                    pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
+                    pnl_usd = (exit_price - position.entry_price) * position.volume
                 else:
-                    pnl_pct = ((position.entry_price - position.current_price) / position.entry_price) * 100
+                    pnl_pct = ((position.entry_price - exit_price) / position.entry_price) * 100
+                    pnl_usd = (position.entry_price - exit_price) * position.volume
                 
                 # Update statistics
                 self.ai_exit_signals += 1
                 
+                # Check if this is a hard trigger (stop loss/take profit)
+                is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
+                hold_time_hours = self._get_hold_time_hours(position)
+                
+                # Determine exit type and emoji
+                if is_hard_trigger:
+                    if "stop loss" in decision.reasoning.lower() or "stop" in decision.reasoning.lower():
+                        exit_type = "🛑 STOP LOSS"
+                        color = 16711680  # Red
+                    elif "take profit" in decision.reasoning.lower() or "target" in decision.reasoning.lower():
+                        exit_type = "🎯 TAKE PROFIT"
+                        color = 65280  # Green
+                    else:
+                        exit_type = "🚨 HARD TRIGGER"
+                        color = 16711680  # Red
+                else:
+                    exit_type = "🤖 AI EXIT"
+                    color = 65280 if pnl_pct > 0 else 16711680  # Green/Red
+                
+                # Build detailed notification message
+                message_parts = [
+                    f"**Exit Type:** {exit_type}",
+                    f"**Pair:** {position.pair}",
+                    f"**Side:** {position.side}",
+                    f"**Volume:** {position.volume:.6f}",
+                    "",
+                    f"**Entry Price:** ${position.entry_price:,.6f}",
+                    f"**Exit Price:** ${exit_price:,.6f}",
+                    f"**P&L:** {pnl_pct:+.2f}% (${pnl_usd:+.2f})",
+                    "",
+                    f"**Hold Time:** {hold_time_hours:.1f} hours",
+                    f"**Reason:** {decision.reasoning}",
+                ]
+                
+                if hasattr(decision, 'confidence') and decision.confidence:
+                    message_parts.append(f"**Confidence:** {decision.confidence:.1f}%")
+                
+                if result.order_id:
+                    message_parts.append(f"**Order ID:** `{result.order_id}`")
+                
                 # Send notification
                 self._send_notification(
-                    f"🤖 AI Exit: {position.pair}",
-                    f"**Action:** {decision.action}\n"
-                    f"**P&L:** {pnl_pct:+.2f}%\n"
-                    f"**Reason:** {decision.reasoning}\n"
-                    f"**Confidence:** {decision.confidence:.1f}%",
-                    color=65280 if pnl_pct > 0 else 16711680  # Green/Red
+                    f"{exit_type}: {position.pair}",
+                    "\n".join(message_parts),
+                    color=color
                 )
                 
                 # Update journal with exit
@@ -2231,13 +2275,14 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         return True
     
     def _send_notification(self, title: str, message: str, color: int = 3447003):
-        """Send Discord notification"""
+        """Send Discord notification with improved error handling"""
         try:
             import os
             import requests
             
             webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
             if not webhook_url:
+                logger.debug("DISCORD_WEBHOOK_URL not set, skipping notification")
                 return
             
             embed = {
@@ -2248,11 +2293,16 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             }
             
             payload = {'embeds': [embed]}
-            response = requests.post(webhook_url, json=payload, timeout=5)
+            response = requests.post(webhook_url, json=payload, timeout=10)
             response.raise_for_status()
+            logger.debug(f"✅ Discord notification sent: {title}")
             
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Failed to send Discord notification ({title}): {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"   Response status: {e.response.status_code}, body: {e.response.text[:200]}")
         except Exception as e:
-            logger.debug(f"Failed to send Discord notification: {e}")
+            logger.error(f"❌ Unexpected error sending Discord notification ({title}): {e}", exc_info=True)
     
     def exclude_pair(self, pair: str) -> bool:
         """Exclude a pair from monitoring and close if active"""
