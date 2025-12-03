@@ -593,12 +593,19 @@ class DiscordTradeApprovalBot(commands.Bot):
         except:
             pass
 
-        # Call approval callback
+        # Call approval callback in a thread to prevent blocking Discord event loop
         if self.approval_callback:
             try:
-                self.approval_callback(approval_id, approve)
+                import asyncio
+                # Run callback in thread executor to prevent blocking
+                await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                logger.info(f"✅ Approval callback completed for {approval_id}")
             except Exception as e:
                 logger.error(f"Error in approval callback: {e}", exc_info=True)
+                try:
+                    await interaction.followup.send(f"⚠️ Callback error: {str(e)[:100]}", ephemeral=True)
+                except:
+                    pass
 
     async def _handle_alert_reply(self, message: discord.Message, content: str):
         """Handle replies to generic alerts (from Orchestrator queue)"""
@@ -2086,10 +2093,12 @@ class DiscordTradeApprovalBot(commands.Bot):
             )
             logger.info(f"❌ User rejected specific trade: {target_approval.approval_id}")
         
-        # Call approval callback
+        # Call approval callback in thread to prevent blocking
         if self.approval_callback:
             try:
-                self.approval_callback(target_approval.approval_id, approve)
+                import asyncio
+                await asyncio.to_thread(self.approval_callback, target_approval.approval_id, approve)
+                logger.info(f"✅ Approval callback completed for {target_approval.approval_id}")
             except Exception as e:
                 logger.error(f"Error in approval callback: {e}", exc_info=True)
     
@@ -2274,6 +2283,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         action = "APPROVED" if approve else "REJECTED"
         count = 0
         
+        import asyncio
+        
         for approval_id, approval in pending:
             if approve:
                 approval.approved = True
@@ -2281,10 +2292,11 @@ class DiscordTradeApprovalBot(commands.Bot):
                 approval.rejected = True
             count += 1
             
-            # Call approval callback for each
+            # Call approval callback for each in thread to prevent blocking
             if self.approval_callback:
                 try:
-                    self.approval_callback(approval.approval_id, approve)
+                    await asyncio.to_thread(self.approval_callback, approval.approval_id, approve)
+                    logger.info(f"✅ Approval callback completed for {approval.approval_id}")
                 except Exception as e:
                     logger.error(f"Error in approval callback: {e}", exc_info=True)
         
@@ -2349,16 +2361,19 @@ class DiscordTradeApprovalBot(commands.Bot):
             if "/" in latest_approval.pair:
                 await self._execute_crypto_trade(message, latest_approval)
             else:
-                # Stock trade - use callback
+                # Stock trade - use callback in thread to prevent blocking
                 if self.approval_callback:
                     try:
-                        self.approval_callback(approval_id, approve)
+                        import asyncio
+                        await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                        logger.info(f"✅ Stock approval callback completed for {approval_id}")
                         # Remove from pending after callback
                         if approval_id in self.pending_approvals:
                             del self.pending_approvals[approval_id]
                             logger.info(f"🗑️ Removed {approval_id} from pending approvals after stock execution")
                     except Exception as e:
                         logger.error(f"Error in approval callback: {e}", exc_info=True)
+                        await message.channel.send(f"⚠️ Callback error: {str(e)[:100]}")
         else:
             latest_approval.rejected = True
             await message.channel.send(

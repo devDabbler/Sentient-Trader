@@ -619,6 +619,133 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
             logger.error(f"Error closing position: {e}")
             return False
     
+    def tighten_stop(self, trade_id: str, new_stop: float, reason: str = "AI adjustment") -> bool:
+        """
+        Tighten stop loss for an existing position.
+        
+        For stocks, we update internal tracking. The position will be closed
+        at market if the stop is hit during monitoring.
+        
+        Args:
+            trade_id: Position trade ID
+            new_stop: New stop loss price
+            reason: Reason for the adjustment
+            
+        Returns:
+            True if stop was tightened successfully
+        """
+        try:
+            if trade_id not in self.positions:
+                logger.warning(f"Position {trade_id} not found for tighten_stop")
+                return False
+            
+            position = self.positions[trade_id]
+            
+            if position.status != StockPositionStatus.ACTIVE.value:
+                logger.warning(f"Position {trade_id} is not active")
+                return False
+            
+            old_stop = position.stop_loss
+            
+            # Validate - new stop should be tighter (higher for longs, lower for shorts)
+            if position.side.upper() == "BUY":
+                if new_stop <= old_stop:
+                    logger.warning(f"New stop ${new_stop:.2f} is not tighter than old ${old_stop:.2f} for LONG")
+                    return False
+            else:  # SELL (short)
+                if new_stop >= old_stop:
+                    logger.warning(f"New stop ${new_stop:.2f} is not tighter than old ${old_stop:.2f} for SHORT")
+                    return False
+            
+            # Update stop loss
+            position.stop_loss = new_stop
+            
+            # Calculate protection level
+            if position.current_price > 0:
+                protection_pct = abs((position.current_price - new_stop) / position.current_price) * 100
+            else:
+                protection_pct = 0
+            
+            logger.info("")
+            logger.info("=" * 60)
+            logger.info(f"🎯 STOP TIGHTENED: {position.symbol}")
+            logger.info("=" * 60)
+            logger.info(f"   Old Stop: ${old_stop:.2f}")
+            logger.info(f"   New Stop: ${new_stop:.2f}")
+            logger.info(f"   Current Price: ${position.current_price:.2f}")
+            logger.info(f"   Protection: {protection_pct:.2f}% from current price")
+            logger.info(f"   Reason: {reason}")
+            logger.info("=" * 60)
+            
+            # Send Discord notification
+            self._send_stop_update_notification(position, old_stop, new_stop, protection_pct, reason)
+            
+            # Save state
+            self._save_state()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error tightening stop: {e}")
+            return False
+    
+    def _send_stop_update_notification(self, position: StockPosition, old_stop: float, 
+                                       new_stop: float, protection_pct: float, reason: str):
+        """Send Discord notification for stop adjustment"""
+        try:
+            import os
+            import requests
+            
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if not webhook_url:
+                return
+            
+            embed = {
+                'title': f"🎯 Stop Tightened: {position.symbol}",
+                'description': f"**Action:** TIGHTEN_STOP",
+                'color': 3066993,  # Green
+                'timestamp': datetime.now().isoformat(),
+                'fields': [
+                    {
+                        'name': '📉 Old Stop',
+                        'value': f"${old_stop:.2f}",
+                        'inline': True
+                    },
+                    {
+                        'name': '📈 New Stop',
+                        'value': f"${new_stop:.2f}",
+                        'inline': True
+                    },
+                    {
+                        'name': '💰 Current Price',
+                        'value': f"${position.current_price:.2f}",
+                        'inline': True
+                    },
+                    {
+                        'name': '🛡️ Protection',
+                        'value': f"{protection_pct:.2f}% buffer",
+                        'inline': True
+                    },
+                    {
+                        'name': '📝 Reason',
+                        'value': reason[:200] if reason else "AI adjustment",
+                        'inline': False
+                    }
+                ],
+                'footer': {
+                    'text': f"Stock Position Manager | Paper: {self.paper_mode}"
+                }
+            }
+            
+            payload = {'embeds': [embed]}
+            
+            response = requests.post(webhook_url, json=payload, timeout=5)
+            response.raise_for_status()
+            logger.debug(f"✅ Discord stop update notification sent for {position.symbol}")
+            
+        except Exception as e:
+            logger.debug(f"Failed to send Discord notification: {e}")
+    
     def _journal_trade_entry(self, position: StockPosition, decision: StockTradeDecision):
         """
         Log trade entry to unified trade journal (matching crypto position manager pattern)

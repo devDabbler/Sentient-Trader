@@ -984,6 +984,14 @@ MIT License - See LICENSE file for details
   - Profit suggestion: HODL=50%, SWING=15%, SCALP=5%
 - ✅ **Alert Suppression Tracking:** Positions track how many alerts were suppressed for debugging
 - ✅ **Position Intent API:** Set intent per position (`HODL`, `SWING`, `SCALP`) to control AI aggressiveness
+- ✅ **Fixed Discord Approval Blocking:** All approval callbacks now run in threads to prevent UI hangs
+- ✅ **TIGHTEN_STOP Execution:** Both crypto and stock managers now properly execute stop tightening with Discord notifications
+  - Validates new stop is actually tighter (not looser)
+  - Sends confirmation notification with protection percentage
+  - Updates internal tracking (stops monitored by AI, not broker orders)
+- ✅ **Stock Tighten Stop Support:** Added `tighten_stop()` method to AI Stock Position Manager
+  - Mirrors crypto implementation for consistency
+  - Sends Discord notification on successful adjustment
 
 **Usage:** When adding positions or via the control panel, set the position intent:
 ```python
@@ -995,6 +1003,26 @@ manager.set_position_intent("BTC/USD", "HODL")
 
 # For a quick scalp (tight stops, aggressive alerts)
 manager.set_position_intent("BTC/USD", "SCALP")
+```
+
+**How Stops Work:**
+- Stops are tracked **internally** by the AI Position Manager, NOT as broker orders
+- When price hits the stop level, a **market order** is placed to close the position
+- This allows flexible stop adjustments without modifying broker orders
+- Kraken and most stock brokers don't easily support modifying existing stop orders
+
+**Auto-Execute Adjustments (NEW):**
+Safe position adjustments can now execute automatically without Discord approval:
+- ✅ **TIGHTEN_STOP** - Auto-executes (raises stop to lock in profits)
+- ✅ **EXTEND_TARGET** - Auto-executes (raises take profit target)
+- ✅ **MOVE_TO_BREAKEVEN** - Auto-executes (moves stop to entry price)
+- ❌ **CLOSE_NOW** - Requires approval (closes position)
+- ❌ **TAKE_PARTIAL** - Requires approval (sells portion of position)
+
+Toggle via code:
+```python
+manager.set_auto_execute_adjustments(True)   # Auto-execute safe adjustments (default)
+manager.set_auto_execute_adjustments(False)  # Require approval for ALL actions
 ```
 
 ### Kraken Position Sync UI (December 2, 2025)

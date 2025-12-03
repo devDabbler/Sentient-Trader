@@ -228,6 +228,14 @@ class AICryptoPositionManager:
     Monitors positions 24/7 and makes intelligent exit decisions
     """
     
+    # Actions that are safe to auto-execute (don't close positions, just adjust tracking)
+    AUTO_EXECUTABLE_ACTIONS = {
+        PositionAction.TIGHTEN_STOP.value,
+        PositionAction.EXTEND_TARGET.value,
+        PositionAction.MOVE_TO_BREAKEVEN.value,
+        PositionAction.HOLD.value,
+    }
+    
     def __init__(
         self,
         kraken_client,
@@ -239,7 +247,8 @@ class AICryptoPositionManager:
         enable_partial_exits: bool = True,
         min_ai_confidence: float = 65.0,
         state_file: str = "data/ai_crypto_positions.json",
-        require_manual_approval: bool = True,  # SAFETY: Require manual approval for trades
+        require_manual_approval: bool = True,  # SAFETY: Require manual approval for CLOSING trades
+        auto_execute_adjustments: bool = True,  # Auto-execute stop/target adjustments without approval
         max_positions: int = 15  # Maximum concurrent monitored positions
     ):
         """
@@ -255,7 +264,8 @@ class AICryptoPositionManager:
             enable_partial_exits: Enable partial profit taking
             min_ai_confidence: Minimum AI confidence to act (0-100)
             state_file: File to persist position state
-            require_manual_approval: SAFETY - Require user approval before executing trades (default: True)
+            require_manual_approval: SAFETY - Require user approval before CLOSING trades (default: True)
+            auto_execute_adjustments: Auto-execute stop/target adjustments without approval (default: True)
             max_positions: Maximum concurrent positions to monitor (default: 15)
         """
         self.kraken_client = kraken_client
@@ -274,6 +284,7 @@ class AICryptoPositionManager:
         self.min_ai_confidence = min_ai_confidence
         self.state_file = state_file
         self.require_manual_approval = require_manual_approval
+        self.auto_execute_adjustments = auto_execute_adjustments
         
         # Use absolute path for state file to ensure persistence
         if state_file == "data/ai_crypto_positions.json":
@@ -330,7 +341,8 @@ class AICryptoPositionManager:
         logger.info(f"   Partial Exits: {' ENABLED' if enable_partial_exits else ' DISABLED'}")
         logger.info(f"   Min AI Confidence: {min_ai_confidence}%")
         logger.info(f"   Max Positions: {max_positions}")
-        logger.info("   SAFETY - MANUAL APPROVAL: {}", str(' REQUIRED' if require_manual_approval else ' AUTO-EXECUTE (DANGEROUS!)'))
+        logger.info("   SAFETY - MANUAL APPROVAL: {}", str('✅ REQUIRED for closes' if require_manual_approval else '⚠️ AUTO-EXECUTE (DANGEROUS!)'))
+        logger.info(f"   Auto-Execute Adjustments: {'✅ ENABLED (stops/targets adjust without approval)' if auto_execute_adjustments else '❌ DISABLED'}")
         logger.info(f"   Discord Approval: {'✅ ENABLED' if self.discord_approval_manager else '❌ NOT CONFIGURED'}")
         logger.info("=" * 80)
     
@@ -1443,8 +1455,9 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         position = self.positions[trade_id]
         
         # 🛡️ ALERT COOLDOWN CHECK: Prevent spam and premature exit recommendations
+        # Skip this check if action is already approved (skip_approval=True)
         # Only check for HOLD, as HOLD should never be suppressed
-        if decision.action != PositionAction.HOLD.value:
+        if not skip_approval and decision.action != PositionAction.HOLD.value:
             should_suppress, suppress_reason = self._should_suppress_alert(position, decision.action)
             if should_suppress:
                 position.alert_suppressed_count += 1
@@ -1452,7 +1465,17 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 log_and_print(f"   Total suppressed: {position.alert_suppressed_count} | Intent: {position.position_intent}")
                 return False  # Don't send alert, but return False to indicate no action taken
         
-        # 🚨 SAFETY CHECK: Require manual approval unless explicitly skipped
+        # 🚀 AUTO-EXECUTE SAFE ADJUSTMENTS: Tighten stop, extend target, breakeven moves
+        # These don't close positions, they just adjust internal tracking - safe to auto-execute
+        is_auto_executable = decision.action in self.AUTO_EXECUTABLE_ACTIONS
+        
+        if self.auto_execute_adjustments and is_auto_executable and not skip_approval:
+            log_and_print(f"⚡ AUTO-EXECUTING: {decision.action} for {position.pair}")
+            log_and_print(f"   Reason: {decision.reasoning}")
+            log_and_print(f"   (Safe adjustment - no approval required)")
+            skip_approval = True  # Mark as approved for execution below
+        
+        # 🚨 SAFETY CHECK: Require manual approval for CLOSING actions unless explicitly skipped
         if self.require_manual_approval and not skip_approval:
             # Check for existing pending approval for this trade_id and action
             for pid, pending in self.pending_approvals.items():
@@ -1690,21 +1713,58 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         position: MonitoredCryptoPosition,
         decision: AITradeDecision
     ) -> bool:
-        """Tighten stop loss"""
+        """
+        Tighten stop loss for a position.
+        
+        NOTE: For crypto (Kraken), we update internal tracking only.
+        Kraken doesn't easily support modifying existing stop orders,
+        so we monitor the stop level ourselves and exit at market if hit.
+        """
         if not decision.new_stop:
             logger.warning("No new_stop provided for TIGHTEN_STOP")
             return False
         
-        # Update stop loss
+        # Validate - new stop should be tighter (higher for longs, lower for shorts)
         old_stop = position.stop_loss
+        if position.side == 'BUY':
+            if decision.new_stop <= old_stop:
+                logger.warning(f"New stop ${decision.new_stop:,.4f} is not tighter than old ${old_stop:,.4f} for LONG")
+                return False
+        else:  # SELL (short)
+            if decision.new_stop >= old_stop:
+                logger.warning(f"New stop ${decision.new_stop:,.4f} is not tighter than old ${old_stop:,.4f} for SHORT")
+                return False
+        
+        # Update stop loss
         position.stop_loss = decision.new_stop
         position.ai_adjustment_count += 1
         self.total_ai_adjustments += 1
         
-        logger.info(f"📈 Stop tightened: {position.pair} - ${old_stop:,.2f} → ${decision.new_stop:,.2f}")
+        # Calculate protection level
+        if position.current_price > 0:
+            protection_pct = abs((position.current_price - decision.new_stop) / position.current_price) * 100
+        else:
+            protection_pct = 0
         
-        # Note: Kraken doesn't support modifying stop orders easily
-        # We update our internal tracking and will exit at market if stop hit on next check
+        log_and_print(f"📈 STOP TIGHTENED: {position.pair}")
+        log_and_print(f"   Old Stop: ${old_stop:,.6f}")
+        log_and_print(f"   New Stop: ${decision.new_stop:,.6f}")
+        log_and_print(f"   Current Price: ${position.current_price:,.6f}")
+        log_and_print(f"   Protection: {protection_pct:.2f}% from current price")
+        log_and_print(f"   Reason: {decision.reasoning}")
+        
+        # Send Discord notification confirming the adjustment
+        self._send_notification(
+            f"🎯 Stop Tightened: {position.pair}",
+            f"**Action:** TIGHTEN_STOP\n"
+            f"**Old Stop:** ${old_stop:,.6f}\n"
+            f"**New Stop:** ${decision.new_stop:,.6f}\n"
+            f"**Current Price:** ${position.current_price:,.6f}\n"
+            f"**Protection:** {protection_pct:.2f}% buffer\n"
+            f"**Reason:** {decision.reasoning}\n\n"
+            f"_Note: Kraken stops are monitored internally. Position will be closed at market if stop is hit._",
+            color=3066993  # Green
+        )
         
         self._save_state()
         return True
@@ -1942,6 +2002,33 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             if position.pair == pair:
                 return position.position_intent
         return None
+    
+    def set_auto_execute_adjustments(self, enabled: bool):
+        """
+        Enable/disable auto-execution of safe adjustments (stop tightening, target extending, breakeven).
+        
+        When enabled (default), these actions execute immediately without Discord approval:
+        - TIGHTEN_STOP: Raises stop loss to lock in profits
+        - EXTEND_TARGET: Raises take profit target
+        - MOVE_TO_BREAKEVEN: Moves stop to entry price
+        
+        When disabled, ALL actions require Discord approval.
+        
+        Args:
+            enabled: True to auto-execute adjustments, False to require approval for everything
+        """
+        old_value = self.auto_execute_adjustments
+        self.auto_execute_adjustments = enabled
+        
+        if enabled:
+            log_and_print(f"⚡ Auto-execute adjustments: ENABLED")
+            log_and_print(f"   Stop tightening, target extending, breakeven moves will execute automatically")
+        else:
+            log_and_print(f"🔒 Auto-execute adjustments: DISABLED")
+            log_and_print(f"   ALL actions now require Discord approval")
+        
+        if old_value != enabled:
+            log_and_print(f"   Changed from: {'ENABLED' if old_value else 'DISABLED'}")
     
     def _save_state(self):
         """Save position state to file"""
