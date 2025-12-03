@@ -2250,23 +2250,40 @@ def main():
                 
                 # Interval config - only show for services that support intervals
                 if svc_info.get("interval_key"):
+                    # Clear any cached interval to ensure we get fresh value from file
+                    load_service_intervals.clear()
                     current_interval = get_service_interval(svc_name, svc_info)
                     interval_min = svc_info.get("interval_min", 10)
                     interval_max = svc_info.get("interval_max", 3600)
                     # Ensure current_interval is within valid range
                     current_interval = max(interval_min, min(current_interval, interval_max))
+                    
+                    # Use session state to track the value and force sync with file
+                    interval_state_key = f"interval_val_{svc_name}"
+                    if interval_state_key not in st.session_state:
+                        st.session_state[interval_state_key] = current_interval
+                    # If file value differs from session state, update session state
+                    if st.session_state[interval_state_key] != current_interval:
+                        st.session_state[interval_state_key] = current_interval
+                    
                     new_interval = st.number_input(
                         "Scan Interval (sec)", 
                         min_value=interval_min,
                         max_value=interval_max,
-                        value=current_interval,
+                        value=st.session_state[interval_state_key],
                         key=f"tab_interval_{svc_name}"
                     )
                     
                     if new_interval != current_interval:
-                        if st.button("Update Interval", key=f"tab_update_{svc_name}"):
+                        if st.button("Update & Restart", key=f"tab_update_{svc_name}", type="primary"):
                             if set_service_interval(svc_name, svc_info, int(new_interval)):
-                                st.toast(f"✅ Interval set to {new_interval}s")
+                                st.session_state[interval_state_key] = new_interval
+                                # CRITICAL: Restart service to apply new interval
+                                success, msg = control_service(svc_name, "restart")
+                                if success:
+                                    st.toast(f"✅ Interval set to {new_interval}s and service restarted!")
+                                else:
+                                    st.warning(f"Interval saved but restart failed: {msg}")
                 
                 st.markdown("---")
 
@@ -2520,12 +2537,22 @@ def main():
                 # Expandable settings section (only for services with configurable intervals)
                 if svc_info.get("interval_key"):
                     with st.expander(f"⚙️ Settings - {display_name}"):
+                        # Clear cache to get fresh value from file
+                        load_service_intervals.clear()
                         current_interval = get_service_interval(service_name, svc_info)
                         interval_min = svc_info.get("interval_min", 5)
                         interval_max = svc_info.get("interval_max", 3600)
                         # Ensure current_interval is within valid range
                         current_interval = max(interval_min, min(current_interval, interval_max))
                         interval_key = svc_info.get("interval_key", "scan_interval_seconds")
+                        
+                        # Use session state for consistent tracking
+                        interval_state_key = f"interval_val_{service_name}"
+                        if interval_state_key not in st.session_state:
+                            st.session_state[interval_state_key] = current_interval
+                        # Sync session state with file if they differ
+                        if st.session_state[interval_state_key] != current_interval:
+                            st.session_state[interval_state_key] = current_interval
                         
                         st.markdown(f"**⏱️ Scan/Check Interval**")
                         
@@ -2534,7 +2561,7 @@ def main():
                             current_display = f"{current_interval}s ({current_interval//60}m {current_interval%60}s)"
                         else:
                             current_display = f"{current_interval}s"
-                        st.info(f"Current: **{current_display}**")
+                        st.info(f"Current (from config): **{current_display}**")
                         
                         # Two input methods: slider for quick adjust, number input for precise
                         input_col1, input_col2 = st.columns([2, 1])
@@ -2545,7 +2572,7 @@ def main():
                                 "Quick Adjust (drag)",
                                 min_value=interval_min,
                                 max_value=min(600, interval_max),  # Cap slider at 10 min for usability
-                                value=min(current_interval, 600),
+                                value=min(st.session_state[interval_state_key], 600),
                                 step=5,
                                 key=f"main_slider_{service_name}",
                                 help="Drag for quick adjustment (5-600s)"
@@ -2557,7 +2584,7 @@ def main():
                                 "Custom (seconds)",
                                 min_value=interval_min,
                                 max_value=interval_max,
-                                value=current_interval,
+                                value=st.session_state[interval_state_key],
                                 step=1,
                                 key=f"main_custom_{service_name}",
                                 help=f"Enter any value from {interval_min}s to {interval_max}s"
@@ -2580,17 +2607,21 @@ def main():
                                 new_display = f"{new_interval}s ({new_interval//60}m {new_interval%60}s)"
                             else:
                                 new_display = f"{new_interval}s"
-                            st.warning(f"📝 New value: **{new_display}** (click Apply to save)")
+                            st.warning(f"📝 New value: **{new_display}** (click Apply to save and restart service)")
                         
                         # Apply button
                         col_apply, col_reset = st.columns([1, 1])
                         with col_apply:
                             if st.button("💾 Apply & Restart", key=f"main_apply_interval_{service_name}", type="primary"):
                                 if set_service_interval(service_name, svc_info, int(new_interval)):
+                                    # Update session state to match saved value
+                                    st.session_state[interval_state_key] = new_interval
+                                    st.session_state[f"main_last_custom_{service_name}"] = new_interval
                                     # Restart the service to apply new interval
                                     success, msg = control_service(service_name, "restart")
                                     if success:
                                         st.toast(f"✅ Interval set to {new_interval}s and service restarted!")
+                                        st.rerun()  # Refresh to show new values
                                     else:
                                         st.warning(f"Interval saved but restart failed: {msg}")
                                 else:
@@ -2599,9 +2630,12 @@ def main():
                         with col_reset:
                             default_val = svc_info.get("interval_default", 60)
                             if st.button(f"↩️ Reset to Default ({default_val}s)", key=f"main_reset_{service_name}"):
-                                set_service_interval(service_name, svc_info, default_val)
-                                control_service(service_name, "restart")
-                                st.toast(f"↩️ Reset to {default_val}s and restarted")
+                                if set_service_interval(service_name, svc_info, default_val):
+                                    st.session_state[interval_state_key] = default_val
+                                    st.session_state[f"main_last_custom_{service_name}"] = default_val
+                                    control_service(service_name, "restart")
+                                    st.toast(f"↩️ Reset to {default_val}s and restarted")
+                                    st.rerun()  # Refresh to show new values
                         
                         # Quick presets
                         st.markdown("---")
@@ -2621,10 +2655,13 @@ def main():
                                 if seconds >= interval_min and seconds <= interval_max:
                                     if st.button(f"{emoji} {label}", key=f"main_preset_{seconds}_{service_name}"):
                                         if debounced_action(f"preset_{seconds}_{service_name}"):
-                                            set_service_interval(service_name, svc_info, seconds)
-                                            control_service(service_name, "restart")
-                                            st.toast(f"✅ Set to {label}")
-                                            smart_rerun("preset_interval")
+                                            if set_service_interval(service_name, svc_info, seconds):
+                                                # Update session state
+                                                st.session_state[interval_state_key] = seconds
+                                                st.session_state[f"main_last_custom_{service_name}"] = seconds
+                                                control_service(service_name, "restart")
+                                                st.toast(f"✅ Set to {label} and restarted")
+                                                smart_rerun("preset_interval")
                         
                         # Info about intervals
                         st.caption(f"💡 Range: {interval_min}s - {interval_max}s ({interval_max//60} min). Lower = more responsive but higher API usage.")

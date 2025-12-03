@@ -1025,6 +1025,13 @@ manager.set_auto_execute_adjustments(True)   # Auto-execute safe adjustments (de
 manager.set_auto_execute_adjustments(False)  # Require approval for ALL actions
 ```
 
+### Service Configuration Persistence Fix (December 3, 2025)
+- ✅ **Fixed interval settings not persisting**: Service interval changes now properly save to file AND update session state
+- ✅ **Tab section now restarts service**: Changing interval in the compact tab view now restarts service (was just saving without applying)
+- ✅ **Cache clearing on save**: Config file cache is cleared after saves to ensure fresh values are read
+- ✅ **Session state sync**: UI values now sync with config file values to prevent stale data
+- ✅ **Presets update properly**: Quick preset buttons now update session state for consistency
+
 ### Kraken Position Sync UI (December 2, 2025)
 - ✅ **Kraken Sync Button:** Control Panel now has "🔄 Sync Kraken Positions" button for AI Crypto Trader
 - ✅ **Discord Notifications:** Synced positions announced to Discord with entry price, P&L, stop/target
