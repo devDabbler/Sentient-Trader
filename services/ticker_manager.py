@@ -6,6 +6,7 @@ watchlists, and quick-access lists using a Supabase backend.
 """
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any
 from loguru import logger
@@ -325,7 +326,12 @@ class TickerManager:
             for analysis_key, (db_field, type_cast) in safe_field_mapping.items():
                 try:
                     if analysis_key in analysis and analysis[analysis_key] is not None:
-                        update_data[db_field] = type_cast(analysis[analysis_key])
+                        value = analysis[analysis_key]
+                        # Handle NaN values which aren't JSON serializable
+                        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+                            logger.debug(f"Skipping {db_field}: NaN or Inf value")
+                            continue
+                        update_data[db_field] = type_cast(value)
                 except (ValueError, TypeError) as e:
                     logger.debug(f"Skipping {db_field} due to type conversion error: {e}")
             
@@ -340,12 +346,12 @@ class TickerManager:
                 on_conflict='ticker'
             ).execute()
             
-            logger.info("✓ Updated analysis for {}: score={update_data.get('ml_score', 'N/A')}, momentum={update_data.get('momentum', 'N/A')}%", str(ticker))
+            logger.info(f"✓ Updated analysis for {ticker}: score={update_data.get('ml_score', 'N/A')}, momentum={update_data.get('momentum', 'N/A')}%")
             return True
                 
         except Exception as e:
             logger.error(f"Error updating analysis for {ticker}: {e}")
-            logger.debug("Attempted data: {}", str(update_data if 'update_data' in locals() else 'N/A'))
+            logger.debug(f"Attempted data: {update_data}")
             return False
 
     def update_ai_entry_analysis(self, ticker: str, entry_analysis: Dict) -> bool:
