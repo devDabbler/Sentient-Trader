@@ -3026,6 +3026,14 @@ def main():
                             st.markdown("**🔄 Kraken Position Sync**")
                             st.caption("Sync your active crypto positions from Kraken to monitor them with AI")
                             
+                            # Initialize session state for crypto positions
+                            if 'crypto_positions_data' not in st.session_state:
+                                st.session_state.crypto_positions_data = None
+                            if 'crypto_sync_result' not in st.session_state:
+                                st.session_state.crypto_sync_result = None
+                            if 'crypto_manager_status' not in st.session_state:
+                                st.session_state.crypto_manager_status = None
+                            
                             kraken_col1, kraken_col2 = st.columns(2)
                             with kraken_col1:
                                 if st.button("🔄 Sync Kraken Positions", key="sync_kraken_positions", type="primary", use_container_width=True):
@@ -3034,18 +3042,15 @@ def main():
                                         manager = get_ai_crypto_position_manager()
                                         if manager:
                                             sync_result = manager.sync_with_kraken()
-                                            st.success(f"✅ Synced! Added: {sync_result['added']}, Removed: {sync_result['removed']}, Kept: {sync_result['kept']}")
+                                            st.session_state.crypto_sync_result = sync_result
                                             
-                                            # Show current positions
-                                            positions = [p for p in manager.positions.values() if p.status == 'ACTIVE']
-                                            if positions:
-                                                st.markdown("**📊 Active Positions:**")
-                                                for pos in positions:
-                                                    pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price * 100) if pos.entry_price > 0 else 0
-                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
-                                                    st.write(f"  {emoji} **{pos.pair}**: {pos.volume:.6f} @ ${pos.entry_price:,.4f} ({pnl_pct:+.1f}%)")
-                                            else:
-                                                st.info("📭 No active positions found in Kraken")
+                                            # Store positions and status in session state
+                                            st.session_state.crypto_manager_status = manager.get_status()
+                                            st.session_state.crypto_positions_data = {
+                                                'positions': [p for p in manager.positions.values() if p.status == 'ACTIVE'],
+                                                'excluded_pairs': list(manager.excluded_pairs)
+                                            }
+                                            st.toast(f"✅ Synced! Added: {sync_result['added']}, Removed: {sync_result['removed']}, Kept: {sync_result['kept']}")
                                         else:
                                             st.warning("⚠️ Could not initialize position manager - check Kraken API config in .env")
                                     except Exception as e:
@@ -3057,25 +3062,77 @@ def main():
                                         from services.ai_crypto_position_manager import get_ai_crypto_position_manager
                                         manager = get_ai_crypto_position_manager()
                                         if manager:
-                                            status = manager.get_status()
-                                            
-                                            st.markdown(f"**Status:** {'🟢 Running' if status['is_running'] else '🔴 Stopped'}")
-                                            st.markdown(f"**Active Positions:** {status['active_positions']}")
-                                            st.markdown(f"**Excluded Pairs:** {len(status['excluded_pairs'])}")
-                                            
-                                            positions = status.get('positions', {})
-                                            if positions:
-                                                total_value = 0
-                                                for tid, pos in positions.items():
-                                                    pnl_pct = pos.get('pnl_pct', 0)
-                                                    emoji = "🟢" if pnl_pct >= 0 else "🔴"
-                                                    st.write(f"  {emoji} {pos['pair']}: ${pos.get('current_price', 0):,.4f} ({pnl_pct:+.1f}%)")
-                                            else:
-                                                st.info("📭 No positions being monitored")
+                                            st.session_state.crypto_manager_status = manager.get_status()
+                                            st.session_state.crypto_positions_data = {
+                                                'positions': [p for p in manager.positions.values() if p.status == 'ACTIVE'],
+                                                'excluded_pairs': list(manager.excluded_pairs)
+                                            }
                                         else:
                                             st.warning("⚠️ Position manager not available")
                                     except Exception as e:
                                         st.error(f"❌ Error: {e}")
+                            
+                            # Display persistent status from session state
+                            if st.session_state.crypto_manager_status:
+                                status = st.session_state.crypto_manager_status
+                                
+                                # Status row
+                                status_col1, status_col2, status_col3 = st.columns(3)
+                                with status_col1:
+                                    st.markdown(f"**Status:** {'🟢 Running' if status['is_running'] else '🔴 Stopped'}")
+                                with status_col2:
+                                    st.markdown(f"**Active Positions:** {status['active_positions']}")
+                                with status_col3:
+                                    st.markdown(f"**Excluded Pairs:** {len(status['excluded_pairs'])}")
+                            
+                            # Display positions from session state
+                            if st.session_state.crypto_positions_data:
+                                positions = st.session_state.crypto_positions_data.get('positions', [])
+                                if positions:
+                                    for pos in positions:
+                                        entry_price = pos.entry_price if hasattr(pos, 'entry_price') else pos.get('entry_price', 0)
+                                        current_price = pos.current_price if hasattr(pos, 'current_price') else pos.get('current_price', 0)
+                                        pair = pos.pair if hasattr(pos, 'pair') else pos.get('pair', 'N/A')
+                                        volume = pos.volume if hasattr(pos, 'volume') else pos.get('volume', 0)
+                                        stop_loss = pos.stop_loss if hasattr(pos, 'stop_loss') else pos.get('stop_loss', 0)
+                                        take_profit = pos.take_profit if hasattr(pos, 'take_profit') else pos.get('take_profit', 0)
+                                        position_intent = pos.position_intent if hasattr(pos, 'position_intent') else pos.get('position_intent', 'SWING')
+                                        
+                                        pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
+                                        pnl_usd = (current_price - entry_price) * volume
+                                        position_value = current_price * volume
+                                        emoji = "🟢" if pnl_pct >= 0 else "🔴"
+                                        intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(position_intent, "📊")
+                                        
+                                        # Enhanced position card display
+                                        with st.container():
+                                            st.markdown(f"""
+<div style="background: linear-gradient(135deg, {'#1a472a' if pnl_pct >= 0 else '#4a1a1a'} 0%, {'#0d2818' if pnl_pct >= 0 else '#2d0d0d'} 100%); 
+     border-radius: 10px; padding: 12px; margin-bottom: 8px; border-left: 4px solid {'#00ff88' if pnl_pct >= 0 else '#ff4444'};">
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <span style="font-size: 1.1em; font-weight: bold;">{emoji} {pair}</span>
+        <span style="margin-left: 8px; opacity: 0.7;">{intent_emoji} {position_intent}</span>
+    </div>
+    <div style="text-align: right;">
+        <span style="font-size: 1.2em; font-weight: bold; color: {'#00ff88' if pnl_pct >= 0 else '#ff4444'};">{pnl_pct:+.2f}%</span>
+        <span style="margin-left: 8px; opacity: 0.8;">(${pnl_usd:+.2f})</span>
+    </div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px; font-size: 0.85em;">
+    <div><span style="opacity: 0.6;">Entry:</span> ${entry_price:,.6f}</div>
+    <div><span style="opacity: 0.6;">Current:</span> ${current_price:,.6f}</div>
+    <div><span style="opacity: 0.6;">Stop:</span> ${stop_loss:,.6f}</div>
+    <div><span style="opacity: 0.6;">Target:</span> ${take_profit:,.6f}</div>
+</div>
+<div style="display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.8em; opacity: 0.7;">
+    <span>📦 Volume: {volume:.6f}</span>
+    <span>💰 Value: ${position_value:,.2f}</span>
+</div>
+</div>
+""", unsafe_allow_html=True)
+                                else:
+                                    st.info("📭 No active positions being monitored. Click 'Sync Kraken Positions' to import.")
                         
                         # ============================================================
                         # CRYPTO TRADE JOURNAL (AI Crypto Trader)
@@ -3119,30 +3176,6 @@ def main():
                                             st.info("📭 No crypto trades in journal")
                                     except Exception as e:
                                         st.error(f"❌ Error: {e}")
-                            
-                            # Show active positions from crypto AI manager
-                            st.markdown("---")
-                            st.markdown("**📊 Active Crypto Positions**")
-                            if st.button("🔄 Refresh Positions", key="refresh_crypto_positions", use_container_width=True):
-                                try:
-                                    if AI_POSITIONS_FILE.exists():
-                                        with open(AI_POSITIONS_FILE, 'r') as f:
-                                            state = json.load(f)
-                                            positions = state.get("positions", {})
-                                            if positions:
-                                                for trade_id, pos in positions.items():
-                                                    if pos.get('status') == 'ACTIVE':
-                                                        entry_price = pos.get('entry_price', 0)
-                                                        current_price = pos.get('current_price', entry_price)
-                                                        pnl_pct = ((current_price - entry_price) / entry_price * 100) if entry_price > 0 else 0
-                                                        emoji = "🟢" if pnl_pct >= 0 else "🔴"
-                                                        st.write(f"{emoji} **{pos.get('pair', 'N/A')}**: {pos.get('volume', 0):.4f} @ ${entry_price:.4f} ({pnl_pct:+.1f}%)")
-                                            else:
-                                                st.info("📭 No active crypto positions")
-                                    else:
-                                        st.info("📭 No crypto position data found")
-                                except Exception as e:
-                                    st.error(f"❌ Error loading positions: {e}")
                 
                 st.markdown("---")
     
