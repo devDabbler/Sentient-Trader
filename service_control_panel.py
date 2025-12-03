@@ -393,8 +393,9 @@ def save_service_watchlists(watchlists: dict) -> bool:
         return False
 
 
+@st.cache_data(ttl=15)
 def get_service_watchlist(service_name: str, category: str = "stocks") -> list:
-    """Get watchlist for a specific service"""
+    """Get watchlist for a specific service with 15s cache"""
     watchlists = load_service_watchlists()
     if service_name in watchlists:
         return watchlists[service_name].get("tickers", [])
@@ -402,8 +403,38 @@ def get_service_watchlist(service_name: str, category: str = "stocks") -> list:
     return DEFAULT_WATCHLISTS.get(category, [])
 
 
+@st.cache_data(ttl=60)
+def get_supabase_tickers_cached(category: str, service_name: str) -> list:
+    """Get tickers from Supabase with 60s cache to avoid repeated queries"""
+    supabase_tickers = []
+    try:
+        if category == "crypto" and service_name != "sentient-dex-launch":
+            # Use CryptoWatchlistManager for crypto
+            from services.crypto_watchlist_manager import CryptoWatchlistManager
+            cwm = CryptoWatchlistManager()
+            crypto_watchlist = cwm.get_all_cryptos()
+            if crypto_watchlist:
+                supabase_tickers = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
+        else:
+            # Use TickerManager for stocks
+            from services.ticker_manager import TickerManager
+            svc_tm = TickerManager()
+            if svc_tm.test_connection():
+                if category == "stocks":
+                    # Fetch stock tickers from Supabase (includes penny_stock type)
+                    stock_data = svc_tm.get_all_tickers(ticker_type='stock', limit=1000)
+                    penny_data = svc_tm.get_all_tickers(ticker_type='penny_stock', limit=1000)
+                    if stock_data:
+                        supabase_tickers.extend([t['ticker'] for t in stock_data])
+                    if penny_data:
+                        supabase_tickers.extend([t['ticker'] for t in penny_data])
+    except Exception as e:
+        print(f"Failed to fetch tickers from Supabase: {e}")
+    return supabase_tickers
+
+
 def set_service_watchlist(service_name: str, tickers: list) -> bool:
-    """Set watchlist for a specific service"""
+    """Set watchlist for a specific service and invalidate caches"""
     try:
         watchlists = load_service_watchlists()
         if service_name not in watchlists:
@@ -411,6 +442,8 @@ def set_service_watchlist(service_name: str, tickers: list) -> bool:
         watchlists[service_name]["tickers"] = tickers
         watchlists[service_name]["updated"] = datetime.now().isoformat()
         result = save_service_watchlists(watchlists)
+        # Invalidate get_service_watchlist cache
+        get_service_watchlist.clear()
         print(f"[WATCHLIST] Saved {len(tickers)} tickers for {service_name}: {result}")
         print(f"[WATCHLIST] File: {SERVICE_WATCHLISTS_FILE}")
         return result
@@ -2618,31 +2651,8 @@ def main():
                         ]
                         default_dex_chains = ['solana', 'ethereum', 'base', 'arbitrum', 'polygon']
                         
-                        # Try to fetch tickers from Supabase based on category
-                        supabase_tickers = []
-                        try:
-                            if category == "crypto" and service_name != "sentient-dex-launch":
-                                # Use CryptoWatchlistManager for crypto (same as Watchlist Manager tab)
-                                from services.crypto_watchlist_manager import CryptoWatchlistManager
-                                cwm = CryptoWatchlistManager()
-                                crypto_watchlist = cwm.get_all_cryptos()
-                                if crypto_watchlist:
-                                    supabase_tickers = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
-                            else:
-                                # Use TickerManager for stocks
-                                from services.ticker_manager import TickerManager
-                                svc_tm = TickerManager()
-                                if svc_tm.test_connection():
-                                    if category == "stocks":
-                                        # Fetch stock tickers from Supabase (includes penny_stock type)
-                                        stock_data = svc_tm.get_all_tickers(ticker_type='stock', limit=1000)
-                                        penny_data = svc_tm.get_all_tickers(ticker_type='penny_stock', limit=1000)
-                                        if stock_data:
-                                            supabase_tickers.extend([t['ticker'] for t in stock_data])
-                                        if penny_data:
-                                            supabase_tickers.extend([t['ticker'] for t in penny_data])
-                        except Exception as e:
-                            print(f"Failed to fetch tickers from Supabase: {e}")
+                        # Try to fetch tickers from Supabase (cached for performance)
+                        supabase_tickers = get_supabase_tickers_cached(category, service_name)
                         
                         # Determine final ticker list: Supabase tickers + defaults
                         if category == "crypto" and service_name != "sentient-dex-launch":
@@ -2803,15 +2813,16 @@ def main():
                         # Combine all_tickers with current_watchlist to ensure custom additions are available as options
                         available_options = sorted(list(set(all_tickers + current_watchlist)))
                         
-                        # IMPORTANT: Pre-populate session state from file on each render
-                        # This ensures the multiselect always reflects the saved watchlist
-                        st.session_state[multiselect_key] = [t for t in current_watchlist if t in available_options]
+                        # Initialize session state ONLY on first load (not on every render)
+                        # This prevents fighting with user's in-progress selections
+                        if multiselect_key not in st.session_state:
+                            st.session_state[multiselect_key] = [t for t in current_watchlist if t in available_options]
                         
                         selected_tickers = st.multiselect(
                             "Select tickers to monitor",
                             options=available_options,
                             key=multiselect_key,
-                            help="Select which tickers this service should scan"
+                            help="Select which tickers this service should scan. Changes require Save to apply."
                         )
                         
                         # Custom ticker input
