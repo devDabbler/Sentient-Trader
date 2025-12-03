@@ -616,22 +616,66 @@ class DiscordTradeApprovalBot(commands.Bot):
 
         # Extract symbol from the referenced message embed or content
         target_symbol = None
+        
+        # Pattern to match crypto (XXX/USD, BTC/USDT) and stock symbols (AAPL, NVDA)
+        import re
+        symbol_pattern = re.compile(r'\b([A-Z0-9]{2,10}/[A-Z]{2,4}|[A-Z]{1,5})\b')
+        
         if ref_msg.embeds:
             for embed in ref_msg.embeds:
-                if embed.title and ":" in embed.title:
-                    # Try extracting after colon
-                    parts = embed.title.split(":")
-                    if len(parts) > 1:
-                        possible_symbol = parts[-1].strip().split(' ')[0]
-                        target_symbol = possible_symbol
+                if embed.title:
+                    # Method 1: Title with colon - "🔔 BREAKOUT: BLUR/USD"
+                    if ":" in embed.title:
+                        parts = embed.title.split(":")
+                        if len(parts) > 1:
+                            possible_symbol = parts[-1].strip().split(' ')[0]
+                            if possible_symbol and len(possible_symbol) >= 2:
+                                target_symbol = possible_symbol
+                                break
+                    
+                    # Method 2: Title without colon - "📈 BTC/USD" or "🔥 BLUR/USD"
+                    if not target_symbol:
+                        # Find symbol pattern in title
+                        matches = symbol_pattern.findall(embed.title)
+                        # Prefer crypto pairs (contain /) over stock symbols
+                        for match in matches:
+                            if '/' in match:
+                                target_symbol = match
+                                break
+                        # If no crypto pair, use first match that's not a common word
+                        if not target_symbol and matches:
+                            for match in matches:
+                                if match not in ['RSI', 'EMA', 'SMA', 'MACD', 'BUY', 'SELL', 'HIGH', 'LOW']:
+                                    target_symbol = match
+                                    break
+                    
+                    if target_symbol:
                         break
         
-        if not target_symbol:
-            # Try content
-            if ":" in ref_msg.content:
-                 parts = ref_msg.content.split(":")
-                 if len(parts) > 1:
-                     target_symbol = parts[-1].strip().split(' ')[0]
+        # Method 3: Try message content if no embed match
+        if not target_symbol and ref_msg.content:
+            content_to_check = ref_msg.content
+            
+            # Check for colon format first
+            if ":" in content_to_check:
+                parts = content_to_check.split(":")
+                if len(parts) > 1:
+                    possible_symbol = parts[-1].strip().split(' ')[0].split('\n')[0]
+                    if possible_symbol and len(possible_symbol) >= 2:
+                        target_symbol = possible_symbol
+            
+            # Otherwise search for symbol patterns in content
+            if not target_symbol:
+                matches = symbol_pattern.findall(content_to_check)
+                for match in matches:
+                    if '/' in match:  # Prefer crypto pairs
+                        target_symbol = match
+                        break
+                if not target_symbol and matches:
+                    for match in matches:
+                        if match not in ['RSI', 'EMA', 'SMA', 'MACD', 'BUY', 'SELL', 'HIGH', 'LOW', 'USD', 'USDT']:
+                            target_symbol = match
+                            break
 
         if not target_symbol:
             await message.channel.send("⚠️ Could not determine symbol from the message you replied to.")
@@ -657,15 +701,38 @@ class DiscordTradeApprovalBot(commands.Bot):
         elif content in ['3', 'U', 'ULT', 'ULTIMATE']:
             await self._handle_analyze_command(message, target_symbol, mode="ultimate")
         
-        # STOCK TRADE EXECUTION COMMANDS (after analysis approval)
+        # TRADE EXECUTION COMMANDS - Route to appropriate handler based on asset type
         elif content in ['T', 'TRADE', 'EXECUTE', 'BUY', 'ENTER']:
-            await self._handle_stock_trade_execution(message, target_symbol, side="BUY")
+            # Check if crypto (contains /) or stock
+            if "/" in target_symbol:
+                # Crypto trade - use crypto position manager
+                result = await self._handle_trade_command(message, target_symbol)
+                if result.get('success'):
+                    await message.channel.send(
+                        f"✅ **Crypto Trade Queued:** {target_symbol}\n"
+                        f"**Side:** {result.get('side', 'BUY')}\n"
+                        f"**Size:** ${result.get('position_size', 0):,.2f}\n"
+                        f"**Stop:** ${result.get('stop_loss', 0):,.4f}\n"
+                        f"**Target:** ${result.get('take_profit', 0):,.4f}"
+                    )
+                else:
+                    await message.channel.send(f"❌ Trade failed: {result.get('error', 'Unknown error')}")
+            else:
+                # Stock trade
+                await self._handle_stock_trade_execution(message, target_symbol, side="BUY")
         
         elif content in ['SHORT', 'SELL', 'S-TRADE']:
-            await self._handle_stock_trade_execution(message, target_symbol, side="SELL")
+            if "/" in target_symbol:
+                # Crypto short/sell - not yet implemented
+                await message.channel.send(f"⚠️ Short selling not yet available for crypto. Use the exchange directly.")
+            else:
+                await self._handle_stock_trade_execution(message, target_symbol, side="SELL")
         
         elif content in ['P', 'PAPER', 'PAPER-TRADE', 'TEST']:
-            await self._handle_stock_trade_execution(message, target_symbol, side="BUY", paper_mode=True)
+            if "/" in target_symbol:
+                await message.channel.send(f"⚠️ Paper trading for crypto not yet implemented. Use `T` or `TRADE` for live trading.")
+            else:
+                await self._handle_stock_trade_execution(message, target_symbol, side="BUY", paper_mode=True)
             
         elif content in ['DISMISS', 'REMOVE', 'DELETE', 'X', 'D']:
             # Reject in orchestrator
