@@ -965,6 +965,38 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### AI Position Manager Alert Cooldown & Trading Style Enhancement (December 3, 2025)
+- ✅ **Alert Cooldown System:** Prevents spam - each action type has configurable cooldown before repeated alerts
+  - HODL: 4 hours between alerts
+  - SWING: 1 hour between alerts
+  - SCALP: 15 minutes between alerts
+- ✅ **Minimum Hold Time Thresholds:** Prevents premature exit recommendations based on trading style
+  - HODL: Won't suggest close for 168 hours (1 week)
+  - SWING: Won't suggest close for 4 hours minimum
+  - SCALP: No hold time restriction
+- ✅ **Enhanced SWING Trading Style:** More patient, forward-looking AI analysis
+  - Default action is HOLD unless compelling reason to exit
+  - Considers trend continuation before suggesting exits
+  - Requires higher confidence for exit recommendations
+  - Distinguishes between "noise" and actual trend reversals
+- ✅ **Trading Style Configurations:** Customizable thresholds per intent
+  - Loss threshold: HODL=30%, SWING=12%, SCALP=3%
+  - Profit suggestion: HODL=50%, SWING=15%, SCALP=5%
+- ✅ **Alert Suppression Tracking:** Positions track how many alerts were suppressed for debugging
+- ✅ **Position Intent API:** Set intent per position (`HODL`, `SWING`, `SCALP`) to control AI aggressiveness
+
+**Usage:** When adding positions or via the control panel, set the position intent:
+```python
+# For a mid-term swing trade (patient, fewer alerts)
+manager.set_position_intent("BTC/USD", "SWING")
+
+# For a long-term hold (minimal alerts, ride volatility)
+manager.set_position_intent("BTC/USD", "HODL")
+
+# For a quick scalp (tight stops, aggressive alerts)
+manager.set_position_intent("BTC/USD", "SCALP")
+```
+
 ### Kraken Position Sync UI (December 2, 2025)
 - ✅ **Kraken Sync Button:** Control Panel now has "🔄 Sync Kraken Positions" button for AI Crypto Trader
 - ✅ **Discord Notifications:** Synced positions announced to Discord with entry price, P&L, stop/target
@@ -1042,6 +1074,6 @@ MIT License - See LICENSE file for details
 
 ---
 
-**Last Updated**: December 2, 2025  
+**Last Updated**: December 3, 2025  
 **Status**: ✅ Production Ready  
 **Phases Completed**: 1, 2, 3 ✅

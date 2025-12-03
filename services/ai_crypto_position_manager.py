@@ -75,10 +75,64 @@ class PositionIntent(Enum):
     def get_description(cls, intent: str) -> str:
         descriptions = {
             "HODL": "Long-term hold - Will ride through volatility. Only alert on catastrophic moves.",
-            "SWING": "Swing trade - Standard risk management with balanced alerts.",
+            "SWING": "Swing trade - Patient mid-term approach with balanced alerts. Respects intended hold period.",
             "SCALP": "Quick trade - Tight stops, aggressive profit-taking."
         }
         return descriptions.get(intent, "Unknown intent")
+
+
+@dataclass
+class TradingStyleConfig:
+    """
+    Configurable thresholds per trading style.
+    Controls how aggressive the AI is with exit/close recommendations.
+    """
+    # Minimum hold time before AI can suggest CLOSE_NOW (in hours)
+    min_hold_hours_before_close: float
+    # Minimum hold time before AI can suggest TIGHTEN_STOP (in hours)
+    min_hold_hours_before_tighten: float
+    # Alert cooldown - minimum time between repeated alerts for same action (in minutes)
+    alert_cooldown_minutes: int
+    # Loss threshold before exit suggestion (percentage)
+    loss_threshold_pct: float
+    # Profit threshold before take profit suggestion (percentage)
+    profit_suggestion_pct: float
+    # Whether to be more forward-looking (analyze trend continuation)
+    forward_looking: bool
+    # Description
+    description: str
+
+
+# Default configurations per trading style
+TRADING_STYLE_CONFIGS = {
+    PositionIntent.HODL.value: TradingStyleConfig(
+        min_hold_hours_before_close=168.0,  # 1 week - very patient
+        min_hold_hours_before_tighten=72.0,  # 3 days
+        alert_cooldown_minutes=240,  # 4 hours between alerts
+        loss_threshold_pct=30.0,  # Only alert on 30%+ loss
+        profit_suggestion_pct=50.0,  # Suggest profit taking at 50%+
+        forward_looking=True,
+        description="Long-term hold: Very patient, minimal alerts, ride volatility"
+    ),
+    PositionIntent.SWING.value: TradingStyleConfig(
+        min_hold_hours_before_close=4.0,  # 4 hours minimum
+        min_hold_hours_before_tighten=2.0,  # 2 hours before tightening
+        alert_cooldown_minutes=60,  # 1 hour between alerts
+        loss_threshold_pct=12.0,  # Alert at 12%+ loss
+        profit_suggestion_pct=15.0,  # Suggest profit taking at 15%+
+        forward_looking=True,
+        description="Mid-term swing: Patient approach, analyzes trend continuation"
+    ),
+    PositionIntent.SCALP.value: TradingStyleConfig(
+        min_hold_hours_before_close=0.0,  # Immediate - quick trades
+        min_hold_hours_before_tighten=0.0,  # Immediate
+        alert_cooldown_minutes=15,  # 15 min between alerts
+        loss_threshold_pct=3.0,  # Tight 3% loss threshold
+        profit_suggestion_pct=5.0,  # Quick 5% profit taking
+        forward_looking=False,
+        description="Quick scalp: Aggressive exits, tight risk management"
+    )
+}
 
 
 @dataclass
@@ -122,6 +176,12 @@ class MonitoredCryptoPosition:
     max_favorable_pct: float = 0.0  # Max profit seen
     max_adverse_pct: float = 0.0  # Max drawdown seen
     ai_adjustment_count: int = 0
+    
+    # Alert cooldown tracking (prevents repeated alerts for same action)
+    last_close_alert_time: Optional[datetime] = None
+    last_tighten_alert_time: Optional[datetime] = None
+    last_partial_alert_time: Optional[datetime] = None
+    alert_suppressed_count: int = 0  # Track how many alerts were suppressed
     
     # Order IDs for Kraken
     entry_order_id: Optional[str] = None
@@ -655,6 +715,98 @@ class AICryptoPositionManager:
         
         return decisions
     
+    def _get_style_config(self, intent: str) -> TradingStyleConfig:
+        """Get the trading style configuration for a given intent"""
+        return TRADING_STYLE_CONFIGS.get(intent, TRADING_STYLE_CONFIGS[PositionIntent.SWING.value])
+    
+    def _get_hold_time_hours(self, position: MonitoredCryptoPosition) -> float:
+        """Calculate how long a position has been held in hours"""
+        if not position.entry_time:
+            return 0.0
+        return (datetime.now() - position.entry_time).total_seconds() / 3600
+    
+    def _should_suppress_alert(
+        self,
+        position: MonitoredCryptoPosition,
+        action: str
+    ) -> Tuple[bool, str]:
+        """
+        Check if an alert should be suppressed based on cooldown and minimum hold time.
+        
+        Returns:
+            Tuple of (should_suppress, reason)
+        """
+        style_config = self._get_style_config(position.position_intent)
+        hold_time_hours = self._get_hold_time_hours(position)
+        
+        # 1. Check minimum hold time for CLOSE_NOW
+        if action == PositionAction.CLOSE_NOW.value:
+            if hold_time_hours < style_config.min_hold_hours_before_close:
+                return (True, f"Position held {hold_time_hours:.1f}h, need {style_config.min_hold_hours_before_close}h minimum for {position.position_intent} style")
+            
+            # Check cooldown since last close alert
+            if position.last_close_alert_time:
+                minutes_since_last = (datetime.now() - position.last_close_alert_time).total_seconds() / 60
+                if minutes_since_last < style_config.alert_cooldown_minutes:
+                    return (True, f"Cooldown: {minutes_since_last:.0f}m since last close alert (need {style_config.alert_cooldown_minutes}m)")
+        
+        # 2. Check minimum hold time for TIGHTEN_STOP
+        elif action == PositionAction.TIGHTEN_STOP.value:
+            if hold_time_hours < style_config.min_hold_hours_before_tighten:
+                return (True, f"Position held {hold_time_hours:.1f}h, need {style_config.min_hold_hours_before_tighten}h minimum for tighten alerts")
+            
+            # Check cooldown since last tighten alert
+            if position.last_tighten_alert_time:
+                minutes_since_last = (datetime.now() - position.last_tighten_alert_time).total_seconds() / 60
+                if minutes_since_last < style_config.alert_cooldown_minutes:
+                    return (True, f"Cooldown: {minutes_since_last:.0f}m since last tighten alert (need {style_config.alert_cooldown_minutes}m)")
+        
+        # 3. Check cooldown for TAKE_PARTIAL
+        elif action == PositionAction.TAKE_PARTIAL.value:
+            if position.last_partial_alert_time:
+                minutes_since_last = (datetime.now() - position.last_partial_alert_time).total_seconds() / 60
+                if minutes_since_last < style_config.alert_cooldown_minutes:
+                    return (True, f"Cooldown: {minutes_since_last:.0f}m since last partial alert (need {style_config.alert_cooldown_minutes}m)")
+        
+        return (False, "")
+    
+    def _record_alert_sent(self, position: MonitoredCryptoPosition, action: str):
+        """Record that an alert was sent for cooldown tracking"""
+        now = datetime.now()
+        if action == PositionAction.CLOSE_NOW.value:
+            position.last_close_alert_time = now
+        elif action == PositionAction.TIGHTEN_STOP.value:
+            position.last_tighten_alert_time = now
+        elif action == PositionAction.TAKE_PARTIAL.value:
+            position.last_partial_alert_time = now
+    
+    def _check_style_thresholds(
+        self,
+        position: MonitoredCryptoPosition,
+        pnl_pct: float
+    ) -> Optional[str]:
+        """
+        Check if P&L thresholds for the trading style have been breached.
+        Returns a warning message if close to threshold, None otherwise.
+        """
+        style_config = self._get_style_config(position.position_intent)
+        
+        # Check loss threshold
+        if pnl_pct < 0 and abs(pnl_pct) >= style_config.loss_threshold_pct * 0.8:
+            if abs(pnl_pct) >= style_config.loss_threshold_pct:
+                return f"⚠️ Loss threshold breached: {pnl_pct:.1f}% (threshold: -{style_config.loss_threshold_pct}%)"
+            else:
+                return f"📉 Approaching loss threshold: {pnl_pct:.1f}% (threshold: -{style_config.loss_threshold_pct}%)"
+        
+        # Check profit threshold
+        if pnl_pct > 0 and pnl_pct >= style_config.profit_suggestion_pct * 0.8:
+            if pnl_pct >= style_config.profit_suggestion_pct:
+                return f"🎯 Profit target zone: +{pnl_pct:.1f}% (suggestion at +{style_config.profit_suggestion_pct}%)"
+            else:
+                return f"📈 Approaching profit target: +{pnl_pct:.1f}% (suggestion at +{style_config.profit_suggestion_pct}%)"
+        
+        return None
+    
     def _check_basic_exit_conditions(
         self,
         position: MonitoredCryptoPosition,
@@ -1069,10 +1221,34 @@ The user is actively trading this position for quick profits. They want:
 - Fast action recommendations
 """
         else:  # SWING (default)
+            # Get trading style config for hold time context
+            style_config = self._get_style_config(PositionIntent.SWING.value)
+            hold_hours = self._get_hold_time_hours(position)
+            min_hold_hours = style_config.min_hold_hours_before_close
+            
             intent_context = f"""
-**USER INTENT = {intent_emoji} SWING (STANDARD TRADE)**
-The user is swing trading this position with standard risk management.
-Apply balanced analysis with normal exit rules.
+**USER INTENT = {intent_emoji} SWING (MID-TERM TRADE)**
+The user is swing trading this position - this is a PATIENT, MID-TERM approach.
+
+**SWING TRADING PHILOSOPHY:**
+- Swing trades are meant to capture multi-day to multi-week moves
+- Short-term volatility is EXPECTED and ACCEPTABLE
+- Position has been held for {hold_hours:.1f} hours (minimum recommended: {min_hold_hours}h)
+- Do NOT recommend exit just because of normal market fluctuations
+- Analyze TREND CONTINUATION potential before suggesting exits
+- Be FORWARD-LOOKING: Consider where price is likely to go, not just where it's been
+
+**WHEN TO HOLD (Default for Swing):**
+- Position is consolidating but trend is intact
+- Temporary pullback within the larger trend
+- No fundamental change in the asset
+- Technical structure still supports the trade thesis
+
+**WHEN TO CONSIDER EXIT:**
+- Clear trend reversal (multiple timeframe confirmation)
+- Break of key support/resistance that invalidates the setup
+- Fundamental change (negative news with high confidence)
+- Already exceeded original target significantly
 """
         
         prompt = f"""
@@ -1165,13 +1341,28 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
 - Quick action is key - don't wait for confirmation"""
         else:  # SWING
             decision_rules = """
-**🔄 SWING TRADE DECISION RULES (STANDARD):**
-Analyze the position using these factors:
-1. **Trend Strength**: Is momentum building or weakening?
-2. **News Impact**: How does recent sentiment affect this position?
-3. **Risk/Reward**: Is current R:R still favorable given market context?
-4. **Technical Signals**: What do indicators suggest?
-5. **Position Progress**: Are we near entry or near target?"""
+**🔄 SWING TRADE DECISION RULES (PATIENT MID-TERM APPROACH):**
+
+**⚠️ DEFAULT ACTION FOR SWING = HOLD** unless there's a compelling reason to exit.
+
+**Before recommending CLOSE_NOW, ask yourself:**
+1. Is this just normal volatility, or a true trend reversal?
+2. Has the trade thesis been INVALIDATED, or just tested?
+3. Would an experienced swing trader exit here, or hold through the noise?
+4. Is there HIGH-CONFIDENCE negative news, or just FUD?
+
+**Analysis Factors (in order of importance):**
+1. **Trend Continuation**: Does the LARGER trend support holding? (Most Important)
+2. **Support/Resistance**: Is price at a key level that changes the thesis?
+3. **News Impact**: Only HIGH-CONFIDENCE, HIGH-IMPACT news should trigger exits
+4. **Technical Signals**: Use as confirmation, not primary decision driver
+5. **Risk/Reward**: Only reconsider if R:R has significantly deteriorated
+
+**HOLD unless:**
+- Clear multi-timeframe trend reversal confirmed
+- Key support/resistance level broken with conviction
+- HIGH confidence (>80%) negative news directly impacting this asset
+- Position has hit take profit or extended significantly beyond target"""
 
         prompt += f"""
 **Decision Framework:**
@@ -1249,6 +1440,18 @@ Analyze the position using these factors:
             log_and_print(f"Position {trade_id} not found", "ERROR")
             return False
         
+        position = self.positions[trade_id]
+        
+        # 🛡️ ALERT COOLDOWN CHECK: Prevent spam and premature exit recommendations
+        # Only check for HOLD, as HOLD should never be suppressed
+        if decision.action != PositionAction.HOLD.value:
+            should_suppress, suppress_reason = self._should_suppress_alert(position, decision.action)
+            if should_suppress:
+                position.alert_suppressed_count += 1
+                log_and_print(f"🔇 Alert suppressed for {position.pair}: {suppress_reason}", "DEBUG")
+                log_and_print(f"   Total suppressed: {position.alert_suppressed_count} | Intent: {position.position_intent}")
+                return False  # Don't send alert, but return False to indicate no action taken
+        
         # 🚨 SAFETY CHECK: Require manual approval unless explicitly skipped
         if self.require_manual_approval and not skip_approval:
             # Check for existing pending approval for this trade_id and action
@@ -1259,9 +1462,11 @@ Analyze the position using these factors:
 
             # Add to pending approvals queue instead of executing
             approval_id = f"{trade_id}_{int(time.time())}"
-            position = self.positions[trade_id]
             current_price = position.current_price or position.entry_price
             pnl_pct = ((current_price - position.entry_price) / position.entry_price) * 100
+            
+            # Record that we're sending this alert (for cooldown tracking)
+            self._record_alert_sent(position, decision.action)
             
             self.pending_approvals[approval_id] = {
                 'trade_id': trade_id,
