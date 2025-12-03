@@ -1987,6 +1987,45 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             # Determine order side (opposite of entry)
             order_side = OrderSide.SELL if position.side == 'BUY' else OrderSide.BUY
             
+            # ============================================================
+            # CANCEL EXISTING ORDERS FOR THIS PAIR FIRST
+            # This prevents "insufficient balance" errors when there are
+            # pending stop-loss or take-profit orders holding the volume
+            # ============================================================
+            try:
+                log_and_print(f"🔍 Checking for existing orders on {position.pair}...")
+                open_orders = self.kraken_client.get_open_orders()
+                
+                # Normalize the pair for comparison (Kraken may use different formats)
+                pair_normalized = position.pair.replace('/', '')
+                orders_cancelled = 0
+                
+                for order in open_orders:
+                    order_pair_normalized = order.pair.replace('/', '') if order.pair else ''
+                    # Match by pair (handle variations like "HUSD" vs "H/USD")
+                    if pair_normalized in order_pair_normalized or order_pair_normalized in pair_normalized or position.pair in str(order.pair):
+                        log_and_print(f"   📋 Found open order: {order.order_id} ({order.side} {order.volume:.6f} @ {order.order_type})")
+                        
+                        # Cancel the order
+                        cancelled = self.kraken_client.cancel_order(order.order_id)
+                        if cancelled:
+                            orders_cancelled += 1
+                            log_and_print(f"   ✅ Cancelled order: {order.order_id}")
+                        else:
+                            log_and_print(f"   ⚠️ Could not cancel order: {order.order_id}", "WARNING")
+                
+                if orders_cancelled > 0:
+                    log_and_print(f"🧹 Cancelled {orders_cancelled} existing order(s) for {position.pair}")
+                    # Small delay to let Kraken process the cancellations
+                    import time
+                    time.sleep(0.5)
+                else:
+                    log_and_print(f"   ✅ No conflicting orders found")
+                    
+            except Exception as cancel_error:
+                log_and_print(f"⚠️ Could not check/cancel existing orders: {cancel_error}", "WARNING")
+                # Continue anyway - the close order might still work
+            
             # Calculate P&L before attempting order (needed for notification even if order fails)
             exit_price = position.current_price if position.current_price else position.entry_price
             if position.side == 'BUY':
