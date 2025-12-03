@@ -22,6 +22,15 @@ from loguru import logger
 PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# ============================================================
+# SINGLETON CHECK - Prevent multiple instances
+# ============================================================
+from utils.process_lock import ensure_single_instance
+
+force_restart = '--force' in sys.argv or '-f' in sys.argv
+process_lock = ensure_single_instance("analysis_queue_processor", force=force_restart)
+# ============================================================
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
@@ -822,3 +831,5 @@ if __name__ == "__main__":
     except Exception as e:
         logger.critical(f"💥 FATAL ERROR: {e}", exc_info=True)
         exit(1)
+    finally:
+        process_lock.release()

@@ -17,6 +17,15 @@ os.chdir(PROJECT_ROOT)
 # Add to Python path
 sys.path.insert(0, str(PROJECT_ROOT))
 
+# ============================================================
+# SINGLETON CHECK - Prevent multiple instances
+# ============================================================
+from utils.process_lock import ensure_single_instance
+
+force_restart = '--force' in sys.argv or '-f' in sys.argv
+process_lock = ensure_single_instance("stock_monitor", force=force_restart)
+# ============================================================
+
 # Load environment variables from .env file (CRITICAL for Discord alerts, API keys, etc.)
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / '.env')
@@ -289,9 +298,14 @@ try:
 
 except KeyboardInterrupt:
     logger.info("Service stopped by user")
+    process_lock.release()
     sys.exit(0)
 
 except Exception as e:
     logger.error(f"FATAL ERROR: {e}", exc_info=True)
     logger.error("Service failed to start or crashed during operation")
+    process_lock.release()
     sys.exit(1)
+
+finally:
+    process_lock.release()

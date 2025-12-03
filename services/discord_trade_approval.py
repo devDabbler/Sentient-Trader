@@ -1496,24 +1496,6 @@ class DiscordTradeApprovalBot(commands.Bot):
                 if t > cutoff
             }
             
-            # No cooldown - create/update lock file IMMEDIATELY to prevent race conditions
-            try:
-                os.makedirs(os.path.dirname(trade_lock_file), exist_ok=True)
-                with open(trade_lock_file, 'w') as f:
-                    f.write(f"{datetime.now().isoformat()}|{symbol}")
-            except Exception as lock_err:
-                logger.debug(f"Trade lock file creation error (non-critical): {lock_err}")
-            
-            # Record this trade request in memory IMMEDIATELY
-            self._recent_trade_requests[symbol] = datetime.now()
-            
-            # Clean up old entries (older than 5 minutes)
-            cutoff = datetime.now() - timedelta(minutes=5)
-            self._recent_trade_requests = {
-                sym: t for sym, t in self._recent_trade_requests.items() 
-                if t > cutoff
-            }
-            
             # NOW send the preparing message (after all checks and locks are in place)
             await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
             

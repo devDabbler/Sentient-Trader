@@ -17,6 +17,18 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+# ============================================================
+# SINGLETON CHECK - Prevent multiple instances
+# ============================================================
+from utils.process_lock import ensure_single_instance
+
+# Check for --force flag to kill existing instance
+force_restart = '--force' in sys.argv or '-f' in sys.argv
+
+# This will exit if another instance is running (unless force=True)
+process_lock = ensure_single_instance("discord_approval_bot", force=force_restart)
+# ============================================================
+
 print("DEBUG: Starting Discord Approval Bot...", flush=True)
 
 # Load environment FIRST
@@ -227,3 +239,5 @@ finally:
     logger.info("🛑 Discord Approval Bot shutting down")
     if approval_manager:
         approval_manager.stop()
+    # Release process lock
+    process_lock.release()

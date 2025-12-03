@@ -3,10 +3,20 @@ Start Discord Approval Bot
 Standalone script to start the Discord trade approval bot
 """
 
+import sys
 from loguru import logger
 from dotenv import load_dotenv
 import os
 import time
+
+# ============================================================
+# SINGLETON CHECK - Prevent multiple instances
+# ============================================================
+from utils.process_lock import ensure_single_instance
+
+force_restart = '--force' in sys.argv or '-f' in sys.argv
+process_lock = ensure_single_instance("discord_approval_bot", force=force_restart)
+# ============================================================
 
 # Load .env file FIRST
 load_dotenv()
@@ -75,3 +85,5 @@ try:
             logger.info(f"⏳ {pending} pending approval(s)")
 except KeyboardInterrupt:
     logger.info("👋 Shutting down Discord bot...")
+finally:
+    process_lock.release()
