@@ -714,17 +714,8 @@ class DiscordTradeApprovalBot(commands.Bot):
             # Check if crypto (contains /) or stock
             if "/" in target_symbol:
                 # Crypto trade - use crypto position manager
-                result = await self._handle_trade_command(message, target_symbol)
-                if result.get('success'):
-                    await message.channel.send(
-                        f"✅ **Crypto Trade Queued:** {target_symbol}\n"
-                        f"**Side:** {result.get('side', 'BUY')}\n"
-                        f"**Size:** ${result.get('position_size', 0):,.2f}\n"
-                        f"**Stop:** ${result.get('stop_loss', 0):,.4f}\n"
-                        f"**Target:** ${result.get('take_profit', 0):,.4f}"
-                    )
-                else:
-                    await message.channel.send(f"❌ Trade failed: {result.get('error', 'Unknown error')}")
+                # _handle_trade_command sends its own success/failure messages
+                await self._handle_trade_command(message, target_symbol)
             else:
                 # Stock trade
                 await self._handle_stock_trade_execution(message, target_symbol, side="BUY")
@@ -1442,8 +1433,15 @@ class DiscordTradeApprovalBot(commands.Bot):
                     from services.ai_crypto_position_manager import get_ai_crypto_position_manager
                     from services.risk_profile_config import get_risk_profile_manager
                     
+                    # Get Kraken credentials from environment (mirrors stock broker pattern)
+                    api_key = os.getenv('KRAKEN_API_KEY')
+                    api_secret = os.getenv('KRAKEN_API_SECRET')
+                    
+                    if not api_key or not api_secret:
+                        return {'success': False, 'error': 'KRAKEN_API_KEY and KRAKEN_API_SECRET must be set in .env'}
+                    
                     # Get current price
-                    kraken = KrakenClient()
+                    kraken = KrakenClient(api_key=api_key, api_secret=api_secret)
                     ticker_info = kraken.get_ticker_info(symbol)
                     if not ticker_info:
                         return {'success': False, 'error': f"Could not get price for {symbol}"}
