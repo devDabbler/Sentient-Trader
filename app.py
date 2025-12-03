@@ -37,7 +37,7 @@ try:
         dashboard_tab, scanner_tab, watchlist_tab, strategy_advisor_tab,
         generate_signal_tab, signal_history_tab, strategy_guide_tab,
         tradier_tab, ibkr_tab, scalping_tab, strategy_analyzer_tab,
-        autotrader_tab, crypto_tab, dca_tab, llm_usage_tab
+        autotrader_tab, crypto_tab, dca_tab, llm_usage_tab, quant_analytics_tab
     )
 except ImportError as e:
     st.error(f"Failed to import tab modules: {e}")
@@ -203,6 +203,7 @@ def main():
         "🤖 Strategy Analyzer",
         "🤖 Auto-Trader",
         "₿ Crypto Trading",
+        "📊 Quant Analytics",
         "🤖 LLM Usage"
     ]
     
@@ -252,6 +253,8 @@ def main():
             autotrader_tab.render_tab()
         elif selected_tab == "₿ Crypto Trading":
             crypto_tab.render_tab()
+        elif selected_tab == "📊 Quant Analytics":
+            quant_analytics_tab.render_tab()
         elif selected_tab == "🤖 LLM Usage":
             llm_usage_tab.render_llm_usage_tab()
         else:

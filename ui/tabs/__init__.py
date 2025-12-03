@@ -79,6 +79,11 @@ try:
 except ImportError:
     llm_usage_tab = None
 
+try:
+    from . import quant_analytics_tab
+except ImportError:
+    quant_analytics_tab = None
+
 __all__ = [
     'dashboard_tab',
     'scanner_tab',
@@ -94,5 +99,6 @@ __all__ = [
     'autotrader_tab',
     'crypto_tab',
     'dca_tab',
-    'llm_usage_tab'
+    'llm_usage_tab',
+    'quant_analytics_tab'
 ]

@@ -98,6 +98,26 @@ The platform supports:
 * **⏱️ Micro/Intraday Factors:**
   - First hour momentum detection
   - Lunch hour avoidance
+
+#### Quant Analytics (NEW - December 2025) ✅ PRODUCTION READY
+* **📊 Institutional-Grade Analytics:** GS Quant-inspired risk and backtesting for stocks & options
+  - **Options Greeks Calculator:** Delta, Gamma, Theta, Vega, Rho via Black-Scholes
+  - **Theoretical Option Pricing:** Calculate fair value for any contract
+  - **Portfolio Risk Dashboard:** Aggregated Greeks, VaR (95%/99%), max drawdown
+  - **Strategy Backtester:** Test strategies on historical data with full metrics
+* **📈 Supported Backtesting Strategies:**
+  - **WARRIOR_SCALPING:** Gap & Go momentum trading (stocks)
+  - **SLOW_SCALPER:** Mean reversion with Bollinger Bands (stocks)
+  - **MICRO_SWING:** Key level rejection trading (stocks)
+  - **COVERED_CALL:** Premium collection on stock holdings (options)
+  - **CASH_SECURED_PUT:** Sell puts for income or stock acquisition (options)
+  - **SMA_CROSSOVER:** Generic moving average strategy (stocks)
+* **📉 Comprehensive Metrics:**
+  - Sharpe ratio, Sortino ratio, profit factor
+  - Win rate, average win/loss, total return
+  - Max drawdown, volatility, annualized returns
+  - Trade-by-trade log with PnL breakdown
+* **🎯 AI Recommendations:** Automatic strategy rating (STRONG_BUY to CAUTION)
   - OpEx week awareness
   - Monday/Friday effects
 * **📊 Trading Guidance:**

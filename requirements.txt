@@ -25,8 +25,8 @@ httpx>=0.24.0  # Modern async HTTP client for RSS feeds
 apscheduler>=3.10.0  # Scheduled event detection
 selenium>=4.38.0  # Web browser automation for human-like behavior
 psutil>=5.9.0  # System and process utilities for resource monitoring
+gs-quant
 
-# PHASE 1 ENHANCEMENTS: FinBERT for Financial Sentiment Analysis
 transformers>=4.30.0  # Hugging Face transformers for FinBERT model
 torch>=2.0.0  # PyTorch for FinBERT (CPU version sufficient, GPU optional)
 # Note: For GPU support, install: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
