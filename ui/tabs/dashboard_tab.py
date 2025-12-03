@@ -14,6 +14,8 @@ import streamlit as st
 
 import time
 
+import asyncio
+
 from datetime import datetime, timedelta
 
 from loguru import logger
@@ -28,6 +30,8 @@ from ui.tabs.common_imports import (
 )
 
 from utils.caching import get_cached_news
+
+from services.social_sentiment_analyzer import SocialSentimentAnalyzer
 
 
 
@@ -1265,7 +1269,46 @@ def _handle_analysis(search_ticker: str, trading_style: str):
                     'score': analysis.sentiment_score,
                     'signals': analysis.sentiment_signals
                 }
+                
+                # Fetch social sentiment from Reddit/StockTwits (async)
                 social_data = None
+                try:
+                    st.write("📱 Fetching social sentiment (Reddit, StockTwits)...")
+                    social_analyzer = SocialSentimentAnalyzer()
+                    
+                    # Run async social analysis
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        social_data = loop.run_until_complete(
+                            asyncio.wait_for(social_analyzer.analyze_social_buzz(analysis.ticker), timeout=20.0)
+                        )
+                        if social_data and social_data.get('total_mentions', 0) > 0:
+                            logger.info(f"📱 Social sentiment for {analysis.ticker}: {social_data.get('total_mentions', 0)} mentions, score: {social_data.get('sentiment_score', 0):.2f}")
+                            
+                            # Store social data in session for display
+                            st.session_state.social_sentiment_data = social_data
+                            
+                            # Blend social sentiment with news sentiment if we have social data
+                            if social_data.get('sentiment_score') is not None:
+                                # Weight: 60% news, 40% social (social is noisier)
+                                news_weight = 0.6
+                                social_weight = 0.4
+                                blended_score = (sentiment_data['score'] * news_weight) + (social_data.get('sentiment_score', 0) * social_weight)
+                                sentiment_data['score'] = blended_score
+                                sentiment_data['social_mentions'] = social_data.get('total_mentions', 0)
+                                logger.info(f"📊 Blended sentiment for {analysis.ticker}: {blended_score:.2f} (news + social)")
+                        else:
+                            logger.info(f"📭 No social mentions found for {analysis.ticker}")
+                            st.session_state.social_sentiment_data = {}
+                    finally:
+                        loop.close()
+                except asyncio.TimeoutError:
+                    logger.warning(f"⏱️ Social sentiment timeout for {analysis.ticker}")
+                    st.session_state.social_sentiment_data = {}
+                except Exception as social_error:
+                    logger.debug(f"Social sentiment fetch failed for {analysis.ticker}: {social_error}")
+                    st.session_state.social_sentiment_data = {}
 
                 # Generate the signal using the configured premium model
                 ai_signal = signal_generator.generate_signal(
@@ -1389,12 +1432,35 @@ def _display_analysis_results():
     
     sentiment_col1, sentiment_col2 = st.columns([1, 3])
     
+    # Get social data from session if available
+    social_data = st.session_state.get('social_sentiment_data', {})
+    
     with sentiment_col1:
         sentiment_label = "POSITIVE" if analysis.sentiment_score > 0.2 else "NEGATIVE" if analysis.sentiment_score < -0.2 else "NEUTRAL"
         sentiment_color = "🟢" if analysis.sentiment_score > 0.2 else "🔴" if analysis.sentiment_score < -0.2 else "🟡"
         
         st.metric("News Sentiment", f"{sentiment_color} {sentiment_label}")
         st.metric("Sentiment Score", f"{analysis.sentiment_score:.2f}")
+        
+        # Show social sentiment if available
+        if social_data and social_data.get('total_mentions', 0) > 0:
+            st.divider()
+            st.caption("📱 **Social Buzz**")
+            st.metric("Social Mentions", social_data.get('total_mentions', 0))
+            social_score = social_data.get('sentiment_score', 0)
+            social_label = "BULLISH" if social_score > 0.2 else "BEARISH" if social_score < -0.2 else "NEUTRAL"
+            st.metric("Social Sentiment", f"{social_label}")
+            
+            # Show source breakdown
+            reddit = social_data.get('reddit_mentions', 0)
+            stocktwits = social_data.get('stocktwits_mentions', 0)
+            twitter = social_data.get('twitter_mentions', 0)
+            if reddit or stocktwits or twitter:
+                sources = []
+                if reddit: sources.append(f"Reddit: {reddit}")
+                if stocktwits: sources.append(f"StockTwits: {stocktwits}")
+                if twitter: sources.append(f"X: {twitter}")
+                st.caption(" | ".join(sources))
     
     with sentiment_col2:
         if analysis.recent_news:
@@ -1407,4 +1473,6 @@ def _display_analysis_results():
                         st.write(f"[📖 Read Full Article]({article['link']})")
         else:
             st.info("📭 No recent news found for this ticker.")
+            if not social_data or social_data.get('total_mentions', 0) == 0:
+                st.caption("💡 Tip: OTC/penny stocks often have limited news coverage. Check Reddit or StockTwits directly for community discussions.")
 
