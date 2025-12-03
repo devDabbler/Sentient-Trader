@@ -1544,13 +1544,18 @@ class DiscordTradeApprovalBot(commands.Bot):
             def _queue_crypto_trade():
                 try:
                     from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                    import uuid
                     
                     manager = get_ai_crypto_position_manager()
                     if not manager:
                         return {'success': False, 'error': 'Crypto Position Manager not available'}
                     
+                    # Generate unique trade ID
+                    trade_id = f"discord_{params['symbol'].replace('/', '_')}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+                    
                     # Add position for monitoring (this will queue for execution)
                     success = manager.add_position(
+                        trade_id=trade_id,
                         pair=params['symbol'],
                         side=params['side'],
                         volume=params['volume'],
