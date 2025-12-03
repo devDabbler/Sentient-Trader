@@ -13,7 +13,7 @@ from discord.ui import View, Button
 import asyncio
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, Callable
 from dataclasses import dataclass, asdict
 import json
@@ -234,6 +234,10 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Message deduplication - prevent processing same message twice
         self._processed_messages: set = set()
         self._max_processed_cache = 100  # Keep last 100 message IDs
+        
+        # 🛡️ TRADE DEDUPLICATION - prevent double trades within cooldown window
+        self._recent_trade_requests: Dict[str, datetime] = {}  # {symbol: last_trade_time}
+        self._trade_cooldown_seconds = 30  # Minimum seconds between trades for same symbol
         
         logger.info(f"🤖 Discord Trade Approval Bot initialized")
         logger.info(f"   Channel ID: {channel_id}")
@@ -614,6 +618,12 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send("⚠️ Could not retrieve original message context.")
             return
 
+        # 🛡️ DUPLICATE PREVENTION: Only respond to messages from THIS bot
+        # Prevents double-processing when multiple bots are in the same channel
+        if ref_msg.author != self.user:
+            logger.debug(f"   ↳ Ignoring reply to message from {ref_msg.author.name} (not our bot)")
+            return
+
         # Extract symbol from the referenced message embed or content
         target_symbol = None
         
@@ -703,6 +713,28 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         # TRADE EXECUTION COMMANDS - Route to appropriate handler based on asset type
         elif content in ['T', 'TRADE', 'EXECUTE', 'BUY', 'ENTER']:
+            # 🛡️ TRADE DEDUPLICATION: Check cooldown to prevent double trades
+            if target_symbol in self._recent_trade_requests:
+                last_trade_time = self._recent_trade_requests[target_symbol]
+                elapsed = (datetime.now() - last_trade_time).total_seconds()
+                if elapsed < self._trade_cooldown_seconds:
+                    remaining = int(self._trade_cooldown_seconds - elapsed)
+                    await message.channel.send(
+                        f"⏳ **Trade Cooldown:** {target_symbol} was just traded {elapsed:.0f}s ago.\n"
+                        f"Wait {remaining}s or check your positions."
+                    )
+                    return
+            
+            # Record this trade request
+            self._recent_trade_requests[target_symbol] = datetime.now()
+            
+            # Clean up old entries (older than 5 minutes)
+            cutoff = datetime.now() - timedelta(minutes=5)
+            self._recent_trade_requests = {
+                sym: t for sym, t in self._recent_trade_requests.items() 
+                if t > cutoff
+            }
+            
             # Check if crypto (contains /) or stock
             if "/" in target_symbol:
                 # Crypto trade - use crypto position manager
