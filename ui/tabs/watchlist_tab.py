@@ -1262,8 +1262,10 @@ def render_tab():
                                 # Last analysis timestamp
                                 st.caption(f"🕒 Analysis updated: Just now")
                                 
-                            else:
+                            elif should_refresh:
+                                # Only show error if user actually requested analysis but it failed
                                 st.error(f"❌ Could not analyze {ticker_symbol}. Check ticker symbol or try again.")
+                            # else: neither button clicked, just waiting for user action - no error needed
                                 
                         except Exception as e:
                             st.error(f"❌ Error analyzing {ticker_symbol}: {str(e)}")
