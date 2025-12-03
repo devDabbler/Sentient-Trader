@@ -28,6 +28,7 @@ from typing import Any, Optional
 import platform
 import binascii
 import functools
+import psutil
 
 # Performance utilities for faster UX
 from utils.streamlit_performance import (
@@ -877,10 +878,10 @@ def load_trade_journal_stats() -> dict:
         }
     except Exception as e:
         print(f"Error loading trade journal stats: {e}")
-    return {}
+        return {}
 
 
-def load_recent_trades(trade_type: str = None, limit: int = 20) -> list:
+def load_recent_trades(trade_type: Optional[str] = None, limit: int = 20) -> list:
     """Load recent trades from the unified trade journal"""
     try:
         from services.unified_trade_journal import get_unified_journal
@@ -1931,7 +1932,7 @@ def main():
                             elif mode_key == "aggressive":
                                 for svc in SERVICES.values():
                                     control_service(svc["name"], "start")
-                            st.toast(f"✅ {mode_name} mode activated")
+                            st.toast(f"✅ {label} mode activated")
                     st.caption(desc)
             
             st.markdown("---")
@@ -3239,11 +3240,11 @@ def main():
         'orb_fvg_scan': '🎯 ORB+FVG',
         'quick_crypto': '⚡ Quick Crypto',
     }
-    
     def get_service_label(service_key: str) -> str:
         """Get a better label for the service - avoid duplicates"""
         # Skip 'latest' - we show queue_latest instead
         if service_key == 'latest':
+            return ''  # Skip this key
             return None  # Skip this key
         
         # Check for exact matches first
