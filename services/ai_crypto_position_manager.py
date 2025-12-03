@@ -190,6 +190,56 @@ class MonitoredCryptoPosition:
 
 
 @dataclass
+class EnhancedExitReasoning:
+    """
+    Detailed sell vs hold analysis for better decision making.
+    Provides comprehensive reasoning to help traders understand
+    why they should sell now vs hold longer.
+    """
+    # Primary reasoning summary
+    summary: str
+    
+    # Sell rationale - why selling now makes sense
+    sell_rationale: str
+    sell_factors: List[str]  # Bullet points for sell case
+    
+    # Hold alternative - what would need to happen to justify holding
+    hold_alternative: str
+    hold_factors: List[str]  # Bullet points for hold case
+    
+    # Risk assessment
+    downside_risk: str  # Potential loss if held
+    upside_potential: str  # Potential gain if held
+    risk_reward_assessment: str  # Overall risk/reward for holding vs selling
+    
+    # Market context
+    market_context: str
+    
+    # Confidence breakdown
+    sell_confidence: float  # 0-100 confidence in sell recommendation
+    hold_confidence: float  # 0-100 confidence if holding was chosen
+    
+    # Time-sensitive factors
+    time_sensitivity: str  # Why timing matters
+    
+    def to_discord_format(self) -> str:
+        """Format for Discord message display"""
+        sell_bullets = "\n".join([f"  • {f}" for f in self.sell_factors[:4]])
+        hold_bullets = "\n".join([f"  • {f}" for f in self.hold_factors[:4]])
+        
+        return (
+            f"**📊 AI Analysis Summary:**\n{self.summary}\n\n"
+            f"**🔴 Why Sell Now ({self.sell_confidence:.0f}% confidence):**\n{sell_bullets}\n\n"
+            f"**🟢 Hold Alternative ({self.hold_confidence:.0f}% confidence):**\n{hold_bullets}\n\n"
+            f"**⚠️ Risk Assessment:**\n"
+            f"  • Downside if held: {self.downside_risk}\n"
+            f"  • Upside potential: {self.upside_potential}\n"
+            f"  • R:R Verdict: {self.risk_reward_assessment}\n\n"
+            f"**⏱️ Time Sensitivity:** {self.time_sensitivity}"
+        )
+
+
+@dataclass
 class AITradeDecision:
     """AI recommendation for position management"""
     action: str  # PositionAction value
@@ -203,6 +253,7 @@ class AITradeDecision:
     trend_score: float = 0.0
     risk_score: float = 0.0
     metadata: Optional[Dict[str, Any]] = None
+    enhanced_reasoning: Optional[EnhancedExitReasoning] = None  # Detailed sell/hold analysis
 
 
 def _load_service_interval(service_name: str = "sentient-crypto-ai-trader") -> int:
@@ -1111,6 +1162,14 @@ class AICryptoPositionManager:
             decision_data = self._parse_ai_response(response)
             
             if decision_data:
+                # Extract enhanced reasoning fields from AI response
+                ai_metadata = {
+                    'sell_case': decision_data.get('sell_case', ''),
+                    'hold_case': decision_data.get('hold_case', ''),
+                    'downside_risk': decision_data.get('downside_risk', ''),
+                    'upside_potential': decision_data.get('upside_potential', ''),
+                }
+                
                 return AITradeDecision(
                     action=decision_data.get('action', 'HOLD'),
                     confidence=float(decision_data.get('confidence', 0)),
@@ -1121,7 +1180,8 @@ class AICryptoPositionManager:
                     partial_pct=decision_data.get('partial_pct'),
                     technical_score=float(decision_data.get('technical_score', 0)),
                     trend_score=float(decision_data.get('trend_score', 0)),
-                    risk_score=float(decision_data.get('risk_score', 0))
+                    risk_score=float(decision_data.get('risk_score', 0)),
+                    metadata=ai_metadata
                 )
             
         except Exception as e:
@@ -1406,14 +1466,18 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
 {{
     "action": "HOLD|TIGHTEN_STOP|EXTEND_TARGET|TAKE_PARTIAL|CLOSE_NOW",
     "confidence": 0-100,
-    "reasoning": "Brief 1-2 sentence explanation citing news/technical factors AND respecting {intent} intent",
+    "reasoning": "Detailed 2-3 sentence explanation of WHY this action is recommended",
+    "sell_case": "Why selling/closing now makes sense (even if recommending HOLD)",
+    "hold_case": "Why holding longer could be beneficial (even if recommending CLOSE)",
     "urgency": "LOW|MEDIUM|HIGH",
     "new_stop": price_value_or_null,
     "new_target": price_value_or_null,
     "partial_pct": percentage_or_null,
     "technical_score": 0-100,
     "trend_score": 0-100,
-    "risk_score": 0-100
+    "risk_score": 0-100,
+    "downside_risk": "What could go wrong if holding",
+    "upside_potential": "What gains are possible if holding"
 }}
 """
         
@@ -1442,6 +1506,206 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         except Exception as e:
             logger.error(f"Error parsing AI response: {e}")
             return None
+    
+    def _generate_enhanced_exit_reasoning(
+        self,
+        position: MonitoredCryptoPosition,
+        current_price: float,
+        pnl_pct: float,
+        decision: AITradeDecision,
+        technical_data: Dict,
+        hold_time_hours: float,
+        exit_trigger: str = "AI_ANALYSIS"  # Or "STOP_LOSS", "TAKE_PROFIT"
+    ) -> EnhancedExitReasoning:
+        """
+        Generate detailed sell vs hold analysis for a position.
+        Provides comprehensive reasoning to help traders make informed decisions.
+        
+        Args:
+            position: Current position being analyzed
+            current_price: Latest market price
+            pnl_pct: Current profit/loss percentage
+            decision: AI decision (CLOSE_NOW, HOLD, etc.)
+            technical_data: Technical indicators
+            hold_time_hours: How long position has been held
+            exit_trigger: What triggered the exit analysis
+        
+        Returns:
+            EnhancedExitReasoning with detailed sell/hold comparison
+        """
+        intent = position.position_intent
+        style_config = self._get_style_config(intent)
+        
+        # Calculate key metrics
+        distance_to_stop = abs(current_price - position.stop_loss) / current_price * 100
+        distance_to_target = abs(position.take_profit - current_price) / current_price * 100
+        risk_reward_if_held = distance_to_target / max(distance_to_stop, 0.1)
+        
+        # Extract technical signals
+        rsi = technical_data.get('rsi', 50)
+        macd = technical_data.get('macd', 0)
+        macd_signal = technical_data.get('macd_signal', 0)
+        trend = technical_data.get('trend', 'NEUTRAL')
+        ema_20 = technical_data.get('ema_20', current_price)
+        ema_50 = technical_data.get('ema_50', current_price)
+        
+        # Build sell factors
+        sell_factors = []
+        hold_factors = []
+        
+        # Analyze based on exit trigger
+        if exit_trigger == "STOP_LOSS":
+            sell_factors.append(f"Stop loss hit at ${position.stop_loss:,.6f}")
+            sell_factors.append(f"Loss of {pnl_pct:.2f}% - capital preservation")
+            sell_factors.append("Original trade thesis invalidated")
+            if trend in ['BEARISH', 'STRONGLY_BEARISH']:
+                sell_factors.append(f"Trend confirms bearish momentum ({trend})")
+        elif exit_trigger == "TAKE_PROFIT":
+            sell_factors.append(f"Take profit target reached at ${position.take_profit:,.6f}")
+            sell_factors.append(f"Profit of {pnl_pct:.2f}% secured")
+            sell_factors.append("Original target achieved - mission accomplished")
+        else:
+            # AI-driven analysis
+            if pnl_pct < 0:
+                sell_factors.append(f"Currently down {abs(pnl_pct):.2f}% - avoid further losses")
+            if rsi > 70:
+                sell_factors.append(f"RSI overbought at {rsi:.1f} - potential reversal")
+            elif rsi < 30 and pnl_pct < 0:
+                sell_factors.append(f"RSI oversold ({rsi:.1f}) but still declining")
+            if macd < macd_signal and trend == 'BEARISH':
+                sell_factors.append("MACD bearish crossover confirms downtrend")
+            if current_price < ema_20 < ema_50:
+                sell_factors.append("Price below both EMAs - bearish structure")
+            if decision.confidence >= 80:
+                sell_factors.append(f"High AI confidence ({decision.confidence:.0f}%) in exit")
+            if position.max_favorable_pct > 0 and pnl_pct < position.max_favorable_pct * 0.5:
+                sell_factors.append(f"Gave back {position.max_favorable_pct - pnl_pct:.1f}% from peak")
+        
+        # Build hold factors
+        if intent == "HODL":
+            hold_factors.append(f"HODL intent: Designed to hold through volatility")
+            hold_factors.append(f"Only {abs(pnl_pct):.1f}% loss - normal for long-term")
+        if trend in ['BULLISH', 'STRONGLY_BULLISH']:
+            hold_factors.append(f"Trend still bullish ({trend}) - potential recovery")
+        if rsi >= 30 and rsi <= 50 and pnl_pct < 0:
+            hold_factors.append(f"RSI at {rsi:.1f} - not oversold, room for bounce")
+        if risk_reward_if_held > 2.0:
+            hold_factors.append(f"R:R ratio {risk_reward_if_held:.1f}:1 if held to target")
+        if current_price > ema_20:
+            hold_factors.append("Price above short-term EMA - bullish support")
+        if hold_time_hours < style_config.min_hold_hours_before_close:
+            hold_factors.append(f"Only held {hold_time_hours:.1f}h - below min {style_config.min_hold_hours_before_close}h")
+        if position.moved_to_breakeven:
+            hold_factors.append("Stop at breakeven - risk-free trade")
+        
+        # Ensure we have at least one factor in each list
+        if not sell_factors:
+            sell_factors.append("Lock in current position value")
+        if not hold_factors:
+            hold_factors.append("Wait for clearer market direction")
+        
+        # Calculate downside/upside
+        if pnl_pct >= 0:
+            downside_risk = f"Risk losing {pnl_pct:.2f}% profit if market reverses"
+            upside_potential = f"Potential additional {distance_to_target:.1f}% to target"
+        else:
+            downside_risk = f"Additional {distance_to_stop:.1f}% loss possible to stop"
+            upside_potential = f"Recovery potential: {abs(pnl_pct) + distance_to_target:.1f}% gain"
+        
+        # Risk/reward assessment
+        if decision.action == "CLOSE_NOW":
+            if pnl_pct >= 5:
+                rr_assessment = "SELL RECOMMENDED: Secure profits while positive"
+            elif pnl_pct >= 0:
+                rr_assessment = "SELL RECOMMENDED: Exit at breakeven before potential loss"
+            else:
+                rr_assessment = f"SELL RECOMMENDED: Limit loss at {pnl_pct:.2f}%"
+        elif decision.action == "HOLD":
+            if risk_reward_if_held > 2.0:
+                rr_assessment = f"HOLD FAVORED: R:R of {risk_reward_if_held:.1f}:1 supports patience"
+            else:
+                rr_assessment = "HOLD ACCEPTABLE: Trend/setup still intact"
+        else:
+            rr_assessment = "NEUTRAL: Consider partial exit to reduce risk"
+        
+        # Market context
+        if trend == 'STRONGLY_BULLISH':
+            market_context = "Strong bullish momentum in market"
+        elif trend == 'BULLISH':
+            market_context = "Moderate bullish conditions"
+        elif trend == 'BEARISH':
+            market_context = "Bearish pressure present"
+        elif trend == 'STRONGLY_BEARISH':
+            market_context = "Strong bearish momentum - caution advised"
+        else:
+            market_context = "Neutral/consolidating market"
+        
+        # Time sensitivity
+        if decision.urgency == "HIGH":
+            time_sensitivity = "⚠️ URGENT: Immediate action recommended"
+        elif decision.urgency == "MEDIUM":
+            time_sensitivity = "⏰ Time-sensitive: Consider acting within the hour"
+        else:
+            time_sensitivity = "📊 Low urgency: Can monitor before deciding"
+        
+        # Calculate confidence scores
+        if decision.action == "CLOSE_NOW":
+            sell_confidence = decision.confidence
+            hold_confidence = 100 - decision.confidence
+        elif decision.action == "HOLD":
+            hold_confidence = decision.confidence
+            sell_confidence = 100 - decision.confidence
+        else:
+            sell_confidence = 50
+            hold_confidence = 50
+        
+        # Build summary
+        if decision.action == "CLOSE_NOW":
+            if exit_trigger == "STOP_LOSS":
+                summary = f"Stop loss triggered at ${current_price:,.6f}. Position down {pnl_pct:.2f}%. Trade thesis invalidated - recommend exit to preserve capital."
+            elif exit_trigger == "TAKE_PROFIT":
+                summary = f"🎯 Target achieved! Position up {pnl_pct:.2f}%. Recommend taking profits as original goal met."
+            else:
+                summary = f"AI analysis recommends closing position. Current P&L: {pnl_pct:+.2f}%. {decision.reasoning}"
+        else:
+            summary = f"Position showing {pnl_pct:+.2f}% P&L. AI recommends {decision.action.lower()} based on {trend.lower()} trend and technical indicators."
+        
+        # Build hold alternative reasoning - use AI-provided if available
+        ai_hold_case = decision.metadata.get('hold_case', '') if decision.metadata else ''
+        ai_sell_case = decision.metadata.get('sell_case', '') if decision.metadata else ''
+        ai_downside = decision.metadata.get('downside_risk', '') if decision.metadata else ''
+        ai_upside = decision.metadata.get('upside_potential', '') if decision.metadata else ''
+        
+        if decision.action == "CLOSE_NOW":
+            hold_alternative = ai_hold_case if ai_hold_case else f"If choosing to hold: Set mental stop at ${position.stop_loss:,.6f}, target remains ${position.take_profit:,.6f}. Requires trend reversal confirmation."
+        else:
+            hold_alternative = ai_hold_case if ai_hold_case else f"Continue holding with current parameters. Stop at ${position.stop_loss:,.6f}, target ${position.take_profit:,.6f}."
+        
+        # Enhance sell_rationale with AI-provided sell case
+        sell_rationale = decision.reasoning
+        if ai_sell_case and ai_sell_case not in sell_rationale:
+            sell_rationale = f"{decision.reasoning} {ai_sell_case}"
+        
+        # Use AI-provided downside/upside if available and more detailed
+        if ai_downside and len(ai_downside) > len(downside_risk):
+            downside_risk = ai_downside
+        if ai_upside and len(ai_upside) > len(upside_potential):
+            upside_potential = ai_upside
+        
+        return EnhancedExitReasoning(
+            summary=summary,
+            sell_rationale=sell_rationale,
+            sell_factors=sell_factors,
+            hold_alternative=hold_alternative,
+            hold_factors=hold_factors,
+            downside_risk=downside_risk,
+            upside_potential=upside_potential,
+            risk_reward_assessment=rr_assessment,
+            market_context=market_context,
+            sell_confidence=sell_confidence,
+            hold_confidence=hold_confidence,
+            time_sensitivity=time_sensitivity
+        )
     
     def execute_decision(self, trade_id: str, decision: AITradeDecision, skip_approval: bool = False) -> bool:
         """
@@ -1521,15 +1785,44 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             # 🔔 SEND DISCORD APPROVAL REQUEST
             if self.discord_approval_manager:
                 try:
-                    # Build detailed reasoning
-                    reasoning = (
-                        f"**AI Analysis:**\n{decision.reasoning}\n\n"
-                        f"**Technical Score:** {decision.technical_score:.0f}/100\n"
-                        f"**Trend Score:** {decision.trend_score:.0f}/100\n"
-                        f"**Risk Score:** {decision.risk_score:.0f}/100\n\n"
-                        f"**Current P&L:** {pnl_pct:+.2f}%\n"
-                        f"**Entry:** ${position.entry_price:,.6f}\n"
-                        f"**Current:** ${current_price:,.6f}"
+                    # Generate enhanced reasoning for detailed sell/hold analysis
+                    hold_time_hours = self._get_hold_time_hours(position)
+                    technical_data = self._get_technical_indicators(position.pair)
+                    
+                    # Determine exit trigger type
+                    if current_price <= position.stop_loss:
+                        exit_trigger = "STOP_LOSS"
+                    elif current_price >= position.take_profit:
+                        exit_trigger = "TAKE_PROFIT"
+                    else:
+                        exit_trigger = "AI_ANALYSIS"
+                    
+                    enhanced_reasoning = self._generate_enhanced_exit_reasoning(
+                        position=position,
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                        decision=decision,
+                        technical_data=technical_data,
+                        hold_time_hours=hold_time_hours,
+                        exit_trigger=exit_trigger
+                    )
+                    
+                    # Store enhanced reasoning in decision
+                    decision.enhanced_reasoning = enhanced_reasoning
+                    
+                    # Build detailed reasoning with enhanced sell/hold analysis
+                    reasoning = enhanced_reasoning.to_discord_format()
+                    
+                    # Add standard metrics below the enhanced analysis
+                    reasoning += (
+                        f"\n\n**📈 Technical Scores:**\n"
+                        f"  • Technical: {decision.technical_score:.0f}/100\n"
+                        f"  • Trend: {decision.trend_score:.0f}/100\n"
+                        f"  • Risk: {decision.risk_score:.0f}/100\n\n"
+                        f"**💰 Position Details:**\n"
+                        f"  • Current P&L: {pnl_pct:+.2f}%\n"
+                        f"  • Entry: ${position.entry_price:,.6f}\n"
+                        f"  • Current: ${current_price:,.6f}"
                     )
                     
                     # Determine position size in USD

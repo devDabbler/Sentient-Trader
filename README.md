@@ -49,6 +49,28 @@ The platform supports:
 * **💧 Liquidity Depth Analysis:** Validates execution viability at multiple price levels
 * **🎯 Confidence Scoring:** AI-enhanced technical analysis (when enabled)
 
+#### Enhanced Exit Reasoning (NEW - December 2025) ✅ PRODUCTION READY
+AI Position Manager now provides **detailed sell vs hold analysis** for every exit decision:
+* **📊 Dual-Perspective Analysis:** Every CLOSE_NOW recommendation includes both sell AND hold arguments
+  - Sell factors: Technical indicators, stop loss triggers, profit-taking rationale
+  - Hold factors: Trend continuation potential, R:R assessment, support levels
+* **⚠️ Risk Assessment:** Detailed breakdown of downside risk and upside potential
+  - Quantified loss potential if holding
+  - Potential gains if position recovers
+  - Risk/reward verdict for informed decisions
+* **🎯 AI Confidence Split:** Shows confidence in both sell and hold scenarios
+  - Sell confidence percentage (e.g., 75% sell, 25% hold)
+  - Helps traders understand AI certainty level
+* **⏱️ Time Sensitivity Indicators:** Urgency levels with actionable timeframes
+  - HIGH: Immediate action recommended
+  - MEDIUM: Consider acting within the hour
+  - LOW: Can monitor before deciding
+* **📱 Discord Integration:** Enhanced approval messages show full analysis
+  - Bullet-point sell reasons
+  - Bullet-point hold alternatives
+  - Clear risk/reward verdict
+  - Market context summary
+
 #### Stock Intelligence Monitor (ENHANCED - December 2025) ✅ PRODUCTION READY
 * **🎯 Multi-Pronged Analysis:** 4-stream detection (Technical + Events + ML + LLM)
   - Technical indicators (RSI, MACD, Bollinger Bands, Volume, Momentum)
