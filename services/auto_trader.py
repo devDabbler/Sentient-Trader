@@ -1995,6 +1995,61 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
                             if allocation:
                                 logger.info(f"💰 Allocated ${allocation.capital_allocated:,.2f} for {signal.symbol} ({strategy})")
                                 pass  # logger.info("📊 Capital status: ${} available ({self._capital_manager.get_utilization_pct():.1f}% utilization)", str(self._capital_manager.get_available_capital():,.2f))
+                        
+                        # STORE IN SIGNAL MEMORY (RAG for future pattern matching)
+                        try:
+                            from services.signal_memory import get_signal_memory_service
+                            import asyncio
+                            
+                            memory_service = get_signal_memory_service()
+                            if memory_service:
+                                # Get market context data
+                                rsi = getattr(signal, 'technical_score', 50)  # Use as proxy if RSI not available
+                                macd = 0.0
+                                vix = 20.0  # Default VIX
+                                
+                                # Try to get VIX from macro filter if available
+                                try:
+                                    from services.macro_market_filter import get_macro_filter
+                                    macro = get_macro_filter()
+                                    if macro:
+                                        context = macro.get_trading_context()
+                                        vix = context.get('vix_level', 20)
+                                        market_regime = context.get('regime', 'NEUTRAL')
+                                except Exception:
+                                    market_regime = 'NEUTRAL'
+                                
+                                # Store asynchronously
+                                trade_id = f"{signal.symbol}_{order_id}_{int(datetime.now().timestamp())}"
+                                
+                                async def store_signal():
+                                    await memory_service.store_signal(
+                                        ticker=signal.symbol,
+                                        strategy=self.config.trading_mode,
+                                        signal_type=signal.signal,
+                                        confidence=signal.confidence,
+                                        price=signal.entry_price,
+                                        volume=0,  # Volume not always available
+                                        rsi=rsi,
+                                        macd_histogram=macd,
+                                        vix=vix,
+                                        market_regime=market_regime,
+                                        trade_id=trade_id
+                                    )
+                                
+                                # Run in background
+                                try:
+                                    loop = asyncio.get_event_loop()
+                                    if loop.is_running():
+                                        asyncio.create_task(store_signal())
+                                    else:
+                                        loop.run_until_complete(store_signal())
+                                except Exception:
+                                    asyncio.run(store_signal())
+                                    
+                                logger.info(f"🧠 Stored signal in memory for pattern learning: {signal.symbol}")
+                        except Exception as mem_err:
+                            logger.debug(f"Could not store signal in memory (non-critical): {mem_err}")
                 except Exception as e:
                     logger.error(f"❌ Error recording trade in state manager: {e}")
                 

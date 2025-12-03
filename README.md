@@ -135,6 +135,25 @@ The platform supports:
   - Position size multipliers per regime
   - 15-minute cache TTL to reduce API load
 
+#### Signal Memory RAG (NEW - December 2025) ✅ PRODUCTION READY
+* **🧠 Pattern Memory System:** Vector embeddings for trading signal history
+  - **"What happened last time?"** - RAG-based similarity search for historical patterns
+  - **Automatic Confidence Adjustment:** Boost/reduce signal confidence based on historical outcomes
+  - **Dual Embedding Support:** OpenAI (cloud) or Ollama (local, FREE)
+* **📊 How It Works:**
+  - Every trade signal is stored with market context (RSI, MACD, VIX, regime)
+  - On new signals, finds similar historical patterns via vector similarity
+  - Adjusts confidence: +15% if similar patterns succeeded, -25% if they failed
+  - Tracks outcomes (WIN/LOSS) when positions close for continuous learning
+* **⚙️ Configuration:**
+  - Set `SIGNAL_MEMORY_EMBEDDING_PROVIDER=ollama` (default) or `openai`
+  - For Ollama: `ollama pull nomic-embed-text` (768 dims, FREE)
+  - For OpenAI: Uses text-embedding-ada-002 (1536 dims, ~$0.01/1000 signals)
+* **📈 Integration Points:**
+  - `ai_trading_signals.py` - Queries history before generating signals
+  - `auto_trader.py` - Stores signals after trade execution
+  - `position_exit_monitor.py` - Updates outcomes when positions close
+
 ---
 
 ## 🚀 Quick Start

@@ -47,3 +47,8 @@ base58>=2.1.1  # Base58 encoding for Solana addresses
 # Service Control Panel - 2FA Authentication
 pyotp>=2.9.0  # TOTP one-time passwords (Google Authenticator)
 qrcode[pil]>=7.4.0  # QR code generation for 2FA setup
+
+# Signal Memory RAG - Vector Embeddings for Trading Pattern Memory
+# Uses Ollama (local, FREE) by default. Set SIGNAL_MEMORY_EMBEDDING_PROVIDER=openai for cloud.
+# For Ollama local embeddings: ollama pull nomic-embed-text
+sentence-transformers>=2.2.0  # Optional: Local embeddings (alternative to Ollama)

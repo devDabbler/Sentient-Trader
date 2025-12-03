@@ -127,6 +127,12 @@ class AITradingSignalGenerator:
                 # Parse AI response into trading signal
                 signal = self._parse_signal(response, symbol)
                 if signal:
+                    # Apply Signal Memory RAG - adjust confidence based on historical patterns
+                    signal = self._apply_historical_adjustment(
+                        signal, 
+                        technical_data, 
+                        trading_style
+                    )
                     logger.success(f"✅ Successfully generated signal for {symbol}: {signal.signal} ({signal.confidence}%)")
                 else:
                     logger.error(f"❌ Failed to parse signal from response")
@@ -318,6 +324,79 @@ Analyze all the data above and provide a trading recommendation. Consider:
 """
         
         return prompt
+    
+    def _apply_historical_adjustment(
+        self,
+        signal: TradingSignal,
+        technical_data: Dict,
+        trading_style: str
+    ) -> TradingSignal:
+        """
+        Apply Signal Memory RAG - adjust confidence based on historical pattern performance.
+        
+        Uses vector similarity search to find similar historical signals and their outcomes.
+        If similar patterns have historically performed well, boost confidence.
+        If similar patterns have historically failed, reduce confidence.
+        """
+        try:
+            from services.signal_memory import get_historical_win_rate_sync
+            
+            # Extract market data for similarity search
+            rsi = technical_data.get('rsi', 50)
+            macd = technical_data.get('macd_histogram', 0) or technical_data.get('macd', 0)
+            price = technical_data.get('price', 0)
+            vix = technical_data.get('vix', 20)
+            market_regime = technical_data.get('market_regime', 'NEUTRAL')
+            
+            # Map trading style to strategy name
+            strategy_map = {
+                'DAY_TRADE': 'DAY_TRADE',
+                'SWING_TRADE': 'SWING_TRADE',
+                'SCALP': 'SCALPING',
+                'WARRIOR_SCALPING': 'WARRIOR_SCALPING',
+                'SLOW_SCALPER': 'SLOW_SCALPER',
+                'MICRO_SWING': 'MICRO_SWING',
+                'OPTIONS': 'OPTIONS'
+            }
+            strategy = strategy_map.get(trading_style, trading_style)
+            
+            # Get historical performance for similar signals
+            history = get_historical_win_rate_sync(
+                ticker=signal.symbol,
+                strategy=strategy,
+                signal_type=signal.signal,
+                price=price,
+                rsi=rsi,
+                macd=macd,
+                vix=vix,
+                market_regime=market_regime
+            )
+            
+            # Apply confidence adjustment based on historical performance
+            if history.get('sample_size', 0) >= 5:
+                adjustment = history.get('confidence_adjustment', 1.0)
+                recommendation = history.get('recommendation', 'NEUTRAL')
+                win_rate = history.get('win_rate', 0)
+                
+                if adjustment != 1.0:
+                    original_confidence = signal.confidence
+                    signal.confidence = min(100, max(0, signal.confidence * adjustment))
+                    
+                    if recommendation == 'BOOST':
+                        logger.info(f"📈 Historical boost for {signal.symbol}: {original_confidence:.1f}% → {signal.confidence:.1f}% (win rate: {win_rate:.1%})")
+                        signal.reasoning += f" [Historical boost: {win_rate:.0%} win rate on similar patterns]"
+                    elif recommendation == 'REDUCE':
+                        logger.warning(f"📉 Historical caution for {signal.symbol}: {original_confidence:.1f}% → {signal.confidence:.1f}% (win rate: {win_rate:.1%})")
+                        signal.reasoning += f" [Historical caution: {win_rate:.0%} win rate on similar patterns]"
+            
+            return signal
+            
+        except ImportError:
+            logger.debug("Signal Memory service not available, skipping historical adjustment")
+            return signal
+        except Exception as e:
+            logger.debug(f"Historical adjustment failed (non-critical): {e}")
+            return signal
     
     def _clean_json_string(self, json_str: str) -> str:
         """Clean JSON string to handle malformed responses from LLM"""

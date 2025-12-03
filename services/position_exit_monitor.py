@@ -557,6 +557,55 @@ class PositionExitMonitor:
                     reason=exit_reason.value
                 )
                 
+                # UPDATE SIGNAL MEMORY with trade outcome (RAG learning)
+                try:
+                    from services.signal_memory import get_signal_memory_service
+                    import asyncio
+                    
+                    memory_service = get_signal_memory_service()
+                    if memory_service:
+                        # Calculate holding period
+                        holding_hours = int((datetime.now() - position.entry_time).total_seconds() / 3600)
+                        outcome = "WIN" if pnl > 0 else "LOSS"
+                        
+                        # Try to find trade_id from state manager or journal
+                        trade_id = None
+                        try:
+                            from services.unified_trade_journal import get_unified_journal
+                            journal = get_unified_journal()
+                            recent_trades = journal.get_trades(symbol=symbol, status="OPEN", limit=5)
+                            if recent_trades:
+                                trade_id = recent_trades[0].trade_id
+                        except Exception:
+                            pass
+                        
+                        async def update_outcome():
+                            if trade_id:
+                                await memory_service.update_outcome_by_trade_id(
+                                    trade_id=trade_id,
+                                    outcome=outcome,
+                                    pnl_pct=pnl_pct,
+                                    holding_period_hours=holding_hours
+                                )
+                            else:
+                                # Fallback: Try to find by ticker/strategy (less precise)
+                                logger.debug(f"No trade_id found for {symbol}, signal memory update skipped")
+                        
+                        # Run async update
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.create_task(update_outcome())
+                            else:
+                                loop.run_until_complete(update_outcome())
+                        except Exception:
+                            asyncio.run(update_outcome())
+                        
+                        emoji = "✅" if outcome == "WIN" else "❌"
+                        logger.info(f"🧠 {emoji} Updated signal memory: {symbol} {outcome} ({pnl_pct:+.2f}%)")
+                except Exception as mem_err:
+                    logger.debug(f"Could not update signal memory (non-critical): {mem_err}")
+                
                 # Release capital
                 if self.capital_manager:
                     self.capital_manager.release_capital(symbol, pnl=pnl)
