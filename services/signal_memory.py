@@ -590,3 +590,209 @@ def get_historical_win_rate_sync(**kwargs) -> Dict[str, Any]:
         except Exception as e:
             logger.debug(f"get_historical_win_rate_sync failed: {e}")
     return {"recommendation": "INSUFFICIENT_DATA", "confidence_adjustment": 1.0, "sample_size": 0}
+
+
+# ============================================================
+# CRYPTO-SPECIFIC HELPERS
+# ============================================================
+
+def get_crypto_historical_performance(
+    symbol: str,
+    strategy: str,
+    signal_type: str,
+    price: float,
+    rsi: float = 50.0,
+    volume_ratio: float = 1.0,
+    change_24h: float = 0.0
+) -> Dict[str, Any]:
+    """
+    Get historical performance for crypto signals - simplified interface.
+    
+    Args:
+        symbol: Crypto pair (e.g., 'BTC/USD')
+        strategy: Strategy name (e.g., 'BREAKOUT', 'BUZZING')
+        signal_type: 'BUY' or 'SELL'
+        price: Current price
+        rsi: RSI value (default 50)
+        volume_ratio: Volume vs average (default 1.0)
+        change_24h: 24h price change percentage
+        
+    Returns:
+        {
+            "win_rate": float or None,
+            "avg_pnl": float or None,
+            "sample_size": int,
+            "recommendation": str,  # 'BOOST', 'REDUCE', 'NEUTRAL', 'INSUFFICIENT_DATA'
+            "confidence_adjustment": float,
+            "similar_patterns": int
+        }
+    """
+    # Map 24h change to approximate MACD histogram
+    macd_estimate = change_24h / 10.0  # Rough approximation
+    
+    # Crypto markets are 24/7, use a default "moderate" VIX equivalent
+    crypto_volatility = min(40, max(10, abs(change_24h) * 2 + 15))
+    
+    # Determine market regime from price action
+    if change_24h > 5:
+        market_regime = 'BULLISH'
+    elif change_24h < -5:
+        market_regime = 'BEARISH'
+    elif volume_ratio > 2:
+        market_regime = 'VOLATILE'
+    else:
+        market_regime = 'NEUTRAL'
+    
+    result = get_historical_win_rate_sync(
+        ticker=symbol,
+        strategy=f"CRYPTO_{strategy}",  # Prefix to separate from stock strategies
+        signal_type=signal_type,
+        price=price,
+        rsi=rsi,
+        macd=macd_estimate,
+        vix=crypto_volatility,
+        market_regime=market_regime
+    )
+    
+    result['similar_patterns'] = result.get('sample_size', 0)
+    return result
+
+
+def store_crypto_signal(
+    symbol: str,
+    strategy: str,
+    signal_type: str,
+    confidence: float,
+    price: float,
+    rsi: float = 50.0,
+    volume_ratio: float = 1.0,
+    change_24h: float = 0.0,
+    trade_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    Store a crypto trading signal for future pattern matching.
+    
+    Args:
+        symbol: Crypto pair (e.g., 'BTC/USD')
+        strategy: Strategy name (e.g., 'BREAKOUT', 'BUZZING')
+        signal_type: 'BUY' or 'SELL'
+        confidence: Signal confidence (0-100)
+        price: Entry price
+        rsi: RSI value
+        volume_ratio: Volume vs average
+        change_24h: 24h price change percentage
+        trade_id: Optional trade ID for outcome tracking
+        
+    Returns:
+        Signal ID if stored successfully, None otherwise
+    """
+    service = get_signal_memory_service()
+    if not service:
+        return None
+    
+    try:
+        # Map crypto metrics to signal memory format
+        macd_estimate = change_24h / 10.0
+        crypto_volatility = min(40, max(10, abs(change_24h) * 2 + 15))
+        
+        if change_24h > 5:
+            market_regime = 'BULLISH'
+        elif change_24h < -5:
+            market_regime = 'BEARISH'
+        elif volume_ratio > 2:
+            market_regime = 'VOLATILE'
+        else:
+            market_regime = 'NEUTRAL'
+        
+        # Use sync wrapper pattern
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    service.store_signal(
+                        ticker=symbol,
+                        strategy=f"CRYPTO_{strategy}",
+                        signal_type=signal_type,
+                        confidence=confidence,
+                        price=price,
+                        volume=int(volume_ratio * 1000),  # Store as relative volume
+                        rsi=rsi,
+                        macd_histogram=macd_estimate,
+                        vix=crypto_volatility,
+                        market_regime=market_regime,
+                        trade_id=trade_id
+                    )
+                )
+                return future.result()
+        except RuntimeError:
+            return asyncio.run(
+                service.store_signal(
+                    ticker=symbol,
+                    strategy=f"CRYPTO_{strategy}",
+                    signal_type=signal_type,
+                    confidence=confidence,
+                    price=price,
+                    volume=int(volume_ratio * 1000),
+                    rsi=rsi,
+                    macd_histogram=macd_estimate,
+                    vix=crypto_volatility,
+                    market_regime=market_regime,
+                    trade_id=trade_id
+                )
+            )
+    except Exception as e:
+        logger.debug(f"store_crypto_signal failed: {e}")
+        return None
+
+
+def update_crypto_signal_outcome(
+    trade_id: str,
+    outcome: str,
+    pnl_pct: float,
+    holding_hours: int = 0
+) -> bool:
+    """
+    Update a crypto signal with its outcome after trade closes.
+    
+    Args:
+        trade_id: Trade ID used when storing the signal
+        outcome: 'WIN' or 'LOSS'
+        pnl_pct: Profit/loss percentage
+        holding_hours: Hours position was held
+        
+    Returns:
+        True if updated successfully
+    """
+    service = get_signal_memory_service()
+    if not service:
+        return False
+    
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    service.update_outcome_by_trade_id(
+                        trade_id=trade_id,
+                        outcome=outcome,
+                        pnl_pct=pnl_pct,
+                        holding_period_hours=holding_hours
+                    )
+                )
+                return future.result()
+        except RuntimeError:
+            return asyncio.run(
+                service.update_outcome_by_trade_id(
+                    trade_id=trade_id,
+                    outcome=outcome,
+                    pnl_pct=pnl_pct,
+                    holding_period_hours=holding_hours
+                )
+            )
+    except Exception as e:
+        logger.debug(f"update_crypto_signal_outcome failed: {e}")
+        return False

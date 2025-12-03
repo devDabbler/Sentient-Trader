@@ -649,7 +649,47 @@ class CryptoBreakoutMonitor:
                 logger.debug(f"   🤖 {breakout.symbol} skipped - AI confidence {breakout.ai_confidence} < min {self.min_confidence}")
                 return False
         
+        # 🧠 Check Signal Memory for historical pattern performance (RAG)
+        try:
+            from services.signal_memory import get_crypto_historical_performance
+            
+            history = get_crypto_historical_performance(
+                symbol=breakout.symbol,
+                strategy=breakout.alert_type,
+                signal_type='BUY',
+                price=breakout.price,
+                rsi=breakout.rsi,
+                volume_ratio=breakout.volume_ratio,
+                change_24h=breakout.change_24h
+            )
+            
+            if history.get('sample_size', 0) >= 5:
+                recommendation = history.get('recommendation', 'NEUTRAL')
+                win_rate = history.get('win_rate', 0)
+                adjustment = history.get('confidence_adjustment', 1.0)
+                
+                # Apply confidence adjustment to score
+                if adjustment != 1.0:
+                    original_score = breakout.score
+                    breakout.score = min(100, breakout.score * adjustment)
+                    
+                    if recommendation == 'BOOST':
+                        logger.info(f"   📈 Historical boost for {breakout.symbol}: score {original_score:.1f} → {breakout.score:.1f} (win rate: {win_rate:.0%})")
+                        breakout.ai_reasoning = f"{breakout.ai_reasoning or ''} [Historical: {win_rate:.0%} win rate]".strip()
+                    elif recommendation == 'REDUCE':
+                        logger.warning(f"   📉 Historical caution for {breakout.symbol}: score {original_score:.1f} → {breakout.score:.1f} (win rate: {win_rate:.0%})")
+                        breakout.ai_reasoning = f"{breakout.ai_reasoning or ''} [⚠️ Historical: {win_rate:.0%} win rate]".strip()
+                        
+                        # If score dropped below threshold after adjustment, skip
+                        if breakout.score < self.min_score:
+                            logger.warning(f"   ⛔ {breakout.symbol} skipped - adjusted score {breakout.score:.1f} < min {self.min_score}")
+                            return False
+                            
+        except Exception as e:
+            logger.debug(f"   Could not check signal memory (non-critical): {e}")
+        
         logger.info(f"   ✅ {breakout.symbol} PASSED all filters (score={breakout.score:.1f}, conf={breakout.confidence}, ai_conf={breakout.ai_confidence})")
+        return True
         return True
     
     def _send_alert(self, breakout: BreakoutAlert):

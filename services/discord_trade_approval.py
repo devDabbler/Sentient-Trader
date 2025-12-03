@@ -1345,6 +1345,44 @@ class DiscordTradeApprovalBot(commands.Bot):
             
             await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
             
+            # Check Signal Memory for historical pattern performance (RAG)
+            historical_adjustment = 1.0
+            historical_info = ""
+            try:
+                from services.signal_memory import get_crypto_historical_performance
+                
+                # Get alert data values or defaults
+                score = alert_data.get('score', 75) if alert_data else 75
+                rsi = alert_data.get('rsi', 50) if alert_data else 50
+                change_24h = alert_data.get('change_24h', 0) if alert_data else 0
+                volume_ratio = alert_data.get('volume_ratio', 1) if alert_data else 1
+                price = alert_data.get('price', 0) if alert_data else 0
+                
+                history = get_crypto_historical_performance(
+                    symbol=symbol,
+                    strategy=alert_data.get('alert_type', 'DISCORD_TRADE') if alert_data else 'DISCORD_TRADE',
+                    signal_type='BUY',
+                    price=price,
+                    rsi=rsi,
+                    volume_ratio=volume_ratio,
+                    change_24h=change_24h
+                )
+                
+                if history.get('sample_size', 0) >= 3:
+                    recommendation = history.get('recommendation', 'NEUTRAL')
+                    win_rate = history.get('win_rate', 0)
+                    historical_adjustment = history.get('confidence_adjustment', 1.0)
+                    
+                    if recommendation == 'BOOST':
+                        historical_info = f"📈 Historical: {win_rate:.0%} win rate on similar patterns"
+                        await message.channel.send(f"🧠 {historical_info}")
+                    elif recommendation == 'REDUCE':
+                        historical_info = f"⚠️ Historical: {win_rate:.0%} win rate on similar patterns"
+                        await message.channel.send(f"🧠 {historical_info}")
+                        
+            except Exception as hist_err:
+                logger.debug(f"Could not check signal memory (non-critical): {hist_err}")
+            
             # Get current price and calculate trade parameters
             def _get_trade_params():
                 try:
@@ -1364,6 +1402,9 @@ class DiscordTradeApprovalBot(commands.Bot):
                     
                     # Use alert data if available, otherwise use defaults
                     score = alert_data.get('score', 75) if alert_data else 75
+                    
+                    # Apply historical adjustment to score
+                    adjusted_score = min(100, score * historical_adjustment)
                     
                     # Calculate stop loss and take profit (2% stop, 4% target default)
                     stop_loss_pct = 0.02

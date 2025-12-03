@@ -473,6 +473,29 @@ class AICryptoPositionManager:
             except Exception as e:
                 logger.debug(f"Could not log to unified journal: {e}")
             
+            # Store in Signal Memory for pattern learning (RAG)
+            try:
+                from services.signal_memory import store_crypto_signal
+                
+                signal_id = store_crypto_signal(
+                    symbol=pair,
+                    strategy=strategy,
+                    signal_type=side,
+                    confidence=75.0,  # Default confidence for manual trades
+                    price=entry_price,
+                    rsi=50.0,  # Will be updated with real values when available
+                    volume_ratio=1.0,
+                    change_24h=0.0,
+                    trade_id=trade_id
+                )
+                
+                if signal_id:
+                    logger.info(f"🧠 Stored crypto signal in memory for pattern learning: {pair}")
+                    # Store signal_id in position for outcome tracking
+                    position.signal_memory_id = signal_id if hasattr(position, 'signal_memory_id') else None
+            except Exception as mem_err:
+                logger.debug(f"Could not store signal in memory (non-critical): {mem_err}")
+            
             return True
             
         except Exception as e:
@@ -1422,6 +1445,27 @@ Analyze the position using these factors:
                     logger.debug(f"📝 Updated journal with trade exit: {position.trade_id}")
                 except Exception as e:
                     logger.debug(f"Could not update journal with exit: {e}")
+                
+                # Update Signal Memory with outcome (RAG learning)
+                try:
+                    from services.signal_memory import update_crypto_signal_outcome
+                    
+                    # Calculate holding time
+                    holding_hours = int((datetime.now() - position.entry_time).total_seconds() / 3600)
+                    outcome = "WIN" if pnl_pct > 0 else "LOSS"
+                    
+                    updated = update_crypto_signal_outcome(
+                        trade_id=position.trade_id,
+                        outcome=outcome,
+                        pnl_pct=pnl_pct,
+                        holding_hours=holding_hours
+                    )
+                    
+                    if updated:
+                        emoji = "✅" if outcome == "WIN" else "❌"
+                        logger.info(f"🧠 {emoji} Updated signal memory: {position.pair} {outcome} ({pnl_pct:+.2f}%)")
+                except Exception as mem_err:
+                    logger.debug(f"Could not update signal memory outcome (non-critical): {mem_err}")
                 
                 # Remove from monitoring
                 position.status = PositionStatus.CLOSED.value
