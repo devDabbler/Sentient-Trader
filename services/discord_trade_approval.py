@@ -235,7 +235,11 @@ class DiscordTradeApprovalBot(commands.Bot):
         self._processed_messages: set = set()
         self._max_processed_cache = 100  # Keep last 100 message IDs
         
-        # 🛡️ TRADE DEDUPLICATION - prevent double trades within cooldown window
+        # 🛡️ ANALYSIS DEDUPLICATION - prevent double analysis when multiple bots or reconnects
+        self._recent_analysis_requests: Dict[str, datetime] = {}  # {symbol_mode: last_request_time}
+        self._analysis_cooldown_seconds = 10  # Minimum seconds between analyses for same symbol+mode
+        
+        # 🛡️ TRADE DEDUPLICATION - prevent double trades when multiple bots or reconnects
         self._recent_trade_requests: Dict[str, datetime] = {}  # {symbol: last_trade_time}
         self._trade_cooldown_seconds = 30  # Minimum seconds between trades for same symbol
         
@@ -618,12 +622,6 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send("⚠️ Could not retrieve original message context.")
             return
 
-        # 🛡️ DUPLICATE PREVENTION: Only respond to messages from THIS bot
-        # Prevents double-processing when multiple bots are in the same channel
-        if ref_msg.author != self.user:
-            logger.debug(f"   ↳ Ignoring reply to message from {ref_msg.author.name} (not our bot)")
-            return
-
         # Extract symbol from the referenced message embed or content
         target_symbol = None
         
@@ -713,28 +711,6 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         # TRADE EXECUTION COMMANDS - Route to appropriate handler based on asset type
         elif content in ['T', 'TRADE', 'EXECUTE', 'BUY', 'ENTER']:
-            # 🛡️ TRADE DEDUPLICATION: Check cooldown to prevent double trades
-            if target_symbol in self._recent_trade_requests:
-                last_trade_time = self._recent_trade_requests[target_symbol]
-                elapsed = (datetime.now() - last_trade_time).total_seconds()
-                if elapsed < self._trade_cooldown_seconds:
-                    remaining = int(self._trade_cooldown_seconds - elapsed)
-                    await message.channel.send(
-                        f"⏳ **Trade Cooldown:** {target_symbol} was just traded {elapsed:.0f}s ago.\n"
-                        f"Wait {remaining}s or check your positions."
-                    )
-                    return
-            
-            # Record this trade request
-            self._recent_trade_requests[target_symbol] = datetime.now()
-            
-            # Clean up old entries (older than 5 minutes)
-            cutoff = datetime.now() - timedelta(minutes=5)
-            self._recent_trade_requests = {
-                sym: t for sym, t in self._recent_trade_requests.items() 
-                if t > cutoff
-            }
-            
             # Check if crypto (contains /) or stock
             if "/" in target_symbol:
                 # Crypto trade - use crypto position manager
@@ -1295,6 +1271,27 @@ class DiscordTradeApprovalBot(commands.Bot):
         from windows_services.runners.service_config_loader import queue_analysis_request
         
         try:
+            # 🛡️ ANALYSIS DEDUPLICATION: Check cooldown to prevent double analysis
+            # This catches cases where multiple bot instances or Discord reconnects cause duplicate processing
+            cache_key = f"{symbol.upper()}_{mode}"
+            if cache_key in self._recent_analysis_requests:
+                last_request_time = self._recent_analysis_requests[cache_key]
+                elapsed = (datetime.now() - last_request_time).total_seconds()
+                if elapsed < self._analysis_cooldown_seconds:
+                    logger.warning(f"⏳ Duplicate analysis blocked: {symbol} {mode} (requested {elapsed:.1f}s ago)")
+                    # Don't send message - silently ignore duplicate
+                    return
+            
+            # Record this analysis request
+            self._recent_analysis_requests[cache_key] = datetime.now()
+            
+            # Clean up old entries (older than 2 minutes)
+            cutoff = datetime.now() - timedelta(minutes=2)
+            self._recent_analysis_requests = {
+                k: t for k, t in self._recent_analysis_requests.items() 
+                if t > cutoff
+            }
+            
             # Determine asset type
             asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOGE", "XRP"] else "stock"
             
@@ -1374,6 +1371,29 @@ class DiscordTradeApprovalBot(commands.Bot):
             # Ensure we have a valid crypto pair format
             if "/" not in symbol:
                 symbol = f"{symbol}/USD"
+            
+            # 🛡️ TRADE DEDUPLICATION: Check cooldown to prevent double trades
+            if symbol in self._recent_trade_requests:
+                last_trade_time = self._recent_trade_requests[symbol]
+                elapsed = (datetime.now() - last_trade_time).total_seconds()
+                if elapsed < self._trade_cooldown_seconds:
+                    remaining = int(self._trade_cooldown_seconds - elapsed)
+                    logger.warning(f"⏳ Duplicate crypto trade blocked: {symbol} (traded {elapsed:.1f}s ago)")
+                    await message.channel.send(
+                        f"⏳ **Trade Cooldown:** {symbol} was just traded {elapsed:.0f}s ago.\n"
+                        f"Wait {remaining}s or check your positions."
+                    )
+                    return {'success': False, 'error': 'Trade cooldown active'}
+            
+            # Record this trade request
+            self._recent_trade_requests[symbol] = datetime.now()
+            
+            # Clean up old entries (older than 5 minutes)
+            cutoff = datetime.now() - timedelta(minutes=5)
+            self._recent_trade_requests = {
+                sym: t for sym, t in self._recent_trade_requests.items() 
+                if t > cutoff
+            }
             
             await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
             
@@ -1556,6 +1576,29 @@ class DiscordTradeApprovalBot(commands.Bot):
             paper_mode: If True, use paper trading regardless of config
         """
         import asyncio
+        
+        # 🛡️ TRADE DEDUPLICATION: Check cooldown to prevent double trades
+        if symbol.upper() in self._recent_trade_requests:
+            last_trade_time = self._recent_trade_requests[symbol.upper()]
+            elapsed = (datetime.now() - last_trade_time).total_seconds()
+            if elapsed < self._trade_cooldown_seconds:
+                remaining = int(self._trade_cooldown_seconds - elapsed)
+                logger.warning(f"⏳ Duplicate stock trade blocked: {symbol} (traded {elapsed:.1f}s ago)")
+                await message.channel.send(
+                    f"⏳ **Trade Cooldown:** {symbol} was just traded {elapsed:.0f}s ago.\n"
+                    f"Wait {remaining}s or check your positions."
+                )
+                return
+        
+        # Record this trade request
+        self._recent_trade_requests[symbol.upper()] = datetime.now()
+        
+        # Clean up old entries (older than 5 minutes)
+        cutoff = datetime.now() - timedelta(minutes=5)
+        self._recent_trade_requests = {
+            sym: t for sym, t in self._recent_trade_requests.items() 
+            if t > cutoff
+        }
         
         try:
             from services.ai_stock_position_manager import get_ai_stock_position_manager
