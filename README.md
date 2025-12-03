@@ -809,11 +809,35 @@ ps aux | grep python      # Linux
 
 ## 📊 Performance & Scale
 
+### Backend Performance
 - **DEX Hunter**: Analyzes 50+ token launches per 5-minute scan cycle
 - **Holder Analysis**: 90% reduction in RPC calls via optimized strategy
 - **Rate Limiting**: Handles 429 errors gracefully with exponential backoff
 - **Data Sources**: DexScreener, Pump.fun, Birdeye, X/Twitter, Solana RPC
 - **Supported Chains**: Ethereum, BSC, Solana, Base, and others (via DexScreener)
+
+### UI Performance Optimizations (December 2025)
+Comprehensive Streamlit performance improvements for faster UX:
+
+- **Cached Data Loading**: File I/O operations cached with 10-30s TTL
+  - Service status checks cached (10s TTL)
+  - Analysis results/requests cached (5-10s TTL)
+  - Watchlists and settings cached (30s TTL)
+- **Debounced Actions**: Prevents double-click issues and rapid-fire requests
+  - Button clicks debounced (0.5s cooldown)
+  - Expensive operations rate-limited (2s minimum interval)
+- **Smart Reruns**: Reduces unnecessary full-page refreshes
+  - Toast notifications for instant feedback (no rerun needed)
+  - Batched state updates before single rerun
+  - Cache invalidation on data changes triggers fresh load
+- **Fragment Support**: Partial page updates (Streamlit 1.33+)
+  - Auto-refresh sections without full page reload
+  - Independent widget groups for isolated updates
+- **Performance Utilities**: `utils/streamlit_performance.py`
+  - `@cached_operation(ttl)` decorator for expensive functions
+  - `debounced_action(id)` for button click protection
+  - `smart_rerun(reason)` for controlled page refreshes
+  - `@fragment_safe(run_every)` for partial updates
 
 ---
 

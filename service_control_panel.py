@@ -27,6 +27,17 @@ import importlib
 from typing import Any, Optional
 import platform
 import binascii
+import functools
+
+# Performance utilities for faster UX
+from utils.streamlit_performance import (
+    debounced_action, 
+    show_action_result,
+    smart_rerun,
+    fragment_safe,
+    init_performance_state,
+    cached_operation
+)
 
 # Try to import TOTP library dynamically to avoid static linter errors when dev env
 # doesn't have these optional dependencies installed.  Uses importlib so Pylance
@@ -284,8 +295,9 @@ SERVICES = {
 # SERVICE INTERVAL FUNCTIONS
 # ============================================================
 
+@st.cache_data(ttl=30)
 def load_service_intervals() -> dict:
-    """Load service intervals from JSON file"""
+    """Load service intervals from JSON file with 30s cache"""
     try:
         if SERVICE_INTERVALS_FILE.exists():
             with open(SERVICE_INTERVALS_FILE, 'r') as f:
@@ -296,11 +308,13 @@ def load_service_intervals() -> dict:
 
 
 def save_service_intervals(intervals: dict) -> bool:
-    """Save service intervals to JSON file"""
+    """Save service intervals to JSON file and invalidate cache"""
     try:
         SERVICE_INTERVALS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SERVICE_INTERVALS_FILE, 'w') as f:
             json.dump(intervals, f, indent=4)
+        # Invalidate cache after save
+        load_service_intervals.clear()
         return True
     except Exception as e:
         print(f"Error saving service intervals: {e}")
@@ -353,8 +367,9 @@ def set_service_interval(service_name: str, svc_info: dict, new_interval: int) -
 # WATCHLIST MANAGEMENT
 # ============================================================
 
+@st.cache_data(ttl=30)
 def load_service_watchlists() -> dict:
-    """Load service-specific watchlists from JSON file"""
+    """Load service-specific watchlists from JSON file with 30s cache"""
     try:
         if SERVICE_WATCHLISTS_FILE.exists():
             with open(SERVICE_WATCHLISTS_FILE, 'r') as f:
@@ -365,11 +380,13 @@ def load_service_watchlists() -> dict:
 
 
 def save_service_watchlists(watchlists: dict) -> bool:
-    """Save service watchlists to JSON file"""
+    """Save service watchlists to JSON file and invalidate cache"""
     try:
         SERVICE_WATCHLISTS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SERVICE_WATCHLISTS_FILE, 'w') as f:
             json.dump(watchlists, f, indent=4)
+        # Invalidate cache after save
+        load_service_watchlists.clear()
         return True
     except Exception as e:
         print(f"Error saving service watchlists: {e}")
@@ -499,14 +516,18 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = Non
             json.dump(requests, f, indent=2)
             f.flush()
             os.fsync(f.fileno())
+        
+        # Invalidate cache after adding request
+        get_analysis_requests.clear()
         return True
     except Exception as e:
         print(f"Error queuing analysis: {e}")
         return False
 
 
+@st.cache_data(ttl=5)
 def get_analysis_requests() -> list:
-    """Get pending analysis requests"""
+    """Get pending analysis requests with 5s cache"""
     try:
         if ANALYSIS_REQUESTS_FILE.exists():
             with open(ANALYSIS_REQUESTS_FILE, 'r') as f:
@@ -517,7 +538,7 @@ def get_analysis_requests() -> list:
 
 
 def clear_analysis_requests() -> bool:
-    """Clear all analysis requests"""
+    """Clear all analysis requests and invalidate cache"""
     import os
     try:
         # Ensure parent directory exists
@@ -526,6 +547,8 @@ def clear_analysis_requests() -> bool:
             json.dump([], f)
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
+        # Invalidate cache after clear
+        get_analysis_requests.clear()
         print(f"[INFO] Cleared analysis requests file: {ANALYSIS_REQUESTS_FILE}")
         return True
     except Exception as e:
@@ -534,7 +557,7 @@ def clear_analysis_requests() -> bool:
 
 
 def clear_analysis_results() -> bool:
-    """Clear all analysis results with verification"""
+    """Clear all analysis results with verification and cache invalidation"""
     import os
     try:
         # Ensure parent directory exists
@@ -547,6 +570,9 @@ def clear_analysis_results() -> bool:
             json.dump({}, f)
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
+        
+        # Invalidate cache after clear
+        get_analysis_results.clear()
         
         # Verify the clear worked
         size_after = ANALYSIS_RESULTS_FILE.stat().st_size
@@ -576,8 +602,9 @@ def clear_analysis_results() -> bool:
 # DISCORD SETTINGS MANAGEMENT
 # ============================================================
 
+@st.cache_data(ttl=30)
 def load_discord_settings() -> dict:
-    """Load Discord settings for all services"""
+    """Load Discord settings for all services with 30s cache"""
     try:
         if SERVICE_DISCORD_FILE.exists():
             with open(SERVICE_DISCORD_FILE, 'r') as f:
@@ -588,11 +615,13 @@ def load_discord_settings() -> dict:
 
 
 def save_discord_settings(settings: dict) -> bool:
-    """Save Discord settings"""
+    """Save Discord settings and invalidate cache"""
     try:
         SERVICE_DISCORD_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(SERVICE_DISCORD_FILE, 'w') as f:
             json.dump(settings, f, indent=4)
+        # Invalidate cache after save
+        load_discord_settings.clear()
         return True
     except Exception as e:
         print(f"Error saving discord settings: {e}")
@@ -724,8 +753,9 @@ def add_manual_alert(symbol: str, alert_type: str = "WATCH", asset_type: str = "
 # ANALYSIS RESULTS
 # ============================================================
 
+@st.cache_data(ttl=10)
 def get_analysis_results() -> dict:
-    """Get analysis results from all services"""
+    """Get analysis results from all services with 10s cache"""
     try:
         if ANALYSIS_RESULTS_FILE.exists():
             with open(ANALYSIS_RESULTS_FILE, 'r') as f:
@@ -869,8 +899,9 @@ def run_command(cmd: str) -> tuple:
         return False, str(e)
 
 
+@st.cache_data(ttl=10)
 def get_service_status(service_name: str) -> dict:
-    """Get status of a service. Uses systemd/journalctl on Linux and sc/Get-Service on Windows."""
+    """Get status of a service with 10s cache. Uses systemd/journalctl on Linux and sc/Get-Service on Windows."""
     if platform.system().lower().startswith('win'):
         windows_name_map = {
             'sentient-stock-monitor': 'SentientStockMonitor',
@@ -922,7 +953,10 @@ def get_service_status(service_name: str) -> dict:
 
 def control_service(service_name: str, action: str) -> tuple:
     """Start, stop, restart, enable, or disable a service.
-    Uses systemctl on Linux and sc/Get-Service on Windows."""
+    Uses systemctl on Linux and sc/Get-Service on Windows.
+    Invalidates status cache after action."""
+    result = None
+    
     if platform.system().lower().startswith('win'):
         # Map systemd-style names to Windows service names
         windows_name_map = {
@@ -937,25 +971,20 @@ def control_service(service_name: str, action: str) -> tuple:
         svc_to_control = windows_name_map.get(service_name, service_name)
         
         # On Windows try sc start/stop for built-in service control; nssm can also be used
-        action_map = {
-            'start': 'start',
-            'stop': 'stop',
-            'restart': 'stop'  # implement restart via stop+start
-        }
         if action == 'restart':
             # perform stop then start
             ok1, out1 = run_command(f"sc stop {svc_to_control}")
             time.sleep(1)
             ok2, out2 = run_command(f"sc start {svc_to_control}")
-            return ok1 and ok2, out1 + "\n" + out2
+            result = ok1 and ok2, out1 + "\n" + out2
         elif action in ['start', 'stop']:
-            return run_command(f"sc {action} {svc_to_control}")
+            result = run_command(f"sc {action} {svc_to_control}")
         elif action == 'enable':
-            return run_command(f"sc config {svc_to_control} start= auto")
+            result = run_command(f"sc config {svc_to_control} start= auto")
         elif action == 'disable':
-            return run_command(f"sc config {svc_to_control} start= disabled")
+            result = run_command(f"sc config {svc_to_control} start= disabled")
         else:
-            return False, f"Unknown action: {action}"
+            result = False, f"Unknown action: {action}"
     else:
         if action in ["start", "stop", "restart"]:
             cmd = f"sudo systemctl {action} {service_name}"
@@ -964,8 +993,14 @@ def control_service(service_name: str, action: str) -> tuple:
         elif action == "disable":
             cmd = f"sudo systemctl disable {service_name}"
         else:
-            return False, f"Unknown action: {action}"
-        return run_command(cmd)
+            result = False, f"Unknown action: {action}"
+        if result is None:
+            result = run_command(cmd)
+    
+    # Invalidate service status cache after control action
+    get_service_status.clear()
+    
+    return result
 
 
 def get_service_logs(service_name: str, lines: int = 100) -> str:
@@ -1386,8 +1421,8 @@ def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_t
                     success = tm.add_ticker(new_ticker, ticker_type=sub_type if ticker_type == "stock" else ticker_type)
                 
                 if success:
-                    st.success(f"Added {new_ticker} to {category_name}")
-                    st.rerun()
+                    st.toast(f"✅ Added {new_ticker} to {category_name}")
+                    smart_rerun("add_ticker")
                 else:
                     st.error("Failed to add ticker")
     
@@ -1402,12 +1437,14 @@ def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_t
         btn_col1, btn_col2 = st.columns(2)
         with btn_col1:
             if st.button("✅ Select All", key=f"{key_prefix}_select_all", use_container_width=True):
-                st.session_state[f"{key_prefix}_selected"] = ticker_list.copy()
-                st.rerun()
+                if debounced_action(f"{key_prefix}_select_all"):
+                    st.session_state[f"{key_prefix}_selected"] = ticker_list.copy()
+                    smart_rerun("select_all")
         with btn_col2:
             if st.button("❌ Clear Selection", key=f"{key_prefix}_clear_all", use_container_width=True):
-                st.session_state[f"{key_prefix}_selected"] = []
-                st.rerun()
+                if debounced_action(f"{key_prefix}_clear_all"):
+                    st.session_state[f"{key_prefix}_selected"] = []
+                    smart_rerun("clear_selection")
         
         # Initialize session state for selections
         if f"{key_prefix}_selected" not in st.session_state:
@@ -1425,13 +1462,14 @@ def _render_ticker_category(tm, tickers_data: list, category_name: str, ticker_t
         if to_remove:
             st.warning(f"⚠️ {len(to_remove)} ticker(s) will be removed")
             if st.button(f"🗑️ Remove {len(to_remove)} ticker(s)?", key=f"{key_prefix}_remove_btn", type="secondary"):
-                for t in to_remove:
-                    if ticker_type == "crypto" and cwm:
-                        cwm.remove_crypto(t)
-                    elif tm:
-                        tm.remove_ticker(t)
-                st.success(f"Removed {len(to_remove)} {category_name.lower()}")
-                st.rerun()
+                if debounced_action(f"{key_prefix}_remove"):
+                    for t in to_remove:
+                        if ticker_type == "crypto" and cwm:
+                            cwm.remove_crypto(t)
+                        elif tm:
+                            tm.remove_ticker(t)
+                    st.toast(f"✅ Removed {len(to_remove)} {category_name.lower()}")
+                    smart_rerun("remove_tickers")
     else:
         st.info(f"No {category_name.lower()} found in your watchlist. Add some above!")
 
@@ -1568,49 +1606,54 @@ def render_watchlist_manager():
             with col2:
                 if st.button("Add", key=f"btn_add_{svc_key}"):
                     if custom_add and custom_add not in current_watchlist:
-                        current_watchlist.append(custom_add)
-                        
-                        # Save to Local
-                        set_service_watchlist(svc_key, current_watchlist)
-                        
-                        # Save to Supabase
-                        if tm and supabase_available:
-                            # Ensure watchlist exists
-                            tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
-                            tm.add_to_watchlist(sup_watchlist_name, custom_add)
+                        if debounced_action(f"add_{svc_key}_{custom_add}"):
+                            current_watchlist.append(custom_add)
                             
-                        st.success(f"Added {custom_add}")
-                        st.rerun()
+                            # Save to Local
+                            set_service_watchlist(svc_key, current_watchlist)
+                            
+                            # Save to Supabase
+                            if tm and supabase_available:
+                                # Ensure watchlist exists
+                                tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                                tm.add_to_watchlist(sup_watchlist_name, custom_add)
+                                
+                            st.toast(f"✅ Added {custom_add}")
+                            smart_rerun("add_service_ticker")
             
             # Multiselect with clear/all
             col_act1, col_act2 = st.columns(2)
             with col_act1:
                 if st.button("Select All Default", key=f"all_{svc_key}"):
-                    default = DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])
-                    new_list = list(set(current_watchlist + default))
-                    
-                    # Save Local
-                    set_service_watchlist(svc_key, new_list)
-                    
-                    # Save Supabase (Bulk add)
-                    if tm and supabase_available:
-                        tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
-                        for t in new_list:
-                            if t not in current_watchlist:
-                                tm.add_to_watchlist(sup_watchlist_name, t)
-                                
-                    st.rerun()
+                    if debounced_action(f"all_{svc_key}"):
+                        default = DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])
+                        new_list = list(set(current_watchlist + default))
+                        
+                        # Save Local
+                        set_service_watchlist(svc_key, new_list)
+                        
+                        # Save Supabase (Bulk add)
+                        if tm and supabase_available:
+                            tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                            for t in new_list:
+                                if t not in current_watchlist:
+                                    tm.add_to_watchlist(sup_watchlist_name, t)
+                                    
+                        st.toast("✅ Added default tickers")
+                        smart_rerun("select_all_default")
             with col_act2:
                 if st.button("Clear All", key=f"clear_{svc_key}"):
-                    # Save Local
-                    set_service_watchlist(svc_key, [])
-                    
-                    # Save Supabase (Delete and Recreate empty)
-                    if tm and supabase_available:
-                         tm.delete_watchlist(sup_watchlist_name)
-                         tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
-                         
-                    st.rerun()
+                    if debounced_action(f"clear_{svc_key}"):
+                        # Save Local
+                        set_service_watchlist(svc_key, [])
+                        
+                        # Save Supabase (Delete and Recreate empty)
+                        if tm and supabase_available:
+                             tm.delete_watchlist(sup_watchlist_name)
+                             tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {selected_service}")
+                             
+                        st.toast("✅ Cleared watchlist")
+                        smart_rerun("clear_watchlist")
 
             # Combine with defaults for options, but selection is current_watchlist
             options = list(set(current_watchlist + DEFAULT_WATCHLISTS.get(svc_info.get('category', 'stocks'), [])))
@@ -1660,12 +1703,13 @@ def render_watchlist_manager():
         with col2:
             if st.button("Add Exclusion", type="primary"):
                 if new_exclude and new_exclude not in excluded:
-                    excluded.append(new_exclude)
-                    if save_ai_exclusions(excluded):
-                        st.success(f"Excluded {new_exclude}")
-                        st.rerun()
-                    else:
-                        st.error("Failed to save exclusion")
+                    if debounced_action(f"exclude_{new_exclude}"):
+                        excluded.append(new_exclude)
+                        if save_ai_exclusions(excluded):
+                            st.toast(f"✅ Excluded {new_exclude}")
+                            smart_rerun("add_exclusion")
+                        else:
+                            st.error("Failed to save exclusion")
         
         if excluded:
             st.write("### Excluded Pairs")
@@ -1705,6 +1749,9 @@ def main():
         layout="wide"
     )
     
+    # Initialize performance optimizations
+    init_performance_state()
+    
     # Check authentication
     if not check_password():
         return
@@ -1716,33 +1763,40 @@ def main():
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
         if st.button("🚪 Logout"):
-            # Clear session state
-            st.session_state.authenticated = False
-            st.session_state.password_verified = False
-            
-            # Clear auth token if present
-            if "auth_token" in st.session_state:
-                token = st.session_state.auth_token
-                # Remove from file
-                tokens = load_auth_tokens()
-                if token in tokens:
-                    del tokens[token]
-                    save_auth_tokens(tokens)
-                del st.session_state.auth_token
-            
-            # Clear query params
-            try:
-                st.query_params.clear()
-            except:
-                st.experimental_set_query_params()
+            if debounced_action("logout"):
+                # Clear session state
+                st.session_state.authenticated = False
+                st.session_state.password_verified = False
                 
-            st.rerun()
+                # Clear auth token if present
+                if "auth_token" in st.session_state:
+                    token = st.session_state.auth_token
+                    # Remove from file
+                    tokens = load_auth_tokens()
+                    if token in tokens:
+                        del tokens[token]
+                        save_auth_tokens(tokens)
+                    del st.session_state.auth_token
+                
+                # Clear query params
+                try:
+                    st.query_params.clear()
+                except:
+                    st.experimental_set_query_params()
+                    
+                st.rerun()  # Logout must rerun to show login page
         
         st.markdown("---")
         st.markdown(f"**Last refresh:** {datetime.now().strftime('%H:%M:%S')}")
         
         if st.button("🔄 Refresh Status"):
-            st.rerun()
+            if debounced_action("manual_refresh"):
+                # Clear all caches to force fresh data
+                get_service_status.clear()
+                get_analysis_requests.clear()
+                get_analysis_results.clear()
+                st.toast("🔄 Refreshing...")
+                st.rerun()
         
         # Auto-refresh option - NON-BLOCKING implementation
         st.markdown("---")
@@ -1869,11 +1923,12 @@ def main():
                 
                 if st.button("Add to Queue", type="primary", key="add_manual_alert"):
                     if manual_symbol:
-                        if add_manual_alert(manual_symbol, manual_type, manual_asset, manual_reason or "Manually added"):
-                            st.toast(f"✅ Added {manual_symbol} to queue")
-                            st.rerun()
-                        else:
-                            st.error("Failed to add alert")
+                        if debounced_action("add_manual_alert"):
+                            if add_manual_alert(manual_symbol, manual_type, manual_asset, manual_reason or "Manually added"):
+                                st.toast(f"✅ Added {manual_symbol} to queue")
+                                # No rerun needed - toast provides feedback, data refreshes on next interaction
+                            else:
+                                st.error("Failed to add alert")
                     else:
                         st.warning("Enter a symbol")
             
@@ -1914,12 +1969,14 @@ def main():
                 
                 with col_acts[0]:
                         if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
-                            success = False
-                            with st.spinner("Adding..."):
-                                success = approve_alert(alert['id'])
-                            
-                            if success:
-                                st.rerun()
+                            if debounced_action(f"approve_{alert['id']}"):
+                                success = False
+                                with st.spinner("Adding..."):
+                                    success = approve_alert(alert['id'])
+                                
+                                if success:
+                                    st.toast(f"✅ Added to watchlist")
+                                    # No rerun - toast provides feedback
                 
                 # Analysis buttons - show mode options
                 modes = analysis_modes.get(asset_type, analysis_modes["crypto"])
@@ -2231,14 +2288,15 @@ def main():
             
             if selected and selected != current_strategy:
                 if st.button("🔄 Apply Strategy", type="primary", use_container_width=True):
-                    success, msg = switch_strategy(str(selected))
-                    if success:
-                        st.toast(f"✅ {msg}")
-                        # Restart relevant services
-                        control_service("sentient-stock-monitor", "restart")
-                        st.rerun()
-                    else:
-                        st.error(msg)
+                    if debounced_action("apply_strategy"):
+                        success, msg = switch_strategy(str(selected))
+                        if success:
+                            st.toast(f"✅ {msg}")
+                            # Restart relevant services
+                            control_service("sentient-stock-monitor", "restart")
+                            smart_rerun("apply_strategy")
+                        else:
+                            st.error(msg)
         
         # ============================================================
         # QUICK ANALYSIS (Mobile-Friendly)
@@ -2529,9 +2587,11 @@ def main():
                             with preset_cols[i]:
                                 if seconds >= interval_min and seconds <= interval_max:
                                     if st.button(f"{emoji} {label}", key=f"main_preset_{seconds}_{service_name}"):
-                                        set_service_interval(service_name, svc_info, seconds)
-                                        control_service(service_name, "restart")
-                                        st.rerun()
+                                        if debounced_action(f"preset_{seconds}_{service_name}"):
+                                            set_service_interval(service_name, svc_info, seconds)
+                                            control_service(service_name, "restart")
+                                            st.toast(f"✅ Set to {label}")
+                                            smart_rerun("preset_interval")
                         
                         # Info about intervals
                         st.caption(f"💡 Range: {interval_min}s - {interval_max}s ({interval_max//60} min). Lower = more responsive but higher API usage.")
@@ -2608,23 +2668,31 @@ def main():
                         btn_col1, btn_col2, btn_col3, btn_col4 = st.columns(4)
                         with btn_col1:
                             if st.button("✅ All", key=f"main_watchlist_all_{service_name}", use_container_width=True, help=f"Select all {len(all_tickers)} tickers"):
-                                set_service_watchlist(service_name, all_tickers)
-                                st.rerun()
+                                if debounced_action(f"watchlist_all_{service_name}"):
+                                    set_service_watchlist(service_name, all_tickers)
+                                    st.toast(f"✅ Selected {len(all_tickers)} tickers")
+                                    smart_rerun("watchlist_all")
                         with btn_col2:
                             if st.button("❌ Clear", key=f"main_watchlist_clear_{service_name}", use_container_width=True, help="Clear all tickers"):
-                                set_service_watchlist(service_name, [])
-                                st.rerun()
+                                if debounced_action(f"watchlist_clear_{service_name}"):
+                                    set_service_watchlist(service_name, [])
+                                    st.toast("✅ Cleared watchlist")
+                                    smart_rerun("watchlist_clear")
                         with btn_col3:
                             top_5 = all_tickers[:5]
                             if st.button("🔝 Top 5", key=f"main_watchlist_top_{service_name}", use_container_width=True, help=f"Select: {', '.join(top_5)}"):
-                                set_service_watchlist(service_name, top_5)
-                                st.rerun()
+                                if debounced_action(f"watchlist_top_{service_name}"):
+                                    set_service_watchlist(service_name, top_5)
+                                    st.toast("✅ Selected top 5")
+                                    smart_rerun("watchlist_top5")
                         with btn_col4:
                             # Sync from Supabase button - use all Supabase tickers
                             if supabase_tickers:
                                 if st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, help=f"Sync {len(supabase_tickers)} tickers from Supabase"):
-                                    set_service_watchlist(service_name, supabase_tickers)
-                                    st.rerun()
+                                    if debounced_action(f"watchlist_sync_{service_name}"):
+                                        set_service_watchlist(service_name, supabase_tickers)
+                                        st.toast(f"☁️ Synced {len(supabase_tickers)} tickers")
+                                        smart_rerun("watchlist_sync")
                             else:
                                 # Show disabled-looking button when no Supabase data
                                 st.button("☁️ Sync", key=f"main_watchlist_sync_{service_name}", use_container_width=True, disabled=True, help="No Supabase tickers found - connect to Supabase first")
@@ -2755,36 +2823,37 @@ def main():
                         
                         # Save watchlist button
                         if st.button("💾 Save Watchlist", key=f"main_save_watchlist_{service_name}", type="primary", use_container_width=True):
-                            # Combine selected and custom tickers
-                            final_tickers = list(selected_tickers)
-                            if custom_input:
-                                custom_list = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
-                                final_tickers.extend([t for t in custom_list if t not in final_tickers])
-                            
-                            # 1. Save to Local JSON
-                            if set_service_watchlist(service_name, final_tickers):
+                            if debounced_action(f"save_watchlist_{service_name}"):
+                                # Combine selected and custom tickers
+                                final_tickers = list(selected_tickers)
+                                if custom_input:
+                                    custom_list = [t.strip().upper() for t in custom_input.split(",") if t.strip()]
+                                    final_tickers.extend([t for t in custom_list if t not in final_tickers])
                                 
-                                # 2. Sync to Supabase (if available)
-                                try:
-                                    from services.ticker_manager import TickerManager
-                                    tm = TickerManager()
-                                    if tm.test_connection():
-                                        sup_watchlist_name = f"service_{service_name}"
-                                        # Recreate watchlist to match exact state
-                                        tm.delete_watchlist(sup_watchlist_name)
-                                        tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {svc_label}")
-                                        for t in final_tickers:
-                                            tm.add_to_watchlist(sup_watchlist_name, t)
-                                        st.toast("✅ Synced to Supabase!")
-                                except Exception as e:
-                                    print(f"Failed to sync to Supabase: {e}")
-                                
-                                st.toast(f"✅ Saved {len(final_tickers)} tickers!")
-                                # Restart service to apply new watchlist
-                                control_service(service_name, "restart")
-                                st.rerun()
-                            else:
-                                st.error("Failed to save watchlist")
+                                # 1. Save to Local JSON
+                                if set_service_watchlist(service_name, final_tickers):
+                                    
+                                    # 2. Sync to Supabase (if available)
+                                    try:
+                                        from services.ticker_manager import TickerManager
+                                        tm = TickerManager()
+                                        if tm.test_connection():
+                                            sup_watchlist_name = f"service_{service_name}"
+                                            # Recreate watchlist to match exact state
+                                            tm.delete_watchlist(sup_watchlist_name)
+                                            tm.create_watchlist(sup_watchlist_name, description=f"Watchlist for {svc_label}")
+                                            for t in final_tickers:
+                                                tm.add_to_watchlist(sup_watchlist_name, t)
+                                            st.toast("☁️ Synced to Supabase!")
+                                    except Exception as e:
+                                        print(f"Failed to sync to Supabase: {e}")
+                                    
+                                    st.toast(f"✅ Saved {len(final_tickers)} tickers!")
+                                    # Restart service to apply new watchlist
+                                    control_service(service_name, "restart")
+                                    smart_rerun("save_watchlist")
+                                else:
+                                    st.error("Failed to save watchlist")
                         
                         st.caption(f"📊 Currently monitoring: {len(current_watchlist)} ticker(s)")
                         
@@ -2843,18 +2912,19 @@ def main():
                         
                         # Save Discord settings button
                         if st.button("💾 Save Discord Settings", key=f"main_save_discord_{service_name}", use_container_width=True):
-                            new_discord_settings = {
-                                'enabled': alerts_enabled,
-                                'min_confidence': min_confidence,
-                                'cooldown_minutes': int(cooldown),
-                                'alert_types': alert_types,
-                            }
-                            if set_service_discord_settings(service_name, new_discord_settings):
-                                st.toast(f"✅ Discord settings saved!")
-                                control_service(service_name, "restart")
-                                st.rerun()
-                            else:
-                                st.error("Failed to save Discord settings")
+                            if debounced_action(f"save_discord_{service_name}"):
+                                new_discord_settings = {
+                                    'enabled': alerts_enabled,
+                                    'min_confidence': min_confidence,
+                                    'cooldown_minutes': int(cooldown),
+                                    'alert_types': alert_types,
+                                }
+                                if set_service_discord_settings(service_name, new_discord_settings):
+                                    st.toast(f"✅ Discord settings saved!")
+                                    control_service(service_name, "restart")
+                                    # No rerun needed - toast provides feedback
+                                else:
+                                    st.error("Failed to save Discord settings")
                         
                         # ============================================================
                         # DISCOVERY CONFIGURATION (Stock Monitor only)
@@ -3055,20 +3125,20 @@ def main():
         col_clear1, col_clear2 = st.columns(2)
         with col_clear1:
             if st.button("🗑️ Clear All Requests", use_container_width=True):
-                if clear_analysis_requests():
-                    st.success("✅ Analysis queue cleared!")
-                    time.sleep(0.5)  # Ensure file write completes
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to clear queue")
+                if debounced_action("clear_requests"):
+                    if clear_analysis_requests():
+                        st.toast("✅ Analysis queue cleared!")
+                        # No rerun needed - cache already invalidated
+                    else:
+                        st.error("❌ Failed to clear queue")
         with col_clear2:
             if st.button("🗑️ Clear Results", use_container_width=True):
-                if clear_analysis_results():
-                    st.success("✅ Analysis results cleared!")
-                    time.sleep(0.5)  # Ensure file write completes
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to clear results")
+                if debounced_action("clear_results"):
+                    if clear_analysis_results():
+                        st.toast("✅ Analysis results cleared!")
+                        # No rerun needed - cache already invalidated
+                    else:
+                        st.error("❌ Failed to clear results")
     else:
         st.info("No analysis requests queued. Use the sidebar to trigger scans from your phone! 📱")
     
@@ -3083,7 +3153,10 @@ def main():
         st.markdown("## 📈 Recent Analysis Results")
     with res_col2:
         if st.button("🔄 Refresh", key="refresh_results"):
-            st.rerun()
+            if debounced_action("refresh_results"):
+                get_analysis_results.clear()
+                st.toast("🔄 Refreshing...")
+                st.rerun()
     with res_col3:
         # Auto-refresh toggle - DEFAULT ON for better UX
         auto_refresh = st.checkbox("Auto-refresh", value=True, key="auto_refresh_results")

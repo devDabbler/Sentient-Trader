@@ -14,6 +14,13 @@ from loguru import logger
 import os
 import sys
 
+# Initialize performance optimizations
+try:
+    from utils.streamlit_performance import init_performance_state
+    init_performance_state()
+except ImportError:
+    pass  # Performance utils not available
+
 # Add src directory to path for integrations
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 

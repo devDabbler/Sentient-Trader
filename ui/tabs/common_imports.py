@@ -23,6 +23,23 @@ import yfinance as yf
 import requests
 from loguru import logger
 
+# Performance utilities for faster UX
+try:
+    from utils.streamlit_performance import (
+        debounced_action,
+        show_action_result,
+        smart_rerun,
+        fragment_safe,
+        cached_operation
+    )
+except ImportError:
+    # Fallback stubs if performance module not available
+    def debounced_action(action_id, cooldown=0.5): return True
+    def show_action_result(success, msg, err=""): st.toast(f"{'✅' if success else '❌'} {msg if success else err}")
+    def smart_rerun(reason=""): st.rerun()
+    def fragment_safe(run_every=None): return lambda f: f
+    def cached_operation(ttl=60): return lambda f: f
+
 # Windows-specific asyncio policy
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -238,5 +255,7 @@ __all__ = [
     'get_cached_stock_data', 'get_ticker_manager', 'get_base_scanner', 'get_llm_analyzer',
     'get_social_analyzer', 'get_ai_scanner', 'get_ml_scanner', 'get_advanced_scanner',
     # Scanner types and classes
-    'ScanType', 'ComprehensiveAnalyzer', 'PENNY_THRESHOLDS'
+    'ScanType', 'ComprehensiveAnalyzer', 'PENNY_THRESHOLDS',
+    # Performance utilities
+    'debounced_action', 'show_action_result', 'smart_rerun', 'fragment_safe', 'cached_operation'
 ]
