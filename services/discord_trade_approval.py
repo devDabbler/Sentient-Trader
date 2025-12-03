@@ -2122,8 +2122,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Process the approval
         if approve:
             approval.approved = True
-            # Mark message to prevent duplicate processing
-            message._approval_already_processed = True
+            # Mark message ID to prevent duplicate processing
+            self._processed_messages.add(message.id)
             
             # Reply to the original message for clear context
             await message.reply(
@@ -2296,7 +2296,7 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Check if there's a pending approval (most recent)
         if not self.pending_approvals:
             # Only send message if this isn't a duplicate check after execution
-            if not hasattr(message, '_approval_already_processed'):
+            if message.id not in self._processed_messages:
                 await message.channel.send("❌ No pending trade approvals.")
             return
         
@@ -2306,7 +2306,7 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         if not pending:
             # Only send message if this isn't a duplicate check after execution
-            if not hasattr(message, '_approval_already_processed'):
+            if message.id not in self._processed_messages:
                 await message.channel.send("❌ No pending approvals found.")
             return
         
@@ -2336,8 +2336,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Mark as approved/rejected
         if approve:
             latest_approval.approved = True
-            # Mark message to prevent duplicate processing
-            message._approval_already_processed = True
+            # Mark message ID to prevent duplicate processing
+            self._processed_messages.add(message.id)
             
             await message.channel.send(
                 f"✅ **APPROVED:** {latest_approval.pair} {latest_approval.side} trade\n"
