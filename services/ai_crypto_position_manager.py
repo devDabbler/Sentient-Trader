@@ -960,21 +960,30 @@ class AICryptoPositionManager:
             return None
         
         # Standard stop loss check for SWING/SCALP
+        # VALIDATION: For BUY positions, stop loss should be BELOW entry price
+        # If stop_loss > entry_price, it's misconfigured and should not trigger
         if position.side == 'BUY':
-            if current_price <= position.stop_loss:
+            # Sanity check: stop loss must be below entry for a long position
+            if position.stop_loss > position.entry_price:
+                log_and_print(f"   ⚠️ {position.pair}: Stop loss ${position.stop_loss:,.6f} is ABOVE entry ${position.entry_price:,.6f} - misconfigured, skipping stop check", "WARNING")
+                # Don't trigger stop loss if it's misconfigured
+            elif current_price <= position.stop_loss:
                 return AITradeDecision(
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
-                    reasoning=f"Stop loss hit at ${current_price:,.2f}",
+                    reasoning=f"Stop loss hit at ${current_price:,.6f} (stop: ${position.stop_loss:,.6f})",
                     urgency="HIGH",
                     is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
-        else:  # SELL
-            if current_price >= position.stop_loss:
+        else:  # SELL (short position)
+            # Sanity check: stop loss must be ABOVE entry for a short position
+            if position.stop_loss < position.entry_price:
+                log_and_print(f"   ⚠️ {position.pair}: Stop loss ${position.stop_loss:,.6f} is BELOW entry ${position.entry_price:,.6f} for SHORT - misconfigured, skipping stop check", "WARNING")
+            elif current_price >= position.stop_loss:
                 return AITradeDecision(
                     action=PositionAction.CLOSE_NOW.value,
                     confidence=100.0,
-                    reasoning=f"Stop loss hit at ${current_price:,.2f}",
+                    reasoning=f"Stop loss hit at ${current_price:,.6f} (stop: ${position.stop_loss:,.6f})",
                     urgency="HIGH",
                     is_hard_trigger=True  # Hard trigger - bypasses cooldown
                 )
@@ -1991,19 +2000,66 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
             hold_time_hours = self._get_hold_time_hours(position)
             
+            # Validate position exists and we have sufficient balance before attempting close
+            logger.info(f"🔍 Validating position before close: {position.pair}")
+            logger.info(f"   Side: {position.side} → Closing with: {order_side.value}")
+            logger.info(f"   Volume to close: {position.volume:.6f}")
+            
+            # Verify balance if selling (closing long position)
+            if order_side == OrderSide.SELL:
+                try:
+                    balances = self.kraken_client.get_account_balance()
+                    if balances:
+                        # Extract base asset from pair (e.g., "H" from "H/USD")
+                        base_asset = position.pair.split('/')[0]
+                        # Kraken uses prefixes like "X" or "Z" for some assets
+                        possible_assets = [base_asset, f"X{base_asset}", f"Z{base_asset}"]
+                        
+                        available_balance = 0.0
+                        for balance in balances:
+                            if balance.currency.upper() in [a.upper() for a in possible_assets]:
+                                available_balance = balance.available
+                                logger.info(f"   Available balance: {balance.currency} = {available_balance:.6f} (total: {balance.balance:.6f})")
+                                break
+                        
+                        if available_balance < position.volume:
+                            error_msg = (
+                                f"Insufficient balance: Need {position.volume:.6f} {base_asset} to close, "
+                                f"but only {available_balance:.6f} available. "
+                                f"Position may have been partially closed or doesn't exist on Kraken."
+                            )
+                            logger.error(f"❌ {error_msg}")
+                            order_error = error_msg
+                            result = None
+                        else:
+                            logger.info(f"✅ Balance check passed: {available_balance:.6f} >= {position.volume:.6f}")
+                except Exception as balance_check_error:
+                    logger.warning(f"⚠️ Could not verify balance before close: {balance_check_error}")
+                    # Continue anyway - let Kraken API reject if there's really an issue
+            
             # Place market order to close
             result = None
-            order_error = None
-            try:
-                result = self.kraken_client.place_order(
-                    pair=position.pair,
-                    side=order_side,
-                    order_type=OrderType.MARKET,
-                    volume=position.volume
-                )
-            except Exception as order_ex:
-                order_error = str(order_ex)
-                logger.error(f"❌ Error placing close order for {position.pair}: {order_ex}", exc_info=True)
+            if not order_error:  # Only try if balance check passed
+                try:
+                    logger.info(f"📤 Placing {order_side.value} order to close {position.pair}: {position.volume:.6f} @ market")
+                    result = self.kraken_client.place_order(
+                        pair=position.pair,
+                        side=order_side,
+                        order_type=OrderType.MARKET,
+                        volume=position.volume
+                    )
+                except Exception as order_ex:
+                    order_error = str(order_ex)
+                    logger.error(f"❌ Error placing close order for {position.pair}: {order_ex}", exc_info=True)
+                    
+                    # Provide clearer error message for "Insufficient funds" when selling
+                    if "insufficient funds" in str(order_ex).lower() and order_side == OrderSide.SELL:
+                        order_error = (
+                            f"Kraken API: Insufficient funds error when trying to SELL {position.volume:.6f} {position.pair.split('/')[0]}. "
+                            f"This usually means: (1) Position doesn't exist on Kraken, (2) Position was already closed, "
+                            f"(3) Volume is incorrect, or (4) Asset is locked/hold. Check your Kraken account manually."
+                        )
+                        logger.error(f"   {order_error}")
             
             if result:
                 logger.info(f"✅ Position closed: {position.pair} - Order ID: {result.order_id}")
@@ -2931,10 +2987,11 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     pos = kraken_pos_list[0]
                     trade_id = f"{pos.pair}_synced_{int(time.time())}_{added_count}"
                     
-                    # Calculate stop loss and take profit (5% and 10% from current)
-                    stop_loss = pos.current_price * 0.95
-                    take_profit = pos.current_price * 1.10
+                    # Use entry price as base for stop/target calculation (not current price)
+                    # This ensures stop is always BELOW entry for longs
                     entry_price = pos.entry_price if pos.entry_price > 0 else pos.current_price
+                    stop_loss = entry_price * 0.95  # 5% below ENTRY (not current)
+                    take_profit = entry_price * 1.10  # 10% above ENTRY
                     
                     log_and_print(f"   📥 Adding {pos.pair} - Volume: {pos.volume:.6f}, Entry: ${entry_price:,.4f}")
                     
