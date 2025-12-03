@@ -2088,6 +2088,9 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Process the approval
         if approve:
             approval.approved = True
+            # Mark message to prevent duplicate processing
+            message._approval_already_processed = True
+            
             # Reply to the original message for clear context
             await message.reply(
                 f"✅ **APPROVED:** {approval.pair} {approval.side}\n"
@@ -2104,6 +2107,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                     try:
                         import asyncio
                         await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                        # Remove from pending after callback
+                        if approval_id in self.pending_approvals:
+                            del self.pending_approvals[approval_id]
+                            logger.info(f"🗑️ Removed {approval_id} from pending approvals after stock execution")
                     except Exception as e:
                         logger.error(f"Error in approval callback: {e}", exc_info=True)
                         await message.channel.send(f"⚠️ Error processing trade: {str(e)[:100]}")
@@ -2116,17 +2123,21 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.info(f"❌ User rejected trade via reply: {approval_id} ({approval.pair})")
     
     async def _execute_crypto_trade(self, message: discord.Message, approval: 'PendingTradeApproval'):
-        """Execute an approved crypto trade via AI Crypto Position Manager"""
+        """Execute an approved crypto trade via Kraken and add to AI Position Manager"""
         import asyncio
         import uuid
         
         def _do_execute():
             try:
                 from services.ai_crypto_position_manager import get_ai_crypto_position_manager
+                from clients.kraken_client import OrderSide, OrderType
                 
                 manager = get_ai_crypto_position_manager()
                 if not manager:
                     return {'success': False, 'error': 'Crypto Position Manager not available'}
+                
+                if not manager.kraken_client:
+                    return {'success': False, 'error': 'Kraken client not available'}
                 
                 # Generate unique trade ID
                 trade_id = f"discord_{approval.pair.replace('/', '_')}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
@@ -2134,43 +2145,84 @@ class DiscordTradeApprovalBot(commands.Bot):
                 # Calculate volume from position size and price
                 volume = approval.position_size / approval.entry_price if approval.entry_price > 0 else 0
                 
-                # Add position for monitoring and execution
+                if volume <= 0:
+                    return {'success': False, 'error': 'Invalid volume calculated'}
+                
+                # Convert side string to OrderSide enum
+                side_enum = OrderSide.BUY if approval.side.upper() == 'BUY' else OrderSide.SELL
+                
+                # Place order with Kraken first (like stock execution does)
+                logger.info(f"🚀 Placing {approval.side} order for {approval.pair}: {volume:.6f} @ ${approval.entry_price:,.4f}")
+                executed_order = manager.kraken_client.place_order(
+                    pair=approval.pair,
+                    side=side_enum,
+                    order_type=OrderType.MARKET,
+                    volume=volume,
+                    price=None,  # Market order
+                    stop_loss=approval.stop_loss,
+                    take_profit=approval.take_profit
+                )
+                
+                if not executed_order:
+                    return {'success': False, 'error': 'Failed to place order with Kraken'}
+                
+                order_id = executed_order.order_id if hasattr(executed_order, 'order_id') else None
+                if not order_id:
+                    return {'success': False, 'error': 'Order placed but no order ID returned'}
+                
+                logger.info(f"✅ Order placed successfully: {order_id} for {approval.pair}")
+                
+                # Get actual execution price from order if available
+                actual_price = executed_order.avg_price if hasattr(executed_order, 'avg_price') and executed_order.avg_price > 0 else approval.entry_price
+                
+                # Now add position to monitoring with the order ID
                 success = manager.add_position(
                     trade_id=trade_id,
                     pair=approval.pair,
                     side=approval.side,
                     volume=volume,
-                    entry_price=approval.entry_price,
+                    entry_price=actual_price,
                     stop_loss=approval.stop_loss,
                     take_profit=approval.take_profit,
                     strategy="DISCORD_TRADE",
                     trailing_stop_pct=2.0,
-                    breakeven_trigger_pct=3.0
+                    breakeven_trigger_pct=3.0,
+                    entry_order_id=order_id
                 )
                 
                 if success:
                     return {
                         'success': True,
                         'trade_id': trade_id,
+                        'order_id': order_id,
                         'volume': volume,
-                        'price': approval.entry_price,
+                        'price': actual_price,
                         'position_size': approval.position_size
                     }
                 else:
-                    return {'success': False, 'error': 'Failed to add position to manager'}
+                    return {'success': False, 'error': 'Order placed but failed to add position to manager'}
                     
             except Exception as e:
-                logger.error(f"Error executing crypto trade: {e}")
+                logger.error(f"Error executing crypto trade: {e}", exc_info=True)
                 return {'success': False, 'error': str(e)}
         
         result = await asyncio.to_thread(_do_execute)
+        
+        # Mark approval as executed to prevent duplicate processing
+        approval.executed = True
+        
+        # Remove from pending approvals to prevent duplicate messages
+        if approval.approval_id in self.pending_approvals:
+            del self.pending_approvals[approval.approval_id]
+            logger.info(f"🗑️ Removed {approval.approval_id} from pending approvals after execution")
         
         if result.get('success'):
             await message.channel.send(
                 f"✅ **Crypto Trade Executed:** {approval.pair}\n"
                 f"**Side:** {approval.side} | **Price:** ${result['price']:,.4f}\n"
                 f"**Volume:** {result['volume']:.6f} | **Value:** ${result['position_size']:,.2f}\n"
-                f"**Stop:** ${approval.stop_loss:,.4f} | **Target:** ${approval.take_profit:,.4f}\n\n"
+                f"**Stop:** ${approval.stop_loss:,.4f} | **Target:** ${approval.take_profit:,.4f}\n"
+                f"**Order ID:** `{result.get('order_id', 'N/A')}`\n\n"
                 f"🤖 _AI Position Manager is now monitoring this trade_"
             )
         else:
@@ -2209,15 +2261,19 @@ class DiscordTradeApprovalBot(commands.Bot):
         """Handle user approval/rejection (most recent trade)"""
         # Check if there's a pending approval (most recent)
         if not self.pending_approvals:
-            await message.channel.send("❌ No pending trade approvals.")
+            # Only send message if this isn't a duplicate check after execution
+            if not hasattr(message, '_approval_already_processed'):
+                await message.channel.send("❌ No pending trade approvals.")
             return
         
-        # Get all pending (not approved/rejected)
+        # Get all pending (not approved/rejected/executed)
         pending = [(aid, a) for aid, a in self.pending_approvals.items() 
-                   if not a.approved and not a.rejected and not a.is_expired()]
+                   if not a.approved and not a.rejected and not a.executed and not a.is_expired()]
         
         if not pending:
-            await message.channel.send("❌ No pending approvals found.")
+            # Only send message if this isn't a duplicate check after execution
+            if not hasattr(message, '_approval_already_processed'):
+                await message.channel.send("❌ No pending approvals found.")
             return
         
         # If multiple pending, show list and ask for specific selection
@@ -2234,29 +2290,51 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         # Only one pending - approve/reject it
         latest_approval = pending[0][1]
+        approval_id = latest_approval.approval_id
+        
+        # Check if already processed
+        if latest_approval.approved or latest_approval.rejected or latest_approval.executed:
+            await message.channel.send(
+                f"⚠️ This trade ({latest_approval.pair}) has already been processed."
+            )
+            return
         
         # Mark as approved/rejected
         if approve:
             latest_approval.approved = True
+            # Mark message to prevent duplicate processing
+            message._approval_already_processed = True
+            
             await message.channel.send(
                 f"✅ **APPROVED:** {latest_approval.pair} {latest_approval.side} trade\n"
                 f"Executing trade now..."
             )
-            logger.info(f"✅ User approved trade: {latest_approval.approval_id}")
+            logger.info(f"✅ User approved trade: {approval_id}")
+            
+            # Check if this is a crypto trade (contains /) and execute it directly
+            if "/" in latest_approval.pair:
+                await self._execute_crypto_trade(message, latest_approval)
+            else:
+                # Stock trade - use callback
+                if self.approval_callback:
+                    try:
+                        self.approval_callback(approval_id, approve)
+                        # Remove from pending after callback
+                        if approval_id in self.pending_approvals:
+                            del self.pending_approvals[approval_id]
+                            logger.info(f"🗑️ Removed {approval_id} from pending approvals after stock execution")
+                    except Exception as e:
+                        logger.error(f"Error in approval callback: {e}", exc_info=True)
         else:
             latest_approval.rejected = True
             await message.channel.send(
                 f"❌ **REJECTED:** {latest_approval.pair} {latest_approval.side} trade\n"
                 f"Trade cancelled."
             )
-            logger.info(f"❌ User rejected trade: {latest_approval.approval_id}")
-        
-        # Call approval callback
-        if self.approval_callback:
-            try:
-                self.approval_callback(latest_approval.approval_id, approve)
-            except Exception as e:
-                logger.error(f"Error in approval callback: {e}", exc_info=True)
+            logger.info(f"❌ User rejected trade: {approval_id}")
+            # Remove rejected approval
+            if approval_id in self.pending_approvals:
+                del self.pending_approvals[approval_id]
     
     async def send_approval_request(
         self,
