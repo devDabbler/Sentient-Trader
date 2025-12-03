@@ -1426,58 +1426,59 @@ class DiscordTradeApprovalBot(commands.Bot):
         """
         import asyncio
         
-        # 🛡️ PREVENT DUPLICATE PROCESSING: Check if we're already processing this trade
-        trade_key = f"crypto_trade_{symbol}_{message.id}"
+        # Ensure we have a valid crypto pair format
+        if "/" not in symbol:
+            symbol = f"{symbol}/USD"
+        
+        # 🛡️ TRADE DEDUPLICATION: Check cooldown FIRST, before any processing or messages
+        trade_lock_file = os.path.join(os.path.dirname(__file__), "..", "logs", f".trade_lock_{symbol.replace('/', '_')}.lock")
+        
+        cooldown_active = False
+        lock_age = 0
+        elapsed = 0
+        cooldown_source = None
+        
+        # Check file-based lock (cross-process)
+        try:
+            if os.path.exists(trade_lock_file):
+                lock_age = time.time() - os.path.getmtime(trade_lock_file)
+                if lock_age < self._trade_cooldown_seconds:
+                    cooldown_active = True
+                    cooldown_source = "file lock"
+        except Exception as lock_err:
+            logger.debug(f"Trade lock file error (non-critical): {lock_err}")
+        
+        # Check in-memory cache (same-process)
+        if not cooldown_active and symbol in self._recent_trade_requests:
+            last_trade_time = self._recent_trade_requests[symbol]
+            elapsed = (datetime.now() - last_trade_time).total_seconds()
+            if elapsed < self._trade_cooldown_seconds:
+                cooldown_active = True
+                cooldown_source = "memory cache"
+        
+        # If cooldown is active, send ONE message and return IMMEDIATELY (no processing set entry)
+        if cooldown_active:
+            # Use the most recent cooldown time
+            cooldown_time = max(lock_age, elapsed) if lock_age > 0 else elapsed
+            remaining = int(self._trade_cooldown_seconds - cooldown_time)
+            logger.warning(f"⏳ Duplicate crypto trade blocked ({cooldown_source}): {symbol} ({cooldown_time:.1f}s ago)")
+            await message.channel.send(
+                f"⏳ **Trade Cooldown:** {symbol} was just traded {cooldown_time:.0f}s ago.\n"
+                f"Wait {remaining}s or check your positions."
+            )
+            return {'success': False, 'error': 'Trade cooldown active'}
+        
+        # 🛡️ PREVENT DUPLICATE PROCESSING: Use symbol-only key to catch duplicates from any code path
+        trade_key = f"crypto_trade_{symbol}"
         if trade_key in self._processing_trades:
-            logger.warning(f"⏳ Duplicate trade command ignored: {symbol} (message {message.id})")
+            logger.warning(f"⏳ Duplicate trade command ignored: {symbol} (already processing)")
             return {'success': False, 'error': 'Already processing this trade'}
         
+        # No cooldown and not already processing - add to processing set and create locks IMMEDIATELY
         self._processing_trades.add(trade_key)
         
         try:
-            # Ensure we have a valid crypto pair format
-            if "/" not in symbol:
-                symbol = f"{symbol}/USD"
-            
-            # 🛡️ TRADE DEDUPLICATION: Check both file lock and memory cache, but send ONLY ONE message
-            trade_lock_file = os.path.join(os.path.dirname(__file__), "..", "logs", f".trade_lock_{symbol.replace('/', '_')}.lock")
-            
-            cooldown_active = False
-            lock_age = 0
-            elapsed = 0
-            cooldown_source = None
-            
-            # Check file-based lock (cross-process)
-            try:
-                if os.path.exists(trade_lock_file):
-                    lock_age = time.time() - os.path.getmtime(trade_lock_file)
-                    if lock_age < self._trade_cooldown_seconds:
-                        cooldown_active = True
-                        cooldown_source = "file lock"
-            except Exception as lock_err:
-                logger.debug(f"Trade lock file error (non-critical): {lock_err}")
-            
-            # Check in-memory cache (same-process)
-            if not cooldown_active and symbol in self._recent_trade_requests:
-                last_trade_time = self._recent_trade_requests[symbol]
-                elapsed = (datetime.now() - last_trade_time).total_seconds()
-                if elapsed < self._trade_cooldown_seconds:
-                    cooldown_active = True
-                    cooldown_source = "memory cache"
-            
-            # If cooldown is active, send ONE message and return
-            if cooldown_active:
-                # Use the most recent cooldown time
-                cooldown_time = max(lock_age, elapsed) if lock_age > 0 else elapsed
-                remaining = int(self._trade_cooldown_seconds - cooldown_time)
-                logger.warning(f"⏳ Duplicate crypto trade blocked ({cooldown_source}): {symbol} ({cooldown_time:.1f}s ago)")
-                await message.channel.send(
-                    f"⏳ **Trade Cooldown:** {symbol} was just traded {cooldown_time:.0f}s ago.\n"
-                    f"Wait {remaining}s or check your positions."
-                )
-                return {'success': False, 'error': 'Trade cooldown active'}
-            
-            # No cooldown - create/update lock file and record in memory
+            # Create/update lock file IMMEDIATELY to prevent race conditions
             try:
                 os.makedirs(os.path.dirname(trade_lock_file), exist_ok=True)
                 with open(trade_lock_file, 'w') as f:
@@ -1485,7 +1486,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             except Exception as lock_err:
                 logger.debug(f"Trade lock file creation error (non-critical): {lock_err}")
             
-            # Record this trade request in memory
+            # Record this trade request in memory IMMEDIATELY
             self._recent_trade_requests[symbol] = datetime.now()
             
             # Clean up old entries (older than 5 minutes)
@@ -1495,6 +1496,25 @@ class DiscordTradeApprovalBot(commands.Bot):
                 if t > cutoff
             }
             
+            # No cooldown - create/update lock file IMMEDIATELY to prevent race conditions
+            try:
+                os.makedirs(os.path.dirname(trade_lock_file), exist_ok=True)
+                with open(trade_lock_file, 'w') as f:
+                    f.write(f"{datetime.now().isoformat()}|{symbol}")
+            except Exception as lock_err:
+                logger.debug(f"Trade lock file creation error (non-critical): {lock_err}")
+            
+            # Record this trade request in memory IMMEDIATELY
+            self._recent_trade_requests[symbol] = datetime.now()
+            
+            # Clean up old entries (older than 5 minutes)
+            cutoff = datetime.now() - timedelta(minutes=5)
+            self._recent_trade_requests = {
+                sym: t for sym, t in self._recent_trade_requests.items() 
+                if t > cutoff
+            }
+            
+            # NOW send the preparing message (after all checks and locks are in place)
             await message.channel.send(f"🚀 **Preparing Crypto Trade:** {symbol}...")
             
             # Get current price and calculate trade parameters
@@ -1632,12 +1652,13 @@ class DiscordTradeApprovalBot(commands.Bot):
             return error_result
         finally:
             # Remove from processing set after completion (with delay to prevent rapid re-processing)
-            if hasattr(self, '_processing_trades') and trade_key in self._processing_trades:
+            if trade_key in self._processing_trades:
                 # Remove after a short delay to prevent immediate re-processing
                 async def cleanup():
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(5)  # Increased delay to prevent rapid re-processing
                     if hasattr(self, '_processing_trades'):
                         self._processing_trades.discard(trade_key)
+                        logger.debug(f"🧹 Cleaned up processing key: {trade_key}")
                 asyncio.create_task(cleanup())
     
     async def _handle_stock_trade_execution(self, message: discord.Message, symbol: str, side: str = "BUY", paper_mode: bool = False):
