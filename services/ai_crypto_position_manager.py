@@ -735,7 +735,14 @@ class AICryptoPositionManager:
         """Calculate how long a position has been held in hours"""
         if not position.entry_time:
             return 0.0
-        return (datetime.now() - position.entry_time).total_seconds() / 3600
+        # Defensive: ensure entry_time is datetime, not string
+        entry_time = position.entry_time
+        if isinstance(entry_time, str):
+            try:
+                entry_time = datetime.fromisoformat(entry_time)
+            except (ValueError, TypeError):
+                return 0.0
+        return (datetime.now() - entry_time).total_seconds() / 3600
     
     def _should_suppress_alert(
         self,
@@ -992,8 +999,8 @@ class AICryptoPositionManager:
             # Get technical data
             technical_data = self._get_technical_indicators(position.pair)
             
-            # Calculate hold time
-            hold_time = (datetime.now() - position.entry_time).total_seconds() / 60
+            # Calculate hold time in minutes (using helper for safety)
+            hold_time = self._get_hold_time_hours(position) * 60  # Convert hours to minutes
             
             # ENHANCED: Fetch real-time news and sentiment (last 2 hours)
             recent_news: List[Dict[str, Any]] = []
@@ -1543,7 +1550,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                             f"{action_emoji.get(decision.action, '🤖')} **Recommended Action:** {decision.action}\n"
                             f"**Urgency:** {decision.urgency}\n"
                             f"**Position Volume:** {position.volume:.6f}\n"
-                            f"**Hold Time:** {(datetime.now() - position.entry_time).total_seconds() / 3600:.1f} hours"
+                            f"**Hold Time:** {self._get_hold_time_hours(position):.1f} hours"
                         )
                     )
                     
@@ -1678,8 +1685,8 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 try:
                     from services.signal_memory import update_crypto_signal_outcome
                     
-                    # Calculate holding time
-                    holding_hours = int((datetime.now() - position.entry_time).total_seconds() / 3600)
+                    # Calculate holding time (use helper for safety)
+                    holding_hours = int(self._get_hold_time_hours(position))
                     outcome = "WIN" if pnl_pct > 0 else "LOSS"
                     
                     updated = update_crypto_signal_outcome(
@@ -2048,12 +2055,15 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 'last_updated': datetime.now().isoformat()
             }
             
-            # Convert datetime objects to strings
+            # Convert all datetime objects to strings for JSON serialization
+            datetime_fields = [
+                'entry_time', 'last_check_time', 
+                'last_close_alert_time', 'last_tighten_alert_time', 'last_partial_alert_time'
+            ]
             for pos in state['positions'].values():
-                if isinstance(pos.get('entry_time'), datetime):
-                    pos['entry_time'] = pos['entry_time'].isoformat()
-                if isinstance(pos.get('last_check_time'), datetime):
-                    pos['last_check_time'] = pos['last_check_time'].isoformat()
+                for field in datetime_fields:
+                    if isinstance(pos.get(field), datetime):
+                        pos[field] = pos[field].isoformat()
             
             with open(self.state_file, 'w') as f:
                 json.dump(state, f, indent=2, default=str)
@@ -2082,11 +2092,24 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     skipped_count += 1
                     continue
                     
-                # Convert ISO strings back to datetime
-                if 'entry_time' in pos_data:
-                    pos_data['entry_time'] = datetime.fromisoformat(pos_data['entry_time'])
-                if 'last_check_time' in pos_data:
-                    pos_data['last_check_time'] = datetime.fromisoformat(pos_data['last_check_time'])
+                # Convert ISO strings back to datetime for all datetime fields
+                datetime_fields = [
+                    'entry_time', 'last_check_time', 
+                    'last_close_alert_time', 'last_tighten_alert_time', 'last_partial_alert_time'
+                ]
+                for field in datetime_fields:
+                    if field in pos_data and pos_data[field]:
+                        try:
+                            if isinstance(pos_data[field], str):
+                                pos_data[field] = datetime.fromisoformat(pos_data[field])
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Could not parse {field} for {trade_id}: {e}")
+                            pos_data[field] = None if field != 'entry_time' else datetime.now()
+                
+                # Ensure entry_time is always a datetime
+                if not isinstance(pos_data.get('entry_time'), datetime):
+                    pos_data['entry_time'] = datetime.now()
+                    logger.warning(f"Reset entry_time for {trade_id} to now (was invalid)")
                 
                 self.positions[trade_id] = MonitoredCryptoPosition(**pos_data)
             
@@ -2149,7 +2172,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                                 pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
                             pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
                             intent_emoji = {"HODL": "💎", "SWING": "🔄", "SCALP": "⚡"}.get(pos.position_intent, "📊")
-                            hold_hours = (datetime.now() - pos.entry_time).total_seconds() / 3600 if pos.entry_time else 0
+                            hold_hours = self._get_hold_time_hours(pos)
                             log_and_print(f"   {pnl_emoji} {pos.pair} {intent_emoji}: ${pos.current_price:,.4f} | P&L: {pnl_pct:+.2f}% | Hold: {hold_hours:.1f}h")
                             log_and_print(f"      Entry: ${pos.entry_price:,.4f} | Stop: ${pos.stop_loss:,.4f} | Target: ${pos.take_profit:,.4f} | Intent: {pos.position_intent}")
                     
@@ -2499,7 +2522,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     ),
                     'stop_loss': pos.stop_loss,
                     'take_profit': pos.take_profit,
-                    'hold_time_minutes': (datetime.now() - pos.entry_time).total_seconds() / 60,
+                    'hold_time_minutes': self._get_hold_time_hours(pos) * 60,  # Hours to minutes
                     'last_ai_action': pos.last_ai_action,
                     'last_ai_confidence': pos.last_ai_confidence,
                     'moved_to_breakeven': pos.moved_to_breakeven,
