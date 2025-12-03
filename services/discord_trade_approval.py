@@ -1262,15 +1262,32 @@ class DiscordTradeApprovalBot(commands.Bot):
         from windows_services.runners.service_config_loader import queue_analysis_request
         
         try:
-            # 🛡️ ANALYSIS DEDUPLICATION: Check cooldown to prevent double analysis
+            # 🛡️ ANALYSIS DEDUPLICATION: Use file-based lock to prevent double analysis across processes
             # This catches cases where multiple bot instances or Discord reconnects cause duplicate processing
             cache_key = f"{symbol.upper()}_{mode}"
+            lock_file = os.path.join(os.path.dirname(__file__), "..", "logs", f".analysis_lock_{cache_key.replace('/', '_')}.lock")
+            
+            try:
+                # Check if lock file exists and is recent (within cooldown period)
+                if os.path.exists(lock_file):
+                    lock_age = time.time() - os.path.getmtime(lock_file)
+                    if lock_age < self._analysis_cooldown_seconds:
+                        logger.warning(f"⏳ Duplicate analysis blocked (file lock): {symbol} {mode} ({lock_age:.1f}s ago)")
+                        return
+                
+                # Create/update lock file
+                os.makedirs(os.path.dirname(lock_file), exist_ok=True)
+                with open(lock_file, 'w') as f:
+                    f.write(f"{datetime.now().isoformat()}|{symbol}|{mode}")
+            except Exception as lock_err:
+                logger.debug(f"Lock file error (non-critical): {lock_err}")
+            
+            # Also check in-memory cache for same-process duplicates
             if cache_key in self._recent_analysis_requests:
                 last_request_time = self._recent_analysis_requests[cache_key]
                 elapsed = (datetime.now() - last_request_time).total_seconds()
                 if elapsed < self._analysis_cooldown_seconds:
-                    logger.warning(f"⏳ Duplicate analysis blocked: {symbol} {mode} (requested {elapsed:.1f}s ago)")
-                    # Don't send message - silently ignore duplicate
+                    logger.warning(f"⏳ Duplicate analysis blocked (memory): {symbol} {mode} (requested {elapsed:.1f}s ago)")
                     return
             
             # Record this analysis request
@@ -1363,13 +1380,35 @@ class DiscordTradeApprovalBot(commands.Bot):
             if "/" not in symbol:
                 symbol = f"{symbol}/USD"
             
-            # 🛡️ TRADE DEDUPLICATION: Check cooldown to prevent double trades
+            # 🛡️ TRADE DEDUPLICATION: Use file-based lock to prevent double trades across processes
+            trade_lock_file = os.path.join(os.path.dirname(__file__), "..", "logs", f".trade_lock_{symbol.replace('/', '_')}.lock")
+            
+            try:
+                if os.path.exists(trade_lock_file):
+                    lock_age = time.time() - os.path.getmtime(trade_lock_file)
+                    if lock_age < self._trade_cooldown_seconds:
+                        remaining = int(self._trade_cooldown_seconds - lock_age)
+                        logger.warning(f"⏳ Duplicate crypto trade blocked (file lock): {symbol} ({lock_age:.1f}s ago)")
+                        await message.channel.send(
+                            f"⏳ **Trade Cooldown:** {symbol} was just traded {lock_age:.0f}s ago.\n"
+                            f"Wait {remaining}s or check your positions."
+                        )
+                        return {'success': False, 'error': 'Trade cooldown active'}
+                
+                # Create/update lock file
+                os.makedirs(os.path.dirname(trade_lock_file), exist_ok=True)
+                with open(trade_lock_file, 'w') as f:
+                    f.write(f"{datetime.now().isoformat()}|{symbol}")
+            except Exception as lock_err:
+                logger.debug(f"Trade lock file error (non-critical): {lock_err}")
+            
+            # Also check in-memory cache for same-process duplicates
             if symbol in self._recent_trade_requests:
                 last_trade_time = self._recent_trade_requests[symbol]
                 elapsed = (datetime.now() - last_trade_time).total_seconds()
                 if elapsed < self._trade_cooldown_seconds:
                     remaining = int(self._trade_cooldown_seconds - elapsed)
-                    logger.warning(f"⏳ Duplicate crypto trade blocked: {symbol} (traded {elapsed:.1f}s ago)")
+                    logger.warning(f"⏳ Duplicate crypto trade blocked (memory): {symbol} (traded {elapsed:.1f}s ago)")
                     await message.channel.send(
                         f"⏳ **Trade Cooldown:** {symbol} was just traded {elapsed:.0f}s ago.\n"
                         f"Wait {remaining}s or check your positions."
