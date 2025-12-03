@@ -527,7 +527,16 @@ class ServiceOrchestrator:
             if asset_type:
                 pending = [a for a in pending if a.asset_type == asset_type]
             
-            return sorted(pending, key=lambda x: x.timestamp, reverse=True)
+            # 🛡️ DEDUPLICATION: Remove duplicate alerts by ID
+            # This can happen when file is read multiple times or corrupted
+            seen_ids = set()
+            unique_pending = []
+            for alert in pending:
+                if alert.id not in seen_ids:
+                    seen_ids.add(alert.id)
+                    unique_pending.append(alert)
+            
+            return sorted(unique_pending, key=lambda x: x.timestamp, reverse=True)
     
     def approve_alert(self, alert_id: str, add_to_watchlist: bool = True) -> bool:
         """Approve an alert and optionally add to watchlist"""
