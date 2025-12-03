@@ -553,15 +553,21 @@ def store_signal_sync(**kwargs) -> Optional[str]:
     """Synchronous wrapper for store_signal"""
     service = get_signal_memory_service()
     if service:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Create a new event loop in a separate thread
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, service.store_signal(**kwargs))
-                return future.result()
-        else:
-            return loop.run_until_complete(service.store_signal(**kwargs))
+        try:
+            # Try to get existing loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Loop is running, use thread executor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, service.store_signal(**kwargs))
+                    return future.result()
+            except RuntimeError:
+                # No running loop, create one
+                return asyncio.run(service.store_signal(**kwargs))
+        except Exception as e:
+            logger.debug(f"store_signal_sync failed: {e}")
+            return None
     return None
 
 
@@ -569,12 +575,18 @@ def get_historical_win_rate_sync(**kwargs) -> Dict[str, Any]:
     """Synchronous wrapper for get_historical_win_rate"""
     service = get_signal_memory_service()
     if service:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, service.get_historical_win_rate(**kwargs))
-                return future.result()
-        else:
-            return loop.run_until_complete(service.get_historical_win_rate(**kwargs))
+        try:
+            # Try to get existing loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Loop is running, use thread executor
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, service.get_historical_win_rate(**kwargs))
+                    return future.result()
+            except RuntimeError:
+                # No running loop, create one
+                return asyncio.run(service.get_historical_win_rate(**kwargs))
+        except Exception as e:
+            logger.debug(f"get_historical_win_rate_sync failed: {e}")
     return {"recommendation": "INSUFFICIENT_DATA", "confidence_adjustment": 1.0, "sample_size": 0}
