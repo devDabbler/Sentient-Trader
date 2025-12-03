@@ -1794,32 +1794,24 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             log_and_print(f"   (Safe adjustment - no approval required)")
             skip_approval = True  # Mark as approved for execution below
         
-        # 🔥 HARD TRIGGERS: Stop loss/take profit hits should auto-execute (critical exits)
+        # 🔥 HARD TRIGGERS: Stop loss/take profit - send notification but still require approval
+        # This matches the stock workflow - we notify urgently but don't auto-execute
         is_hard_trigger = getattr(decision, 'is_hard_trigger', False)
         if is_hard_trigger and decision.action == PositionAction.CLOSE_NOW.value:
             log_and_print(f"🔥 HARD TRIGGER DETECTED: {decision.reasoning}", "WARNING")
-            log_and_print(f"   ⚡ Auto-executing stop loss/take profit exit (bypasses approval)")
-            skip_approval = True  # Hard triggers auto-execute for safety
+            log_and_print(f"   📨 Sending urgent Discord notification for approval")
+            # NOTE: We do NOT auto-execute - approval is still required via Discord
+            # This prevents order failures (e.g., insufficient funds) from auto-triggering
         
         # 🚨 SAFETY CHECK: Require manual approval for CLOSING actions unless explicitly skipped
         if self.require_manual_approval and not skip_approval:
             # Check for existing pending approval for this trade_id and action
-            # For hard triggers, replace old pending approval if it exists
-            if is_hard_trigger:
-                # Remove any existing pending approval for this trade/action
-                to_remove = []
-                for pid, pending in self.pending_approvals.items():
-                    if pending['trade_id'] == trade_id and pending['decision'].action == decision.action:
-                        to_remove.append(pid)
-                for pid in to_remove:
-                    log_and_print(f"🔄 Replacing old pending approval for {position.pair} (hard trigger takes priority)")
-                    del self.pending_approvals[pid]
-            else:
-                # For non-hard triggers, check if already pending
-                for pid, pending in self.pending_approvals.items():
-                    if pending['trade_id'] == trade_id and pending['decision'].action == decision.action:
-                        # Already pending, don't create a duplicate
-                        return False
+            # For BOTH hard triggers and regular triggers, don't spam duplicates
+            for pid, pending in self.pending_approvals.items():
+                if pending['trade_id'] == trade_id and pending['decision'].action == decision.action:
+                    # Already pending approval for this exact action - don't spam Discord
+                    log_and_print(f"⏳ {position.pair}: Already awaiting approval for {decision.action} (ID: {pid})", "DEBUG")
+                    return False  # Return False to indicate waiting for approval
 
             # Add to pending approvals queue instead of executing
             approval_id = f"{trade_id}_{int(time.time())}"
