@@ -196,6 +196,26 @@ Complete cloud persistence for all crypto and stock positions with full audit tr
   - `auto_trader.py` - Stores signals after trade execution
   - `position_exit_monitor.py` - Updates outcomes when positions close
 
+#### Multi-Model Local LLM (NEW - December 2025)
+* **🧠 Dual Local LLM Support:** Run multiple Ollama models for enhanced analysis
+  - **Qwen 2.5:7B** - Primary model for general trading analysis and reasoning
+  - **Mistral 7B Instruct v0.3** - Secondary model for structured JSON output and sentiment
+  - Ollama manages VRAM automatically (loads on demand, unloads after idle)
+* **📊 Use Cases:**
+  - **Ensemble Decisions:** Run same analysis through both models, act only when they agree
+  - **Task Specialization:** Qwen for reasoning, Mistral for JSON-structured outputs
+  - **Failover Redundancy:** If one model hangs, fallback to the other instantly
+* **⚙️ Available Models:**
+  ```powershell
+  ollama pull qwen2.5:7b                    # General reasoning (~4.7GB VRAM)
+  ollama pull mistral:7b-instruct-v0.3-q4_K_M  # JSON/structured output (~4.4GB VRAM)
+  ollama pull nomic-embed-text              # Embeddings for RAG (~274MB VRAM)
+  ```
+* **🎯 VRAM Management (RTX 3080 Ti 12GB):**
+  - Models load on-demand and unload after ~5 min idle
+  - Sequential model use recommended (not simultaneous)
+  - Set `ANALYSIS_LLM_MODE=compare` in `.env` to compare both models
+
 ---
 
 ## 🚀 Quick Start
