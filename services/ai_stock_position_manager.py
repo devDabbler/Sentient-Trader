@@ -188,6 +188,10 @@ class AIStockPositionManager:
         self.discord_approval_manager = None
         self._init_discord_approval()
         
+        # Supabase sync for cloud persistence
+        self.supabase_sync = None
+        self._init_supabase_sync()
+        
         # State management
         self.is_running = False
         self.thread = None
@@ -231,6 +235,21 @@ class AIStockPositionManager:
         except Exception as e:
             logger.warning(f"Could not initialize Discord approval: {e}")
             self.discord_approval_manager = None
+    
+    def _init_supabase_sync(self):
+        """Initialize Supabase sync for cloud persistence of positions"""
+        try:
+            from services.position_supabase_sync import get_position_supabase_sync
+            self.supabase_sync = get_position_supabase_sync()
+            
+            if self.supabase_sync and self.supabase_sync.enabled:
+                logger.info("✅ Supabase position sync enabled for stocks")
+            else:
+                logger.warning("⚠️ Supabase sync not available - stock positions saved locally only")
+                self.supabase_sync = None
+        except Exception as e:
+            logger.warning(f"Could not initialize Supabase sync: {e}")
+            self.supabase_sync = None
     
     def _handle_discord_approval(self, approval_id: str, approved: bool):
         """Handle approval/rejection from Discord"""
@@ -939,7 +958,7 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         ]
     
     def _save_state(self):
-        """Persist positions to file"""
+        """Persist positions to file AND sync to Supabase"""
         try:
             state = {
                 'positions': {k: v.to_dict() for k, v in self.positions.items()},
@@ -951,11 +970,29 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                 'last_updated': datetime.now().isoformat()
             }
             
+            # Save to local file
             Path(self.state_file).parent.mkdir(parents=True, exist_ok=True)
             with open(self.state_file, 'w') as f:
                 json.dump(state, f, indent=2)
                 
             logger.debug(f"💾 State saved to {self.state_file}")
+            
+            # Sync to Supabase for cloud persistence
+            if self.supabase_sync and self.supabase_sync.enabled:
+                broker_name = "UNKNOWN"
+                if self.broker_adapter:
+                    broker_name = getattr(self.broker_adapter, 'broker_name', 'TRADIER')
+                
+                for trade_id, pos in self.positions.items():
+                    try:
+                        position_data = pos.to_dict()
+                        self.supabase_sync.sync_stock_position(
+                            position_data, 
+                            paper_mode=self.paper_mode,
+                            broker=broker_name
+                        )
+                    except Exception as sync_error:
+                        logger.debug(f"Supabase sync error for {pos.symbol}: {sync_error}")
             
         except Exception as e:
             logger.error(f"Error saving state: {e}")

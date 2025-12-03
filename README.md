@@ -71,6 +71,26 @@ AI Position Manager now provides **detailed sell vs hold analysis** for every ex
   - Clear risk/reward verdict
   - Market context summary
 
+#### Position Tracking & Supabase Sync (NEW - December 2025) ✅ PRODUCTION READY
+Complete cloud persistence for all crypto and stock positions with full audit trail:
+* **☁️ Supabase Cloud Sync:** All positions automatically synced to Supabase
+  - Full position details (entry, stop loss, take profit, current price)
+  - Real-time sync on every state change
+  - Access positions from any device
+* **🛡️ Stop Loss & Take Profit Tracking:** Complete record of risk management levels
+  - Entry price, stop loss, take profit for every position
+  - Trailing stop percentage and breakeven triggers
+  - Position intent (HODL, SWING, SCALP)
+* **📜 Position History Audit Trail:** Complete log of all position changes
+  - Entry, stop updates, target updates, partial exits, full exits
+  - AI decision reasoning and confidence scores
+  - Trigger source tracking (AI, Manual, Stop Loss, Take Profit)
+* **📊 Supabase Tables:**
+  - `crypto_positions` - All crypto positions with full details
+  - `stock_positions` - All stock positions with broker info
+  - `position_history` - Complete audit trail of changes
+* **⚙️ Setup:** Run SQL from `data/position_tracking_supabase_setup.sql` in Supabase SQL Editor
+
 #### Stock Intelligence Monitor (ENHANCED - December 2025) ✅ PRODUCTION READY
 * **🎯 Multi-Pronged Analysis:** 4-stream detection (Technical + Events + ML + LLM)
   - Technical indicators (RSI, MACD, Bollinger Bands, Volume, Momentum)

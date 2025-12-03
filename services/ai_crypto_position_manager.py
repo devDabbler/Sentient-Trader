@@ -361,6 +361,10 @@ class AICryptoPositionManager:
         self.discord_approval_manager = None
         self._init_discord_approval()
         
+        # Supabase sync for cloud persistence (positions, stop losses, etc.)
+        self.supabase_sync = None
+        self._init_supabase_sync()
+        
         # State management
         self.is_running = False
         self.thread = None
@@ -417,6 +421,32 @@ class AICryptoPositionManager:
         except Exception as e:
             logger.warning(f"Could not initialize Discord approval: {e}")
             self.discord_approval_manager = None
+    
+    def _init_supabase_sync(self):
+        """Initialize Supabase sync for cloud persistence of positions"""
+        try:
+            from services.position_supabase_sync import get_position_supabase_sync
+            self.supabase_sync = get_position_supabase_sync()
+            
+            if self.supabase_sync and self.supabase_sync.enabled:
+                logger.info("✅ Supabase position sync enabled - all positions will be saved to cloud")
+            else:
+                logger.warning("⚠️ Supabase sync not available - positions saved locally only")
+                self.supabase_sync = None
+        except Exception as e:
+            logger.warning(f"Could not initialize Supabase sync: {e}")
+            self.supabase_sync = None
+    
+    def _sync_position_to_supabase(self, position: MonitoredCryptoPosition):
+        """Sync a single position to Supabase"""
+        if not self.supabase_sync or not self.supabase_sync.enabled:
+            return
+        
+        try:
+            position_data = asdict(position)
+            self.supabase_sync.sync_crypto_position(position_data)
+        except Exception as e:
+            logger.warning(f"Failed to sync position to Supabase: {e}")
     
     def _handle_discord_approval(self, approval_id: str, approved: bool):
         """Handle approval/rejection from Discord"""
@@ -2331,7 +2361,7 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             log_and_print(f"   Changed from: {'ENABLED' if old_value else 'DISABLED'}")
     
     def _save_state(self):
-        """Save position state to file"""
+        """Save position state to file AND sync to Supabase"""
         try:
             state = {
                 'positions': {
@@ -2358,8 +2388,18 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     if isinstance(pos.get(field), datetime):
                         pos[field] = pos[field].isoformat()
             
+            # Save to local file
             with open(self.state_file, 'w') as f:
                 json.dump(state, f, indent=2, default=str)
+            
+            # Sync all positions to Supabase for cloud persistence
+            if self.supabase_sync and self.supabase_sync.enabled:
+                for trade_id, pos in self.positions.items():
+                    try:
+                        position_data = asdict(pos)
+                        self.supabase_sync.sync_crypto_position(position_data)
+                    except Exception as sync_error:
+                        logger.debug(f"Supabase sync error for {pos.pair}: {sync_error}")
                 
         except Exception as e:
             logger.error("Error saving state: {}", str(e), exc_info=True)
