@@ -2141,8 +2141,30 @@ class DiscordTradeApprovalBot(commands.Bot):
             )
             logger.info(f"✅ User approved trade via reply: {approval_id} ({approval.pair})")
             
-            # Check if this is a crypto trade (contains /) and execute it
-            if "/" in approval.pair:
+            # Check if this is a position management action (CLOSE_NOW, TIGHTEN_STOP, etc.)
+            # These should use the callback to go through the AI position manager
+            is_position_action = approval.side.upper() in ['CLOSE_NOW', 'TIGHTEN_STOP', 'EXTEND_TARGET', 'TAKE_PARTIAL', 'MOVE_TO_BREAKEVEN']
+            
+            if is_position_action:
+                # Position management actions must go through the approval callback
+                # to properly close/modify existing positions via AI Position Manager
+                logger.info(f"🔄 Position action detected ({approval.side}) - routing through AI Position Manager callback")
+                if self.approval_callback:
+                    try:
+                        import asyncio
+                        await asyncio.to_thread(self.approval_callback, approval_id, approve)
+                        # Remove from pending after callback
+                        if approval_id in self.pending_approvals:
+                            del self.pending_approvals[approval_id]
+                            logger.info(f"🗑️ Removed {approval_id} from pending approvals after position action")
+                    except Exception as e:
+                        logger.error(f"Error in position action callback: {e}", exc_info=True)
+                        await message.channel.send(f"⚠️ Error processing position action: {str(e)[:100]}")
+                else:
+                    logger.error("❌ No approval callback configured for position action!")
+                    await message.channel.send(f"❌ **Error:** Position manager callback not configured. Please use buttons or restart the crypto AI trader service.")
+            elif "/" in approval.pair:
+                # New crypto trade (BUY/SELL entry) - execute directly via Kraken
                 await self._execute_crypto_trade(message, approval)
             else:
                 # Stock trade - use callback
@@ -2166,9 +2188,27 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.info(f"❌ User rejected trade via reply: {approval_id} ({approval.pair})")
     
     async def _execute_crypto_trade(self, message: discord.Message, approval: 'PendingTradeApproval'):
-        """Execute an approved crypto trade via Kraken and add to AI Position Manager"""
+        """
+        Execute an approved NEW crypto trade via Kraken and add to AI Position Manager.
+        
+        NOTE: This function is for NEW trade entries (BUY/SELL) only.
+        Position management actions (CLOSE_NOW, TIGHTEN_STOP, etc.) should be routed
+        through the approval_callback to use the AI Position Manager's execute_decision.
+        """
         import asyncio
         import uuid
+        
+        # Safety check: Reject position management actions
+        position_actions = ['CLOSE_NOW', 'TIGHTEN_STOP', 'EXTEND_TARGET', 'TAKE_PARTIAL', 'MOVE_TO_BREAKEVEN', 'HOLD']
+        if approval.side.upper() in position_actions:
+            error_msg = (
+                f"❌ **Error:** Cannot execute position action '{approval.side}' as a new trade. "
+                f"This appears to be a position management request that was incorrectly routed. "
+                f"Please restart the Crypto AI Trader service and try again using the Approve button."
+            )
+            logger.error(f"_execute_crypto_trade called with position action: {approval.side}")
+            await message.channel.send(error_msg)
+            return
         
         def _do_execute():
             try:
@@ -2191,7 +2231,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                 if volume <= 0:
                     return {'success': False, 'error': 'Invalid volume calculated'}
                 
-                # Convert side string to OrderSide enum
+                # Convert side string to OrderSide enum - only BUY/SELL should reach here
+                if approval.side.upper() not in ['BUY', 'SELL']:
+                    return {'success': False, 'error': f"Invalid order side: {approval.side}. Expected BUY or SELL."}
+                
                 side_enum = OrderSide.BUY if approval.side.upper() == 'BUY' else OrderSide.SELL
                 
                 # Place order with Kraken first (like stock execution does)
