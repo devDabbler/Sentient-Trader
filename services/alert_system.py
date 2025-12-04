@@ -49,6 +49,12 @@ class AlertSystem:
             # Extract ticker/symbol from metadata
             ticker = metadata.get('symbol', 'UNKNOWN') if metadata else 'UNKNOWN'
             
+            # Check if this is a DEX Hunter / pump chaser alert
+            is_dex_alert = title in ["LAUNCH_DETECTED", "DEX_PUMP", "TOKEN_LAUNCH"] or \
+                           "LAUNCH" in title.upper() or \
+                           "PUMP" in title.upper() or \
+                           (metadata and metadata.get('source') in ['dex_hunter', 'dex_launch', 'pump_chaser'])
+            
             # Create TradingAlert (uses 'ticker' and 'details' not 'symbol' and 'metadata')
             alert = TradingAlert(
                 ticker=ticker,
@@ -57,7 +63,7 @@ class AlertSystem:
                 message=f"{title}\n\n{message}",
                 timestamp=datetime.now(),
                 confidence_score=metadata.get('score', 0.0) if metadata else 0.0,
-                details=metadata or {}
+                details={**(metadata or {}), '_is_dex_alert': is_dex_alert}
             )
             
             # Trigger it

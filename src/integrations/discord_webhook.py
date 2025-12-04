@@ -214,10 +214,18 @@ def _get_webhook_for_alert(alert: 'TradingAlert') -> Optional[str]:
     try:
         from src.integrations.discord_channels import (
             get_discord_webhook_for_asset, 
+            get_discord_webhook,
             AlertCategory,
             is_crypto_symbol,
             is_options_symbol
         )
+        
+        # Check if this is a DEX Hunter / pump chaser alert
+        is_dex_alert = alert.details.get('_is_dex_alert', False) if alert.details else False
+        if is_dex_alert:
+            webhook_url = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS)
+            if webhook_url:
+                return webhook_url
         
         # Determine if this is an execution or an alert
         is_execution = alert.alert_type in [
