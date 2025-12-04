@@ -1086,24 +1086,21 @@ class StockInformationalMonitor(LLMServiceMixin):
             # Queue to Service Orchestrator for review in Control Panel
             self._queue_to_orchestrator(opportunity)
             
-            # Check if we have a dedicated stock alerts channel - if so, prefer webhook over bot
-            # (Bot always sends to the general channel, webhook can be routed per-asset)
-            use_webhook_routing = False
+            # Get target channel ID for stock alerts (for channel routing with buttons)
+            target_channel_id = None
             try:
-                from src.integrations.discord_channels import get_discord_webhook, AlertCategory
-                stock_webhook = get_discord_webhook(AlertCategory.STOCK_ALERTS)
-                general_webhook = os.getenv('DISCORD_WEBHOOK_URL')
-                # If stock channel is different from general, use webhook routing
-                if stock_webhook and general_webhook and stock_webhook != general_webhook:
-                    use_webhook_routing = True
-                    logger.debug(f"   Using dedicated stock alerts channel (webhook routing)")
+                from src.integrations.discord_channels import get_channel_id_for_category, AlertCategory
+                target_channel_id = get_channel_id_for_category(AlertCategory.STOCK_ALERTS)
+                if target_channel_id:
+                    logger.debug(f"   Using stock alerts channel ID: {target_channel_id}")
             except ImportError:
                 pass
+            except Exception as e:
+                logger.debug(f"   Could not get stock channel ID: {e}")
             
-            # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
-            # But skip bot if we have dedicated channel routing configured
+            # Try Discord bot first (has interactive buttons for Watch/Analyze/Trade/Dismiss)
             bot_sent = False
-            if not use_webhook_routing and self.discord_bot_manager:
+            if self.discord_bot_manager:
                 try:
                     import asyncio
                     
@@ -1147,14 +1144,16 @@ class StockInformationalMonitor(LLMServiceMixin):
                     else:
                         color = 0xFFA500  # Orange
                     
-                    # Send via bot (has buttons) - same pattern as crypto breakout monitor
+                    # Send via bot (has buttons) - with target channel for routing
                     async def send_bot_alert():
                         return await self.discord_bot_manager.bot.send_alert_notification(
                             symbol=opportunity.symbol,
                             alert_type=f"{emoji} STOCK {opportunity.opportunity_type}",
                             message_text=message_text,
                             confidence=opportunity.alert_priority,
-                            color=color
+                            color=color,
+                            asset_type="stock",
+                            target_channel_id=target_channel_id
                         )
                     
                     if self.discord_bot_manager.loop:
@@ -1165,7 +1164,7 @@ class StockInformationalMonitor(LLMServiceMixin):
                         bot_sent = future.result(timeout=10)
                     
                     if bot_sent:
-                        logger.info(f"   ✅ Discord alert sent via BOT (with Watch/Analyze/Dismiss buttons)")
+                        logger.info(f"   ✅ Discord alert sent via BOT (with buttons) to channel {target_channel_id or 'default'}")
                     else:
                         logger.debug("   Bot send returned False, falling back to webhook")
                 

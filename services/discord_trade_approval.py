@@ -2580,7 +2580,8 @@ class DiscordTradeApprovalBot(commands.Bot):
         confidence: str = "MEDIUM",
         color: int = 3447003,
         asset_type: str = "crypto",
-        alert_data: dict = None
+        alert_data: dict = None,
+        target_channel_id: int = None
     ) -> bool:
         """
         Send a generic alert notification with action buttons
@@ -2593,14 +2594,20 @@ class DiscordTradeApprovalBot(commands.Bot):
             color: Embed color
             asset_type: 'crypto' or 'stock' - determines available buttons
             alert_data: Optional dict with price, score, etc. for trade execution
+            target_channel_id: Optional specific channel ID to send to (for channel routing)
         """
         try:
             if not self.bot_ready:
                 return False
-                
-            channel = self.get_channel(self.channel_id)
+            
+            # Use target channel if specified, otherwise fall back to default
+            channel_id = target_channel_id if target_channel_id else self.channel_id
+            channel = self.get_channel(channel_id)
             if not channel:
-                return False
+                logger.warning(f"Could not find channel {channel_id}, falling back to default {self.channel_id}")
+                channel = self.get_channel(self.channel_id)
+                if not channel:
+                    return False
             
             # Build alert data from parameters if not provided
             if alert_data is None:
@@ -2620,6 +2627,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             # Pass asset_type and alert_data to view for Trade button functionality
             view = AlertActionView(self, symbol, asset_type=asset_type, alert_data=alert_data)
             await channel.send(embed=embed, view=view)
+            logger.debug(f"Sent alert to channel {channel.name} (ID: {channel_id})")
             return True
             
         except Exception as e:

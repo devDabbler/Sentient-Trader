@@ -138,6 +138,60 @@ def get_discord_webhook(category: AlertCategory) -> Optional[str]:
     return webhook_url
 
 
+# Channel ID environment variable mapping (for Discord bot routing)
+CHANNEL_ID_ENV_VARS = {
+    AlertCategory.STOCK_ALERTS: "DISCORD_CHANNEL_ID_STOCK_ALERTS",
+    AlertCategory.CRYPTO_ALERTS: "DISCORD_CHANNEL_ID_CRYPTO_ALERTS",
+    AlertCategory.OPTIONS_ALERTS: "DISCORD_CHANNEL_ID_OPTIONS_ALERTS",
+    AlertCategory.DEX_PUMP_ALERTS: "DISCORD_CHANNEL_ID_DEX_PUMP_ALERTS",
+    AlertCategory.STOCK_POSITIONS: "DISCORD_CHANNEL_ID_STOCK_POSITIONS",
+    AlertCategory.CRYPTO_POSITIONS: "DISCORD_CHANNEL_ID_CRYPTO_POSITIONS",
+    AlertCategory.OPTIONS_POSITIONS: "DISCORD_CHANNEL_ID_OPTIONS_POSITIONS",
+    AlertCategory.STOCK_EXECUTIONS: "DISCORD_CHANNEL_ID_STOCK_EXECUTIONS",
+    AlertCategory.CRYPTO_EXECUTIONS: "DISCORD_CHANNEL_ID_CRYPTO_EXECUTIONS",
+    AlertCategory.OPTIONS_EXECUTIONS: "DISCORD_CHANNEL_ID_OPTIONS_EXECUTIONS",
+    AlertCategory.GENERAL: "DISCORD_CHANNEL_IDS",  # Fallback to original
+}
+
+
+def get_channel_id_for_category(category: AlertCategory) -> Optional[int]:
+    """
+    Get the Discord channel ID for a specific alert category.
+    
+    For Discord bot routing - the bot needs channel IDs (not webhook URLs)
+    to send messages with interactive buttons to specific channels.
+    
+    Falls back to DISCORD_CHANNEL_IDS if specific channel not configured.
+    
+    Args:
+        category: The alert category to get channel ID for
+        
+    Returns:
+        Channel ID as int, or None if not configured
+    """
+    # First, check for specific channel ID env var
+    env_var = CHANNEL_ID_ENV_VARS.get(category)
+    channel_id_str = os.getenv(env_var) if env_var else None
+    
+    # Fallback to general channel if specific not set
+    if not channel_id_str:
+        channel_id_str = os.getenv("DISCORD_CHANNEL_IDS")
+        if channel_id_str:
+            logger.debug(f"Using fallback DISCORD_CHANNEL_IDS for {category.value}")
+    
+    if channel_id_str:
+        try:
+            # Handle comma-separated list (take first one)
+            if "," in channel_id_str:
+                channel_id_str = channel_id_str.split(",")[0].strip()
+            return int(channel_id_str)
+        except ValueError:
+            logger.error(f"Invalid channel ID format: {channel_id_str}")
+            return None
+    
+    return None
+
+
 def get_discord_webhook_for_asset(
     symbol: str,
     is_execution: bool = False,

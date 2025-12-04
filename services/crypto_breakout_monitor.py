@@ -711,24 +711,21 @@ class CryptoBreakoutMonitor:
         # Queue to Service Orchestrator for review in Control Panel
         self._queue_to_orchestrator(breakout)
         
-        # Check if we have a dedicated crypto alerts channel - if so, prefer webhook over bot
-        # (Bot always sends to the general channel, webhook can be routed per-asset)
-        use_webhook_routing = False
+        # Get target channel ID for crypto alerts (for channel routing with buttons)
+        target_channel_id = None
         try:
-            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
-            crypto_webhook = get_discord_webhook(AlertCategory.CRYPTO_ALERTS)
-            general_webhook = os.getenv('DISCORD_WEBHOOK_URL')
-            # If crypto channel is different from general, use webhook routing
-            if crypto_webhook and general_webhook and crypto_webhook != general_webhook:
-                use_webhook_routing = True
-                logger.debug(f"   Using dedicated crypto alerts channel (webhook routing)")
+            from src.integrations.discord_channels import get_channel_id_for_category, AlertCategory
+            target_channel_id = get_channel_id_for_category(AlertCategory.CRYPTO_ALERTS)
+            if target_channel_id:
+                logger.debug(f"   Using crypto alerts channel ID: {target_channel_id}")
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"   Could not get crypto channel ID: {e}")
         
-        # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
-        # But skip bot if we have dedicated channel routing configured
+        # Try Discord bot first (has interactive buttons for Watch/Analyze/Trade/Dismiss)
         bot_sent = False
-        if not use_webhook_routing and self.discord_bot_manager and self.discord_bot_manager.is_running():
+        if self.discord_bot_manager and self.discord_bot_manager.is_running():
             try:
                 import asyncio
                 
@@ -793,7 +790,8 @@ class CryptoBreakoutMonitor:
                         confidence=breakout.confidence,
                         color=color,
                         asset_type="crypto",
-                        alert_data=alert_data
+                        alert_data=alert_data,
+                        target_channel_id=target_channel_id
                     )
                 
                 if self.discord_bot_manager.loop:
@@ -804,7 +802,7 @@ class CryptoBreakoutMonitor:
                     bot_sent = future.result(timeout=10)
                     
                 if bot_sent:
-                    logger.info(f"   ✅ Discord alert sent via BOT (with buttons)")
+                    logger.info(f"   ✅ Discord alert sent via BOT (with buttons) to channel {target_channel_id or 'default'}")
                 else:
                     logger.debug("   Bot send returned False, falling back to webhook")
                     
