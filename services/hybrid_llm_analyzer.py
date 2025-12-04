@@ -62,6 +62,8 @@ class LLMConfig:
     fallback_enabled: bool = True
     max_local_timeout: int = 120  # Increased for longer prompts
     max_cloud_timeout: int = 30
+    # Set DISABLE_OPENROUTER=true in .env to skip OpenRouter entirely (use local Ollama only)
+    disable_openrouter: bool = os.getenv('DISABLE_OPENROUTER', 'false').lower() == 'true'
 
 
 class HybridLLMAnalyzer:
@@ -98,8 +100,11 @@ class HybridLLMAnalyzer:
                 logger.error(f"❌ Failed to initialize Ollama: {e}")
                 self.ollama_client = None
         
-        # Validate cloud backup
-        if not self.ollama_client or self.config.fallback_enabled:
+        # Validate cloud backup (skip if OpenRouter is disabled)
+        if self.config.disable_openrouter:
+            logger.info("🚫 OpenRouter disabled via DISABLE_OPENROUTER=true - using local Ollama only")
+            self.openrouter_api_key = None  # Ensure we don't try to use it
+        elif not self.ollama_client or self.config.fallback_enabled:
             if not self.openrouter_api_key:
                 logger.warning("⚠️ No OpenRouter API key found - cloud fallback unavailable")
             else:
@@ -230,6 +235,15 @@ class HybridLLMAnalyzer:
     def _get_optimal_provider_order(self) -> List[str]:
         """Determine optimal order to try providers based on config and performance"""
         providers = []
+        
+        # If OpenRouter is disabled, only use local
+        if self.config.disable_openrouter:
+            if self.ollama_client:
+                providers.append('local')
+            # Still allow Groq as fallback if available
+            if self.groq_api_key:
+                providers.append('groq')
+            return providers
         
         # Check recent performance
         local_avg_time = self._get_average_performance('local')
