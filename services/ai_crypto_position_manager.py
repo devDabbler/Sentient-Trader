@@ -2044,6 +2044,9 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             logger.info(f"   Side: {position.side} → Closing with: {order_side.value}")
             logger.info(f"   Volume to close: {position.volume:.6f}")
             
+            # Initialize order_error to None before balance check
+            order_error = None
+            
             # Verify balance if selling (closing long position)
             if order_side == OrderSide.SELL:
                 try:
