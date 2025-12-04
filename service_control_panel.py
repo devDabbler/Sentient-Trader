@@ -1955,194 +1955,6 @@ def main():
             st.markdown("---")
             
             # ============================================================
-            # ALERT QUEUE
-            # ============================================================
-            st.markdown("### 📥 Alert Queue")
-            st.caption("Alerts from Discord and scanners waiting for your review")
-            
-            # Add manual alert
-            with st.expander("➕ Add Alert Manually"):
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    manual_symbol = st.text_input("Symbol", placeholder="BTC, ETH, NVDA", key="manual_alert_symbol").upper()
-                with col2:
-                    manual_type = st.selectbox("Type", ["WATCH", "ENTRY", "BREAKOUT"], key="manual_alert_type")
-                with col3:
-                    manual_asset = st.selectbox("Asset", ["crypto", "stock"], key="manual_alert_asset")
-                
-                manual_reason = st.text_input("Reasoning (optional)", placeholder="Saw on Twitter...", key="manual_alert_reason")
-                
-                if st.button("Add to Queue", type="primary", key="add_manual_alert"):
-                    if manual_symbol:
-                        if debounced_action("add_manual_alert"):
-                            if add_manual_alert(manual_symbol, manual_type, manual_asset, manual_reason or "Manually added"):
-                                st.toast(f"✅ Added {manual_symbol} to queue")
-                                # No rerun needed - toast provides feedback, data refreshes on next interaction
-                            else:
-                                st.error("Failed to add alert")
-                    else:
-                        st.warning("Enter a symbol")
-            
-            # Get pending alerts
-            pending_crypto = get_pending_alerts("crypto")
-            pending_stocks = get_pending_alerts("stock")
-            
-            # Bulk actions row
-            bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
-            with bulk_col1:
-                if st.button("🗑️ Clear All Crypto", key="clear_all_crypto", use_container_width=True, disabled=len(pending_crypto)==0):
-                    cleared = bulk_clear_alerts("crypto")
-                    st.toast(f"❌ Cleared {cleared} crypto alerts")
-            with bulk_col2:
-                if st.button("🗑️ Clear All Stocks", key="clear_all_stocks", use_container_width=True, disabled=len(pending_stocks)==0):
-                    cleared = bulk_clear_alerts("stock")
-                    st.toast(f"❌ Cleared {cleared} stock alerts")
-            with bulk_col3:
-                st.caption(f"Total: {len(pending_crypto) + len(pending_stocks)} pending alerts")
-            
-            # Use stable tab labels (counts shown inside tabs, not in labels)
-            alert_tab1, alert_tab2 = st.tabs(["🪙 Crypto", "📈 Stocks"])
-            
-            def render_alert_actions(alert, asset_type):
-                """Render action buttons for an alert"""
-                # Analysis mode selector
-                analysis_modes = {
-                    "crypto": [("🔬 Standard", "crypto_standard"), ("🎯 Multi", "crypto_multi"), ("🚀 Ultimate", "crypto_ultimate")],
-                    "stock": [("📈 Momentum", "stock_momentum"), ("🎯 ORB+FVG", "orb_fvg_scan")]
-                }
-                
-                # Count how many alerts exist for this symbol
-                symbol = alert['symbol']
-                all_pending = get_pending_alerts(asset_type)
-                symbol_alert_count = sum(1 for a in all_pending if a['symbol'].upper() == symbol.upper())
-                
-                col_acts = st.columns(6)
-                
-                with col_acts[0]:
-                        if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
-                            if debounced_action(f"approve_{alert['id']}"):
-                                success = False
-                                with st.spinner("Adding..."):
-                                    success = approve_alert(alert['id'])
-                                
-                                if success:
-                                    st.toast(f"✅ Added to watchlist")
-                                    # No rerun - toast provides feedback
-                
-                # Analysis buttons - show mode options
-                modes = analysis_modes.get(asset_type, analysis_modes["crypto"])
-                with col_acts[1]:
-                    if st.button(modes[0][0], key=f"analyze_std_{alert['id']}", use_container_width=True, help="Standard analysis"):
-                        if queue_analysis_request(modes[0][1], [alert['symbol']]):
-                            st.toast(f"🔬 Standard analysis queued for {alert['symbol']}")
-                        else:
-                            st.error("Failed to queue analysis")
-                
-                with col_acts[2]:
-                    if st.button(modes[1][0], key=f"analyze_multi_{alert['id']}", use_container_width=True, help="Multi-config analysis"):
-                        if queue_analysis_request(modes[1][1], [alert['symbol']]):
-                            st.toast(f"🎯 Multi analysis queued for {alert['symbol']}")
-                        else:
-                            st.error("Failed to queue analysis")
-                
-                with col_acts[3]:
-                    if asset_type == "crypto" and len(modes) > 2:
-                        if st.button(modes[2][0], key=f"analyze_ult_{alert['id']}", use_container_width=True, help="Ultimate analysis"):
-                            if queue_analysis_request(modes[2][1], [alert['symbol']]):
-                                st.toast(f"🚀 Ultimate analysis queued for {alert['symbol']}")
-                            else:
-                                st.error("Failed to queue analysis")
-                    else:
-                        # Trade button for stocks or placeholder
-                        if st.button("🚀 Trade", key=f"trade_{alert['id']}", use_container_width=True, help="Open Trade Setup"):
-                            st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
-                
-                with col_acts[4]:
-                    if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss This Alert"):
-                        if reject_alert(alert['id']):
-                            st.toast(f"❌ {alert['symbol']} dismissed")
-                
-                with col_acts[5]:
-                    # Show button to remove all alerts for this symbol if there are multiple
-                    if symbol_alert_count > 1:
-                        help_text = f"Remove all {symbol_alert_count} alerts for {symbol}"
-                        if st.button("🗑️ All", key=f"reject_all_{alert['id']}", use_container_width=True, help=help_text):
-                            count = reject_all_alerts_for_symbol(symbol)
-                            if count > 0:
-                                st.toast(f"❌ Removed {count} alert(s) for {symbol}")
-                            else:
-                                st.error("Failed to remove alerts")
-                    else:
-                        st.empty()  # Empty space if only one alert
-
-            with alert_tab1:
-                # Show count inside the tab
-                st.caption(f"**{len(pending_crypto)}** pending crypto alert(s)")
-                if pending_crypto:
-                    for alert in pending_crypto:
-                        alert_container = st.empty()
-                        with alert_container.container():
-                            # Determine color/icon
-                            conf = alert.get('confidence', 'MEDIUM')
-                            icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
-                            color = "red" if conf == "LOW" else "orange" if conf == "MEDIUM" else "green"
-                            
-                            with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
-                                # Alert Details
-                                st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
-                                
-                                # Price Info
-                                cols = st.columns(3)
-                                with cols[0]:
-                                    price = alert.get('price')
-                                    st.write(f"**Price:** {f'${price:.4f}' if price else 'N/A'}")
-                                with cols[1]:
-                                    target = alert.get('target')
-                                    st.write(f"**Target:** {f'${target:.4f}' if target else 'N/A'}")
-                                with cols[2]:
-                                    stop = alert.get('stop_loss')
-                                    st.write(f"**Stop:** {f'${stop:.4f}' if stop else 'N/A'}")
-                                
-                                st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
-                                
-                                # Actions
-                                st.markdown("---")
-                                render_alert_actions(alert, "crypto")
-                else:
-                    st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
-            
-            with alert_tab2:
-                # Show count inside the tab
-                st.caption(f"**{len(pending_stocks)}** pending stock alert(s)")
-                if pending_stocks:
-                    for alert in pending_stocks:
-                        conf = alert.get('confidence', 'MEDIUM')
-                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
-                        
-                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=True):
-                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
-                            
-                            cols = st.columns(3)
-                            with cols[0]:
-                                price = alert.get('price')
-                                st.write(f"**Price:** {f'${price:.2f}' if price else 'N/A'}")
-                            with cols[1]:
-                                target = alert.get('target')
-                                st.write(f"**Target:** {f'${target:.2f}' if target else 'N/A'}")
-                            with cols[2]:
-                                stop = alert.get('stop_loss')
-                                st.write(f"**Stop:** {f'${stop:.2f}' if stop else 'N/A'}")
-                                
-                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
-                            
-                            st.markdown("---")
-                            render_alert_actions(alert, "stock")
-                else:
-                    st.info("No pending stock alerts.")
-            
-            st.markdown("---")
-            
-            # ============================================================
             # SERVICE HEALTH SUMMARY
             # ============================================================
             st.markdown("### 🏥 Service Health")
@@ -2444,6 +2256,179 @@ def main():
             if st.button("🗑️ Clear Queue", key="clear_analysis_queue"):
                 if clear_analysis_requests():
                     st.toast("✅ Queue cleared!")
+        
+        # ============================================================
+        # ALERT QUEUE (Collapsed by default for better UX)
+        # ============================================================
+        st.markdown("---")
+        
+        # Get pending alerts for count display
+        pending_crypto = get_pending_alerts("crypto")
+        pending_stocks = get_pending_alerts("stock")
+        total_alerts = len(pending_crypto) + len(pending_stocks)
+        
+        # Show alert queue in collapsible expander (collapsed by default)
+        alert_queue_label = f"📥 Alert Queue ({total_alerts} pending)" if total_alerts > 0 else "📥 Alert Queue (empty)"
+        with st.expander(alert_queue_label, expanded=False):
+            st.caption("Alerts from Discord and scanners waiting for your review")
+            
+            # Add manual alert
+            with st.expander("➕ Add Alert Manually", expanded=False):
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    manual_symbol = st.text_input("Symbol", placeholder="BTC, ETH, NVDA", key="manual_alert_symbol").upper()
+                with col2:
+                    manual_type = st.selectbox("Type", ["WATCH", "ENTRY", "BREAKOUT"], key="manual_alert_type")
+                with col3:
+                    manual_asset = st.selectbox("Asset", ["crypto", "stock"], key="manual_alert_asset")
+                
+                manual_reason = st.text_input("Reasoning (optional)", placeholder="Saw on Twitter...", key="manual_alert_reason")
+                
+                if st.button("Add to Queue", type="primary", key="add_manual_alert"):
+                    if manual_symbol:
+                        if debounced_action("add_manual_alert"):
+                            if add_manual_alert(manual_symbol, manual_type, manual_asset, manual_reason or "Manually added"):
+                                st.toast(f"✅ Added {manual_symbol} to queue")
+                            else:
+                                st.error("Failed to add alert")
+                    else:
+                        st.warning("Enter a symbol")
+            
+            # Bulk actions row
+            bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
+            with bulk_col1:
+                if st.button("🗑️ Clear All Crypto", key="clear_all_crypto", use_container_width=True, disabled=len(pending_crypto)==0):
+                    cleared = bulk_clear_alerts("crypto")
+                    st.toast(f"❌ Cleared {cleared} crypto alerts")
+            with bulk_col2:
+                if st.button("🗑️ Clear All Stocks", key="clear_all_stocks", use_container_width=True, disabled=len(pending_stocks)==0):
+                    cleared = bulk_clear_alerts("stock")
+                    st.toast(f"❌ Cleared {cleared} stock alerts")
+            with bulk_col3:
+                st.caption(f"Total: {total_alerts} pending alerts")
+            
+            # Use stable tab labels (counts shown inside tabs, not in labels)
+            alert_tab1, alert_tab2 = st.tabs(["🪙 Crypto", "📈 Stocks"])
+            
+            def render_alert_actions(alert, asset_type):
+                """Render action buttons for an alert"""
+                analysis_modes = {
+                    "crypto": [("🔬 Standard", "crypto_standard"), ("🎯 Multi", "crypto_multi"), ("🚀 Ultimate", "crypto_ultimate")],
+                    "stock": [("📈 Momentum", "stock_momentum"), ("🎯 ORB+FVG", "orb_fvg_scan")]
+                }
+                
+                symbol = alert['symbol']
+                all_pending = get_pending_alerts(asset_type)
+                symbol_alert_count = sum(1 for a in all_pending if a['symbol'].upper() == symbol.upper())
+                
+                col_acts = st.columns(6)
+                
+                with col_acts[0]:
+                    if st.button("✅ Watchlist", key=f"approve_{alert['id']}", use_container_width=True, help="Add to Watchlist"):
+                        if debounced_action(f"approve_{alert['id']}"):
+                            with st.spinner("Adding..."):
+                                success = approve_alert(alert['id'])
+                            if success:
+                                st.toast(f"✅ Added to watchlist")
+                
+                modes = analysis_modes.get(asset_type, analysis_modes["crypto"])
+                with col_acts[1]:
+                    if st.button(modes[0][0], key=f"analyze_std_{alert['id']}", use_container_width=True, help="Standard analysis"):
+                        if queue_analysis_request(modes[0][1], [alert['symbol']]):
+                            st.toast(f"🔬 Standard analysis queued for {alert['symbol']}")
+                        else:
+                            st.error("Failed to queue analysis")
+                
+                with col_acts[2]:
+                    if st.button(modes[1][0], key=f"analyze_multi_{alert['id']}", use_container_width=True, help="Multi-config analysis"):
+                        if queue_analysis_request(modes[1][1], [alert['symbol']]):
+                            st.toast(f"🎯 Multi analysis queued for {alert['symbol']}")
+                        else:
+                            st.error("Failed to queue analysis")
+                
+                with col_acts[3]:
+                    if asset_type == "crypto" and len(modes) > 2:
+                        if st.button(modes[2][0], key=f"analyze_ult_{alert['id']}", use_container_width=True, help="Ultimate analysis"):
+                            if queue_analysis_request(modes[2][1], [alert['symbol']]):
+                                st.toast(f"🚀 Ultimate analysis queued for {alert['symbol']}")
+                            else:
+                                st.error("Failed to queue analysis")
+                    else:
+                        if st.button("🚀 Trade", key=f"trade_{alert['id']}", use_container_width=True, help="Open Trade Setup"):
+                            st.info("⚠️ Use 'Quick Trade' tab in main app to execute")
+                
+                with col_acts[4]:
+                    if st.button("🗑️", key=f"reject_{alert['id']}", use_container_width=True, help="Dismiss This Alert"):
+                        if reject_alert(alert['id']):
+                            st.toast(f"❌ {alert['symbol']} dismissed")
+                
+                with col_acts[5]:
+                    if symbol_alert_count > 1:
+                        help_text = f"Remove all {symbol_alert_count} alerts for {symbol}"
+                        if st.button("🗑️ All", key=f"reject_all_{alert['id']}", use_container_width=True, help=help_text):
+                            count = reject_all_alerts_for_symbol(symbol)
+                            if count > 0:
+                                st.toast(f"❌ Removed {count} alert(s) for {symbol}")
+                            else:
+                                st.error("Failed to remove alerts")
+                    else:
+                        st.empty()
+
+            with alert_tab1:
+                st.caption(f"**{len(pending_crypto)}** pending crypto alert(s)")
+                if pending_crypto:
+                    for alert in pending_crypto:
+                        conf = alert.get('confidence', 'MEDIUM')
+                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
+                        
+                        # Individual alerts collapsed by default for cleaner view
+                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=False):
+                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                            
+                            cols = st.columns(3)
+                            with cols[0]:
+                                price = alert.get('price')
+                                st.write(f"**Price:** {f'${price:.4f}' if price else 'N/A'}")
+                            with cols[1]:
+                                target = alert.get('target')
+                                st.write(f"**Target:** {f'${target:.4f}' if target else 'N/A'}")
+                            with cols[2]:
+                                stop = alert.get('stop_loss')
+                                st.write(f"**Stop:** {f'${stop:.4f}' if stop else 'N/A'}")
+                            
+                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
+                            st.markdown("---")
+                            render_alert_actions(alert, "crypto")
+                else:
+                    st.info("No pending crypto alerts. Alerts from Discord and scanners will appear here.")
+            
+            with alert_tab2:
+                st.caption(f"**{len(pending_stocks)}** pending stock alert(s)")
+                if pending_stocks:
+                    for alert in pending_stocks:
+                        conf = alert.get('confidence', 'MEDIUM')
+                        icon = "🔥" if conf == "HIGH" else "⚠️" if conf == "LOW" else "🔔"
+                        
+                        # Individual alerts collapsed by default for cleaner view
+                        with st.expander(f"{icon} **{alert['symbol']}** - {alert['alert_type']} ({conf})", expanded=False):
+                            st.markdown(f"**Reasoning:** {alert.get('reasoning', 'No details')}")
+                            
+                            cols = st.columns(3)
+                            with cols[0]:
+                                price = alert.get('price')
+                                st.write(f"**Price:** {f'${price:.2f}' if price else 'N/A'}")
+                            with cols[1]:
+                                target = alert.get('target')
+                                st.write(f"**Target:** {f'${target:.2f}' if target else 'N/A'}")
+                            with cols[2]:
+                                stop = alert.get('stop_loss')
+                                st.write(f"**Stop:** {f'${stop:.2f}' if stop else 'N/A'}")
+                                
+                            st.caption(f"Source: {alert['source']} | Time: {alert['timestamp'].split('T')[1][:8]}")
+                            st.markdown("---")
+                            render_alert_actions(alert, "stock")
+                else:
+                    st.info("No pending stock alerts.")
     
     # Main content - Service Cards by Category
     st.markdown("---")
