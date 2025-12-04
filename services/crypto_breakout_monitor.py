@@ -711,9 +711,24 @@ class CryptoBreakoutMonitor:
         # Queue to Service Orchestrator for review in Control Panel
         self._queue_to_orchestrator(breakout)
         
+        # Check if we have a dedicated crypto alerts channel - if so, prefer webhook over bot
+        # (Bot always sends to the general channel, webhook can be routed per-asset)
+        use_webhook_routing = False
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            crypto_webhook = get_discord_webhook(AlertCategory.CRYPTO_ALERTS)
+            general_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+            # If crypto channel is different from general, use webhook routing
+            if crypto_webhook and general_webhook and crypto_webhook != general_webhook:
+                use_webhook_routing = True
+                logger.debug(f"   Using dedicated crypto alerts channel (webhook routing)")
+        except ImportError:
+            pass
+        
         # Try Discord bot first (has interactive buttons for Watch/Analyze/Dismiss)
+        # But skip bot if we have dedicated channel routing configured
         bot_sent = False
-        if self.discord_bot_manager and self.discord_bot_manager.is_running():
+        if not use_webhook_routing and self.discord_bot_manager and self.discord_bot_manager.is_running():
             try:
                 import asyncio
                 
