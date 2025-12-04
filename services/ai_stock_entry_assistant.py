@@ -127,7 +127,8 @@ class AIStockEntryAssistant:
         side: str,
         position_size: float,
         risk_pct: float,
-        take_profit_pct: float
+        take_profit_pct: float,
+        additional_context: str = None
     ) -> EntryAnalysis:
         """
         Analyze if NOW is a good time to enter this stock trade
@@ -138,6 +139,7 @@ class AIStockEntryAssistant:
             position_size: Position size in USD
             risk_pct: Risk percentage for stop loss
             take_profit_pct: Take profit percentage
+            additional_context: Optional context (e.g., analysis mode) to include
         
         Returns:
             EntryAnalysis with recommendation
@@ -168,7 +170,8 @@ class AIStockEntryAssistant:
                 take_profit_pct=take_profit_pct,
                 technical_data=technical_data,
                 recent_news=recent_news,  # NEW
-                sentiment_score=sentiment_score  # NEW
+                sentiment_score=sentiment_score,  # NEW
+                additional_context=additional_context  # Mode-specific context
             )
             
             # Get AI recommendation
@@ -479,13 +482,22 @@ class AIStockEntryAssistant:
         take_profit_pct: float,
         technical_data: Dict,
         recent_news: Optional[List[Dict]] = None,
-        sentiment_score: Optional[float] = None
+        sentiment_score: Optional[float] = None,
+        additional_context: str = None
     ) -> str:
         """Build AI prompt for stock entry analysis (ENHANCED with real-time news)"""
         
         prompt = f"""
 Analyze this STOCK trade with REAL-TIME MARKET CONTEXT and determine if NOW is optimal entry timing or WAIT for better conditions.
-
+"""
+        
+        # Add mode-specific context if provided
+        if additional_context:
+            prompt += f"""
+{additional_context}
+"""
+        
+        prompt += f"""
 **Stock Trade Request:**
 - Symbol: {symbol}
 - Side: {side} (BUY or SELL/SHORT)

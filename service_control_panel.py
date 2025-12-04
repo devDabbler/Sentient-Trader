@@ -500,8 +500,24 @@ def switch_strategy(strategy_key: str) -> tuple:
 # ON-DEMAND ANALYSIS
 # ============================================================
 
-def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = None) -> bool:
-    """Queue an analysis request for services to pick up"""
+def queue_analysis_request(
+    preset_key: str, 
+    custom_tickers: Optional[list] = None,
+    asset_type: Optional[str] = None,
+    analysis_mode: Optional[str] = None
+) -> bool:
+    """
+    Queue an analysis request for services to pick up.
+    
+    Args:
+        preset_key: Key from ANALYSIS_PRESETS or 'custom'
+        custom_tickers: Optional list of tickers (overrides preset)
+        asset_type: Optional asset type override ('crypto' or 'stock')
+        analysis_mode: Optional analysis mode override ('standard', 'multi_config', 'ultimate')
+        
+    Returns:
+        True if successful
+    """
     import os
     try:
         ANALYSIS_REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -515,8 +531,9 @@ def queue_analysis_request(preset_key: str, custom_tickers: Optional[list] = Non
         # Add new request
         preset = ANALYSIS_PRESETS.get(preset_key, {})
         final_tickers = custom_tickers or preset.get("tickers", [])
-        final_asset_type = preset.get("asset_type", "crypto")
-        final_analysis_mode = preset.get("analysis_mode", "standard")
+        # Use overrides if provided, otherwise use preset defaults
+        final_asset_type = asset_type or preset.get("asset_type", "crypto")
+        final_analysis_mode = analysis_mode or preset.get("analysis_mode", "standard")
         
         # DUPLICATE DETECTION: Check if identical pending request already exists
         # Prevents double-clicks from creating duplicate analysis runs
@@ -2412,8 +2429,10 @@ def main():
             if st.button("🚀 Run Custom", use_container_width=True, type="primary"):
                 tickers = [t.strip().upper() for t in custom_tickers.split(",") if t.strip()]
                 if tickers:
-                    if queue_analysis_request("custom", tickers):
-                        st.toast(f"✅ Custom analysis for {len(tickers)} tickers queued!")
+                    # Pass custom asset type and analysis mode to queue
+                    if queue_analysis_request("custom", tickers, asset_type=custom_asset, analysis_mode=custom_mode):
+                        mode_emoji = {"standard": "🔬", "multi_config": "🎯", "ultimate": "🚀"}.get(custom_mode, "📊")
+                        st.toast(f"✅ {mode_emoji} Custom {custom_mode} analysis for {len(tickers)} {custom_asset} tickers queued!")
                 else:
                     st.warning("Enter at least one ticker")
         

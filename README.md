@@ -1027,6 +1027,21 @@ MIT License - See LICENSE file for details
 
 ## ✨ Recent Updates (December 2025)
 
+### LLM Integration Enhancement for Multi-Config & Ultimate Analysis (December 4, 2025)
+- ✅ **Mode-Aware LLM Analysis:** Multi-config and Ultimate analysis modes now pass specialized context to LLMs
+  - **Standard Mode:** Single strategy analysis with straightforward recommendations
+  - **Multi-Config Mode:** Tests Long/Short scenarios, multiple timeframes, and leverage options
+  - **Ultimate Mode:** Exhaustive analysis across ALL strategies, directions, and timeframes
+- ✅ **Control Panel Custom Analysis Fix:** Custom analysis now properly passes asset type and mode
+  - Previously, custom analysis ignored the selected asset type and analysis mode
+  - Now correctly queues crypto/stock analysis with standard/multi/ultimate modes
+- ✅ **Enhanced Analysis Queue Processor:** Mode-specific prompts guide LLM to appropriate depth
+  - Standard: Focus on primary trading strategy
+  - Multi-Config: Compare trend-following vs mean-reversion, long vs short
+  - Ultimate: ALL strategies tested (Trend, Reversion, Momentum, Breakout, Scalping, Swing)
+- ✅ **Stock Entry Assistant Upgrade:** Now accepts additional_context for mode-aware analysis
+- ✅ **Unified LLM Context:** Both crypto and stock analysis use consistent mode context prompts
+
 ### AI Position Manager Alert Cooldown & Trading Style Enhancement (December 3, 2025)
 - ✅ **Alert Cooldown System:** Prevents spam - each action type has configurable cooldown before repeated alerts
   - HODL: 4 hours between alerts

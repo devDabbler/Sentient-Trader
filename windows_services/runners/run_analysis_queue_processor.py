@@ -90,6 +90,56 @@ def create_llm_analyzer(provider: str = None, model: str = None):
         return None
 
 
+def get_mode_context(mode: str) -> str:
+    """
+    Get analysis context based on the mode (standard, multi_config, ultimate).
+    This context is passed to the LLM to guide its analysis approach.
+    """
+    mode_contexts = {
+        "standard": """
+ANALYSIS MODE: STANDARD (Single Strategy)
+Focus on the PRIMARY trading strategy for this asset.
+Provide a straightforward BUY/SELL/WAIT recommendation based on current conditions.
+""",
+        "multi_config": """
+ANALYSIS MODE: MULTI-CONFIG (Multi-Strategy)
+This is an advanced analysis considering MULTIPLE strategies:
+- Test BOTH Long (BUY) and Short (SELL) scenarios
+- Consider multiple timeframes (short-term, medium-term)
+- Evaluate different leverage options if applicable
+- Compare trend-following vs mean-reversion approaches
+Provide the BEST overall recommendation after considering all scenarios.
+Include which strategy/direction combination is optimal and why.
+""",
+        "multi": """
+ANALYSIS MODE: MULTI-CONFIG (Multi-Strategy)
+This is an advanced analysis considering MULTIPLE strategies:
+- Test BOTH Long (BUY) and Short (SELL) scenarios
+- Consider multiple timeframes (short-term, medium-term)
+- Evaluate different leverage options if applicable
+- Compare trend-following vs mean-reversion approaches
+Provide the BEST overall recommendation after considering all scenarios.
+Include which strategy/direction combination is optimal and why.
+""",
+        "ultimate": """
+ANALYSIS MODE: ULTIMATE (Comprehensive All-Strategy)
+This is the MOST THOROUGH analysis combining ALL available data:
+- Test EVERY strategy: Trend Following, Mean Reversion, Momentum, Breakout, Scalping, Swing
+- Consider ALL directions: Long, Short, Neutral
+- Analyze ALL timeframes: 1H, 4H, Daily, Weekly
+- Evaluate ALL risk profiles: Conservative, Moderate, Aggressive
+You must provide:
+1. The SINGLE BEST trading opportunity after exhaustive analysis
+2. Confidence level (be stringent - only HIGH confidence if ALL indicators align)
+3. Specific strategy, direction, and timeframe that won
+4. Clear reasoning why this beats ALL other combinations
+5. Risk/reward assessment across multiple scenarios
+This is the highest-quality analysis - take extra care with the recommendation.
+"""
+    }
+    return mode_contexts.get(mode, mode_contexts["standard"])
+
+
 def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: str = "primary") -> dict:
     """Run analysis with a specific LLM analyzer"""
     from services.ai_entry_assistant import AIEntryAssistant
@@ -98,13 +148,17 @@ def run_single_analysis(ticker: str, kraken, llm_analyzer, mode: str, llm_name: 
         logger.info(f"   [{llm_name}] Creating AIEntryAssistant...")
         assistant = AIEntryAssistant(kraken_client=kraken, llm_analyzer=llm_analyzer)
         
-        logger.info(f"   [{llm_name}] Running analyze_entry...")
+        # Get mode-specific context to enhance analysis
+        mode_context = get_mode_context(mode)
+        logger.info(f"   [{llm_name}] Running analyze_entry with {mode} mode context...")
+        
         analysis = assistant.analyze_entry(
             pair=ticker,
             side="BUY",
             position_size=1000,
             risk_pct=2.0,
-            take_profit_pct=6.0
+            take_profit_pct=6.0,
+            additional_context=mode_context
         )
         logger.info(f"   [{llm_name}] Analysis complete")
         
@@ -266,6 +320,9 @@ def run_stock_analysis(ticker: str, mode: str = "standard") -> dict:
         from services.ai_stock_entry_assistant import AIStockEntryAssistant
         from services.llm_strategy_analyzer import LLMStrategyAnalyzer
         
+        # Get mode-specific context to enhance analysis
+        mode_context = get_mode_context(mode)
+        
         # Try to get a broker client - Tradier is simplest
         broker_client = None
         try:
@@ -305,12 +362,14 @@ def run_stock_analysis(ticker: str, mode: str = "standard") -> dict:
         
         assistant = AIStockEntryAssistant(broker_client=broker_client, llm_analyzer=llm_analyzer)
         
+        logger.info(f"   Running stock analysis with {mode} mode context...")
         analysis = assistant.analyze_entry(
             symbol=ticker.upper(),
             side="BUY",
             position_size=1000,
             risk_pct=2.0,
-            take_profit_pct=6.0
+            take_profit_pct=6.0,
+            additional_context=mode_context
         )
         
         if analysis:
