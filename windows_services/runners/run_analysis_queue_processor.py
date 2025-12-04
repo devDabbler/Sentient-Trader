@@ -43,7 +43,17 @@ from windows_services.runners.service_config_loader import (
 )
 
 # Discord notifications - ENABLED by default for analysis results
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+# Uses channel routing when available
+def _get_analysis_webhook_url():
+    """Get Discord webhook URL with channel routing support"""
+    try:
+        from src.integrations.discord_channels import get_discord_webhook, AlertCategory, is_crypto_symbol
+        # Will be determined per-request based on asset type
+        return os.getenv("DISCORD_WEBHOOK_URL", "")  # Fallback for now
+    except ImportError:
+        return os.getenv("DISCORD_WEBHOOK_URL", "")
+
+DISCORD_WEBHOOK_URL = _get_analysis_webhook_url()
 # Enable Discord alerts for analysis results - users want to see results in Discord
 ENABLE_DISCORD_ALERTS = os.getenv("ANALYSIS_QUEUE_DISCORD_ALERTS", "true").lower() in ("true", "1", "yes")
 
@@ -743,12 +753,23 @@ def send_discord_notification(results: list, request: dict):
             embeds.append(result_embed)
         
         # Send via webhook (Discord allows up to 10 embeds per message)
+        # Use channel routing based on asset type
+        webhook_url = DISCORD_WEBHOOK_URL
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            if asset_type == "CRYPTO":
+                webhook_url = get_discord_webhook(AlertCategory.CRYPTO_ALERTS) or DISCORD_WEBHOOK_URL
+            else:
+                webhook_url = get_discord_webhook(AlertCategory.STOCK_ALERTS) or DISCORD_WEBHOOK_URL
+        except ImportError:
+            pass
+        
         payload = {
             "username": "🤖 Analysis Queue Processor",
             "embeds": embeds[:10]  # Limit to 10 embeds per message
         }
         
-        response = req_lib.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+        response = req_lib.post(webhook_url, json=payload, timeout=5)
         if response.status_code in [200, 204]:
             logger.info(f"✅ Discord notification sent ({len(embeds)} embeds)")
         else:

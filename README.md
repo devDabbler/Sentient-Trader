@@ -288,8 +288,23 @@ SOLANA_RPC_URL=https://solana-mainnet.g.alchemy.com/v2/key1
 SOLANA_RPC_URL_2=https://solana-mainnet.g.alchemy.com/v2/key2
 SOLANA_RPC_URL_3=https://solana-mainnet.g.alchemy.com/v2/key3
 
-# Alerts
+# Discord Channel Routing (Optional - Enhanced Organization)
+# Create separate text channels in Discord for organized alerts:
+#   #stock-alerts, #crypto-alerts, #options-alerts (for signals/opportunities)
+#   #stock-executions, #crypto-executions, #options-executions (for trade confirmations)
+#
+# FALLBACK WEBHOOK (used when specific channels not configured)
 DISCORD_WEBHOOK_URL=...
+#
+# ALERT CHANNELS (trading signals and opportunities)
+# DISCORD_WEBHOOK_STOCK_ALERTS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_CRYPTO_ALERTS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_OPTIONS_ALERTS=https://discord.com/api/webhooks/...
+#
+# EXECUTION CHANNELS (actual trade confirmations)
+# DISCORD_WEBHOOK_STOCK_EXECUTIONS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_CRYPTO_EXECUTIONS=https://discord.com/api/webhooks/...
+# DISCORD_WEBHOOK_OPTIONS_EXECUTIONS=https://discord.com/api/webhooks/...
 ```
 
 ---

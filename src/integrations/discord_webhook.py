@@ -5,6 +5,7 @@ IMPORTANT: Uses lazy import of requests to prevent Task Scheduler hangs
 """
 
 import os
+from typing import Optional
 from loguru import logger
 from models.alerts import TradingAlert, AlertType
 
@@ -205,9 +206,46 @@ def _build_trading_decision_fields(details: dict) -> list:
     return fields
 
 
+def _get_webhook_for_alert(alert: 'TradingAlert') -> Optional[str]:
+    """
+    Get the appropriate webhook URL for an alert based on its type and ticker.
+    Uses channel routing when configured, falls back to general webhook.
+    """
+    try:
+        from src.integrations.discord_channels import (
+            get_discord_webhook_for_asset, 
+            AlertCategory,
+            is_crypto_symbol,
+            is_options_symbol
+        )
+        
+        # Determine if this is an execution or an alert
+        is_execution = alert.alert_type in [
+            AlertType.TRADE_EXECUTED,
+            AlertType.POSITION_OPENED,
+            AlertType.POSITION_CLOSED,
+            AlertType.STOP_LOSS_HIT,
+            AlertType.PROFIT_TARGET
+        ]
+        
+        # Get the appropriate webhook
+        webhook_url = get_discord_webhook_for_asset(alert.ticker, is_execution=is_execution)
+        
+        if webhook_url:
+            return webhook_url
+            
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"Channel routing failed, using fallback: {e}")
+    
+    # Fallback to general webhook
+    return os.getenv('DISCORD_WEBHOOK_URL')
+
+
 def send_discord_alert(alert: TradingAlert):
     """Sends a trading alert to a Discord webhook with enhanced formatting."""
-    webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+    webhook_url = _get_webhook_for_alert(alert)
     if not webhook_url:
         logger.warning('DISCORD_WEBHOOK_URL not set. Skipping Discord notification.')
         return

@@ -273,10 +273,15 @@ class StockInformationalMonitor(LLMServiceMixin):
         self.recent_alerts: Dict[str, datetime] = {}
         self.alert_cooldown_minutes = 60
         
-        # Discord webhook for rich embeds (like crypto breakout monitor)
-        self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        # Discord webhook for rich embeds (like crypto breakout monitor) - use channel routing
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            self.discord_webhook = get_discord_webhook(AlertCategory.STOCK_ALERTS)
+        except ImportError:
+            self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        
         if not self.discord_webhook:
-            logger.warning("⚠️ DISCORD_WEBHOOK_URL not set - alerts will use fallback system")
+            logger.warning("⚠️ DISCORD_WEBHOOK not set - alerts will use fallback system")
         
         # Discord bot for interactive buttons (Watch/Analyze/Dismiss) - same as crypto breakout monitor
         self.discord_bot_manager = None

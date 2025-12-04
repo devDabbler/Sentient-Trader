@@ -715,7 +715,13 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
             import os
             import requests
             
-            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            # Use channel routing for stock executions
+            try:
+                from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+                webhook_url = get_discord_webhook(AlertCategory.STOCK_EXECUTIONS)
+            except ImportError:
+                webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            
             if not webhook_url:
                 return
             
@@ -1384,7 +1390,13 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         try:
             import requests
             
-            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            # Use channel routing for stock executions
+            try:
+                from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+                webhook_url = get_discord_webhook(AlertCategory.STOCK_EXECUTIONS)
+            except ImportError:
+                webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            
             if not webhook_url:
                 logger.debug("Discord webhook not configured - skipping notification")
                 return

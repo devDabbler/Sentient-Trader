@@ -130,10 +130,15 @@ class CryptoBreakoutMonitor:
         # Track coins added to watchlist in this session
         self.watchlist_added: Set[str] = set()
         
-        # Discord webhook (for simple embeds)
-        self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        # Discord webhook (for simple embeds) - use channel routing
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            self.discord_webhook = get_discord_webhook(AlertCategory.CRYPTO_ALERTS)
+        except ImportError:
+            self.discord_webhook = os.getenv('DISCORD_WEBHOOK_URL')
+        
         if not self.discord_webhook:
-            logger.warning("⚠️ DISCORD_WEBHOOK_URL not set - alerts will be logged only")
+            logger.warning("⚠️ DISCORD_WEBHOOK not set - alerts will be logged only")
         
         # Discord bot for interactive buttons (Watch/Analyze/Dismiss)
         self.discord_bot_manager = None

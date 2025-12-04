@@ -2453,9 +2453,15 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
             import os
             import requests
             
-            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            # Use channel routing for crypto executions
+            try:
+                from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+                webhook_url = get_discord_webhook(AlertCategory.CRYPTO_EXECUTIONS)
+            except ImportError:
+                webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            
             if not webhook_url:
-                logger.warning(f"⚠️ DISCORD_WEBHOOK_URL not set, cannot send notification: {title}")
+                logger.warning(f"⚠️ Discord webhook not set, cannot send notification: {title}")
                 return
             
             embed = {

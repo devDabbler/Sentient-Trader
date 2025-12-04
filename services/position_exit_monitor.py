@@ -739,7 +739,13 @@ class PositionExitMonitor:
         import os
         import requests
         
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        # Use channel routing for stock executions
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            webhook_url = get_discord_webhook(AlertCategory.STOCK_EXECUTIONS)
+        except ImportError:
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        
         if not webhook_url:
             return
         

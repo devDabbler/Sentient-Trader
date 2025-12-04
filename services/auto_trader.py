@@ -2109,9 +2109,15 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
         import os
         import requests
         
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        # Use channel routing for executions
+        try:
+            from src.integrations.discord_channels import get_discord_webhook_for_asset
+            webhook_url = get_discord_webhook_for_asset(signal.symbol, is_execution=True)
+        except ImportError:
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        
         if not webhook_url:
-            logger.debug('DISCORD_WEBHOOK_URL not set. Skipping Discord notification.')
+            logger.debug('Discord webhook not configured. Skipping notification.')
             return
         
         # Determine action type and get P/L for closed positions
@@ -2277,7 +2283,13 @@ Be conservative. Only APPROVE trades with solid risk/reward and proper portfolio
         import os
         import requests
         
-        webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        # Use channel routing for stock alerts
+        try:
+            from src.integrations.discord_channels import get_discord_webhook, AlertCategory
+            webhook_url = get_discord_webhook(AlertCategory.STOCK_ALERTS)
+        except ImportError:
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+        
         if not webhook_url:
             return
         
