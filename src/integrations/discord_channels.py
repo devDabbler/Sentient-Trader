@@ -7,7 +7,12 @@ Channel Categories:
 - CRYPTO_ALERTS: Crypto breakouts, signals, and opportunities
 - OPTIONS_ALERTS: Options trading signals and opportunities
 - DEX_PUMP_ALERTS: DEX Hunter pump/launch detection alerts
-- TRADE_EXECUTIONS: All actual trade executions (buys/sells across all asset types)
+- STOCK_POSITIONS: Stock position monitor updates (AI decisions, stop adjustments)
+- CRYPTO_POSITIONS: Crypto position monitor updates (AI decisions, stop adjustments)
+- OPTIONS_POSITIONS: Options position monitor updates
+- STOCK_EXECUTIONS: Stock trade executions (buys/sells)
+- CRYPTO_EXECUTIONS: Crypto trade executions (buys/sells)
+- OPTIONS_EXECUTIONS: Options trade executions (buys/sells)
 - GENERAL: Fallback for any uncategorized alerts
 
 Usage:
@@ -26,13 +31,22 @@ from loguru import logger
 
 class AlertCategory(Enum):
     """Discord channel categories for routing alerts"""
+    # Trading signals and opportunities
     STOCK_ALERTS = "STOCK_ALERTS"           # Stock trading signals and opportunities
     CRYPTO_ALERTS = "CRYPTO_ALERTS"         # Crypto breakouts and opportunities
     OPTIONS_ALERTS = "OPTIONS_ALERTS"       # Options trading signals
     DEX_PUMP_ALERTS = "DEX_PUMP_ALERTS"     # DEX Hunter pump/launch alerts
+    
+    # Position monitor updates (AI decisions, stop adjustments, P&L updates)
+    STOCK_POSITIONS = "STOCK_POSITIONS"     # Stock position monitor
+    CRYPTO_POSITIONS = "CRYPTO_POSITIONS"   # Crypto position monitor
+    OPTIONS_POSITIONS = "OPTIONS_POSITIONS" # Options position monitor
+    
+    # Trade executions (actual buys/sells)
     STOCK_EXECUTIONS = "STOCK_EXECUTIONS"   # Stock trade executions
     CRYPTO_EXECUTIONS = "CRYPTO_EXECUTIONS" # Crypto trade executions
     OPTIONS_EXECUTIONS = "OPTIONS_EXECUTIONS"  # Options trade executions
+    
     GENERAL = "GENERAL"                     # Fallback channel
 
 
@@ -42,6 +56,9 @@ WEBHOOK_ENV_VARS = {
     AlertCategory.CRYPTO_ALERTS: "DISCORD_WEBHOOK_CRYPTO_ALERTS",
     AlertCategory.OPTIONS_ALERTS: "DISCORD_WEBHOOK_OPTIONS_ALERTS",
     AlertCategory.DEX_PUMP_ALERTS: "DISCORD_WEBHOOK_DEX_PUMP_ALERTS",
+    AlertCategory.STOCK_POSITIONS: "DISCORD_WEBHOOK_STOCK_POSITIONS",
+    AlertCategory.CRYPTO_POSITIONS: "DISCORD_WEBHOOK_CRYPTO_POSITIONS",
+    AlertCategory.OPTIONS_POSITIONS: "DISCORD_WEBHOOK_OPTIONS_POSITIONS",
     AlertCategory.STOCK_EXECUTIONS: "DISCORD_WEBHOOK_STOCK_EXECUTIONS",
     AlertCategory.CRYPTO_EXECUTIONS: "DISCORD_WEBHOOK_CRYPTO_EXECUTIONS",
     AlertCategory.OPTIONS_EXECUTIONS: "DISCORD_WEBHOOK_OPTIONS_EXECUTIONS",

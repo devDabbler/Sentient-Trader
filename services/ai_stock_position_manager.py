@@ -1318,7 +1318,8 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                             f"**P&L:** {pnl_pct:+.2f}%\n"
                             f"**Entry:** ${position.entry_price:.2f}\n"
                             f"**Shares:** {position.quantity}",
-                            color=15158332  # Red
+                            color=15158332,  # Red
+                            is_execution=True
                         )
                         self.close_position(position.trade_id, "Stop loss triggered")
                         continue
@@ -1331,7 +1332,8 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                             f"**P&L:** {pnl_pct:+.2f}%\n"
                             f"**Entry:** ${position.entry_price:.2f}\n"
                             f"**Shares:** {position.quantity}",
-                            color=3066993  # Green
+                            color=3066993,  # Green
+                            is_execution=True
                         )
                         self.close_position(position.trade_id, "Take profit triggered")
                         continue
@@ -1345,7 +1347,8 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                             f"**P&L:** {pnl_pct:+.2f}%\n"
                             f"**Entry:** ${position.entry_price:.2f}\n"
                             f"**Shares:** {position.quantity}",
-                            color=15158332  # Red
+                            color=15158332,  # Red
+                            is_execution=True
                         )
                         self.close_position(position.trade_id, "Stop loss triggered")
                         continue
@@ -1358,7 +1361,8 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
                             f"**P&L:** {pnl_pct:+.2f}%\n"
                             f"**Entry:** ${position.entry_price:.2f}\n"
                             f"**Shares:** {position.quantity}",
-                            color=3066993  # Green
+                            color=3066993,  # Green
+                            is_execution=True
                         )
                         self.close_position(position.trade_id, "Take profit triggered")
                         continue
@@ -1385,15 +1389,25 @@ RESPOND: APPROVED: YES/NO | CONFIDENCE: 0-100 | REASONING: brief"""
         # Save state after checking
         self._save_state()
     
-    def _send_notification(self, title: str, message: str, color: int = 3447003):
-        """Send Discord notification (matching crypto position manager pattern)"""
+    def _send_notification(self, title: str, message: str, color: int = 3447003, is_execution: bool = False):
+        """Send Discord notification (matching crypto position manager pattern)
+        
+        Args:
+            title: Notification title
+            message: Notification body
+            color: Discord embed color
+            is_execution: If True, routes to STOCK_EXECUTIONS; if False, routes to STOCK_POSITION_MONITOR
+        """
         try:
             import requests
             
-            # Use channel routing for stock executions
+            # Use channel routing - executions vs monitoring
             try:
                 from src.integrations.discord_channels import get_discord_webhook, AlertCategory
-                webhook_url = get_discord_webhook(AlertCategory.STOCK_EXECUTIONS)
+                if is_execution:
+                    webhook_url = get_discord_webhook(AlertCategory.STOCK_EXECUTIONS)
+                else:
+                    webhook_url = get_discord_webhook(AlertCategory.STOCK_POSITIONS)
             except ImportError:
                 webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
             

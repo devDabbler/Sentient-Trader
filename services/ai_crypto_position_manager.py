@@ -2156,11 +2156,12 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 if result.order_id:
                     message_parts.append(f"**Order ID:** `{result.order_id}`")
                 
-                # Send notification
+                # Send notification - this is an execution
                 self._send_notification(
                     f"{exit_type}: {position.pair}",
                     "\n".join(message_parts),
-                    color=color
+                    color=color,
+                    is_execution=True
                 )
                 
                 # Update journal with exit
@@ -2256,11 +2257,12 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     f"⚠️ **ACTION REQUIRED:** Please manually close this position on Kraken!"
                 ]
                 
-                # Send notification even though order failed
+                # Send notification even though order failed - this is an execution
                 self._send_notification(
                     f"{exit_type}: {position.pair}",
                     "\n".join(message_parts),
-                    color=color
+                    color=color,
+                    is_execution=True
                 )
                 
                 return False
@@ -2285,7 +2287,8 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                     f"**Reason:** {decision.reasoning}\n"
                     f"**Error:** {str(e)}\n\n"
                     f"⚠️ **ACTION REQUIRED:** Check position status manually!",
-                    color=color
+                    color=color,
+                    is_execution=True
                 )
             except:
                 pass  # Don't fail if notification also fails
@@ -2410,13 +2413,14 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
                 position.partial_exit_pct = decision.partial_pct
                 self.partial_exits_taken += 1
                 
-                # Send notification
+                # Send notification - this is an execution
                 self._send_notification(
                     f"💰 Partial Profit: {position.pair}",
                     f"**Closed:** {decision.partial_pct}% of position\n"
                     f"**Remaining:** {position.volume:.6f}\n"
                     f"**Reason:** {decision.reasoning}",
-                    color=16776960  # Yellow
+                    color=16776960,  # Yellow
+                    is_execution=True
                 )
                 
                 self._save_state()
@@ -2447,16 +2451,26 @@ Analyze this active crypto position with REAL-TIME MARKET CONTEXT and recommend 
         self._save_state()
         return True
     
-    def _send_notification(self, title: str, message: str, color: int = 3447003):
-        """Send Discord notification with improved error handling"""
+    def _send_notification(self, title: str, message: str, color: int = 3447003, is_execution: bool = False):
+        """Send Discord notification with improved error handling
+        
+        Args:
+            title: Notification title
+            message: Notification body
+            color: Discord embed color
+            is_execution: If True, routes to CRYPTO_EXECUTIONS; if False, routes to CRYPTO_POSITION_MONITOR
+        """
         try:
             import os
             import requests
             
-            # Use channel routing for crypto executions
+            # Use channel routing - executions vs monitoring
             try:
                 from src.integrations.discord_channels import get_discord_webhook, AlertCategory
-                webhook_url = get_discord_webhook(AlertCategory.CRYPTO_EXECUTIONS)
+                if is_execution:
+                    webhook_url = get_discord_webhook(AlertCategory.CRYPTO_EXECUTIONS)
+                else:
+                    webhook_url = get_discord_webhook(AlertCategory.CRYPTO_POSITIONS)
             except ImportError:
                 webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
             
