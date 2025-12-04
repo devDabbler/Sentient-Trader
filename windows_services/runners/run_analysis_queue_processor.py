@@ -234,35 +234,44 @@ def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
         logger.info(f"   LLM mode: {llm_mode}, timeout: {ANALYSIS_TIMEOUT}s")
         
         if llm_mode == "compare":
-            # Run BOTH Ollama and OpenRouter, return comparison
+            # Run BOTH local Ollama models, return comparison
             results = {"ticker": ticker, "mode": mode, "comparison": []}
             
-            # Ollama analysis
-            logger.info(f"   Running Ollama analysis...")
-            ollama_llm = create_llm_analyzer(provider="ollama", model="qwen2.5:7b")
-            if ollama_llm:
-                ollama_result = run_single_analysis(ticker, kraken, ollama_llm, mode, "ollama")
-                results["comparison"].append(ollama_result)
-                logger.info(f"   Ollama: {ollama_result.get('action')} ({ollama_result.get('confidence', 0):.0f}%)")
+            # Get local models from env - use two local models for comparison
+            local_model_1 = os.getenv("AI_ANALYZER_MODEL", "qwen2.5:7b")
+            if local_model_1.startswith("ollama/"):
+                local_model_1 = local_model_1.replace("ollama/", "")
             
-            # OpenRouter analysis  
-            logger.info(f"   Running OpenRouter analysis...")
-            openrouter_llm = create_llm_analyzer(provider="openrouter", model="google/gemini-2.0-flash-exp:free")
-            if openrouter_llm:
-                openrouter_result = run_single_analysis(ticker, kraken, openrouter_llm, mode, "openrouter")
-                results["comparison"].append(openrouter_result)
-                logger.info(f"   OpenRouter: {openrouter_result.get('action')} ({openrouter_result.get('confidence', 0):.0f}%)")
+            local_model_2 = os.getenv("AI_ANALYZER_MODEL_2", "mistral:7b-instruct-v0.3-q4_K_M")
+            if local_model_2.startswith("ollama/"):
+                local_model_2 = local_model_2.replace("ollama/", "")
             
-            # Use the best result as primary
+            # First local model analysis
+            logger.info(f"   Running local Ollama analysis with model: {local_model_1}...")
+            ollama_llm_1 = create_llm_analyzer(provider="ollama", model=local_model_1)
+            if ollama_llm_1:
+                result_1 = run_single_analysis(ticker, kraken, ollama_llm_1, mode, f"ollama-{local_model_1.split(':')[0]}")
+                results["comparison"].append(result_1)
+                logger.info(f"   {local_model_1}: {result_1.get('action')} ({result_1.get('confidence', 0):.0f}%)")
+            
+            # Second local model analysis
+            logger.info(f"   Running local Ollama analysis with model: {local_model_2}...")
+            ollama_llm_2 = create_llm_analyzer(provider="ollama", model=local_model_2)
+            if ollama_llm_2:
+                result_2 = run_single_analysis(ticker, kraken, ollama_llm_2, mode, f"ollama-{local_model_2.split(':')[0]}")
+                results["comparison"].append(result_2)
+                logger.info(f"   {local_model_2}: {result_2.get('action')} ({result_2.get('confidence', 0):.0f}%)")
+            
+            # Use the best result as primary (highest confidence)
             valid_results = [r for r in results["comparison"] if r.get("action") not in ["ERROR", "TIMEOUT", "NO_RESULT"]]
             if valid_results:
                 best = max(valid_results, key=lambda x: x.get("confidence", 0))
                 results.update(best)
-                results["comparison_note"] = f"Best of {len(valid_results)} LLMs"
+                results["comparison_note"] = f"Best of {len(valid_results)} local LLMs ({local_model_1}, {local_model_2})"
             else:
                 results["action"] = "ERROR"
                 results["confidence"] = 0
-                results["reasoning"] = "All LLMs failed or timed out"
+                results["reasoning"] = "All local LLMs failed or timed out"
             
             results["analysis_time"] = datetime.now().isoformat()
             results["asset_type"] = "crypto"
@@ -277,8 +286,9 @@ def run_crypto_analysis(ticker: str, mode: str = "standard") -> dict:
                     return result
                 logger.warning(f"   Primary LLM failed, trying fallback...")
             
-            # Fallback to OpenRouter
-            fallback_llm = create_llm_analyzer(provider="openrouter", model="google/gemini-2.0-flash-exp:free")
+            # Fallback to OpenRouter - use OPENROUTER_MODEL from env
+            fallback_model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+            fallback_llm = create_llm_analyzer(provider="openrouter", model=fallback_model)
             if fallback_llm:
                 result = run_single_analysis(ticker, kraken, fallback_llm, mode, "fallback")
                 result["fallback_used"] = True

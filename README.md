@@ -196,25 +196,43 @@ Complete cloud persistence for all crypto and stock positions with full audit tr
   - `auto_trader.py` - Stores signals after trade execution
   - `position_exit_monitor.py` - Updates outcomes when positions close
 
-#### Multi-Model Local LLM (NEW - December 2025)
-* **🧠 Dual Local LLM Support:** Run multiple Ollama models for enhanced analysis
-  - **Qwen 2.5:7B** - Primary model for general trading analysis and reasoning
-  - **Mistral 7B Instruct v0.3** - Secondary model for structured JSON output and sentiment
+#### Multi-Model Local LLM (ENHANCED - December 2025)
+* **🧠 Dual Local LLM Support:** Run TWO local Ollama models for comparison analysis
+  - **Qwen 2.5:7B** - General reasoning and trading analysis
+  - **Mistral 7B Instruct v0.3** - Structured JSON output and sentiment analysis
   - Ollama manages VRAM automatically (loads on demand, unloads after idle)
-* **📊 Use Cases:**
-  - **Ensemble Decisions:** Run same analysis through both models, act only when they agree
-  - **Task Specialization:** Qwen for reasoning, Mistral for JSON-structured outputs
-  - **Failover Redundancy:** If one model hangs, fallback to the other instantly
+* **📊 Compare Mode (Recommended):** Run BOTH local models and use highest confidence
+  - Model 1: Uses `AI_ANALYZER_MODEL` from `.env`
+  - Model 2: Uses `AI_ANALYZER_MODEL_2` from `.env`
+  - System automatically picks the best result (highest confidence)
+* **🔄 LLM Mode Options:**
+  - `compare` - Run BOTH local models, pick highest confidence (recommended)
+  - `primary` - Use ONLY `AI_ANALYZER_MODEL` (fastest, single model)
 * **⚙️ Available Models:**
   ```powershell
-  ollama pull qwen2.5:7b                    # General reasoning (~4.7GB VRAM)
+  ollama pull qwen2.5:7b                       # General reasoning (~4.7GB VRAM)
   ollama pull mistral:7b-instruct-v0.3-q4_K_M  # JSON/structured output (~4.4GB VRAM)
-  ollama pull nomic-embed-text              # Embeddings for RAG (~274MB VRAM)
+  ollama pull nomic-embed-text                 # Embeddings for RAG (~274MB VRAM)
   ```
 * **🎯 VRAM Management (RTX 3080 Ti 12GB):**
   - Models load on-demand and unload after ~5 min idle
-  - Sequential model use recommended (not simultaneous)
-  - Set `ANALYSIS_LLM_MODE=compare` in `.env` to compare both models
+  - Compare mode runs models sequentially (not simultaneous) for VRAM efficiency
+* **📝 Configuration (`.env`):**
+  ```bash
+  # LLM Mode: compare (both local), primary (single local)
+  ANALYSIS_LLM_MODE=compare
+  
+  # Primary local Ollama model
+  AI_ANALYZER_MODEL=qwen2.5:7b
+  
+  # Second local Ollama model for comparison
+  AI_ANALYZER_MODEL_2=mistral:7b-instruct-v0.3-q4_K_M
+  ```
+* **📊 How Compare Mode Works:**
+  1. Runs analysis through first local model (your `AI_ANALYZER_MODEL`)
+  2. Runs same analysis through second local model (your `AI_ANALYZER_MODEL_2`)
+  3. Compares confidence scores, uses the BEST result
+  4. Logs both results with which model "won" for transparency
 
 ---
 
