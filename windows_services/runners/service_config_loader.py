@@ -29,14 +29,17 @@ def load_service_watchlist(service_name: str, default_tickers: Optional[List[str
     
     try:
         if watchlist_file.exists():
-            with open(watchlist_file, 'r') as f:
-                watchlists = json.load(f)
-            
-            service_config = watchlists.get(service_name, {})
-            tickers = service_config.get('tickers', [])
-            
-            if tickers:
-                return tickers
+            content = watchlist_file.read_text().strip()
+            if content:
+                try:
+                    watchlists = json.loads(content)
+                    if isinstance(watchlists, dict):
+                        service_config = watchlists.get(service_name, {})
+                        tickers = service_config.get('tickers', [])
+                        if tickers:
+                            return tickers
+                except json.JSONDecodeError:
+                    pass
     except Exception as e:
         print(f"[service_config_loader] Error loading watchlist: {e}")
     
@@ -65,12 +68,16 @@ def load_discord_settings(service_name: str) -> Dict:
     
     try:
         if settings_file.exists():
-            with open(settings_file, 'r') as f:
-                all_settings = json.load(f)
-            
-            service_settings = all_settings.get(service_name, {})
-            # Merge with defaults
-            return {**default_settings, **service_settings}
+            content = settings_file.read_text().strip()
+            if content:
+                try:
+                    all_settings = json.loads(content)
+                    if isinstance(all_settings, dict):
+                        service_settings = all_settings.get(service_name, {})
+                        # Merge with defaults
+                        return {**default_settings, **service_settings}
+                except json.JSONDecodeError:
+                    pass
     except Exception as e:
         print(f"[service_config_loader] Error loading discord settings: {e}")
     
@@ -88,11 +95,14 @@ def get_pending_analysis_requests() -> List[Dict]:
     
     try:
         if requests_file.exists():
-            with open(requests_file, 'r') as f:
-                requests = json.load(f)
-            
-            # Return only pending requests
-            return [r for r in requests if r.get('status') == 'pending']
+            content = requests_file.read_text().strip()
+            if content:  # Only parse if file has content
+                requests = json.loads(content)
+                if isinstance(requests, list):
+                    # Return only pending requests
+                    return [r for r in requests if r.get('status') == 'pending']
+    except json.JSONDecodeError:
+        print(f"[service_config_loader] Corrupted analysis_requests.json")
     except Exception as e:
         print(f"[service_config_loader] Error loading analysis requests: {e}")
     
@@ -116,8 +126,14 @@ def mark_analysis_complete(request_id: str, results: Optional[Dict] = None) -> b
     try:
         requests = []
         if requests_file.exists():
-            with open(requests_file, 'r') as f:
-                requests = json.load(f)
+            content = requests_file.read_text().strip()
+            if content:
+                try:
+                    requests = json.loads(content)
+                    if not isinstance(requests, list):
+                        requests = []
+                except json.JSONDecodeError:
+                    requests = []
         
         # Find and update the request
         found = False
@@ -165,8 +181,14 @@ def save_analysis_results(service_name: str, results: List[Dict]) -> bool:
         
         all_results = {}
         if results_file.exists():
-            with open(results_file, 'r') as f:
-                all_results = json.load(f)
+            content = results_file.read_text().strip()
+            if content:
+                try:
+                    all_results = json.loads(content)
+                    if not isinstance(all_results, dict):
+                        all_results = {}
+                except json.JSONDecodeError:
+                    all_results = {}
         
         # Store results for this service
         all_results[service_name] = {
@@ -198,12 +220,17 @@ def get_analysis_results(service_name: Optional[str] = None) -> Dict:
     
     try:
         if results_file.exists():
-            with open(results_file, 'r') as f:
-                all_results = json.load(f)
-            
-            if service_name:
-                return all_results.get(service_name, {})
-            return all_results
+            content = results_file.read_text().strip()
+            if content:
+                try:
+                    all_results = json.loads(content)
+                    if not isinstance(all_results, dict):
+                        return {}
+                    if service_name:
+                        return all_results.get(service_name, {})
+                    return all_results
+                except json.JSONDecodeError:
+                    pass
     except Exception as e:
         print(f"[service_config_loader] Error loading analysis results: {e}")
     
@@ -309,11 +336,19 @@ def queue_analysis_request(
     try:
         requests_file.parent.mkdir(parents=True, exist_ok=True)
         
-        # Load existing requests
+        # Load existing requests (handle empty/corrupted file gracefully)
         requests = []
         if requests_file.exists():
-            with open(requests_file, 'r') as f:
-                requests = json.load(f)
+            try:
+                content = requests_file.read_text().strip()
+                if content:  # Only parse if file has content
+                    requests = json.loads(content)
+                    if not isinstance(requests, list):
+                        requests = []
+            except json.JSONDecodeError:
+                # File is corrupted, start fresh
+                print(f"[service_config_loader] Corrupted analysis_requests.json, resetting")
+                requests = []
         
         # Add new request
         preset = ANALYSIS_PRESETS.get(preset_key, {})

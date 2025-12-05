@@ -219,7 +219,10 @@ class BondingCurveMonitor:
             webhook = get_discord_webhook(AlertCategory.DEX_FAST_MONITOR)
             if webhook:
                 return webhook
-        return os.getenv("DISCORD_WEBHOOK_URL")
+        # NO fallback to general DISCORD_WEBHOOK_URL - prevents duplicate alerts to general channel
+        # If no pumpfun-specific webhook is configured, alerts are disabled
+        logger.warning("No PUMPFUN_ALERTS webhook configured - bonding curve alerts disabled")
+        return None
     
     # ========================================================================
     # PUBLIC API

@@ -307,11 +307,13 @@ async def run_pumpfun_gambler():
     logger.info(f"  Discord: webhook={'✅' if webhook_url else '❌'}, channel={'✅' if channel_id else '❌'}")
     
     # Create monitor instance (pump.fun only, no LaunchLab for gambling)
+    # IMPORTANT: Disable bonding_curve_monitor's own alerts - we handle alerts via pumpfun_analyzer
+    # to avoid duplicate alerts (one from monitor, one from analyzer)
     monitor = get_bonding_curve_monitor(
         enable_pump_fun=True,
         enable_launchlab=False,  # Focus on pump.fun for gambling
-        alert_on_creation=alert_on_creation,
-        alert_on_graduation=alert_on_graduation,
+        alert_on_creation=False,  # Disabled - pumpfun_analyzer handles alerts
+        alert_on_graduation=False,  # Disabled - pumpfun_analyzer handles alerts
         min_trades_to_alert=min_trades,
         min_volume_sol_to_alert=min_volume_sol,
     )
