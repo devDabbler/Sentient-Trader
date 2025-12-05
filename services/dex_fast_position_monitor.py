@@ -188,7 +188,13 @@ class FastPositionMonitor:
             default_profit_target_pct: Default profit target percentage
         """
         self.check_interval = check_interval
-        self.discord_webhook_url = discord_webhook_url or os.getenv("DISCORD_DEX_ALERTS_WEBHOOK") or os.getenv("DISCORD_WEBHOOK_URL")
+        # Priority: dedicated fast monitor webhook > DEX pump alerts webhook > fallback
+        self.discord_webhook_url = (
+            discord_webhook_url or 
+            os.getenv("DISCORD_WEBHOOK_DEX_FAST_MONITOR") or 
+            os.getenv("DISCORD_WEBHOOK_DEX_PUMP_ALERTS") or
+            os.getenv("DISCORD_WEBHOOK_URL")
+        )
         
         # Default risk parameters
         self.default_trailing_stop_pct = default_trailing_stop_pct

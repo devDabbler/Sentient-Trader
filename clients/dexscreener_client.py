@@ -26,6 +26,7 @@ class DexScreenerClient:
     """Client for DexScreener API"""
     
     BASE_URL = "https://api.dexscreener.com/latest"
+    BASE_URL_V1 = "https://api.dexscreener.com"  # For newer v1 endpoints
     
     def __init__(self, api_key: Optional[str] = None):
         """
@@ -254,13 +255,45 @@ class DexScreenerClient:
         
         # Stats for logging
         stats = {
-            "source1_found": 0, "source2_found": 0, "source3_found": 0,
+            "source0_found": 0, "source1_found": 0, "source2_found": 0, "source3_found": 0,
             "skipped_seen": 0, "skipped_chain": 0, "skipped_scam": 0,
             "skipped_liquidity": 0, "skipped_volume": 0, "skipped_address": 0,
             "skipped_age": 0
         }
         
         try:
+            # SOURCE 0 (NEW!): Token Profiles & Boosts - catches actively promoted tokens
+            profile_boost_pairs = []
+            try:
+                # Get latest token profiles (tokens that paid for promotion)
+                success, profiles = await self.get_latest_token_profiles()
+                if success and profiles:
+                    logger.info(f"📋 Found {len(profiles)} token profiles")
+                    print(f"[DEX] Source 0a: {len(profiles)} token profiles", flush=True)
+                    profile_pairs = await self.get_token_profile_pairs(profiles, chains)
+                    profile_boost_pairs.extend(profile_pairs)
+                
+                # Get latest boosted tokens
+                success, boosts = await self.get_latest_boosted_tokens()
+                if success and boosts:
+                    logger.info(f"🚀 Found {len(boosts)} boosted tokens")
+                    print(f"[DEX] Source 0b: {len(boosts)} boosted tokens", flush=True)
+                    boost_pairs = await self.get_token_profile_pairs(boosts, chains)
+                    profile_boost_pairs.extend(boost_pairs)
+                
+                # Get top boosted tokens (highest conviction)
+                success, top_boosts = await self.get_top_boosted_tokens()
+                if success and top_boosts:
+                    logger.info(f"🔥 Found {len(top_boosts)} top boosted tokens")
+                    print(f"[DEX] Source 0c: {len(top_boosts)} top boosted tokens", flush=True)
+                    top_pairs = await self.get_token_profile_pairs(top_boosts, chains)
+                    profile_boost_pairs.extend(top_pairs)
+                
+                stats["source0_found"] = len(profile_boost_pairs)
+                logger.info(f"Source 0: Found {len(profile_boost_pairs)} from profiles/boosts (NEW!)")
+            except Exception as e:
+                logger.warning(f"Source 0 (profiles/boosts) failed: {e}")
+            
             # SOURCE 1: Get latest pairs (with timeout to prevent hangs)
             try:
                 latest_pairs = await asyncio.wait_for(self._get_latest_pairs(chains), timeout=30.0)
@@ -306,8 +339,8 @@ class DexScreenerClient:
                 "1000x", "100x", "x",
             ]
             
-            # Combine all sources
-            all_source_pairs = latest_pairs + trending_pairs
+            # Combine all sources (profile/boost pairs first - they're actively promoted!)
+            all_source_pairs = profile_boost_pairs + latest_pairs + trending_pairs
             
             # Add search results
             search_count = 0
@@ -589,6 +622,261 @@ class DexScreenerClient:
         """
         logger.warning("Trending pairs requires premium features or web scraping")
         return True, []
+    
+    # ========================================================================
+    # NEW V1 ENDPOINTS - Token Profiles & Boosts (FREE!)
+    # ========================================================================
+    
+    async def _make_request_v1(self, endpoint: str, params: Optional[Dict] = None) -> Tuple[bool, any]:
+        """
+        Make API request to v1 endpoints (token-profiles, token-boosts)
+        
+        Args:
+            endpoint: API endpoint (e.g., "/token-profiles/latest/v1")
+            params: Query parameters
+            
+        Returns:
+            (success, response_data) - can be list or dict
+        """
+        try:
+            # Rate limiting
+            elapsed = datetime.now().timestamp() - self.last_request_time
+            if elapsed < self.rate_limit_delay:
+                await asyncio.sleep(self.rate_limit_delay - elapsed)
+            
+            url = f"{self.BASE_URL_V1}{endpoint}"
+            headers = {}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, params=params, headers=headers)
+                self.last_request_time = datetime.now().timestamp()
+                
+                if response.status_code == 200:
+                    return True, response.json()
+                elif response.status_code == 429:
+                    logger.warning("DexScreener rate limit hit on v1 endpoint")
+                    await asyncio.sleep(60)
+                    return False, {"error": "Rate limit exceeded"}
+                else:
+                    logger.warning(f"DexScreener v1 API error: {response.status_code}")
+                    return False, {"error": f"HTTP {response.status_code}"}
+                    
+        except Exception as e:
+            logger.error(f"Error calling DexScreener v1 API: {e}")
+            return False, {"error": str(e)}
+    
+    async def get_latest_token_profiles(self) -> Tuple[bool, List[Dict]]:
+        """
+        Get latest token profiles (tokens that paid for a profile)
+        
+        These are tokens actively being promoted - often indicates
+        active development and marketing push.
+        
+        Rate limit: 60 requests per minute
+        
+        Returns:
+            (success, list of token profile dicts)
+        """
+        success, data = await self._make_request_v1("/token-profiles/latest/v1")
+        
+        if not success:
+            return False, []
+        
+        # Response can be a single object or array
+        if isinstance(data, dict):
+            return True, [data] if data.get("tokenAddress") else []
+        elif isinstance(data, list):
+            return True, data
+        
+        return True, []
+    
+    async def get_latest_boosted_tokens(self) -> Tuple[bool, List[Dict]]:
+        """
+        Get latest boosted tokens (tokens receiving community boosts)
+        
+        Boosted tokens have community members paying to promote them,
+        indicating active interest and potential pumps.
+        
+        Rate limit: 60 requests per minute
+        
+        Returns:
+            (success, list of boosted token dicts)
+        """
+        success, data = await self._make_request_v1("/token-boosts/latest/v1")
+        
+        if not success:
+            return False, []
+        
+        # Response can be a single object or array
+        if isinstance(data, dict):
+            return True, [data] if data.get("tokenAddress") else []
+        elif isinstance(data, list):
+            return True, data
+        
+        return True, []
+    
+    async def get_top_boosted_tokens(self) -> Tuple[bool, List[Dict]]:
+        """
+        Get tokens with most active boosts (highest community conviction)
+        
+        These are the tokens with the MOST boost activity - strongest
+        community conviction signals.
+        
+        Rate limit: 60 requests per minute
+        
+        Returns:
+            (success, list of top boosted token dicts)
+        """
+        success, data = await self._make_request_v1("/token-boosts/top/v1")
+        
+        if not success:
+            return False, []
+        
+        # Response can be a single object or array
+        if isinstance(data, dict):
+            return True, [data] if data.get("tokenAddress") else []
+        elif isinstance(data, list):
+            return True, data
+        
+        return True, []
+    
+    async def get_token_profile_pairs(
+        self,
+        profiles: List[Dict],
+        target_chains: Optional[List[str]] = None
+    ) -> List[DexPair]:
+        """
+        Convert token profiles/boosts to DexPairs by looking up their trading pairs
+        
+        Args:
+            profiles: List of token profile/boost dicts from v1 API
+            target_chains: Optional list of chains to filter (e.g., ["solana"])
+            
+        Returns:
+            List of DexPair objects
+        """
+        pairs = []
+        
+        for profile in profiles:
+            try:
+                chain_id = profile.get("chainId", "")
+                token_address = profile.get("tokenAddress", "")
+                
+                # Skip if not in target chains
+                if target_chains and chain_id not in target_chains:
+                    continue
+                
+                if not token_address:
+                    continue
+                
+                # Get the pairs for this token
+                success, token_pairs = await self.get_token_pairs(token_address, chain=chain_id)
+                
+                if success and token_pairs:
+                    # Take the first/main pair
+                    pairs.extend(token_pairs[:1])
+                
+                await asyncio.sleep(0.3)  # Rate limiting
+                
+            except Exception as e:
+                logger.debug(f"Error getting pairs for profile: {e}")
+                continue
+        
+        return pairs
+    
+    async def get_all_new_launches(
+        self,
+        chains: Optional[List[str]] = None,
+        min_liquidity: float = 1000.0,
+        max_liquidity: float = 1000000.0,
+        include_profiles: bool = True,
+        include_boosts: bool = True,
+        limit: int = 50
+    ) -> Tuple[bool, List[DexPair]]:
+        """
+        COMPREHENSIVE new launch discovery using ALL available free endpoints.
+        
+        This combines:
+        1. Latest token profiles (actively promoted)
+        2. Latest boosted tokens (community pushing)
+        3. Top boosted tokens (strongest conviction)
+        4. Keyword searches (existing method)
+        
+        Args:
+            chains: List of chains to scan (default: solana)
+            min_liquidity: Minimum liquidity in USD
+            max_liquidity: Maximum liquidity in USD
+            include_profiles: Include token profiles
+            include_boosts: Include boosted tokens
+            limit: Maximum pairs to return
+            
+        Returns:
+            (success, list of DexPair objects)
+        """
+        target_chains = chains or ["solana"]
+        all_pairs: List[DexPair] = []
+        seen_addresses = set()
+        
+        logger.info(f"🔍 Comprehensive launch scan starting...")
+        print(f"[DEX] Starting comprehensive launch scan on {target_chains}", flush=True)
+        
+        # SOURCE 1: Latest Token Profiles
+        if include_profiles:
+            try:
+                success, profiles = await self.get_latest_token_profiles()
+                if success and profiles:
+                    logger.info(f"📋 Found {len(profiles)} token profiles")
+                    print(f"[DEX] Source 1: {len(profiles)} token profiles", flush=True)
+                    
+                    profile_pairs = await self.get_token_profile_pairs(profiles, target_chains)
+                    for pair in profile_pairs:
+                        if pair.base_token_address.lower() not in seen_addresses:
+                            if min_liquidity <= pair.liquidity_usd <= max_liquidity:
+                                all_pairs.append(pair)
+                                seen_addresses.add(pair.base_token_address.lower())
+            except Exception as e:
+                logger.warning(f"Token profiles source failed: {e}")
+        
+        # SOURCE 2: Latest Boosted Tokens
+        if include_boosts:
+            try:
+                success, boosts = await self.get_latest_boosted_tokens()
+                if success and boosts:
+                    logger.info(f"🚀 Found {len(boosts)} boosted tokens")
+                    print(f"[DEX] Source 2: {len(boosts)} boosted tokens", flush=True)
+                    
+                    boost_pairs = await self.get_token_profile_pairs(boosts, target_chains)
+                    for pair in boost_pairs:
+                        if pair.base_token_address.lower() not in seen_addresses:
+                            if min_liquidity <= pair.liquidity_usd <= max_liquidity:
+                                all_pairs.append(pair)
+                                seen_addresses.add(pair.base_token_address.lower())
+            except Exception as e:
+                logger.warning(f"Boosted tokens source failed: {e}")
+        
+        # SOURCE 3: Top Boosted Tokens
+        if include_boosts:
+            try:
+                success, top_boosts = await self.get_top_boosted_tokens()
+                if success and top_boosts:
+                    logger.info(f"🔥 Found {len(top_boosts)} top boosted tokens")
+                    print(f"[DEX] Source 3: {len(top_boosts)} top boosted tokens", flush=True)
+                    
+                    top_pairs = await self.get_token_profile_pairs(top_boosts, target_chains)
+                    for pair in top_pairs:
+                        if pair.base_token_address.lower() not in seen_addresses:
+                            if min_liquidity <= pair.liquidity_usd <= max_liquidity:
+                                all_pairs.append(pair)
+                                seen_addresses.add(pair.base_token_address.lower())
+            except Exception as e:
+                logger.warning(f"Top boosted source failed: {e}")
+        
+        logger.info(f"✅ Comprehensive scan complete: {len(all_pairs)} unique pairs")
+        print(f"[DEX] Comprehensive scan found {len(all_pairs)} unique pairs", flush=True)
+        
+        return True, all_pairs[:limit]
     
     async def validate_connection(self) -> Tuple[bool, str]:
         """Test API connection"""
