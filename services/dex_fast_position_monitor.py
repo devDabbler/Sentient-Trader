@@ -41,6 +41,8 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 from loguru import logger
 
+from src.integrations.discord_channels import AlertCategory, get_discord_webhook
+
 # Supabase for trade journaling
 try:
     from clients.supabase_client import get_supabase_client
@@ -230,13 +232,17 @@ class FastPositionMonitor:
             default_profit_target_pct: Default profit target percentage
         """
         self.check_interval = check_interval
-        # Priority: dedicated fast monitor webhook > DEX pump alerts webhook > fallback
-        self.discord_webhook_url = (
-            discord_webhook_url or 
-            os.getenv("DISCORD_WEBHOOK_DEX_FAST_MONITOR") or 
-            os.getenv("DISCORD_WEBHOOK_DEX_PUMP_ALERTS") or
-            os.getenv("DISCORD_WEBHOOK_URL")
-        )
+        # Priority: Fast Monitor channel > Crypto Positions > DEX pump > general
+        webhook_candidates = [
+            ("override", discord_webhook_url),
+            ("DEX_FAST_MONITOR", get_discord_webhook(AlertCategory.DEX_FAST_MONITOR)),
+            ("CRYPTO_POSITIONS", get_discord_webhook(AlertCategory.CRYPTO_POSITIONS)),
+            ("DEX_PUMP_ALERTS", os.getenv("DISCORD_WEBHOOK_DEX_PUMP_ALERTS")),
+            ("GENERAL", os.getenv("DISCORD_WEBHOOK_URL")),
+        ]
+        self.discord_webhook_url = next((url for _, url in webhook_candidates if url), None)
+        selected_source = next((name for name, url in webhook_candidates if url), "none")
+        logger.info(f"Discord routing source: {selected_source}")
         
         # Default risk parameters
         self.default_trailing_stop_pct = default_trailing_stop_pct

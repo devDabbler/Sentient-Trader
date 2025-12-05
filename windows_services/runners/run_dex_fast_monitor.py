@@ -95,10 +95,11 @@ async def run_fast_monitor():
     
     # Configuration
     check_interval = float(os.getenv('DEX_FAST_MONITOR_INTERVAL', '2.0'))
-    discord_webhook = os.getenv('DISCORD_DEX_ALERTS_WEBHOOK') or os.getenv('DISCORD_WEBHOOK_URL')
+    # Let the monitor handle routing (Fast Monitor -> Crypto Positions -> Pump -> General)
+    discord_webhook = None
     
     logger.info(f"Check interval: {check_interval}s")
-    logger.info(f"Discord alerts: {'✅ Enabled' if discord_webhook else '❌ Disabled'}")
+    logger.info("Discord alerts: routing handled by monitor priority (Fast -> Crypto Positions -> Pump -> General)")
     
     # Get or create monitor instance
     monitor = get_fast_position_monitor(

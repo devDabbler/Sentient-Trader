@@ -101,6 +101,7 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Real profit if +50% displayed gain
   - Liquidity tier (MICRO/LOW/MEDIUM/GOOD/HIGH)
   - **Order flow signal and whale activity (NEW)**
+  - **Routing priority:** Fast Monitor ➜ Crypto Positions ➜ DEX pump alerts ➜ General fallback
 * **🔗 Service Control Panel Integration:** New "DEX Fast Position Monitor" service
   - Checkbox selection in Crypto preset
   - Configurable check interval (1-10 seconds)
