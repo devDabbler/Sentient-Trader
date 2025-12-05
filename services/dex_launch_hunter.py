@@ -204,6 +204,7 @@ class DexLaunchHunter:
                     self.total_scanned += 1
                     analyzed_count += 1
                     
+                    logger.info(f"[DEX] Analyzing: {pair.base_token_symbol} ({pair.chain.value})...")
                     print(f"[DEX] Analyzing: {pair.base_token_symbol} ({pair.chain.value})...", flush=True)
                     
                     # Add timeout to prevent hanging on individual token analysis
@@ -218,16 +219,25 @@ class DexLaunchHunter:
                         continue
                     
                     if success and token:
-                        # Detailed score breakdown
-                        print(f"[DEX] ✓ {token.symbol}: Score={token.composite_score:.1f}/100, Risk={token.risk_level.value}", flush=True)
-                        print(f"    └─ Pump:{token.pump_potential_score:.0f} Velocity:{token.velocity_score:.0f} Safety:{token.safety_score:.0f} Liq:{token.liquidity_score:.0f}", flush=True)
-                        print(f"    └─ Price=${token.price_usd:.6f} Liq=${token.liquidity_usd:,.0f} Vol=${token.volume_24h:,.0f}", flush=True)
+                        # Detailed score breakdown - LOG it so we see in file
+                        score_msg = f"[DEX] ✓ {token.symbol}: Score={token.composite_score:.1f}/100, Risk={token.risk_level.value}"
+                        breakdown_msg = f"    └─ Pump:{token.pump_potential_score:.0f} Velocity:{token.velocity_score:.0f} Safety:{token.safety_score:.0f} Liq:{token.liquidity_score:.0f}"
+                        price_msg = f"    └─ Price=${token.price_usd:.6f} Liq=${token.liquidity_usd:,.0f} Vol=${token.volume_24h:,.0f}"
+                        
+                        logger.info(score_msg)
+                        logger.info(breakdown_msg)
+                        logger.info(price_msg)
+                        print(score_msg, flush=True)
+                        print(breakdown_msg, flush=True)
+                        print(price_msg, flush=True)
+                        
                         logger.info(
                             f"Discovered: {token.symbol} - "
                             f"Score: {token.composite_score:.1f}, "
                             f"Risk: {token.risk_level.value}"
                         )
                     else:
+                        logger.warning(f"[DEX] ✗ {pair.base_token_symbol}: Analysis failed (success={success})")
                         print(f"[DEX] ✗ {pair.base_token_symbol}: Analysis failed (success={success})", flush=True)
                         failed_analysis += 1
                         
@@ -250,9 +260,13 @@ class DexLaunchHunter:
                     failed_analysis += 1
                     continue
             
-            # Print scan summary
-            print(f"[DEX] Scan complete: Analyzed={analyzed_count}, Skipped(seen)={skipped_already}, Skipped(blacklist)={skipped_blacklist}, Failed={failed_analysis}", flush=True)
-            print(f"[DEX] Total discovered this session: {len(self.discovered_tokens)}", flush=True)
+            # Print scan summary - also log it
+            scan_summary = f"[DEX] Scan complete: Analyzed={analyzed_count}, Skipped(seen)={skipped_already}, Skipped(blacklist)={skipped_blacklist}, Failed={failed_analysis}"
+            discovered_summary = f"[DEX] Total discovered this session: {len(self.discovered_tokens)}"
+            logger.info(scan_summary)
+            logger.info(discovered_summary)
+            print(scan_summary, flush=True)
+            print(discovered_summary, flush=True)
             
             # Save results to control panel
             if results_for_panel:
