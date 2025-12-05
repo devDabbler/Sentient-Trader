@@ -1,0 +1,18 @@
+[Unit]
+Description=Sentient Trader - DEX Fast Position Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/sentient-trader
+Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/root/sentient-trader/venv/bin/python windows_services/runners/run_dex_fast_monitor.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/root/sentient-trader/logs/dex_fast_monitor.log
+StandardError=append:/root/sentient-trader/logs/dex_fast_monitor_error.log
+
+[Install]
+WantedBy=multi-user.target
