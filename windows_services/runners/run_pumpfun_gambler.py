@@ -32,6 +32,7 @@ import os
 import asyncio
 import time
 from pathlib import Path
+from typing import Optional, List
 
 # Track startup time
 import_start = time.time()
@@ -111,7 +112,7 @@ def init_supabase():
     global _supabase, _supabase_enabled
     
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
     
     if supabase_url and supabase_key:
         try:
@@ -146,8 +147,8 @@ async def journal_gambling_decision(
     holder_count: int = 0,
     buy_pressure: float = 0.5,
     reasoning: str = "",
-    risk_factors: list = None,
-    green_flags: list = None,
+    risk_factors: Optional[List] = None,
+    green_flags: Optional[List] = None,
 ):
     """
     Journal a gambling decision/alert to Supabase.
