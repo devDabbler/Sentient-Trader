@@ -31,30 +31,42 @@ else:
 if venv_site_packages and venv_site_packages.exists():
     sys.path.insert(0, str(venv_site_packages))
 
-# Setup logging
+# Setup logging with PST timezone
 from loguru import logger
+import pytz
+
+# Configure PST timezone for logs
+pst_tz = pytz.timezone('America/Los_Angeles')
+
+def pst_time(record):
+    """Convert log time to PST"""
+    from datetime import datetime
+    record["extra"]["pst_time"] = datetime.now(pst_tz).strftime("%Y-%m-%d %H:%M:%S")
+    return record
 
 log_dir = PROJECT_ROOT / "logs"
 log_dir.mkdir(exist_ok=True)
 
 logger.remove()
-# Add stderr handler (so we see logs in terminal)
+# Add stderr handler (so we see logs in terminal) - PST time
 logger.add(
     sys.stderr,
     level="INFO",
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
-    colorize=True
+    format="<green>{extra[pst_time]}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    colorize=True,
+    filter=pst_time
 )
-# Add file handler with immediate flush
+# Add file handler with immediate flush - PST time
 logger.add(
     str(log_dir / "dex_launch_service.log"),
     rotation="50 MB",
     retention="30 days",
     level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+    format="{extra[pst_time]} PST | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
     diagnose=True,
-    enqueue=False
+    enqueue=False,
+    filter=pst_time
 )
 
 print("=" * 70, flush=True)
@@ -178,13 +190,15 @@ try:
                 logger.info(f"🔄 Scan cycle #{scan_counter} starting...")
                 
                 # ===== PART 1: Active DEX Scanning =====
-                print("🔍 Running active DEX scan (max 120s)...", flush=True)
-                logger.info("🔍 Running active DEX scan...")
+                # Timeout configurable via DEX_SCAN_TIMEOUT (default 300s = 5 min)
+                scan_timeout = int(os.getenv("DEX_SCAN_TIMEOUT", "300"))
+                print(f"🔍 Running active DEX scan (max {scan_timeout}s)...", flush=True)
+                logger.info(f"🔍 Running active DEX scan (timeout: {scan_timeout}s)...")
                 try:
                     # Add timeout to prevent hanging
                     await asyncio.wait_for(
                         dex_hunter._scan_for_launches(),
-                        timeout=120  # 2 minute timeout
+                        timeout=scan_timeout
                     )
                     print("✓ Active DEX scan completed!", flush=True)
                     logger.info("✓ Active DEX scan completed")
@@ -223,8 +237,8 @@ try:
                             logger.info(f"✅ Alert sent for {token.symbol} (Score: {token.composite_score:.1f})")
                 
                 except asyncio.TimeoutError:
-                    print("⚠️ DEX scan TIMEOUT after 120s!", flush=True)
-                    logger.warning("⚠️ Active DEX scan timed out after 120s, continuing...")
+                    print(f"⚠️ DEX scan TIMEOUT after {scan_timeout}s!", flush=True)
+                    logger.warning(f"⚠️ Active DEX scan timed out after {scan_timeout}s, continuing...")
                 except Exception as e:
                     print(f"❌ Scan error: {e}", flush=True)
                     logger.error(f"Active scan error: {e}")
