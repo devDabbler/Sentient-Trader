@@ -239,6 +239,8 @@ try:
                     )
                     
                     if success and token and token.composite_score >= 50:
+                        # Use pair address for DexScreener URL (more reliable)
+                        dex_address = token.pairs[0].pair_address if token.pairs else token.contract_address
                         alert_msg = (
                             f"🎓 **BONDING CURVE GRADUATE!**\n\n"
                             f"**Token:** {token.symbol}\n"
@@ -247,7 +249,7 @@ try:
                             f"**Liquidity:** ${token.liquidity_usd:,.0f}\n"
                             f"**Risk:** {token.risk_level.value}\n\n"
                             f"⚡ _Caught at graduation - first seconds on DEX!_\n\n"
-                            f"🔗 https://dexscreener.com/solana/{token.contract_address}\n\n"
+                            f"🔗 https://dexscreener.com/solana/{dex_address}\n\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                             f"**💬 Quick Reply Commands:**\n"
                             f"• `monitor` - Detailed analysis\n"
@@ -307,6 +309,8 @@ try:
                             continue  # Already alerted
                         
                         if token.composite_score >= 60:
+                            # Use pair address for DexScreener URL (more reliable than token address)
+                            dex_address = token.pairs[0].pair_address if token.pairs else token.contract_address
                             alert_msg = (
                                 f"🚀 **NEW TOKEN DISCOVERED!**\n\n"
                                 f"**Token:** {token.symbol}\n"
@@ -316,7 +320,7 @@ try:
                                 f"**Volume 24h:** ${token.volume_24h:,.0f}\n"
                                 f"**Age:** {token.age_hours:.1f}h\n"
                                 f"**Risk:** {token.risk_level.value}\n\n"
-                                f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}\n\n"
+                                f"🔗 https://dexscreener.com/{token.chain.value}/{dex_address}\n\n"
                                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"**💬 Quick Reply Commands:**\n"
                                 f"• `monitor` - Detailed analysis\n"
@@ -360,6 +364,8 @@ try:
                             )
                             
                             if success and token and token.composite_score >= 60:
+                                # Use pair address for DexScreener URL (more reliable)
+                                dex_address = token.pairs[0].pair_address if token.pairs else token.contract_address
                                 alert_msg = (
                                     f"🚨 **HIGH SCORE LAUNCH!**\n\n"
                                     f"**Source:** {announcement.source}\n"
@@ -368,7 +374,7 @@ try:
                                     f"**Score:** {token.composite_score:.1f}/100\n"
                                     f"**Liquidity:** ${token.liquidity_usd:,.0f}\n"
                                     f"**Risk:** {token.risk_level.value}\n\n"
-                                    f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}\n\n"
+                                    f"🔗 https://dexscreener.com/{token.chain.value}/{dex_address}\n\n"
                                     f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                     f"**💬 Quick Reply Commands:**\n"
                                     f"• `monitor` - Detailed analysis\n"

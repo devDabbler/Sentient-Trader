@@ -1461,8 +1461,9 @@ class DexLaunchHunter:
         
         etherscan_url = f"{explorer_base}/address/{token.contract_address}" if explorer_base else ""
         
-        # DexScreener URL (works for all chains)
-        dexscreener_url = f"https://dexscreener.com/{token.chain.value}/{token.contract_address}"
+        # DexScreener URL - use pair address if available (more reliable than token address)
+        dex_address = token.pairs[0].pair_address if token.pairs else token.contract_address
+        dexscreener_url = f"https://dexscreener.com/{token.chain.value}/{dex_address}"
         
         # Social media search URLs
         twitter_search_url = f"https://twitter.com/search?q=%24{token.symbol}+OR+{token.symbol}&f=live"
@@ -1516,7 +1517,7 @@ class DexLaunchHunter:
                 'safety_score': token.safety_score,
                 'composite_score': token.composite_score,
                 'risk_level': token.risk_level.value,
-                'dexscreener_url': f"https://dexscreener.com/{token.chain.value}/{token.contract_address}",
+                'dexscreener_url': f"https://dexscreener.com/{token.chain.value}/{token.pairs[0].pair_address if token.pairs else token.contract_address}",
                 'alert_reasons': alert.reasoning
             }
             
