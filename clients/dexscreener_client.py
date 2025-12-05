@@ -745,7 +745,8 @@ class DexScreenerClient:
     async def get_token_profile_pairs(
         self,
         profiles: List[Dict],
-        target_chains: Optional[List[str]] = None
+        target_chains: Optional[List[str]] = None,
+        max_profiles: int = 15  # Limit to prevent timeout
     ) -> List[DexPair]:
         """
         Convert token profiles/boosts to DexPairs by looking up their trading pairs
@@ -753,13 +754,20 @@ class DexScreenerClient:
         Args:
             profiles: List of token profile/boost dicts from v1 API
             target_chains: Optional list of chains to filter (e.g., ["solana"])
+            max_profiles: Maximum profiles to process (prevents timeout)
             
         Returns:
             List of DexPair objects
         """
         pairs = []
+        processed = 0
         
         for profile in profiles:
+            # Limit to prevent timeout
+            if processed >= max_profiles:
+                logger.debug(f"Reached max_profiles limit ({max_profiles})")
+                break
+                
             try:
                 chain_id = profile.get("chainId", "")
                 token_address = profile.get("tokenAddress", "")
@@ -771,6 +779,8 @@ class DexScreenerClient:
                 if not token_address:
                     continue
                 
+                processed += 1
+                
                 # Get the pairs for this token
                 success, token_pairs = await self.get_token_pairs(token_address, chain=chain_id)
                 
@@ -778,7 +788,7 @@ class DexScreenerClient:
                     # Take the first/main pair
                     pairs.extend(token_pairs[:1])
                 
-                await asyncio.sleep(0.3)  # Rate limiting
+                await asyncio.sleep(0.2)  # Reduced rate limiting
                 
             except Exception as e:
                 logger.debug(f"Error getting pairs for profile: {e}")
