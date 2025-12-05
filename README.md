@@ -71,6 +71,36 @@ AI Position Manager now provides **detailed sell vs hold analysis** for every ex
   - Clear risk/reward verdict
   - Market context summary
 
+#### AI Confidence Calibration & Balanced Analysis (NEW - December 2025) ✅ PRODUCTION READY
+Redesigned AI entry analysis prompts to eliminate high-confidence bias and produce realistic scores:
+* **🎯 Calibrated Confidence Thresholds:** Full 0-100 range usage with clear definitions
+  - 90-100: Exceptional (< 5% of signals) - perfect storm conditions
+  - 80-89: Strong entry - most factors aligned, minor concerns
+  - 70-79: Moderate - acceptable but not ideal, some yellow flags
+  - 60-69: Weak - proceed with caution, significant concerns
+  - 50-59: Poor - more reasons to skip than enter
+  - 0-49: Do not enter - high risk, red flags present
+* **😈 Devil's Advocate Section (REQUIRED):** Every analysis must consider:
+  - Why this trade could FAIL (bear case)
+  - Contradictory signals present
+  - What could go wrong in next 24 hours
+  - Optimism bias check
+* **🔬 Independent Evaluation First:** AI analyzes indicators independently BEFORE considering scanner
+  - Form preliminary conclusion from raw technicals
+  - Compare with scanner second
+  - Note any disagreements and explain why
+* **⚖️ Balanced Prompts:** Removed biased language like "trust scanner unless major deterioration"
+  - Scanner context is reference only, not assumed correct
+  - Higher bar for ENTER_NOW (80%+ confidence required)
+  - Lower bar for DO_NOT_ENTER (anything <60%)
+* **📉 Score Deductions Built-In:**
+  - RSI > 70: Max score 30-40 for timing
+  - Low volume: -10 to -15 points
+  - Counter-trend: -20 points
+  - MACD divergence: -15 to -20 points
+* **📊 Expected Distribution:** Average confidence across all signals ~55-65 (not 75+)
+* **🐻 Bear Case Field:** New `bear_case` field in analysis output explains trade failure scenarios
+
 #### Position Tracking & Supabase Sync (NEW - December 2025) ✅ PRODUCTION READY
 Complete cloud persistence for all crypto and stock positions with full audit trail:
 * **☁️ Supabase Cloud Sync:** All positions automatically synced to Supabase

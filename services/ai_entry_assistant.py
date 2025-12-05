@@ -43,6 +43,7 @@ class EntryAnalysis:
     risk_score: float = 0.0
     wait_for_price: Optional[float] = None
     wait_for_rsi: Optional[float] = None
+    bear_case: Optional[str] = None  # Devil's advocate: why this trade could fail
     analysis_time: datetime = None
     
     def __post_init__(self):
@@ -243,11 +244,14 @@ class AIEntryAssistant:
                     timing_score=safe_float(decision_data.get('timing_score'), 0.0),
                     risk_score=safe_float(decision_data.get('risk_score'), 100.0),
                     wait_for_price=safe_optional_float(decision_data.get('wait_for_price')),
-                    wait_for_rsi=safe_optional_float(decision_data.get('wait_for_rsi'))
+                    wait_for_rsi=safe_optional_float(decision_data.get('wait_for_rsi')),
+                    bear_case=decision_data.get('bear_case')
                 )
                 
                 logger.info(f"✅ Entry analysis complete: {analysis.action} (Confidence: {analysis.confidence:.1f}%)")
                 logger.info(f"   Reasoning: {analysis.reasoning}")
+                if analysis.bear_case:
+                    logger.info(f"   Bear Case: {analysis.bear_case}")
                 
                 return analysis
             else:
@@ -370,70 +374,95 @@ Analyze this POTENTIAL trade setup and determine if NOW is a good time to ENTER 
         else:
             prompt += "\n**Technical Indicators:** Unavailable (analyze price action)\n"
         
-        # Add scanner context if provided
+        # Add scanner context if provided - but encourage INDEPENDENT evaluation
         if additional_context:
             prompt += f"\n{additional_context}\n"
             prompt += """
-**IMPORTANT: Scanner Analysis Was Just Run (Minutes Ago)**
-The scanner recommendation above is RECENT and based on solid 24h momentum, volume, and trend analysis.
-Unless there has been a MAJOR deterioration in the last few minutes (price crashed >5%, volume went to zero, etc.),
-you should TRUST the scanner's analysis and focus on confirming entry timing, NOT re-analyzing the entire setup.
+**SCANNER CONTEXT AVAILABLE - BUT EVALUATE INDEPENDENTLY**
+Scanner context is provided for reference only. Your job is to CRITICALLY evaluate the setup.
+Do NOT blindly trust scanner recommendations. Form your own opinion FIRST, then compare.
 
-Ask yourself: "Has anything DRASTICALLY changed in the last few minutes that invalidates the scanner's bullish view?"
-- If NO major change → Recommend ENTER_NOW or WAIT_FOR_PULLBACK (if slightly overbought)
-- If YES major change → Explain what specifically deteriorated (e.g., "Price just dropped 8% in 5 minutes")
+**INDEPENDENT EVALUATION REQUIRED:**
+1. FIRST: Analyze the technical indicators above objectively (ignore scanner opinion)
+2. SECOND: Form your preliminary conclusion about entry timing
+3. THIRD: Compare your analysis with scanner - note any disagreements
+4. FOURTH: Provide final recommendation with reasoning for any divergence from scanner
+
+If your independent analysis disagrees with scanner, explain WHY in your reasoning.
 """
         
         prompt += f"""
 **Entry Timing Analysis Framework:**
-Evaluate these critical factors:
+Evaluate these critical factors OBJECTIVELY (use full 0-100 range):
 
-1. **Scanner Alignment Check** (if scanner context provided):
-   - Has price moved significantly since scanner analysis? (>5% drop = major change)
-   - Has volume dried up completely vs scanner's high volume finding?
-   - Are current indicators DRASTICALLY different from scanner's findings?
-   - Default to TRUST scanner unless major deterioration
+1. **Independent Technical Analysis** (REQUIRED BEFORE considering scanner):
+   - What do the raw indicators above tell you?
+   - Form your own opinion first, THEN compare to scanner if provided
+   - Note any conflicts between your analysis and scanner
 
-2. **Trend Alignment** (0-100):
-   - Is the trend strong and confirmed?
-   - Are we entering WITH the trend or against it?
-   - Is momentum building or weakening?
+2. **Trend Alignment** (0-100 - use FULL range):
+   - 0-30: Counter-trend, momentum weakening, likely reversal imminent
+   - 31-50: Weak trend, mixed signals, wait for confirmation
+   - 51-70: Moderate trend, some confirmation but risks present
+   - 71-85: Strong trend with good confirmation
+   - 86-100: Exceptional setup (RARE - only 5-10% of trades)
 
 3. **Entry Price Quality** (0-100):
-   - Are we buying near support or chasing resistance?
-   - Is this a good price or are we FOMOing into a pump?
-   - Is there room to the upside or are we at resistance?
+   - 0-30: Chasing a pump, resistance nearby, poor R:R
+   - 31-50: Suboptimal entry, could wait for better price
+   - 51-70: Acceptable entry, moderate setup
+   - 71-85: Good entry near support with room to run
+   - 86-100: Excellent entry (pullback to key level, rare)
 
 4. **Technical Setup** (0-100):
-   - Are indicators aligned for entry?
-   - Is RSI in a good zone (not overbought)?
-   - Is MACD confirming or diverging?
+   - RSI overbought (>70) = score 30-40 max
+   - RSI neutral (40-60) = score 50-70
+   - RSI oversold (<30) = score 70-90
+   - MACD divergence = subtract 15-20 points
 
-5. **Risk/Reward at Current Price** (0-100):
-   - Is the R:R favorable at this price?
-   - Would waiting for pullback improve R:R?
-   - Is the stop loss too tight for current volatility?
+5. **Risk/Reward Assessment** (0-100):
+   - R:R < 1.5 = score 0-40
+   - R:R 1.5-2.0 = score 40-60
+   - R:R 2.0-3.0 = score 60-80
+   - R:R > 3.0 = score 80-100
+
+**DEVIL'S ADVOCATE SECTION (REQUIRED):**
+Before recommending entry, you MUST consider:
+- Why could this trade FAIL? What's the bear case?
+- What contradictory signals exist?
+- What could go wrong in the next 24 hours?
+- Is there something I'm missing or being too optimistic about?
 
 **Available Actions:**
-1. **ENTER_NOW** - Excellent setup, execute immediately (75%+ confidence if scanner approved, 85%+ if no scanner)
-2. **WAIT_FOR_PULLBACK** - Good coin but slightly overbought, wait for minor dip (provide wait_for_price and wait_for_rsi)
+1. **ENTER_NOW** - Excellent setup after critical evaluation (80%+ confidence REQUIRED)
+2. **WAIT_FOR_PULLBACK** - Decent coin but entry price suboptimal (provide wait_for_price and wait_for_rsi)
 3. **WAIT_FOR_BREAKOUT** - Consolidating, wait for confirmed move (provide wait_for_price)
 4. **PLACE_LIMIT_ORDER** - Set limit at better price (provide suggested_entry)
-5. **DO_NOT_ENTER** - MAJOR deterioration since scanner or fundamentally poor setup (<50% confidence)
+5. **DO_NOT_ENTER** - Poor setup, high risk, or low conviction (<60% confidence)
 
-**Critical Rules for Entry Timing:**
-- **IF SCANNER CONTEXT PROVIDED:** Trust scanner's 24h analysis unless DRASTIC change in last few minutes
-- **IF SCANNER SAYS HIGH CONFIDENCE:** Only reject if price dropped >5%, volume died completely, or other MAJOR change
-- Only ENTER_NOW if 75%+ confidence (with scanner) or 85%+ (without scanner)
-- WAIT_FOR_PULLBACK if RSI > 75 (very overbought) - minor concern, not rejection
-- DO_NOT_ENTER only for MAJOR problems: price crashed, fundamentals changed, or no scanner approval
-- Remember: Low recent volume ≠ rejection if scanner found high 24h volume average
+**CALIBRATION GUIDELINES - USE THE FULL RANGE:**
+- **90-100**: Exceptional (should be < 5% of all signals) - perfect storm conditions
+- **80-89**: Strong entry (good setup, most factors aligned, minor concerns)
+- **70-79**: Moderate (acceptable but not ideal, some yellow flags)
+- **60-69**: Weak (proceed with caution, significant concerns)
+- **50-59**: Poor (more reasons to skip than enter)
+- **0-49**: Do not enter (high risk, unclear setup, red flags)
+
+**CRITICAL RULES:**
+- Average confidence across all trades should be ~55-65 (not 75+)
+- ENTER_NOW requires 80%+ confidence (higher bar than before)
+- DO_NOT_ENTER for anything <60% confidence
+- RSI > 70 should almost never be ENTER_NOW
+- Low volume = subtract 10-15 points minimum
+- Counter-trend entries = subtract 20 points minimum
+- Use WAIT actions more frequently - timing matters
 
 **Respond ONLY with valid JSON (no other text):**
 {{
     "action": "ENTER_NOW|WAIT_FOR_PULLBACK|WAIT_FOR_BREAKOUT|PLACE_LIMIT_ORDER|DO_NOT_ENTER",
-    "confidence": 75,
-    "reasoning": "2-3 sentence explanation of timing analysis",
+    "confidence": 55,
+    "reasoning": "2-3 sentences: First state your independent analysis. Then note any scanner agreement/disagreement. Include bear case consideration.",
+    "bear_case": "1-2 sentences explaining why this trade could fail",
     "urgency": "LOW|MEDIUM|HIGH",
     "suggested_entry": {current_price},
     "suggested_stop": "{current_price * (1 - risk_pct/100):.6f}",
@@ -441,10 +470,10 @@ Evaluate these critical factors:
     "risk_reward_ratio": {take_profit_pct / risk_pct:.2f},
     "wait_for_price": null,
     "wait_for_rsi": null,
-    "technical_score": 75,
-    "trend_score": 70,
-    "timing_score": 80,
-    "risk_score": 60
+    "technical_score": 55,
+    "trend_score": 55,
+    "timing_score": 55,
+    "risk_score": 50
 }}
 """
         
