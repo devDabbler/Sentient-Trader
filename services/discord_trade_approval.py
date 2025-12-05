@@ -1064,15 +1064,16 @@ class DiscordTradeApprovalBot(commands.Bot):
                 order_flow = await monitor.get_order_flow(token_address, symbol=symbol)
                 if order_flow:
                     recommendation = monitor.get_entry_exit_recommendation(order_flow)
-                    order_flow_signal = recommendation.signal.value
+                    # recommendation is a dict, not an object with .signal attribute
+                    order_flow_signal = recommendation.get("action", "NEUTRAL")
                     
                     # Use 5m metrics from the order flow (it has 1m, 5m, 15m windows)
                     metrics_5m = order_flow.metrics_5m if hasattr(order_flow, 'metrics_5m') else None
                     if metrics_5m:
                         order_flow_info = (
                             f"\n\n📊 **Order Flow (5 min):**\n"
-                            f"   Buys: {metrics_5m.buy_count} (${metrics_5m.buy_volume:,.0f})\n"
-                            f"   Sells: {metrics_5m.sell_count} (${metrics_5m.sell_volume:,.0f})\n"
+                            f"   Buys: {metrics_5m.buy_count} (${metrics_5m.buy_volume_usd:,.0f})\n"
+                            f"   Sells: {metrics_5m.sell_count} (${metrics_5m.sell_volume_usd:,.0f})\n"
                             f"   Ratio: {metrics_5m.buy_sell_ratio:.2f}\n"
                             f"   Whale Flow: ${metrics_5m.whale_net_usd:+,.0f}\n"
                             f"   Signal: **{order_flow_signal}**"
