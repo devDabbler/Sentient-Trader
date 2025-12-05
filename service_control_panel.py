@@ -1894,113 +1894,119 @@ def main():
     ])
     
     # ============================================================
-    # WORKFLOW TAB - Redesigned unified control center
+    # WORKFLOW TAB - Redesigned unified control center (Mobile-First)
     # ============================================================
     with tab_workflow:
-        st.markdown("### 🎯 Service Control Center")
-        st.caption("Select services individually or use quick actions")
+        st.markdown("## 🎯 Service Control Center")
         
         # Initialize session state for selected services
         if 'selected_services' not in st.session_state:
             st.session_state.selected_services = set()
         
         # ============================================================
-        # QUICK ACTIONS ROW (Top of page for mobile)
+        # SERVICE HEALTH SUMMARY (Top for quick glance)
         # ============================================================
-        st.markdown("#### ⚡ Quick Actions")
-        quick_cols = st.columns(4)
+        running_count = sum(1 for s in SERVICES.values() if get_service_status(s["name"])["active"])
+        total_count = len(SERVICES)
+        selected_count = len(st.session_state.selected_services)
         
-        with quick_cols[0]:
+        # Compact metrics row
+        metric_cols = st.columns(3)
+        with metric_cols[0]:
+            st.metric("🟢 Running", f"{running_count}/{total_count}")
+        with metric_cols[1]:
+            st.metric("☑️ Selected", selected_count)
+        with metric_cols[2]:
+            try:
+                pending_crypto = get_pending_alerts("crypto")
+                pending_stocks = get_pending_alerts("stock")
+                st.metric("📥 Alerts", len(pending_crypto) + len(pending_stocks))
+            except:
+                st.metric("📥 Alerts", "N/A")
+        
+        st.divider()
+        
+        # ============================================================
+        # QUICK ACTIONS (2x2 grid for mobile)
+        # ============================================================
+        st.markdown("### ⚡ Quick Actions")
+        
+        # Row 1: Select/Clear
+        row1_col1, row1_col2 = st.columns(2)
+        with row1_col1:
             if st.button("✅ Select All", key="select_all_svcs", use_container_width=True):
                 st.session_state.selected_services = set(SERVICES.keys())
                 st.toast("✅ All services selected")
-        
-        with quick_cols[1]:
-            if st.button("❌ Clear Selection", key="clear_selection", use_container_width=True):
+                st.rerun()
+        with row1_col2:
+            if st.button("❌ Clear All", key="clear_selection", use_container_width=True):
                 st.session_state.selected_services = set()
                 st.toast("Selection cleared")
+                st.rerun()
         
-        with quick_cols[2]:
-            selected_count = len(st.session_state.selected_services)
-            if st.button(f"▶️ Start Selected ({selected_count})", key="start_selected", 
+        # Row 2: Start/Stop Selected
+        row2_col1, row2_col2 = st.columns(2)
+        with row2_col1:
+            start_label = f"▶️ Start ({selected_count})" if selected_count > 0 else "▶️ Start"
+            if st.button(start_label, key="start_selected", 
                         use_container_width=True, type="primary",
                         disabled=selected_count == 0):
-                with st.spinner(f"Starting {selected_count} services..."):
-                    started = 0
-                    for svc_label in st.session_state.selected_services:
-                        if svc_label in SERVICES:
-                            ok, _ = control_service(SERVICES[svc_label]["name"], "start")
-                            if ok:
-                                started += 1
-                    st.toast(f"✅ Started {started}/{selected_count} services")
-                    get_service_status.clear()  # Force status refresh
+                started = 0
+                for svc_label in st.session_state.selected_services:
+                    if svc_label in SERVICES:
+                        ok, _ = control_service(SERVICES[svc_label]["name"], "start")
+                        if ok:
+                            started += 1
+                st.toast(f"✅ Started {started} services")
+                get_service_status.clear()
+                st.rerun()
         
-        with quick_cols[3]:
-            if st.button(f"⏹️ Stop Selected ({selected_count})", key="stop_selected", 
+        with row2_col2:
+            stop_label = f"⏹️ Stop ({selected_count})" if selected_count > 0 else "⏹️ Stop"
+            if st.button(stop_label, key="stop_selected", 
                         use_container_width=True,
                         disabled=selected_count == 0):
-                with st.spinner(f"Stopping {selected_count} services..."):
-                    stopped = 0
-                    for svc_label in st.session_state.selected_services:
-                        if svc_label in SERVICES:
-                            ok, _ = control_service(SERVICES[svc_label]["name"], "stop")
-                            if ok:
-                                stopped += 1
-                    st.toast(f"⏹️ Stopped {stopped}/{selected_count} services")
-                    get_service_status.clear()
-        
-        st.markdown("---")
+                stopped = 0
+                for svc_label in st.session_state.selected_services:
+                    if svc_label in SERVICES:
+                        ok, _ = control_service(SERVICES[svc_label]["name"], "stop")
+                        if ok:
+                            stopped += 1
+                st.toast(f"⏹️ Stopped {stopped} services")
+                get_service_status.clear()
+                st.rerun()
         
         # ============================================================
-        # PRESET MODES (Common configurations)
+        # PRESET MODES (Collapsible)
         # ============================================================
-        with st.expander("🎛️ Preset Modes (one-click configurations)", expanded=False):
-            preset_cols = st.columns(3)
+        with st.expander("🎛️ Preset Modes", expanded=False):
+            presets = [
+                ("🪙 Crypto", ["DEX Launch Monitor", "Crypto Breakout Monitor", "AI Crypto Trader", "Discord Approval Bot", "Analysis Queue Processor"]),
+                ("📈 Stocks", ["Stock Monitor", "AI Stock Trader", "ORB FVG Scanner", "Discord Approval Bot", "Analysis Queue Processor"]),
+                ("👀 Monitors", ["DEX Launch Monitor", "Crypto Breakout Monitor", "Stock Monitor", "ORB FVG Scanner", "Analysis Queue Processor"]),
+                ("🤖 AI Only", ["AI Crypto Trader", "AI Stock Trader", "Discord Approval Bot"]),
+                ("🛡️ Minimal", ["Discord Approval Bot", "Analysis Queue Processor"]),
+            ]
             
-            presets = {
-                "crypto_only": {
-                    "name": "🪙 Crypto Only",
-                    "services": ["DEX Launch Monitor", "Crypto Breakout Monitor", "AI Crypto Trader", "Discord Approval Bot", "Analysis Queue Processor"],
-                    "desc": "All crypto services"
-                },
-                "stocks_only": {
-                    "name": "📈 Stocks Only", 
-                    "services": ["Stock Monitor", "AI Stock Trader", "ORB FVG Scanner", "Discord Approval Bot", "Analysis Queue Processor"],
-                    "desc": "All stock services"
-                },
-                "monitors_only": {
-                    "name": "👀 Monitors Only",
-                    "services": ["DEX Launch Monitor", "Crypto Breakout Monitor", "Stock Monitor", "ORB FVG Scanner", "Analysis Queue Processor"],
-                    "desc": "Scanners without AI traders"
-                },
-                "ai_traders": {
-                    "name": "🤖 AI Traders Only",
-                    "services": ["AI Crypto Trader", "AI Stock Trader", "Discord Approval Bot"],
-                    "desc": "Position managers only"
-                },
-                "minimal": {
-                    "name": "🛡️ Minimal",
-                    "services": ["Discord Approval Bot", "Analysis Queue Processor"],
-                    "desc": "Infrastructure only"
-                }
-            }
-            
-            for i, (preset_key, preset) in enumerate(presets.items()):
-                with preset_cols[i % 3]:
-                    if st.button(preset["name"], key=f"preset_{preset_key}", use_container_width=True):
-                        st.session_state.selected_services = set(preset["services"])
-                        st.toast(f"Selected: {preset['name']}")
-                    st.caption(preset["desc"])
+            preset_cols = st.columns(5)
+            for i, (name, services) in enumerate(presets):
+                with preset_cols[i]:
+                    if st.button(name, key=f"preset_{i}", use_container_width=True):
+                        st.session_state.selected_services = set(services)
+                        st.toast(f"Selected: {name}")
+                        st.rerun()
+        
+        st.divider()
         
         # ============================================================
-        # SERVICE SELECTION GRID
+        # SERVICE LIST (Card-style, mobile-friendly)
         # ============================================================
-        st.markdown("#### 📋 Select Services")
+        st.markdown("### 📋 Services")
         
         # Group services by category
         categories = {
-            "crypto": {"emoji": "🪙", "name": "Crypto Services", "services": []},
-            "stocks": {"emoji": "📈", "name": "Stock Services", "services": []},
+            "crypto": {"emoji": "🪙", "name": "Crypto", "services": []},
+            "stocks": {"emoji": "📈", "name": "Stocks", "services": []},
             "infrastructure": {"emoji": "⚙️", "name": "Infrastructure", "services": []}
         }
         
@@ -2009,125 +2015,105 @@ def main():
             if cat in categories:
                 categories[cat]["services"].append((svc_label, svc_info))
         
-        # Render each category
+        # Render each category as a section
         for cat_key, cat_data in categories.items():
-            if cat_data["services"]:
-                st.markdown(f"**{cat_data['emoji']} {cat_data['name']}**")
+            if not cat_data["services"]:
+                continue
                 
-                # Create columns for this category's services
-                svc_cols = st.columns(len(cat_data["services"]))
+            st.markdown(f"**{cat_data['emoji']} {cat_data['name']}**")
+            
+            # Each service as a row (works on mobile)
+            for svc_label, svc_info in cat_data["services"]:
+                svc_name = svc_info['name']
+                status = get_service_status(svc_name)
+                is_running = status['active']
+                status_emoji = "🟢" if is_running else "🔴"
+                is_selected = svc_label in st.session_state.selected_services
                 
-                for i, (svc_label, svc_info) in enumerate(cat_data["services"]):
-                    with svc_cols[i]:
-                        svc_name = svc_info['name']
-                        status = get_service_status(svc_name)
-                        is_running = status['active']
-                        status_emoji = "🟢" if is_running else "🔴"
-                        
-                        # Checkbox for selection
-                        is_selected = svc_label in st.session_state.selected_services
-                        
-                        # Use a container for better layout
-                        with st.container():
-                            # Service header with status
-                            col_check, col_status = st.columns([3, 1])
-                            with col_check:
-                                if st.checkbox(
-                                    f"{svc_info['emoji']} {svc_label}",
-                                    value=is_selected,
-                                    key=f"svc_check_{svc_name}"
-                                ):
-                                    st.session_state.selected_services.add(svc_label)
-                                else:
-                                    st.session_state.selected_services.discard(svc_label)
-                            with col_status:
-                                st.markdown(f"<span style='font-size:1.2em'>{status_emoji}</span>", unsafe_allow_html=True)
-                            
-                            # Individual controls
-                            btn_col1, btn_col2 = st.columns(2)
-                            with btn_col1:
-                                if st.button("▶️", key=f"start_{svc_name}", disabled=is_running, 
-                                           help=f"Start {svc_label}"):
-                                    ok, msg = control_service(svc_name, "start")
-                                    if ok:
-                                        st.toast(f"✅ {svc_label} started")
-                                    else:
-                                        st.error(f"Failed: {msg}")
-                            with btn_col2:
-                                if st.button("⏹️", key=f"stop_{svc_name}", disabled=not is_running,
-                                           help=f"Stop {svc_label}"):
-                                    ok, msg = control_service(svc_name, "stop")
-                                    if ok:
-                                        st.toast(f"⏹️ {svc_label} stopped")
-                                    else:
-                                        st.error(f"Failed: {msg}")
+                # Single row per service: [checkbox] [name] [status] [start] [stop]
+                cols = st.columns([0.5, 3, 0.5, 1, 1])
+                
+                with cols[0]:
+                    # Checkbox
+                    new_selected = st.checkbox(
+                        "",  # Empty label, service name shown separately
+                        value=is_selected,
+                        key=f"chk_{svc_name}",
+                        label_visibility="collapsed"
+                    )
+                    if new_selected and svc_label not in st.session_state.selected_services:
+                        st.session_state.selected_services.add(svc_label)
+                    elif not new_selected and svc_label in st.session_state.selected_services:
+                        st.session_state.selected_services.discard(svc_label)
+                
+                with cols[1]:
+                    # Service name with emoji
+                    st.markdown(f"{svc_info['emoji']} **{svc_label}**")
+                
+                with cols[2]:
+                    # Status indicator
+                    st.markdown(f"<div style='text-align:center;font-size:1.1em'>{status_emoji}</div>", unsafe_allow_html=True)
+                
+                with cols[3]:
+                    # Start button
+                    if st.button("▶️", key=f"start_{svc_name}", disabled=is_running, 
+                               use_container_width=True, help=f"Start {svc_label}"):
+                        ok, msg = control_service(svc_name, "start")
+                        if ok:
+                            st.toast(f"✅ Started {svc_label}")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+                
+                with cols[4]:
+                    # Stop button
+                    if st.button("⏹️", key=f"stop_{svc_name}", disabled=not is_running,
+                               use_container_width=True, help=f"Stop {svc_label}"):
+                        ok, msg = control_service(svc_name, "stop")
+                        if ok:
+                            st.toast(f"⏹️ Stopped {svc_label}")
+                            st.rerun()
+                        else:
+                            st.error(msg)
+            
+            st.markdown("")  # Spacing between categories
         
-        st.markdown("---")
-        
-        # ============================================================
-        # SERVICE HEALTH SUMMARY
-        # ============================================================
-        st.markdown("### 🏥 Service Health")
-        
-        # Calculate stats
-        running_count = sum(1 for s in SERVICES.values() if get_service_status(s["name"])["active"])
-        total_count = len(SERVICES)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Running", f"{running_count}/{total_count}")
-        with col2:
-            st.metric("Selected", len(st.session_state.selected_services))
-        with col3:
-            # Get pending alerts count
-            try:
-                pending_crypto = get_pending_alerts("crypto")
-                pending_stocks = get_pending_alerts("stock")
-                st.metric("Pending Alerts", len(pending_crypto) + len(pending_stocks))
-            except:
-                st.metric("Pending Alerts", "N/A")
+        st.divider()
         
         # ============================================================
-        # CURRENT WATCHLISTS (Quick View) - From Supabase
+        # WATCHLISTS SUMMARY (Compact)
         # ============================================================
-        st.markdown("---")
-        st.markdown("### 📋 Current Watchlists (Supabase)")
-        
-        watchlist_col1, watchlist_col2 = st.columns(2)
-        
-        with watchlist_col1:
-            st.markdown("**🪙 Crypto Watchlist**")
-            try:
-                from services.crypto_watchlist_manager import CryptoWatchlistManager
-                cwm = CryptoWatchlistManager()
-                crypto_watchlist = cwm.get_all_cryptos()
-                if crypto_watchlist:
-                    symbols = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
-                    st.write(f"**{len(symbols)}** pairs: " + ", ".join(symbols[:8]) + ("..." if len(symbols) > 8 else ""))
-                else:
-                    st.caption("No crypto pairs in Supabase watchlist")
-            except Exception as e:
-                st.caption(f"⚠️ Could not load: {e}")
-        
-        with watchlist_col2:
-            st.markdown("**📈 Stock Watchlist**")
-            try:
-                from services.ticker_manager import TickerManager
-                tm = TickerManager()
-                if tm.test_connection():
-                    stock_data = tm.get_all_tickers(ticker_type='stock', limit=1000) or []
-                    penny_data = tm.get_all_tickers(ticker_type='penny_stock', limit=1000) or []
-                    all_stocks = [t['ticker'] for t in stock_data] + [t['ticker'] for t in penny_data]
-                    if all_stocks:
-                        st.write(f"**{len(all_stocks)}** tickers: " + ", ".join(all_stocks[:8]) + ("..." if len(all_stocks) > 8 else ""))
+        with st.expander("📋 Watchlists (Supabase)", expanded=False):
+            wl_col1, wl_col2 = st.columns(2)
+            
+            with wl_col1:
+                st.markdown("**🪙 Crypto**")
+                try:
+                    from services.crypto_watchlist_manager import CryptoWatchlistManager
+                    cwm = CryptoWatchlistManager()
+                    crypto_watchlist = cwm.get_all_cryptos()
+                    if crypto_watchlist:
+                        symbols = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
+                        st.caption(f"{len(symbols)} pairs")
                     else:
-                        st.caption("No stocks in Supabase watchlist")
-                else:
-                    st.caption("⚠️ Supabase not connected")
-            except Exception as e:
-                st.caption(f"⚠️ Could not load: {e}")
-        
-        st.caption("_Manage watchlists in the **Watchlists** tab or expand services in **Service Status**_")
+                        st.caption("Empty")
+                except Exception:
+                    st.caption("N/A")
+            
+            with wl_col2:
+                st.markdown("**📈 Stocks**")
+                try:
+                    from services.ticker_manager import TickerManager
+                    tm = TickerManager()
+                    if tm.test_connection():
+                        stock_data = tm.get_all_tickers(ticker_type='stock', limit=1000) or []
+                        penny_data = tm.get_all_tickers(ticker_type='penny_stock', limit=1000) or []
+                        total = len(stock_data) + len(penny_data)
+                        st.caption(f"{total} tickers")
+                    else:
+                        st.caption("Not connected")
+                except Exception:
+                    st.caption("N/A")
     
     with tab_watchlist:
         render_watchlist_manager()
