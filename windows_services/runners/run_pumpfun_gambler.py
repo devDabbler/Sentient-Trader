@@ -113,7 +113,6 @@ async def run_pumpfun_gambler():
     """Run the pump.fun gambler monitor"""
     from services.bonding_curve_monitor import get_bonding_curve_monitor
     from services.pumpfun_analyzer import get_pumpfun_analyzer
-    from services.alert_system import get_alert_system
     
     # Parse configuration from environment
     max_bet = float(os.getenv("PUMPFUN_MAX_BET", "25"))
@@ -172,9 +171,6 @@ async def run_pumpfun_gambler():
     # Initialize pump.fun analyzer
     analyzer = get_pumpfun_analyzer(max_bet_default=max_bet)
     
-    # Get alert system for additional notifications
-    alert_system = get_alert_system()
-    
     # Track tokens for auto-analysis
     analyzed_tokens = set()
     
@@ -214,15 +210,8 @@ async def run_pumpfun_gambler():
         except Exception as e:
             logger.debug(f"Graduation analysis error: {e}")
         
-        # Send high priority alert
-        alert_system.send_alert(
-            "PUMPFUN_GRADUATION",
-            f"🎓 {migration.symbol} graduated from pump.fun!\n"
-            f"Mint: {migration.mint[:30]}...\n"
-            f"Now tradeable on Raydium/DEX\n\n"
-            f"Reply: ANALYZE | BUY $XX | MONITOR",
-            priority="HIGH"
-        )
+        # Graduation alert is sent by analyzer.send_analysis_alert() above
+        # No need for duplicate alert_system call
     
     def on_migration(migration):
         """Sync wrapper for async callback"""
@@ -251,15 +240,25 @@ async def run_pumpfun_gambler():
     
     logger.info(f"🚀 SERVICE READY (startup: {startup_time:.1f}s)")
     
-    # Send startup notification
-    alert_system.send_alert(
-        "SERVICE_START",
-        f"🎰 Pump.fun Gambler Monitor started\n"
-        f"Max bet: ${max_bet}\n"
-        f"Creation alerts: {'✅' if alert_on_creation else '❌'}\n"
-        f"Graduation alerts: {'✅' if alert_on_graduation else '❌'}",
-        priority="LOW"
-    )
+    # Send startup notification to PUMPFUN channel (not generic alert_system)
+    import httpx
+    pumpfun_webhook = os.getenv("DISCORD_WEBHOOK_PUMPFUN_ALERTS")
+    if pumpfun_webhook:
+        try:
+            async def send_startup_alert():
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(pumpfun_webhook, json={
+                        "content": (
+                            f"🎰 **Pump.fun Gambler Monitor Started**\n\n"
+                            f"Max bet: ${max_bet}\n"
+                            f"Creation alerts: {'✅' if alert_on_creation else '❌'}\n"
+                            f"Graduation alerts: {'✅' if alert_on_graduation else '❌'}\n\n"
+                            f"_Reply to token alerts with: ANALYZE | BUY $XX | PASS_"
+                        )
+                    })
+            asyncio.create_task(send_startup_alert())
+        except Exception as e:
+            logger.debug(f"Startup alert error: {e}")
     
     # Status update loop (runs alongside monitor)
     async def status_loop():
