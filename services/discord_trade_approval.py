@@ -1469,20 +1469,19 @@ class DiscordTradeApprovalBot(commands.Bot):
             )
             
             # Send confirmation to the original channel (brief acknowledgment)
-            await message.channel.send(f"✅ **{symbol}** added to Fast Monitor! Check #crypto-positions for updates.")
+            await message.channel.send(f"✅ **{symbol}** added to Fast Monitor! Check #dex-fast-monitor for updates.")
             
-            # Send detailed confirmation to crypto-positions channel
+            # Send detailed confirmation to dex-fast-monitor channel
             try:
-                from src.integrations.discord_channels import get_channel_id_for_category, AlertCategory
-                positions_channel_id = get_channel_id_for_category(AlertCategory.CRYPTO_POSITIONS)
-                if positions_channel_id:
-                    positions_channel = self.get_channel(positions_channel_id)
-                    if positions_channel:
-                        await positions_channel.send(confirmation_msg)
+                dex_channel_id = os.getenv("DISCORD_CHANNEL_ID_DEX_FAST_MONITOR")
+                if dex_channel_id:
+                    dex_channel = self.get_channel(int(dex_channel_id))
+                    if dex_channel:
+                        await dex_channel.send(confirmation_msg)
                     else:
-                        logger.warning(f"Could not find crypto-positions channel {positions_channel_id}")
+                        logger.warning(f"Could not find dex-fast-monitor channel {dex_channel_id}")
             except Exception as e:
-                logger.debug(f"Could not send to positions channel: {e}")
+                logger.debug(f"Could not send to dex-fast-monitor channel: {e}")
             
         except ValueError as e:
             await message.channel.send(f"❌ Invalid number format: {str(e)}")
