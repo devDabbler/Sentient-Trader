@@ -119,6 +119,12 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Win rate, total P&L, and trade statistics via `get_journal_stats()` or `get_local_journal_stats()`
   - Historical analysis for strategy improvement
   - Optional: Add Supabase credentials in `.env` (SUPABASE_URL, SUPABASE_SERVICE_KEY)
+* **💬 Discord Commands (NEW - December 2025):**
+  - `SOLD` - List all active positions
+  - `SOLD PEPE` - Close position by symbol and log to journal
+  - `SOLD ALL` - Close all positions
+  - `CLOSE <symbol>` - Same as SOLD
+  - Shows P&L summary and logs trade to journal
 * **▶️ Standalone Usage:** `python windows_services/runners/run_dex_fast_monitor.py`
   - CLI for adding/closing positions
   - Persists positions to `data/dex_held_positions.json`

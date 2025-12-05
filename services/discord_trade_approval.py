@@ -601,6 +601,13 @@ class DiscordTradeApprovalBot(commands.Bot):
             await self._handle_dex_add_position(message, add_data)
             return
         
+        # DEX Position SOLD/CLOSE command: "SOLD", "SOLD PEPE", "CLOSE", "CLOSE <symbol>"
+        sold_match = re.match(r'(SOLD|CLOSE|EXIT|REMOVE)\s*(.+)?', content, re.IGNORECASE)
+        if sold_match:
+            symbol_or_address = sold_match.group(2).strip() if sold_match.group(2) else None
+            await self._handle_dex_sold_position(message, symbol_or_address)
+            return
+        
         # Shorthand DEX position entry with explicit $ sign (e.g., "$25", "$50", "$100")
         # Only triggers for explicit dollar amounts, NOT plain numbers like "1", "2", "3"
         # Plain numbers are reserved for analysis mode shortcuts
@@ -1531,6 +1538,121 @@ class DiscordTradeApprovalBot(commands.Bot):
             await message.channel.send(f"❌ Invalid number format: {str(e)}")
         except Exception as e:
             logger.error(f"Error adding DEX position: {e}")
+            await message.channel.send(f"❌ Error: {str(e)[:100]}")
+    
+    async def _handle_dex_sold_position(self, message: discord.Message, symbol_or_address: Optional[str] = None):
+        """
+        Handle SOLD/CLOSE command for DEX Fast Monitor positions.
+        
+        Usage:
+            SOLD - Shows all active positions and asks which to close
+            SOLD PEPE - Closes position by symbol
+            SOLD <address> - Closes position by token address
+            CLOSE ALL - Closes all positions
+        """
+        try:
+            from services.dex_fast_position_monitor import get_fast_position_monitor
+            monitor = get_fast_position_monitor()
+            
+            positions = monitor.get_all_positions()
+            
+            if not positions:
+                await message.channel.send("📭 No active positions in DEX Fast Monitor.")
+                return
+            
+            # Handle "CLOSE ALL" / "SOLD ALL"
+            if symbol_or_address and symbol_or_address.upper() == "ALL":
+                closed_count = 0
+                for pos in positions:
+                    await monitor.close_position(pos.token_address)
+                    # Also journal to local file
+                    monitor._local_journal_exit(pos, exit_reason="MANUAL_SOLD_ALL")
+                    closed_count += 1
+                await message.channel.send(f"✅ Closed **{closed_count}** positions from Fast Monitor.")
+                return
+            
+            # If no symbol provided, show all positions
+            if not symbol_or_address:
+                positions_list = ""
+                for i, pos in enumerate(positions, 1):
+                    pnl_emoji = "🟢" if pos.unrealized_pnl_pct >= 0 else "🔴"
+                    positions_list += (
+                        f"**{i}. {pos.symbol}** {pnl_emoji} {pos.unrealized_pnl_pct:+.2f}%\n"
+                        f"   Entry: ${pos.entry_price:.8f} → ${pos.current_price:.8f}\n"
+                        f"   Address: `{pos.token_address[:8]}...`\n\n"
+                    )
+                
+                await message.channel.send(
+                    f"📊 **Active Positions ({len(positions)}):**\n\n"
+                    f"{positions_list}"
+                    f"**To close, reply:** `SOLD <SYMBOL>` or `SOLD ALL`"
+                )
+                return
+            
+            # Find position by symbol or address
+            target_pos = None
+            search_term = symbol_or_address.upper()
+            
+            for pos in positions:
+                if pos.symbol.upper() == search_term:
+                    target_pos = pos
+                    break
+                if pos.token_address.lower().startswith(symbol_or_address.lower()):
+                    target_pos = pos
+                    break
+                if pos.token_address.lower() == symbol_or_address.lower():
+                    target_pos = pos
+                    break
+            
+            if not target_pos:
+                # Show available positions
+                symbols = [p.symbol for p in positions]
+                await message.channel.send(
+                    f"❌ Position not found: **{symbol_or_address}**\n\n"
+                    f"Active positions: {', '.join(symbols)}\n"
+                    f"Try: `SOLD {symbols[0]}` or `SOLD ALL`"
+                )
+                return
+            
+            # Close the position
+            final_pnl = target_pos.unrealized_pnl_pct
+            final_pnl_usd = target_pos.unrealized_pnl_usd
+            hold_time = (datetime.now() - target_pos.entry_time).total_seconds() / 60
+            
+            # Journal to local file BEFORE closing
+            monitor._local_journal_exit(target_pos, exit_reason="MANUAL_SOLD")
+            
+            # Now close from monitor
+            await monitor.close_position(target_pos.token_address)
+            
+            # Build confirmation
+            pnl_emoji = "🟢" if final_pnl >= 0 else "🔴"
+            result_emoji = "💰" if final_pnl >= 0 else "📉"
+            
+            confirmation = (
+                f"{result_emoji} **Position Closed: {target_pos.symbol}**\n\n"
+                f"📍 Token: `{target_pos.token_address[:8]}...{target_pos.token_address[-4:]}`\n"
+                f"💵 Entry: ${target_pos.entry_price:.8f}\n"
+                f"💵 Exit: ${target_pos.current_price:.8f}\n"
+                f"{pnl_emoji} **P&L: {final_pnl:+.2f}%** (${final_pnl_usd:+.2f})\n"
+                f"⏱️ Hold Time: {hold_time:.0f} minutes\n\n"
+                f"📝 Logged to trade journal ✅"
+            )
+            
+            await message.channel.send(confirmation)
+            
+            # Also send to dex-fast-monitor channel
+            try:
+                dex_channel_id = os.getenv("DISCORD_CHANNEL_ID_DEX_FAST_MONITOR")
+                if dex_channel_id:
+                    dex_channel = self.get_channel(int(dex_channel_id))
+                    if dex_channel and dex_channel != message.channel:
+                        await dex_channel.send(confirmation)
+            except Exception as e:
+                logger.debug(f"Could not send to dex-fast-monitor: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error in SOLD command: {e}")
             await message.channel.send(f"❌ Error: {str(e)[:100]}")
 
     async def _handle_risk_command(self, message: discord.Message):
