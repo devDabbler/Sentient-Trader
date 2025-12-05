@@ -18,9 +18,16 @@ Features:
 - Profit target alerts
 - Discord webhook integration for instant notifications
 - Profitability calculator with realistic slippage/fees
+- ORDER FLOW MONITORING (December 2025):
+  * Real-time buy/sell transaction tracking via Birdeye API
+  * Buy/sell volume ratios and imbalance detection
+  * Whale transaction detection ($1k+ trades)
+  * Entry/exit timing signals based on order flow
+  * Transaction velocity tracking (txns per minute)
 
 Author: Sentient Trader
 Created: December 2025
+Updated: December 2025 - Added order flow monitoring
 """
 
 import asyncio
@@ -107,6 +114,14 @@ class HeldPosition:
     max_profit_pct: float = 0.0
     max_drawdown_pct: float = 0.0
     
+    # Order Flow Metrics (from Birdeye transaction monitoring)
+    order_flow_signal: str = "NEUTRAL"  # STRONG_BUY, BUY, NEUTRAL, SELL, STRONG_SELL
+    buy_sell_ratio_1m: float = 1.0
+    volume_imbalance_1m: float = 0.0  # -100 to +100
+    whale_net_usd: float = 0.0  # Net whale activity (positive = accumulating)
+    txn_velocity: float = 0.0  # Transactions per minute
+    last_order_flow_update: Optional[datetime] = None
+    
     @property
     def current_value_usd(self) -> float:
         """Current position value in USD"""
@@ -159,6 +174,11 @@ class FastPositionMonitor:
     - Pump/dump detection
     - Discord alert integration
     - Profitability calculations
+    - ORDER FLOW MONITORING (NEW):
+      * Real-time buy/sell transaction tracking
+      * Buy/sell volume ratios
+      * Whale transaction detection
+      * Entry/exit timing signals
     
     Usage:
         monitor = FastPositionMonitor()
@@ -220,6 +240,12 @@ class FastPositionMonitor:
         # Load persisted positions
         self._load_positions()
         
+        # Order flow monitoring (uses Birdeye API for transaction data)
+        self._transaction_monitor = None
+        self._order_flow_check_interval = 10  # Check order flow every 10 seconds (rate limit friendly)
+        self._last_order_flow_check = 0.0
+        self._order_flow_enabled = bool(os.getenv("BIRDEYE_API_KEY"))
+        
         logger.info("=" * 60)
         logger.info("🚀 DEX FAST POSITION MONITOR INITIALIZED")
         logger.info("=" * 60)
@@ -228,6 +254,7 @@ class FastPositionMonitor:
         logger.info(f"   Hard Stop: {default_hard_stop_pct}%")
         logger.info(f"   Profit Target: {default_profit_target_pct}%")
         logger.info(f"   Discord Alerts: {'✅ Enabled' if self.discord_webhook_url else '❌ Disabled'}")
+        logger.info(f"   Order Flow: {'✅ Enabled (Birdeye)' if self._order_flow_enabled else '❌ Disabled (no API key)'}")
         logger.info(f"   Loaded Positions: {len(self.held_positions)}")
         logger.info("=" * 60)
     
@@ -589,6 +616,9 @@ class FastPositionMonitor:
                     # Small delay between tokens to avoid rate limits
                     await asyncio.sleep(0.5)
                 
+                # 4. Update order flow data (every 10 seconds, rate limit friendly)
+                await self._update_order_flow_for_positions()
+                
                 # Save updated positions
                 self._save_positions()
                 
@@ -701,6 +731,158 @@ class FastPositionMonitor:
             return
     
     # ========================================================================
+    # ORDER FLOW MONITORING (Birdeye API)
+    # ========================================================================
+    
+    def _get_transaction_monitor(self):
+        """Lazy-load the transaction monitor to avoid circular imports"""
+        if self._transaction_monitor is None and self._order_flow_enabled:
+            try:
+                from services.solana_transaction_monitor import get_transaction_monitor
+                self._transaction_monitor = get_transaction_monitor()
+                logger.info("📊 Transaction monitor initialized for order flow tracking")
+            except ImportError as e:
+                logger.warning(f"Could not import transaction monitor: {e}")
+                self._order_flow_enabled = False
+        return self._transaction_monitor
+    
+    async def _update_order_flow_for_positions(self):
+        """
+        Update order flow data for all held positions.
+        
+        Called every 10 seconds to respect Birdeye rate limits (100 req/min).
+        Updates buy/sell ratios, whale activity, and generates timing signals.
+        """
+        if not self._order_flow_enabled:
+            return
+        
+        # Only check every 10 seconds (6 req/min per token)
+        now = datetime.now().timestamp()
+        if now - self._last_order_flow_check < self._order_flow_check_interval:
+            return
+        self._last_order_flow_check = now
+        
+        monitor = self._get_transaction_monitor()
+        if not monitor:
+            return
+        
+        for token_address, position in self.held_positions.items():
+            if position.status != PositionStatus.ACTIVE.value:
+                continue
+            
+            try:
+                # Get order flow data from Birdeye
+                flow = await monitor.get_order_flow(
+                    token_address=token_address,
+                    symbol=position.symbol
+                )
+                
+                if flow and flow.metrics_1m:
+                    m1 = flow.metrics_1m
+                    
+                    # Update position with order flow metrics
+                    position.order_flow_signal = m1.signal
+                    position.buy_sell_ratio_1m = m1.buy_sell_ratio
+                    position.volume_imbalance_1m = m1.volume_imbalance_pct
+                    position.whale_net_usd = m1.whale_net_usd
+                    position.txn_velocity = m1.txn_velocity
+                    position.last_order_flow_update = datetime.now()
+                    
+                    # Log significant order flow changes
+                    if m1.signal in ["STRONG_SELL", "SELL"]:
+                        logger.warning(
+                            f"⚠️ {position.symbol} ORDER FLOW: {m1.signal} | "
+                            f"B/S Ratio: {m1.buy_sell_ratio:.2f} | "
+                            f"Imbalance: {m1.volume_imbalance_pct:+.0f}% | "
+                            f"Reason: {m1.signal_reason}"
+                        )
+                    elif m1.signal in ["STRONG_BUY", "BUY"]:
+                        logger.info(
+                            f"📈 {position.symbol} ORDER FLOW: {m1.signal} | "
+                            f"B/S Ratio: {m1.buy_sell_ratio:.2f} | "
+                            f"Whale Net: ${m1.whale_net_usd:+,.0f}"
+                        )
+                    
+                    # Check for order flow based exit signals
+                    await self._check_order_flow_exit_signal(position, m1)
+                    
+            except Exception as e:
+                logger.debug(f"Error updating order flow for {position.symbol}: {e}")
+    
+    async def _check_order_flow_exit_signal(self, position: HeldPosition, metrics):
+        """
+        Check if order flow suggests exiting the position.
+        
+        Triggers:
+        - STRONG_SELL signal with heavy whale selling
+        - Volume imbalance < -60% (sellers dominating)
+        - Whale dumping > $5000
+        """
+        # Heavy sell pressure detected
+        if (metrics.signal == "STRONG_SELL" and 
+            metrics.volume_imbalance_pct < -50 and
+            metrics.whale_net_usd < -1000):
+            
+            await self._send_alert(
+                position,
+                AlertType.SELL_NOW,
+                f"📉 **ORDER FLOW EXIT SIGNAL**\n"
+                f"Signal: {metrics.signal}\n"
+                f"Volume Imbalance: {metrics.volume_imbalance_pct:+.0f}%\n"
+                f"Whale Net: ${metrics.whale_net_usd:+,.0f}\n"
+                f"B/S Ratio: {metrics.buy_sell_ratio:.2f}x\n"
+                f"Reason: {metrics.signal_reason}\n\n"
+                f"⚠️ Consider exiting - heavy sell pressure detected!"
+            )
+    
+    async def get_position_order_flow(self, token_address: str) -> Optional[Dict]:
+        """
+        Get detailed order flow analysis for a specific position.
+        
+        Returns:
+            Dict with order flow metrics and recommendation, or None
+        """
+        monitor = self._get_transaction_monitor()
+        if not monitor:
+            return None
+        
+        position = self.held_positions.get(token_address.lower())
+        if not position:
+            return None
+        
+        try:
+            flow = await monitor.get_order_flow(token_address, position.symbol)
+            recommendation = monitor.get_entry_exit_recommendation(flow)
+            
+            return {
+                "symbol": position.symbol,
+                "metrics_1m": {
+                    "signal": flow.metrics_1m.signal,
+                    "buy_count": flow.metrics_1m.buy_count,
+                    "sell_count": flow.metrics_1m.sell_count,
+                    "buy_volume_usd": flow.metrics_1m.buy_volume_usd,
+                    "sell_volume_usd": flow.metrics_1m.sell_volume_usd,
+                    "buy_sell_ratio": flow.metrics_1m.buy_sell_ratio,
+                    "volume_imbalance_pct": flow.metrics_1m.volume_imbalance_pct,
+                    "whale_buys": flow.metrics_1m.whale_buys,
+                    "whale_sells": flow.metrics_1m.whale_sells,
+                    "whale_net_usd": flow.metrics_1m.whale_net_usd,
+                    "txn_velocity": flow.metrics_1m.txn_velocity,
+                    "signal_reason": flow.metrics_1m.signal_reason
+                },
+                "metrics_5m": {
+                    "signal": flow.metrics_5m.signal,
+                    "buy_sell_ratio": flow.metrics_5m.buy_sell_ratio,
+                    "whale_net_usd": flow.metrics_5m.whale_net_usd
+                },
+                "recommendation": recommendation,
+                "recent_txns_count": len(flow.recent_txns)
+            }
+        except Exception as e:
+            logger.error(f"Error getting order flow for {token_address}: {e}")
+            return None
+
+    # ========================================================================
     # DISCORD ALERTS
     # ========================================================================
     
@@ -795,6 +977,28 @@ class FastPositionMonitor:
             "timestamp": datetime.now().isoformat()
         }
         
+        # Add order flow data if available
+        if position.order_flow_signal and position.last_order_flow_update:
+            flow_emoji = {
+                "STRONG_BUY": "🟢🟢",
+                "BUY": "🟢",
+                "NEUTRAL": "⚪",
+                "SELL": "🔴",
+                "STRONG_SELL": "🔴🔴"
+            }.get(position.order_flow_signal, "⚪")
+            
+            embed["fields"].append({
+                "name": "📊 Order Flow",
+                "value": (
+                    f"Signal: {flow_emoji} {position.order_flow_signal}\n"
+                    f"B/S Ratio: {position.buy_sell_ratio_1m:.2f}x\n"
+                    f"Imbalance: {position.volume_imbalance_1m:+.0f}%\n"
+                    f"Whale Net: ${position.whale_net_usd:+,.0f}\n"
+                    f"Velocity: {position.txn_velocity:.0f}/min"
+                ),
+                "inline": True
+            })
+        
         # Add warning if profitability is bad
         if profitability.warning:
             embed["fields"].append({
@@ -856,7 +1060,7 @@ class FastPositionMonitor:
                 
                 for addr, pos_dict in data.items():
                     # Convert ISO strings back to datetime
-                    for key in ['entry_time', 'last_update', 'last_alert_time']:
+                    for key in ['entry_time', 'last_update', 'last_alert_time', 'last_order_flow_update']:
                         if pos_dict.get(key):
                             try:
                                 pos_dict[key] = datetime.fromisoformat(pos_dict[key])
@@ -888,13 +1092,17 @@ class FastPositionMonitor:
             "total_price_checks": self.total_price_checks,
             "total_alerts_sent": self.total_alerts_sent,
             "check_interval_seconds": self.check_interval,
+            "order_flow_enabled": self._order_flow_enabled,
             "positions": [
                 {
                     "symbol": p.symbol,
                     "entry_price": p.entry_price,
                     "current_price": p.current_price,
                     "pnl_pct": p.unrealized_pnl_pct,
-                    "drawdown_pct": p.drawdown_from_peak_pct
+                    "drawdown_pct": p.drawdown_from_peak_pct,
+                    "order_flow_signal": p.order_flow_signal,
+                    "buy_sell_ratio": p.buy_sell_ratio_1m,
+                    "whale_net_usd": p.whale_net_usd
                 }
                 for p in self.held_positions.values()
             ]

@@ -65,6 +65,14 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Solana priority fee inclusion ($0.50-2 per transaction)
   - Breakeven gain calculation (often 15-30%+ for low liquidity tokens!)
   - Round-trip cost display (buy + sell slippage + fees)
+* **📊 Order Flow Monitoring (NEW - December 2025):** Real-time buy/sell transaction tracking
+  - Individual buy/sell transaction tracking via Birdeye API (FREE tier)
+  - Buy/sell volume ratios and imbalance detection (-100% to +100%)
+  - Whale transaction detection ($1k+ trades)
+  - Transaction velocity tracking (txns per minute)
+  - Entry/exit timing signals (STRONG_BUY, BUY, NEUTRAL, SELL, STRONG_SELL)
+  - Automatic exit alerts when heavy sell pressure detected
+  - Discord alerts now include order flow metrics
 * **📊 Enhanced Token Scoring:** Profitability analysis integrated into composite score
   - Tokens needing 30%+ to break even get 50% score penalty
   - Tokens needing 20%+ get 30% penalty
@@ -75,6 +83,7 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Breakeven requirement warning
   - Real profit if +50% displayed gain
   - Liquidity tier (MICRO/LOW/MEDIUM/GOOD/HIGH)
+  - **Order flow signal and whale activity (NEW)**
 * **🔗 Service Control Panel Integration:** New "DEX Fast Position Monitor" service
   - Checkbox selection in Crypto preset
   - Configurable check interval (1-10 seconds)
@@ -83,6 +92,33 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - CLI for adding/closing positions
   - Persists positions to `data/dex_held_positions.json`
   - Batch file: `START_DEX_FAST_MONITOR.bat`
+
+#### Order Flow Transaction Monitor (NEW - December 2025) ✅ PRODUCTION READY
+Real-time transaction-level monitoring like DexScreener's transactions tab:
+* **📊 Transaction Tracking:** See individual buys/sells as they happen
+  - Birdeye API integration (FREE tier: 100 req/min - SUFFICIENT for 2-5 tokens)
+  - Buy/sell classification with volume in USD
+  - Maker wallet tracking (truncated for privacy)
+* **🐋 Whale Detection:** Automatic classification of transaction sizes
+  - MINNOW: < $100
+  - FISH: $100 - $1,000
+  - DOLPHIN: $1,000 - $10,000 (counted as whale)
+  - WHALE: $10,000 - $100,000
+  - MEGA_WHALE: > $100,000
+* **📈 Order Flow Signals:** AI-like timing signals based on math rules
+  - Volume imbalance detection (buyers vs sellers)
+  - Buy/sell ratio calculation (>1 = more buys)
+  - Whale net activity (accumulating vs distributing)
+  - Transaction velocity (momentum indicator)
+* **💰 API Cost Analysis:**
+  | Service | Cost | Best For |
+  |---------|------|----------|
+  | Birdeye FREE | $0 | 2-5 tokens, sufficient for position monitoring |
+  | Birdeye Starter | $49/mo | 10+ tokens, WebSocket real-time |
+  | Helius Developer | $49/mo | Best WebSocket, parsed transactions |
+  | DexScreener Paid | $49/mo | New pairs alerts (NOT needed for txns) |
+  
+  **Recommendation:** Start with FREE Birdeye (you have key). Upgrade only if monitoring 10+ tokens.
 
 #### Enhanced Exit Reasoning (NEW - December 2025) ✅ PRODUCTION READY
 AI Position Manager now provides **detailed sell vs hold analysis** for every exit decision:
