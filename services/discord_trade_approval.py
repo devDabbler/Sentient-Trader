@@ -89,7 +89,7 @@ class TradeActionView(View):
 
 class AlertActionView(View):
     """Interactive buttons for General Alerts (Watch/Analyze/Trade/Dismiss)"""
-    def __init__(self, bot, symbol: str, asset_type: str = "crypto", alert_data: dict = None):
+    def __init__(self, bot, symbol: str, asset_type: str = "crypto", alert_data: Optional[dict] = None):
         super().__init__(timeout=7200)  # 2 hour timeout
         self.bot = bot
         self.symbol = symbol
@@ -1280,7 +1280,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 return 10.0  # High slippage warning
         
         # Position tiers
-        positions = {
+        positions: dict = {
             'conservative': {'usd': 25},
             'moderate': {'usd': 50},
             'aggressive': {'usd': 100}
@@ -1524,7 +1524,7 @@ class DiscordTradeApprovalBot(commands.Bot):
                 context = self._channel_token_context.get(message.channel.id)
                 
                 # If no context, try to extract from referenced message (reply to alert)
-                if not context and message.reference:
+                if not context and message.reference and message.reference.message_id:
                     try:
                         ref_msg = await message.channel.fetch_message(message.reference.message_id)
                         token_address = await self._extract_token_address_from_message(ref_msg)
@@ -2334,7 +2334,7 @@ _Commands work in all alert channels: stocks, crypto, options, and executions_
         else:
              await message.channel.send(f"ℹ️ No pending alerts found for **{symbol}**")
     
-    async def _handle_trade_command(self, message: discord.Message, symbol: str, alert_data: dict = None) -> dict:
+    async def _handle_trade_command(self, message: discord.Message, symbol: str, alert_data: Optional[dict] = None) -> dict:
         """
         Handle TRADE command for CRYPTO - Queue trade for approval (mirrors stock workflow)
         Does NOT execute immediately - waits for user confirmation with YES
@@ -3510,8 +3510,8 @@ _Commands work in all alert channels: stocks, crypto, options, and executions_
         confidence: str = "MEDIUM",
         color: int = 3447003,
         asset_type: str = "crypto",
-        alert_data: dict = None,
-        target_channel_id: int = None
+        alert_data: Optional[dict] = None,
+        target_channel_id: Optional[int] = None
     ) -> bool:
         """
         Send a generic alert notification with action buttons
