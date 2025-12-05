@@ -41,15 +41,35 @@ The platform supports:
 * **🐦 X/Twitter Integration:** Real-time social sentiment for trending tokens
 * **📢 Multi-Source Discovery:** DexScreener API + Pump.fun integration
 * **🎣 Webhook Execution Ready:** High-level placeholders for future bundler integration (Jito, Solayer)
-* **⏰ Coin Age & Entry Recommendations (NEW - December 2025):** Smart entry timing based on coin age
-  - Tracks if initial trading has passed (FOMO/rug risk reduced after 15-30 min)
-  - Detects pump patterns for second-wave entry opportunities
-  - Age classifications: BRAND NEW (<5m), VERY FRESH (5-15m), FRESH (15-30m), SETTLING (30-60m), ESTABLISHED (1-3h), MATURING (3-6h), AGED (6-24h), OLD (24h+)
-  - Entry recommendations: HIGH RISK ENTRY (ultra-fresh), WAIT FOR SETTLING, GOOD ENTRY - PUMP FORMING, POTENTIAL DIP BUY, SAFER ENTRY, PRIME ENTRY
-  - Detects accumulation patterns (stable price + rising volume)
-  - Detects recovery bounces (down 24h but up 1h = potential second wave)
-  - Detects consolidation breakouts (5m spike after flat 1h)
-  - Human-readable timing summaries in Discord alerts
+* **⏰ Coin Age & Entry Recommendations:** Smart entry timing based on coin age
+
+#### Bonding Curve Monitor (NEW - December 2025) ✅ PRODUCTION READY
+Real-time monitoring for pump.fun and LaunchLab token launches - catches tokens at creation, not hours later from DexScreener:
+* **🎰 PumpPortal WebSocket (FREE):** Real-time token creation events from pump.fun
+  - Instant notification when new tokens are created (seconds, not minutes)
+  - Trade activity monitoring with volume and buy/sell counts
+  - Migration events when tokens graduate (hit 100% bonding curve)
+* **🚀 LaunchLab Polling:** Monitors Raydium LaunchLab for new token launches
+  - Configurable polling interval (default 30s)
+  - Detects tokens before they appear on DexScreener
+* **🎓 Graduation Alerts:** Notified immediately when tokens complete bonding curve
+  - Auto-analysis via DEX Hunter when tokens graduate
+  - Discord alerts with DexScreener and Raydium links
+* **📊 Early Detection Benefits:**
+  - **Before:** DexScreener shows token 1-2 hours after launch (after graduation)
+  - **After:** Caught at creation on bonding curve (within seconds)
+  - Example: TRUTHAI would have been detected at launch, not after 100% graduation
+* **⚙️ Configuration (Environment Variables):**
+  ```bash
+  DEX_ENABLE_BONDING_MONITOR=true    # Enable bonding curve monitoring
+  BONDING_ALERT_ON_CREATION=true     # Alert on new token creation
+  BONDING_ALERT_ON_GRADUATION=true   # Alert on token graduation
+  BONDING_MIN_TRADES=5               # Min trades for momentum alert
+  BONDING_MIN_VOLUME_SOL=1.0         # Min volume for momentum alert
+  ```
+* **▶️ Standalone Service:** `python windows_services/runners/run_bonding_curve_monitor.py`
+* **🔗 Integrated Mode:** Runs alongside DEX Launch service when `DEX_ENABLE_BONDING_MONITOR=true`
+* **📝 Linux Service:** `deploy/sentient-bonding-curve-monitor.service`
 
 #### Crypto Breakout Service (NEW - December 2025)
 * **📊 Multi-Indicator Detection:** Volume spike, EMA crossover, MACD, RSI, Bollinger Bands

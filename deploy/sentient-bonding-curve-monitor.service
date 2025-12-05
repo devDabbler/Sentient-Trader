@@ -1,0 +1,35 @@
+[Unit]
+Description=Sentient Trader - Bonding Curve Monitor (Real-time pump.fun & LaunchLab)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Sentient-Trader
+Environment="PATH=/root/Sentient-Trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONPATH=/root/Sentient-Trader"
+
+# Configuration - adjust as needed
+Environment="BONDING_ENABLE_PUMPFUN=true"
+Environment="BONDING_ENABLE_LAUNCHLAB=true"
+Environment="BONDING_ALERT_ON_CREATION=true"
+Environment="BONDING_ALERT_ON_GRADUATION=true"
+Environment="BONDING_MIN_TRADES=5"
+Environment="BONDING_MIN_VOLUME_SOL=1.0"
+Environment="BONDING_LAUNCHLAB_INTERVAL=30"
+
+ExecStart=/root/Sentient-Trader/venv/bin/python /root/Sentient-Trader/windows_services/runners/run_bonding_curve_monitor.py
+
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/Sentient-Trader/logs/bonding_curve_monitor.log
+StandardError=append:/root/Sentient-Trader/logs/bonding_curve_monitor.log
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

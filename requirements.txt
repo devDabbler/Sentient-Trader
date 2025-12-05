@@ -43,6 +43,8 @@ pywin32>=306; sys_platform == 'win32'  # Windows services support (Phase 3)
 
 # Solana DEX Hunter - Phase 1: On-chain Verification
 base58>=2.1.1  # Base58 encoding for Solana addresses
+websockets>=12.0  # WebSocket support for PumpPortal (pump.fun real-time data)
+pytz>=2024.1  # Timezone support for PST logging
 
 # Service Control Panel - 2FA Authentication
 pyotp>=2.9.0  # TOTP one-time passwords (Google Authenticator)

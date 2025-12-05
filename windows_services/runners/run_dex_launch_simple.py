@@ -1,6 +1,15 @@
 """
 DEX Launch Monitor - SIMPLE VERSION
 No threading, no timeouts - straightforward execution with async support
+
+Now includes optional Bonding Curve Monitor integration for catching
+pump.fun and LaunchLab tokens at launch (before DexScreener).
+
+Environment Variables:
+    DEX_ENABLE_BONDING_MONITOR: Enable bonding curve monitoring (default: true)
+    DEX_SCAN_INTERVAL: Seconds between DexScreener scans (default: 30)
+    DEX_LENIENT_MODE: Allow tokens with mint/freeze authority (default: true)
+    DEX_DISCOVERY_MODE: aggressive, balanced, conservative (default: aggressive)
 """
 
 import sys
@@ -109,6 +118,20 @@ try:
     from services.alert_system import get_alert_system
     print("  ✓ alert_system imported", flush=True)
     
+    # Optional: Bonding curve monitor for early detection
+    enable_bonding = os.getenv("DEX_ENABLE_BONDING_MONITOR", "true").lower() == "true"
+    bonding_monitor = None
+    if enable_bonding:
+        try:
+            print("  → Importing bonding_curve_monitor...", flush=True)
+            logger.info("  → Importing bonding_curve_monitor...")
+            from services.bonding_curve_monitor import get_bonding_curve_monitor
+            print("  ✓ bonding_curve_monitor imported", flush=True)
+        except ImportError as e:
+            print(f"  ⚠️ bonding_curve_monitor not available: {e}", flush=True)
+            logger.warning(f"Bonding curve monitor not available: {e}")
+            enable_bonding = False
+    
     logger.info(f"✓ All imports complete in {time.time() - import_start:.1f}s")
     print(f"✓ All imports complete in {time.time() - import_start:.1f}s", flush=True)
     
@@ -143,6 +166,23 @@ try:
     print(f"  ✓ DEX hunter created (mode={mode_str}, discovery={discovery_mode})", flush=True)
     alert_system = get_alert_system()
     print("  ✓ Alert system created", flush=True)
+    
+    # Initialize bonding curve monitor if enabled
+    if enable_bonding:
+        bonding_monitor = get_bonding_curve_monitor(
+            enable_pump_fun=True,
+            enable_launchlab=True,
+            alert_on_creation=True,
+            alert_on_graduation=True,
+            min_trades_to_alert=5,
+            min_volume_sol_to_alert=1.0,
+        )
+        print("  ✓ Bonding curve monitor created (pump.fun + LaunchLab)", flush=True)
+        logger.info("✓ Bonding curve monitor initialized")
+    else:
+        bonding_monitor = None
+        print("  ⚠️ Bonding curve monitor disabled", flush=True)
+    
     logger.info("✓ Services initialized")
     print("✓ Services initialized", flush=True)
     
@@ -179,6 +219,64 @@ try:
         
         monitor_task = asyncio.create_task(start_monitor_with_timeout())
         print("Background monitor task created", flush=True)
+        
+        # Start bonding curve monitor in background (if enabled)
+        bonding_task = None
+        if bonding_monitor:
+            print("Creating bonding curve monitor task...", flush=True)
+            logger.info("Starting bonding curve monitor for real-time pump.fun/LaunchLab detection...")
+            
+            # Set up callback to analyze bonding curve tokens with DEX hunter
+            async def on_bonding_token_graduation(migration):
+                """When a token graduates from bonding curve, analyze it immediately"""
+                try:
+                    logger.info(f"🎓 Bonding token graduated: {migration.symbol} - Analyzing...")
+                    print(f"[BONDING→DEX] 🎓 {migration.symbol} graduated, analyzing...", flush=True)
+                    
+                    success, token = await dex_hunter._analyze_token(
+                        migration.mint,
+                        "solana"
+                    )
+                    
+                    if success and token and token.composite_score >= 50:
+                        alert_msg = (
+                            f"🎓 **BONDING CURVE GRADUATE!**\n\n"
+                            f"**Token:** {token.symbol}\n"
+                            f"**Platform:** {migration.platform.value}\n"
+                            f"**Score:** {token.composite_score:.1f}/100\n"
+                            f"**Liquidity:** ${token.liquidity_usd:,.0f}\n"
+                            f"**Risk:** {token.risk_level.value}\n\n"
+                            f"⚡ _Caught at graduation - first seconds on DEX!_\n\n"
+                            f"🔗 https://dexscreener.com/solana/{token.contract_address}\n\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"**💬 Quick Reply Commands:**\n"
+                            f"• `monitor` - Detailed analysis\n"
+                            f"• `ADD $25` - Add position ($25)\n"
+                            f"• `ADD $50` - Add position ($50)"
+                        )
+                        
+                        alert_system.send_alert(
+                            "BONDING_GRADUATE",
+                            alert_msg,
+                            priority="HIGH",
+                            metadata={'symbol': token.symbol, 'score': token.composite_score, 'source': 'bonding_curve'}
+                        )
+                        logger.info(f"✅ Alert sent for graduated token {token.symbol}")
+                        
+                except Exception as e:
+                    logger.error(f"Error analyzing graduated token: {e}")
+            
+            def on_migration_sync(migration):
+                """Sync wrapper that schedules async analysis"""
+                asyncio.create_task(on_bonding_token_graduation(migration))
+            
+            bonding_monitor.set_callbacks(
+                on_migration=on_migration_sync
+            )
+            
+            bonding_task = asyncio.create_task(bonding_monitor.start())
+            print("Bonding curve monitor task created", flush=True)
+            logger.info("✓ Bonding curve monitor started (pump.fun WebSocket + LaunchLab polling)")
         
         scan_counter = 0
         
@@ -313,6 +411,9 @@ try:
         finally:
             monitor.stop_monitoring()
             monitor_task.cancel()
+            if bonding_task and bonding_monitor:
+                bonding_monitor.stop()
+                bonding_task.cancel()
     
     # Run the async loop
     print("Starting async monitor loop...", flush=True)
