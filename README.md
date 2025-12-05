@@ -67,14 +67,20 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Pump spike detection (+5% in 2 seconds)
   - Profit target alerts with partial exit suggestions
   - Discord webhook integration for instant notifications
-* **📣 Position Status Updates (NEW - December 2025):** Regular holding feedback instead of just exit signals
+* **📣 Position Status Updates (ENHANCED - December 2025):** Regular holding feedback instead of just exit signals
   - **HOLDING_STRONG:** Good profit, stable price, healthy order flow - "Keep holding!"
   - **MOMENTUM_BUILDING:** Multiple consecutive up-ticks with buy pressure - "Ride the wave!"
   - **CONSOLIDATING:** Price stable, accumulation phase - "Be patient"
   - **WATCH_CLOSELY:** Minor concerns (consecutive down-ticks, some sell pressure) - "Stay alert"
   - **RECOVERY:** Bouncing back from drawdown - "Patience paid off!"
-  - Status updates every 60 seconds (configurable) to avoid spam
+  - Status updates every **8 seconds** for pump coins (was 60s) - faster feedback for fast-moving tokens
   - Tracks consecutive up/down price movements for momentum detection
+* **🎯 Continuous Entry Timing Alerts (NEW - December 2025):** AI monitors entry conditions even after position added
+  - **ENTRY_NOW Alert:** Sent when order flow improves from WAIT to favorable conditions
+  - **GOOD_ENTRY Alert:** Sent when conditions are improving but not yet optimal
+  - Continuous monitoring of buy/sell ratios, whale activity, and transaction velocity
+  - Alerts if timing changes from "wait" to "buy" - so you don't miss optimal entry
+  - Resets alert flag if conditions worsen (can alert again when they improve)
 * **💸 Profitability Calculator:** Shows REAL profit after slippage, fees, and price impact
   - Realistic slippage estimates by liquidity tier (MICRO: 12-15%, LOW: 8-10%, MEDIUM: 5-7%)
   - AMM price impact calculation (trade_size / 2 * liquidity)
@@ -106,12 +112,13 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Checkbox selection in Crypto preset
   - Configurable check interval (1-10 seconds)
   - Log file at `logs/dex_fast_monitor.log`
-* **📝 Supabase Trade Journaling (NEW - December 2025):** Automatic cloud logging of all DEX positions
-  - Entry and exit details logged to `dex_position_journal` table
+* **📝 Trade Journaling (ENHANCED - December 2025):** Automatic logging of all DEX positions
+  - **Supabase Cloud Journal:** Entry/exit logged to `dex_position_journal` table (when configured)
+  - **Local JSON Journal:** Fallback to `data/dex_trade_journal.json` (always works, no setup)
   - Tracks entry/exit prices, P&L, hold time, order flow at entry/exit
-  - Win rate, total P&L, and trade statistics via `get_journal_stats()`
+  - Win rate, total P&L, and trade statistics via `get_journal_stats()` or `get_local_journal_stats()`
   - Historical analysis for strategy improvement
-  - Requires Supabase credentials in `.env` (SUPABASE_URL, SUPABASE_SERVICE_KEY)
+  - Optional: Add Supabase credentials in `.env` (SUPABASE_URL, SUPABASE_SERVICE_KEY)
 * **▶️ Standalone Usage:** `python windows_services/runners/run_dex_fast_monitor.py`
   - CLI for adding/closing positions
   - Persists positions to `data/dex_held_positions.json`

@@ -69,6 +69,9 @@ class AlertType(Enum):
     STATUS_CONSOLIDATING = "STATUS_CONSOLIDATING"  # Price consolidating
     STATUS_WATCH_CLOSELY = "STATUS_WATCH_CLOSELY"  # Minor concern, watch
     STATUS_RECOVERY = "STATUS_RECOVERY"  # Recovering from dip
+    # Entry timing alerts (NEW - December 2025) - For continuous entry monitoring
+    ENTRY_NOW = "ENTRY_NOW"  # Entry conditions improved - BUY signal
+    ENTRY_WAIT = "ENTRY_WAIT"  # Still waiting for better entry
 
 
 class PositionStatus(Enum):
@@ -142,9 +145,15 @@ class HeldPosition:
     current_status: str = "MONITORING"  # HOLDING_STRONG, MOMENTUM_BUILDING, CONSOLIDATING, WATCH_CLOSELY, RECOVERY
     status_reason: str = ""  # Human-readable reason for current status
     last_status_update: Optional[datetime] = None
-    status_update_interval: int = 60  # Send status updates every 60 seconds (adjustable)
+    status_update_interval: int = 8  # Send status updates every 8 seconds for pump coins (was 60)
     consecutive_up_checks: int = 0  # Number of consecutive price increases
     consecutive_down_checks: int = 0  # Number of consecutive price decreases
+    
+    # Entry Timing Tracking (NEW - December 2025) - For continuous entry signal monitoring
+    last_entry_signal: str = "WAIT"  # ENTER_NOW, CONSIDER_ENTRY, HOLD, CONSIDER_EXIT, EXIT_NOW
+    last_entry_signal_update: Optional[datetime] = None
+    entry_signal_alerted: bool = False  # Whether we've alerted for current ENTER signal
+    time_in_position_minutes: float = 0.0  # How long we've been monitoring
     
     @property
     def current_value_usd(self) -> float:
@@ -212,6 +221,8 @@ class FastPositionMonitor:
     
     # File to persist held positions
     POSITIONS_FILE = Path(__file__).resolve().parent.parent / "data" / "dex_held_positions.json"
+    # Local trade journal (fallback when Supabase not available)
+    JOURNAL_FILE = Path(__file__).resolve().parent.parent / "data" / "dex_trade_journal.json"
     
     def __init__(
         self,
@@ -287,6 +298,10 @@ class FastPositionMonitor:
             except Exception as e:
                 logger.warning(f"Could not initialize Supabase client: {e}")
         
+        # Local JSON journaling (always available as fallback)
+        self._local_journal_enabled = True
+        self._ensure_journal_file()
+        
         logger.info("=" * 60)
         logger.info("🚀 DEX FAST POSITION MONITOR INITIALIZED")
         logger.info("=" * 60)
@@ -298,6 +313,7 @@ class FastPositionMonitor:
         logger.info(f"   Exit Alerts: {'🔕 Suppressed' if self.suppress_exit_alerts else '📢 Enabled'}")
         logger.info(f"   Order Flow: {'✅ Enabled (Birdeye)' if self._order_flow_enabled else '❌ Disabled (no API key)'}")
         logger.info(f"   Supabase Journal: {'✅ Enabled' if self._supabase_enabled else '❌ Disabled'}")
+        logger.info(f"   Local Journal: {'✅ Enabled' if self._local_journal_enabled else '❌ Disabled'}")
         logger.info(f"   Loaded Positions: {len(self.held_positions)}")
         logger.info("=" * 60)
     
@@ -490,8 +506,9 @@ class FastPositionMonitor:
         logger.info(f"➕ Added position: {symbol} @ ${entry_price:.8f} ({tokens_held:.2f} tokens)")
         logger.info(f"   └─ Breakeven needs: {profitability.breakeven_gain_needed_pct:.1f}% displayed gain")
         
-        # Journal to Supabase (NEW - December 2025)
+        # Journal to Supabase and local file
         await self._journal_position_entry(position)
+        self._local_journal_entry(position)
         
         # Send Discord alert
         await self._send_alert(position, AlertType.POSITION_ADDED, 
@@ -523,8 +540,9 @@ class FastPositionMonitor:
             position.unrealized_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
             position.unrealized_pnl_usd = (exit_price - position.entry_price) * position.tokens_held
         
-        # Journal exit to Supabase (NEW - December 2025)
+        # Journal exit to Supabase and local file
         await self._journal_position_exit(position, exit_reason="MANUAL_CLOSE")
+        self._local_journal_exit(position, exit_reason="MANUAL_CLOSE")
         
         # Remove from active monitoring
         del self.held_positions[token_address]
@@ -1056,6 +1074,9 @@ class FastPositionMonitor:
                     # Check for order flow based exit signals
                     await self._check_order_flow_exit_signal(position, m1)
                     
+                    # Check for entry timing improvements (NEW - December 2025)
+                    await self._check_entry_timing_signal(position, flow, monitor)
+                    
             except Exception as e:
                 logger.debug(f"Error updating order flow for {position.symbol}: {e}")
     
@@ -1084,6 +1105,150 @@ class FastPositionMonitor:
                 f"Reason: {metrics.signal_reason}\n\n"
                 f"⚠️ Consider exiting - heavy sell pressure detected!"
             )
+    
+    async def _check_entry_timing_signal(self, position: HeldPosition, flow, monitor):
+        """
+        Check if entry timing has improved and alert user.
+        
+        Continuously monitors order flow and alerts when:
+        - Signal changes from WAIT/HOLD to ENTER_NOW or CONSIDER_ENTRY
+        - This helps users who are monitoring but haven't entered yet
+        
+        Also useful for DCA timing - when to add more to existing position.
+        """
+        try:
+            recommendation = monitor.get_entry_exit_recommendation(flow)
+            new_signal = recommendation.get("action", "HOLD")
+            old_signal = position.last_entry_signal
+            
+            # Update position tracking
+            position.last_entry_signal = new_signal
+            position.last_entry_signal_update = datetime.now()
+            
+            # Calculate time in position
+            position.time_in_position_minutes = (datetime.now() - position.entry_time).total_seconds() / 60
+            
+            # Entry signal improvement detection
+            wait_signals = {"HOLD", "WAIT", "CONSIDER_EXIT", "EXIT_NOW"}
+            enter_signals = {"ENTER_NOW", "CONSIDER_ENTRY"}
+            
+            # Alert if signal improved from waiting to entering
+            signal_improved = old_signal in wait_signals and new_signal in enter_signals
+            
+            # Also alert on first ENTER_NOW if we haven't alerted yet
+            first_enter_now = new_signal == "ENTER_NOW" and not position.entry_signal_alerted
+            
+            if signal_improved or first_enter_now:
+                position.entry_signal_alerted = True
+                
+                # Determine urgency
+                if new_signal == "ENTER_NOW":
+                    await self._send_entry_timing_alert(
+                        position,
+                        recommendation,
+                        flow,
+                        is_urgent=True
+                    )
+                elif new_signal == "CONSIDER_ENTRY":
+                    await self._send_entry_timing_alert(
+                        position,
+                        recommendation,
+                        flow,
+                        is_urgent=False
+                    )
+            
+            # Reset alert flag if signal worsened (so we can alert again if it improves)
+            if new_signal in wait_signals:
+                position.entry_signal_alerted = False
+                
+        except Exception as e:
+            logger.debug(f"Error checking entry timing for {position.symbol}: {e}")
+    
+    async def _send_entry_timing_alert(
+        self, 
+        position: HeldPosition, 
+        recommendation: Dict,
+        flow,
+        is_urgent: bool = False
+    ):
+        """
+        Send entry timing improvement alert to Discord.
+        
+        Args:
+            position: The held position
+            recommendation: Entry/exit recommendation dict
+            flow: TokenOrderFlow data
+            is_urgent: True for ENTER_NOW, False for CONSIDER_ENTRY
+        """
+        action = recommendation.get("action", "UNKNOWN")
+        reason = recommendation.get("reason", "")
+        confidence = recommendation.get("confidence", 50)
+        
+        m1 = flow.metrics_1m
+        m5 = flow.metrics_5m
+        
+        # Build emoji and color based on urgency
+        if is_urgent:
+            emoji = "🟢🚀"
+            title = f"🎯 ENTRY NOW: {position.symbol}"
+            color = 0x00FF00  # Bright green
+            urgency_text = "**BUY NOW** - Conditions are favorable!"
+        else:
+            emoji = "🟡👀"
+            title = f"🎯 GOOD ENTRY: {position.symbol}"
+            color = 0xFFFF00  # Yellow
+            urgency_text = "Consider entering - conditions improving"
+        
+        # Build embed
+        embed = {
+            "title": title,
+            "description": f"{emoji} {urgency_text}\n\n**Reason:** {reason}",
+            "color": color,
+            "fields": [
+                {
+                    "name": "📊 Order Flow (1m)",
+                    "value": f"Signal: {m1.signal}\nB/S Ratio: {m1.buy_sell_ratio:.2f}x\nImbalance: {m1.volume_imbalance_pct:+.0f}%",
+                    "inline": True
+                },
+                {
+                    "name": "📊 Order Flow (5m)",
+                    "value": f"Signal: {m5.signal}\nB/S Ratio: {m5.buy_sell_ratio:.2f}x\nWhale Net: ${m5.whale_net_usd:+,.0f}",
+                    "inline": True
+                },
+                {
+                    "name": "💰 Position Info",
+                    "value": f"Entry: ${position.entry_price:.8f}\nCurrent: ${position.current_price:.8f}\nP&L: {position.unrealized_pnl_pct:+.2f}%",
+                    "inline": True
+                },
+                {
+                    "name": "⏱️ Timing",
+                    "value": f"Velocity: {m5.txn_velocity:.0f} txn/min\nConfidence: {confidence}%\nMonitored: {position.time_in_position_minutes:.0f}m",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": f"Entry Timing Alert | {datetime.now().strftime('%H:%M:%S')}"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Log
+        logger.info(f"🎯 ENTRY TIMING {position.symbol}: {action} | Confidence: {confidence}%")
+        print(f"[FAST_MONITOR] 🎯 ENTRY TIMING {position.symbol}: {action} | {reason}", flush=True)
+        
+        # Send to Discord
+        if self.discord_webhook_url:
+            try:
+                payload = {"embeds": [embed]}
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        self.discord_webhook_url,
+                        json=payload
+                    )
+                    if response.status_code not in [200, 204]:
+                        logger.warning(f"Discord webhook returned {response.status_code}")
+            except Exception as e:
+                logger.error(f"Failed to send entry timing alert: {e}")
     
     async def get_position_order_flow(self, token_address: str) -> Optional[Dict]:
         """
@@ -1309,7 +1474,9 @@ class FastPositionMonitor:
             for addr, pos in self.held_positions.items():
                 pos_dict = asdict(pos)
                 # Convert datetime to ISO format
-                for key in ['entry_time', 'last_update', 'last_alert_time']:
+                datetime_fields = ['entry_time', 'last_update', 'last_alert_time', 'last_order_flow_update', 
+                                   'last_status_update', 'last_entry_signal_update']
+                for key in datetime_fields:
                     if pos_dict.get(key):
                         pos_dict[key] = pos_dict[key].isoformat() if isinstance(pos_dict[key], datetime) else pos_dict[key]
                 data[addr] = pos_dict
@@ -1329,12 +1496,20 @@ class FastPositionMonitor:
                 
                 for addr, pos_dict in data.items():
                     # Convert ISO strings back to datetime
-                    for key in ['entry_time', 'last_update', 'last_alert_time', 'last_order_flow_update']:
+                    datetime_fields = ['entry_time', 'last_update', 'last_alert_time', 'last_order_flow_update',
+                                       'last_status_update', 'last_entry_signal_update']
+                    for key in datetime_fields:
                         if pos_dict.get(key):
                             try:
                                 pos_dict[key] = datetime.fromisoformat(pos_dict[key])
                             except (ValueError, TypeError):
                                 pos_dict[key] = datetime.now() if key == 'entry_time' else None
+                    
+                    # Set defaults for new fields if not present (backward compatibility)
+                    pos_dict.setdefault('last_entry_signal', 'WAIT')
+                    pos_dict.setdefault('entry_signal_alerted', False)
+                    pos_dict.setdefault('time_in_position_minutes', 0.0)
+                    pos_dict.setdefault('status_update_interval', 8)  # 8 seconds for pump coins
                     
                     # Only load ACTIVE positions
                     if pos_dict.get('status') == PositionStatus.ACTIVE.value:
@@ -1483,6 +1658,187 @@ class FastPositionMonitor:
         except Exception as e:
             logger.error(f"Failed to get journal stats from Supabase: {e}")
             return None
+    
+    # ========================================================================
+    # LOCAL JSON JOURNALING (Fallback when Supabase not available)
+    # ========================================================================
+    
+    def _ensure_journal_file(self):
+        """Ensure the local journal file exists with proper structure"""
+        try:
+            self.JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not self.JOURNAL_FILE.exists():
+                with open(self.JOURNAL_FILE, 'w') as f:
+                    json.dump({"trades": [], "stats": {}}, f, indent=2)
+                logger.info(f"📝 Created local trade journal: {self.JOURNAL_FILE}")
+        except Exception as e:
+            logger.error(f"Failed to create journal file: {e}")
+            self._local_journal_enabled = False
+    
+    def _local_journal_entry(self, position: HeldPosition):
+        """
+        Journal a new position entry to local JSON file.
+        """
+        if not self._local_journal_enabled:
+            return
+        
+        try:
+            # Load existing journal
+            with open(self.JOURNAL_FILE, 'r') as f:
+                journal = json.load(f)
+            
+            # Add new entry
+            entry = {
+                "id": f"{position.token_address[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "token_address": position.token_address,
+                "symbol": position.symbol,
+                "chain": position.chain,
+                "entry_price": float(position.entry_price),
+                "entry_time": position.entry_time.isoformat(),
+                "tokens_held": float(position.tokens_held),
+                "investment_usd": float(position.investment_usd),
+                "liquidity_usd": float(position.liquidity_usd),
+                "breakeven_gain_needed_pct": float(position.breakeven_gain_needed_pct),
+                "trailing_stop_pct": float(position.trailing_stop_pct),
+                "hard_stop_pct": float(position.hard_stop_pct),
+                "profit_target_pct": float(position.profit_target_pct),
+                "entry_order_flow_signal": position.order_flow_signal,
+                "entry_buy_sell_ratio": float(position.buy_sell_ratio_1m),
+                "status": "OPEN",
+                # Exit fields (to be updated later)
+                "exit_price": None,
+                "exit_time": None,
+                "exit_reason": None,
+                "realized_pnl_usd": None,
+                "realized_pnl_pct": None,
+                "max_profit_pct": None,
+                "max_drawdown_pct": None
+            }
+            
+            journal["trades"].append(entry)
+            
+            # Save journal
+            with open(self.JOURNAL_FILE, 'w') as f:
+                json.dump(journal, f, indent=2)
+            
+            logger.info(f"📝 Journaled entry to local file: {position.symbol}")
+            
+        except Exception as e:
+            logger.error(f"Failed to journal entry locally: {e}")
+    
+    def _local_journal_exit(self, position: HeldPosition, exit_reason: str = "UNKNOWN"):
+        """
+        Journal a position exit to local JSON file.
+        Updates the matching open entry with exit details.
+        """
+        if not self._local_journal_enabled:
+            return
+        
+        try:
+            # Load existing journal
+            with open(self.JOURNAL_FILE, 'r') as f:
+                journal = json.load(f)
+            
+            # Find and update the matching open entry
+            updated = False
+            for trade in journal["trades"]:
+                if (trade["token_address"] == position.token_address and 
+                    trade["status"] == "OPEN"):
+                    
+                    trade["exit_price"] = float(position.current_price)
+                    trade["exit_time"] = datetime.now().isoformat()
+                    trade["exit_reason"] = exit_reason
+                    trade["realized_pnl_usd"] = float(position.unrealized_pnl_usd)
+                    trade["realized_pnl_pct"] = float(position.unrealized_pnl_pct)
+                    trade["max_profit_pct"] = float(position.max_profit_pct)
+                    trade["max_drawdown_pct"] = float(position.max_drawdown_pct)
+                    trade["exit_order_flow_signal"] = position.order_flow_signal
+                    trade["exit_buy_sell_ratio"] = float(position.buy_sell_ratio_1m)
+                    trade["hold_time_minutes"] = int((datetime.now() - position.entry_time).total_seconds() / 60)
+                    trade["status"] = "CLOSED"
+                    updated = True
+                    break
+            
+            if updated:
+                # Update stats
+                closed_trades = [t for t in journal["trades"] if t["status"] == "CLOSED"]
+                wins = [t for t in closed_trades if (t.get("realized_pnl_pct") or 0) > 0]
+                losses = [t for t in closed_trades if (t.get("realized_pnl_pct") or 0) <= 0]
+                
+                journal["stats"] = {
+                    "total_trades": len(closed_trades),
+                    "wins": len(wins),
+                    "losses": len(losses),
+                    "win_rate": (len(wins) / len(closed_trades) * 100) if closed_trades else 0,
+                    "total_pnl_usd": sum(t.get("realized_pnl_usd") or 0 for t in closed_trades),
+                    "avg_pnl_pct": sum(t.get("realized_pnl_pct") or 0 for t in closed_trades) / len(closed_trades) if closed_trades else 0,
+                    "best_trade_pct": max((t.get("realized_pnl_pct") or 0) for t in closed_trades) if closed_trades else 0,
+                    "worst_trade_pct": min((t.get("realized_pnl_pct") or 0) for t in closed_trades) if closed_trades else 0,
+                    "last_updated": datetime.now().isoformat()
+                }
+                
+                # Save journal
+                with open(self.JOURNAL_FILE, 'w') as f:
+                    json.dump(journal, f, indent=2)
+                
+                logger.info(f"📝 Journaled exit to local file: {position.symbol} | P&L: {position.unrealized_pnl_pct:+.2f}%")
+            else:
+                logger.warning(f"No open position found in local journal for {position.symbol}")
+                
+        except Exception as e:
+            logger.error(f"Failed to journal exit locally: {e}")
+    
+    def get_local_journal_stats(self) -> Optional[Dict]:
+        """
+        Get trade statistics from local JSON journal.
+        
+        Returns:
+            Dict with win rate, total P&L, trade count, etc.
+        """
+        if not self._local_journal_enabled:
+            return None
+        
+        try:
+            with open(self.JOURNAL_FILE, 'r') as f:
+                journal = json.load(f)
+            
+            stats = journal.get("stats", {})
+            if not stats:
+                return {"total_trades": 0, "message": "No closed trades yet"}
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get local journal stats: {e}")
+            return None
+    
+    def get_local_journal_trades(self, status: Optional[str] = None) -> List[Dict]:
+        """
+        Get trades from local journal.
+        
+        Args:
+            status: Filter by status ("OPEN", "CLOSED", or None for all)
+            
+        Returns:
+            List of trade dictionaries
+        """
+        if not self._local_journal_enabled:
+            return []
+        
+        try:
+            with open(self.JOURNAL_FILE, 'r') as f:
+                journal = json.load(f)
+            
+            trades = journal.get("trades", [])
+            
+            if status:
+                trades = [t for t in trades if t.get("status") == status]
+            
+            return trades
+            
+        except Exception as e:
+            logger.error(f"Failed to get local journal trades: {e}")
+            return []
 
     # ========================================================================
     # STATISTICS
