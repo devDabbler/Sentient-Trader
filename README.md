@@ -71,6 +71,34 @@ Real-time monitoring for pump.fun and LaunchLab token launches - catches tokens 
 * **🔗 Integrated Mode:** Runs alongside DEX Launch service when `DEX_ENABLE_BONDING_MONITOR=true`
 * **📝 Linux Service:** `deploy/sentient-bonding-curve-monitor.service`
 
+#### Pump.fun Gambler Monitor (NEW - December 2025) 🎰
+Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<$50 bets):
+* **🎯 Direct pump.fun API Analysis:** Analyzes tokens BEFORE they graduate to DexScreener
+  - Holder count and distribution analysis
+  - Trading activity and momentum tracking
+  - Creator history and rug risk detection
+  - Bonding curve progress monitoring
+* **📊 Risk-Based Scoring:** 0-100 score with recommendations:
+  - **SKIP:** Too risky, don't touch
+  - **WATCH:** Monitor for momentum, not ready yet
+  - **GAMBLE_SMALL:** Small bet OK ($10-25 max)
+  - **GAMBLE:** Decent setup for gambling ($25-50 max)
+* **💬 Discord Commands (reply to alerts in #pumpfun-alerts):**
+  - `ANALYZE` - Full pump.fun analysis (holders, trades, social)
+  - `BUY $25` - Gamble specified amount on token
+  - `PASS` - Skip this token
+  - `MONITOR` - Track bonding curve progress
+* **⚙️ Configuration (Environment Variables):**
+  ```bash
+  DISCORD_WEBHOOK_PUMPFUN_ALERTS=https://discord...  # Webhook for alerts
+  DISCORD_CHANNEL_ID_PUMPFUN_ALERTS=123456789        # Channel ID for commands
+  PUMPFUN_MAX_BET=25                                 # Default max bet
+  PUMPFUN_ALERT_ON_CREATION=true                     # Alert on new tokens
+  PUMPFUN_ALERT_ON_GRADUATION=true                   # Alert on graduation
+  ```
+* **▶️ Service:** `python windows_services/runners/run_pumpfun_gambler.py`
+* **⚠️ Gambling Disclaimer:** 99%+ of bonding curve tokens fail. Only bet what you can lose!
+
 #### Crypto Breakout Service (NEW - December 2025)
 * **📊 Multi-Indicator Detection:** Volume spike, EMA crossover, MACD, RSI, Bollinger Bands
 * **🪙 Jupiter DEX Cross-Validation:** Real-time price confirmation across Solana DEXs

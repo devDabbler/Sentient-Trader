@@ -826,12 +826,32 @@ class DiscordTradeApprovalBot(commands.Bot):
             
         target_symbol = target_symbol.upper()
         
+        # Check if this is a pump.fun channel
+        pumpfun_channel_id = int(os.getenv('DISCORD_CHANNEL_ID_PUMPFUN_ALERTS', '0') or '0')
+        is_pumpfun_channel = message.channel.id == pumpfun_channel_id
+        
+        # PUMP.FUN ANALYZE command - analyze bonding curve token
+        if content in ['ANALYZE', 'A', 'SCAN', 'CHECK'] and is_pumpfun_channel:
+            token_address = await self._extract_token_address_from_message(ref_msg)
+            if token_address:
+                await self._handle_pumpfun_analyze_command(message, token_address)
+            else:
+                await message.channel.send(
+                    "⚠️ Could not find token address in that message.\n"
+                    "Use `ANALYZE <mint_address>` directly instead."
+                )
+            return
+        
         # DEX MONITOR command - extract token address from the alert message and analyze
         if content in ['MONITOR', 'TRACK', 'MON']:
             # Try to extract token address from DEX alert (dexscreener URL or contract address)
             token_address = await self._extract_token_address_from_message(ref_msg)
             if token_address:
-                await self._handle_dex_monitor_command(message, token_address)
+                # Check if we should use pump.fun analyzer (bonding curve) or DEX analyzer
+                if is_pumpfun_channel:
+                    await self._handle_pumpfun_analyze_command(message, token_address)
+                else:
+                    await self._handle_dex_monitor_command(message, token_address)
             else:
                 await message.channel.send(
                     "⚠️ Could not find token address in that message.\n"
@@ -1341,6 +1361,135 @@ class DiscordTradeApprovalBot(commands.Bot):
         positions['recommendation'] = recommendation
         
         return positions
+    
+    async def _handle_pumpfun_analyze_command(self, message: discord.Message, token_address: str):
+        """
+        Handle ANALYZE command for pump.fun bonding curve tokens.
+        
+        Uses pump.fun API directly instead of DexScreener since bonding curve
+        tokens aren't on DexScreener until they graduate.
+        
+        Usage (reply to pump.fun alert):
+            ANALYZE - Analyze the token
+            A - Shorthand
+            SCAN - Alias
+        
+        This:
+        1. Fetches token info from pump.fun API
+        2. Analyzes holder count, trading activity, creator history
+        3. Calculates risk score and pump potential
+        4. Provides gambling recommendation with max bet
+        """
+        try:
+            await message.channel.send(f"🎰 Analyzing pump.fun token `{token_address[:8]}...{token_address[-4:]}`...")
+            
+            # Use pump.fun analyzer
+            from services.pumpfun_analyzer import get_pumpfun_analyzer
+            analyzer = get_pumpfun_analyzer()
+            
+            analysis = await analyzer.analyze_token(token_address)
+            
+            if not analysis:
+                await message.channel.send(
+                    f"❌ Could not analyze token.\n\n"
+                    f"Possible reasons:\n"
+                    f"• Token might have already graduated\n"
+                    f"• pump.fun API might be unavailable\n"
+                    f"• Invalid mint address\n\n"
+                    f"Try the MONITOR command instead if token is on Raydium."
+                )
+                return
+            
+            # Build risk emoji
+            risk_emoji = {
+                "EXTREME": "☠️",
+                "HIGH": "🔴",
+                "MEDIUM": "🟡",
+                "MODERATE": "🟢",
+                "LOW": "💎",
+            }.get(analysis.risk_level.value, "❓")
+            
+            # Build recommendation emoji
+            rec_emoji = {
+                "SKIP": "⛔",
+                "WATCH": "👀",
+                "GAMBLE_SMALL": "🎲",
+                "GAMBLE": "🎰",
+            }.get(analysis.recommendation, "❓")
+            
+            # Format analysis message
+            analysis_msg = (
+                f"🎰 **{analysis.symbol}** Pump.fun Analysis\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📍 **{analysis.name}**\n"
+                f"📋 Mint: `{token_address}`\n\n"
+                f"📊 **Score:** {analysis.score:.0f}/100 | {risk_emoji} {analysis.risk_level.value}\n"
+                f"📈 **Bonding:** {analysis.progress_pct:.1f}% complete\n"
+                f"💰 **Mcap:** ${analysis.market_cap_usd:,.0f}\n\n"
+                f"📊 **Activity:**\n"
+                f"   Trades: {analysis.total_trades} | Buys: {analysis.buy_count} ({analysis.buy_pressure:.0%})\n"
+                f"   5m activity: {analysis.trades_5m} trades\n"
+                f"   Velocity: {analysis.velocity_score:.0f}/100\n\n"
+                f"👥 **Holders:**\n"
+                f"   Count: {analysis.holder_count}\n"
+                f"   Top holder: {analysis.top_holder_pct:.1f}%\n\n"
+                f"🔗 **Social:**\n"
+                f"   {'✅ Twitter' if analysis.has_twitter else '❌ Twitter'} | "
+                f"{'✅ Telegram' if analysis.has_telegram else '❌ Telegram'}\n"
+            )
+            
+            # Risk factors and green flags
+            if analysis.risk_factors:
+                analysis_msg += f"\n⚠️ **Risks:** {', '.join(analysis.risk_factors[:4])}\n"
+            if analysis.green_flags:
+                analysis_msg += f"✅ **Signals:** {', '.join(analysis.green_flags[:4])}\n"
+            
+            # Recommendation
+            analysis_msg += (
+                f"\n{rec_emoji} **Recommendation:** {analysis.recommendation}\n"
+                f"💰 **Max Bet:** ${analysis.max_bet_usd:.0f}\n"
+                f"📝 **Reasoning:** {analysis.reasoning}\n\n"
+                f"🔗 [pump.fun](https://pump.fun/{token_address}) | "
+                f"[DexScreener](https://dexscreener.com/solana/{token_address})"
+            )
+            
+            # Store context for BUY command
+            self._channel_token_context[message.channel.id] = {
+                'token_address': token_address,
+                'symbol': analysis.symbol,
+                'price': analysis.market_cap_usd / 1e9 if analysis.market_cap_usd > 0 else 0,  # Rough estimate
+                'liquidity': analysis.virtual_sol_reserves * 200,  # Rough estimate: SOL at ~$200
+                'max_bet': analysis.max_bet_usd,
+                'recommendation': analysis.recommendation,
+                'timestamp': datetime.now(),
+                'is_pumpfun': True  # Flag to indicate this is a pump.fun token
+            }
+            
+            # Action prompt
+            if analysis.recommendation in ['GAMBLE', 'GAMBLE_SMALL']:
+                action_msg = (
+                    f"\n\n**🎯 To gamble, reply with:**\n"
+                    f"`BUY $10` or `BUY $25` or `BUY $50`\n"
+                    f"(Suggested max: ${analysis.max_bet_usd:.0f})\n\n"
+                    f"_⚠️ This is GAMBLING. Only bet what you can lose!_"
+                )
+            elif analysis.recommendation == 'WATCH':
+                action_msg = (
+                    f"\n\n**👀 Watching...**\n"
+                    f"Wait for more momentum or graduation.\n"
+                    f"Reply `MONITOR` to track progress."
+                )
+            else:
+                action_msg = (
+                    f"\n\n**⛔ Skip Recommended**\n"
+                    f"Too risky based on current metrics."
+                )
+            
+            await message.channel.send(analysis_msg + action_msg)
+            
+        except Exception as e:
+            logger.error(f"Error in pump.fun analyze command: {e}")
+            await message.channel.send(f"❌ Error: {str(e)[:100]}")
     
     async def _handle_dex_add_position(self, message: discord.Message, add_data: str):
         """

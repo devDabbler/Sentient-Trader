@@ -1,0 +1,28 @@
+[Unit]
+Description=Sentient Trader - Pump.fun Gambler Monitor
+Documentation=https://github.com/devDabbler/Sentient-Trader
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Sentient-Trader
+Environment="PATH=/root/Sentient-Trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+EnvironmentFile=/root/Sentient-Trader/.env
+
+ExecStart=/root/Sentient-Trader/venv/bin/python windows_services/runners/run_pumpfun_gambler.py
+
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=append:/root/Sentient-Trader/logs/pumpfun_gambler.log
+StandardError=append:/root/Sentient-Trader/logs/pumpfun_gambler.log
+
+# Security
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

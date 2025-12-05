@@ -203,13 +203,19 @@ class BondingCurveMonitor:
         logger.info("=" * 60)
     
     def _get_discord_webhook(self) -> Optional[str]:
-        """Get Discord webhook URL - routes to DEX pump alerts channel"""
+        """Get Discord webhook URL - routes to PUMPFUN_ALERTS channel for bonding curve tokens"""
         if DISCORD_AVAILABLE:
-            # Use DEX_PUMP_ALERTS for bonding curve launches (same as DEX discoveries)
+            # Primary: Use PUMPFUN_ALERTS for pump.fun bonding curve gambling
+            webhook = get_discord_webhook(AlertCategory.PUMPFUN_ALERTS)
+            if webhook:
+                logger.debug("Using PUMPFUN_ALERTS webhook")
+                return webhook
+            # Fallback: DEX_PUMP_ALERTS for bonding curve launches
             webhook = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS)
             if webhook:
+                logger.debug("Using DEX_PUMP_ALERTS webhook (fallback)")
                 return webhook
-            # Fallback to fast monitor if pump alerts not configured
+            # Final fallback to fast monitor
             webhook = get_discord_webhook(AlertCategory.DEX_FAST_MONITOR)
             if webhook:
                 return webhook
@@ -620,7 +626,7 @@ class BondingCurveMonitor:
     # ========================================================================
     
     async def _send_creation_alert(self, token: BondingToken):
-        """Send Discord alert for new token creation"""
+        """Send Discord alert for new token creation with interactive embed"""
         if not self.discord_webhook_url:
             return
         
@@ -628,31 +634,74 @@ class BondingCurveMonitor:
             platform_emoji = "🎰" if token.platform == BondingPlatform.PUMP_FUN else "🚀"
             platform_name = token.platform.value
             
-            # Build DexScreener link (may not work immediately for bonding curve tokens)
-            dex_link = f"https://dexscreener.com/solana/{token.mint}"
-            # Platform-specific links
+            # Build links
             if token.platform == BondingPlatform.PUMP_FUN:
                 platform_link = f"https://pump.fun/{token.mint}"
             else:
                 platform_link = f"https://raydium.io/launchpad/?mint={token.mint}"
+            dex_link = f"https://dexscreener.com/solana/{token.mint}"
             
-            message = (
-                f"{platform_emoji} **NEW TOKEN LAUNCHED!**\n\n"
-                f"**Token:** {token.symbol} ({token.name})\n"
-                f"**Platform:** {platform_name}\n"
-                f"**Mint:** `{token.mint[:30]}...`\n"
-                f"**Created:** Just now!\n\n"
-                f"🔗 [{platform_name}]({platform_link})\n"
-                f"📊 [DexScreener]({dex_link})\n\n"
-                f"⚡ _Caught at bonding curve launch - before DexScreener!_"
-            )
+            # Build Discord embed for richer formatting
+            embed = {
+                "title": f"{platform_emoji} NEW TOKEN: {token.symbol}",
+                "description": (
+                    f"**{token.name}**\n\n"
+                    f"⚡ Caught at bonding curve launch!\n"
+                    f"_Reply with commands below to interact_"
+                ),
+                "color": 0xFFAA00,  # Orange for new launch
+                "fields": [
+                    {
+                        "name": "📈 Progress",
+                        "value": f"{token.progress_pct:.1f}%",
+                        "inline": True
+                    },
+                    {
+                        "name": "💰 Mcap",
+                        "value": f"{token.market_cap_sol:.2f} SOL",
+                        "inline": True
+                    },
+                    {
+                        "name": "🔗 Platform",
+                        "value": f"[{platform_name}]({platform_link})",
+                        "inline": True
+                    },
+                    {
+                        "name": "📋 Mint Address",
+                        "value": f"`{token.mint}`",
+                        "inline": False
+                    },
+                ],
+                "footer": {
+                    "text": "Reply: ANALYZE | BUY $XX | PASS | MONITOR"
+                },
+                "timestamp": datetime.now().isoformat()
+            }
             
+            # Add social links if available
+            social_links = []
             if token.twitter:
-                message += f"\n🐦 [Twitter]({token.twitter})"
+                social_links.append(f"[Twitter]({token.twitter})")
             if token.telegram:
-                message += f"\n💬 [Telegram]({token.telegram})"
+                social_links.append(f"[Telegram]({token.telegram})")
+            if token.website:
+                social_links.append(f"[Website]({token.website})")
             
-            await self._send_discord_message(message)
+            if social_links:
+                embed["fields"].append({
+                    "name": "🔗 Social",
+                    "value": " | ".join(social_links),
+                    "inline": False
+                })
+            else:
+                embed["fields"].append({
+                    "name": "⚠️ Warning",
+                    "value": "No social links found",
+                    "inline": False
+                })
+            
+            # Send embed message
+            await self._send_discord_embed(embed)
             self.total_alerts_sent += 1
             
         except Exception as e:
@@ -719,6 +768,22 @@ class BondingCurveMonitor:
                 )
         except Exception as e:
             logger.error(f"Discord webhook error: {e}")
+    
+    async def _send_discord_embed(self, embed: dict):
+        """Send embed message to Discord webhook"""
+        if not self.discord_webhook_url:
+            return
+        
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.post(
+                    self.discord_webhook_url,
+                    json={"embeds": [embed]}
+                )
+                if response.status_code not in [200, 204]:
+                    logger.warning(f"Discord webhook returned {response.status_code}")
+        except Exception as e:
+            logger.error(f"Discord embed error: {e}")
     
     # ========================================================================
     # PERSISTENCE
