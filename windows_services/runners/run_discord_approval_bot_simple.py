@@ -31,9 +31,11 @@ process_lock = ensure_single_instance("discord_approval_bot", force=force_restar
 
 print("DEBUG: Starting Discord Approval Bot...", flush=True)
 
-# Load environment FIRST
+# Load environment FIRST - use explicit path for systemd compatibility
+from pathlib import Path
 from dotenv import load_dotenv
-load_dotenv()
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+load_dotenv(PROJECT_ROOT / '.env')
 
 # Setup logging
 from loguru import logger
@@ -60,6 +62,13 @@ if not channel_ids:
 
 logger.info(f"✅ Bot token loaded (length: {len(token)})")
 logger.info(f"✅ Channel IDs: {channel_ids}")
+
+# Debug: Check if Birdeye API key is loaded (for order flow feature)
+birdeye_key = os.getenv('BIRDEYE_API_KEY')
+if birdeye_key:
+    logger.info(f"✅ BIRDEYE_API_KEY loaded (length: {len(birdeye_key)})")
+else:
+    logger.warning("⚠️ BIRDEYE_API_KEY not found - order flow features disabled")
 
 # Import and start the bot
 print("DEBUG: Importing DiscordTradeApprovalBot...", flush=True)
