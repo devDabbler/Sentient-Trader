@@ -535,6 +535,23 @@ class DiscordTradeApprovalBot(commands.Bot):
                 await self._handle_dismiss_command(message, symbol.replace('/', ''))
             return
         
+        # DEX Position ADD command: "ADD token,symbol,price,tokens,usd[,liquidity]"
+        add_match = re.match(r'ADD\s+(.+)', content, re.IGNORECASE)
+        if add_match:
+            add_data = add_match.group(1)
+            await self._handle_dex_add_position(message, add_data)
+            return
+        
+        # DEX Token MONITOR command: "MONITOR <token_address>" or "TRACK <address>"
+        # Adds token to Fast Position Monitor for order flow tracking
+        monitor_match = re.match(r'(MONITOR|TRACK|M)\s+([A-Za-z0-9]+)', content)
+        if monitor_match:
+            token_address = monitor_match.group(2)
+            # Check if it looks like a Solana address (32-44 chars, base58)
+            if len(token_address) >= 32:
+                await self._handle_dex_monitor_command(message, token_address)
+                return
+        
         # Standalone TRADE commands: "TRADE AAPL", "T NVDA", "BUY TSLA", "PAPER GOOG"
         # Also supports crypto: "TRADE BTC/USD", "T ETH", "BUY SOL/USD"
         trade_match = re.match(r'(TRADE|T|BUY|ENTER|PAPER|P)\s+([A-Z0-9/]+)', content)
@@ -731,7 +748,20 @@ class DiscordTradeApprovalBot(commands.Bot):
             
         target_symbol = target_symbol.upper()
         
-        if content in ['WATCH', 'ADD', 'TRACK', 'W']:
+        # DEX MONITOR command - extract token address from the alert message and analyze
+        if content in ['MONITOR', 'TRACK', 'MON']:
+            # Try to extract token address from DEX alert (dexscreener URL or contract address)
+            token_address = await self._extract_token_address_from_message(ref_msg)
+            if token_address:
+                await self._handle_dex_monitor_command(message, token_address)
+            else:
+                await message.channel.send(
+                    "⚠️ Could not find token address in that message.\n"
+                    "Use `MONITOR <token_address>` directly instead."
+                )
+            return
+        
+        if content in ['WATCH', 'ADD', 'W']:
             await self._handle_watch_command(message, target_symbol)
             
             # Also auto-approve in orchestrator if it exists
@@ -927,6 +957,364 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.error(f"Error processing WATCH {symbol}: {e}")
             await message.channel.send(f"❌ Error adding {symbol}: {str(e)}")
     
+    async def _extract_token_address_from_message(self, ref_msg: discord.Message) -> Optional[str]:
+        """
+        Extract Solana token address from a DEX alert message.
+        Looks for DexScreener URLs or raw Solana addresses (32-44 chars, base58).
+        """
+        import re
+        
+        # Pattern for DexScreener URL with token address
+        dexscreener_pattern = re.compile(r'dexscreener\.com/\w+/([A-Za-z0-9]{32,44})')
+        # Pattern for raw Solana address (base58, 32-44 chars)
+        solana_addr_pattern = re.compile(r'\b([A-HJ-NP-Za-km-z1-9]{32,44})\b')
+        
+        # Check embeds first
+        if ref_msg.embeds:
+            for embed in ref_msg.embeds:
+                # Check description
+                if embed.description:
+                    match = dexscreener_pattern.search(embed.description)
+                    if match:
+                        return match.group(1)
+                    # Try raw address
+                    match = solana_addr_pattern.search(embed.description)
+                    if match:
+                        return match.group(1)
+                
+                # Check fields
+                for field in (embed.fields or []):
+                    if field.value:
+                        match = dexscreener_pattern.search(field.value)
+                        if match:
+                            return match.group(1)
+                        match = solana_addr_pattern.search(field.value)
+                        if match:
+                            return match.group(1)
+        
+        # Check message content
+        if ref_msg.content:
+            match = dexscreener_pattern.search(ref_msg.content)
+            if match:
+                return match.group(1)
+            match = solana_addr_pattern.search(ref_msg.content)
+            if match:
+                return match.group(1)
+        
+        return None
+    
+    async def _handle_dex_monitor_command(self, message: discord.Message, token_address: str):
+        """
+        Handle MONITOR command - Analyzes token and provides risk-based position sizing.
+        
+        Usage (reply to DEX alert or standalone):
+            MONITOR <token_address>
+            TRACK <token_address>
+            M <token_address>
+        
+        This:
+        1. Fetches token info (price, liquidity, volume)
+        2. Gets order flow data (buy/sell ratios, whales)
+        3. Calculates risk-based position sizes ($25, $50, $100 tiers)
+        4. Provides entry recommendation with suggested positions
+        """
+        try:
+            await message.channel.send(f"🔍 Analyzing token `{token_address[:8]}...{token_address[-4:]}`...")
+            
+            # Fetch token info from DexScreener
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+                response = await client.get(url)
+                
+                if response.status_code != 200:
+                    await message.channel.send(f"❌ Could not fetch token info (DexScreener returned {response.status_code})")
+                    return
+                
+                data = response.json()
+                pairs = data.get("pairs", [])
+                
+                if not pairs:
+                    await message.channel.send(f"❌ No trading pairs found for this token. Is the address correct?")
+                    return
+                
+                # Get the highest liquidity pair
+                best_pair = max(pairs, key=lambda p: p.get("liquidity", {}).get("usd", 0))
+                
+                symbol = best_pair.get("baseToken", {}).get("symbol", "UNKNOWN")
+                price = float(best_pair.get("priceUsd", 0))
+                liquidity = float(best_pair.get("liquidity", {}).get("usd", 0))
+                chain = best_pair.get("chainId", "solana")
+                volume_24h = float(best_pair.get("volume", {}).get("h24", 0))
+                price_change_5m = float(best_pair.get("priceChange", {}).get("m5", 0))
+                price_change_1h = float(best_pair.get("priceChange", {}).get("h1", 0))
+                txns_buys_5m = best_pair.get("txns", {}).get("m5", {}).get("buys", 0)
+                txns_sells_5m = best_pair.get("txns", {}).get("m5", {}).get("sells", 0)
+            
+            # Get order flow data from Birdeye if available
+            order_flow_info = ""
+            order_flow_signal = "NEUTRAL"
+            try:
+                from services.solana_transaction_monitor import SolanaTransactionMonitor
+                monitor = SolanaTransactionMonitor()
+                order_flow = await monitor.get_order_flow(token_address, minutes=5)
+                if order_flow:
+                    recommendation = monitor.get_entry_exit_recommendation(order_flow)
+                    order_flow_signal = recommendation.signal.value
+                    
+                    order_flow_info = (
+                        f"\n\n📊 **Order Flow (5 min):**\n"
+                        f"   Buys: {order_flow.buy_count} (${order_flow.buy_volume:,.0f})\n"
+                        f"   Sells: {order_flow.sell_count} (${order_flow.sell_volume:,.0f})\n"
+                        f"   Ratio: {order_flow.buy_sell_ratio:.2f}\n"
+                        f"   Whale Flow: ${order_flow.whale_net_usd:+,.0f}\n"
+                        f"   Signal: **{order_flow_signal}**"
+                    )
+            except Exception as e:
+                logger.warning(f"Could not get order flow: {e}")
+                order_flow_info = "\n\n⚠️ _Order flow data unavailable_"
+            
+            # Calculate risk-based position sizes
+            # Factor in: liquidity, volatility, order flow signal
+            risk_analysis = self._calculate_dex_risk_positions(
+                price=price,
+                liquidity=liquidity,
+                volume_24h=volume_24h,
+                price_change_5m=price_change_5m,
+                price_change_1h=price_change_1h,
+                buy_sell_ratio=txns_buys_5m / max(txns_sells_5m, 1),
+                order_flow_signal=order_flow_signal
+            )
+            
+            # Build the analysis message
+            analysis_msg = (
+                f"✅ **{symbol}** Analysis\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📍 Token: `{token_address[:8]}...{token_address[-4:]}`\n"
+                f"💰 Price: ${price:.8f}\n"
+                f"💧 Liquidity: ${liquidity:,.0f}\n"
+                f"📈 Volume 24h: ${volume_24h:,.0f}\n"
+                f"📊 5m: {price_change_5m:+.1f}% | 1h: {price_change_1h:+.1f}%\n"
+                f"🔄 Txns 5m: {txns_buys_5m} buys / {txns_sells_5m} sells"
+                f"{order_flow_info}"
+            )
+            
+            # Position sizing recommendations
+            sizing_msg = (
+                f"\n\n💰 **Suggested Positions (based on risk):**\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🟢 **Conservative ($25):** {risk_analysis['conservative']['tokens']:,.0f} tokens\n"
+                f"   ⚠️ Need {risk_analysis['conservative']['breakeven']:.0f}%+ to break even\n"
+                f"   💵 Target: ${risk_analysis['conservative']['target_value']:.2f} (+50%)\n\n"
+                f"🟡 **Moderate ($50):** {risk_analysis['moderate']['tokens']:,.0f} tokens\n"
+                f"   ⚠️ Need {risk_analysis['moderate']['breakeven']:.0f}%+ to break even\n"
+                f"   💵 Target: ${risk_analysis['moderate']['target_value']:.2f} (+50%)\n\n"
+                f"🔴 **Aggressive ($100):** {risk_analysis['aggressive']['tokens']:,.0f} tokens\n"
+                f"   ⚠️ Need {risk_analysis['aggressive']['breakeven']:.0f}%+ to break even\n"
+                f"   💵 Target: ${risk_analysis['aggressive']['target_value']:.2f} (+50%)\n\n"
+                f"**📊 Risk Score: {risk_analysis['risk_score']}/100** ({risk_analysis['risk_level']})\n"
+                f"{risk_analysis['recommendation']}"
+            )
+            
+            # Action prompt
+            action_msg = (
+                f"\n\n**🎯 To start monitoring, reply with:**\n"
+                f"`ADD {token_address},{symbol},{price:.8f},<tokens>,<usd>`\n\n"
+                f"**Quick options:**\n"
+                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['conservative']['tokens']:.0f},25` (Conservative)\n"
+                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['moderate']['tokens']:.0f},50` (Moderate)\n"
+                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['aggressive']['tokens']:.0f},100` (Aggressive)"
+            )
+            
+            await message.channel.send(analysis_msg + sizing_msg + action_msg)
+            
+        except Exception as e:
+            logger.error(f"Error in DEX monitor command: {e}")
+            await message.channel.send(f"❌ Error: {str(e)[:100]}")
+    
+    def _calculate_dex_risk_positions(
+        self,
+        price: float,
+        liquidity: float,
+        volume_24h: float,
+        price_change_5m: float,
+        price_change_1h: float,
+        buy_sell_ratio: float,
+        order_flow_signal: str
+    ) -> dict:
+        """
+        Calculate risk-based position sizes for DEX tokens.
+        
+        Factors considered:
+        - Liquidity (higher = safer)
+        - Volume (higher = more activity)
+        - Volatility (5m/1h price changes)
+        - Buy/Sell ratio (higher = bullish)
+        - Order flow signal
+        """
+        # Calculate slippage estimate based on liquidity
+        # Rough estimate: for small trades (<2% of liquidity), slippage is minimal
+        def estimate_slippage(trade_size: float, liq: float) -> float:
+            if liq <= 0:
+                return 10.0  # Max slippage for no liquidity
+            trade_pct = (trade_size / liq) * 100
+            if trade_pct < 1:
+                return 0.5  # Minimal slippage
+            elif trade_pct < 3:
+                return 1.5
+            elif trade_pct < 5:
+                return 3.0
+            elif trade_pct < 10:
+                return 5.0
+            else:
+                return 10.0  # High slippage warning
+        
+        # Position tiers
+        positions = {
+            'conservative': {'usd': 25},
+            'moderate': {'usd': 50},
+            'aggressive': {'usd': 100}
+        }
+        
+        # Calculate for each tier
+        for tier, pos in positions.items():
+            usd = pos['usd']
+            tokens = usd / price if price > 0 else 0
+            slippage = estimate_slippage(usd, liquidity)
+            # Breakeven = slippage in + slippage out + fees (~1%)
+            breakeven = slippage * 2 + 1.0
+            target_value = usd * 1.5  # 50% gain target
+            
+            pos['tokens'] = tokens
+            pos['slippage'] = slippage
+            pos['breakeven'] = breakeven
+            pos['target_value'] = target_value
+        
+        # Calculate overall risk score (0-100, higher = riskier)
+        risk_score = 50  # Start neutral
+        
+        # Liquidity factor (low liquidity = high risk)
+        if liquidity < 1000:
+            risk_score += 30
+        elif liquidity < 5000:
+            risk_score += 20
+        elif liquidity < 10000:
+            risk_score += 10
+        elif liquidity > 50000:
+            risk_score -= 10
+        
+        # Volatility factor
+        volatility = abs(price_change_5m) + abs(price_change_1h) / 2
+        if volatility > 20:
+            risk_score += 15
+        elif volatility > 10:
+            risk_score += 10
+        elif volatility < 5:
+            risk_score -= 5
+        
+        # Order flow factor
+        if order_flow_signal == "STRONG_SELL":
+            risk_score += 20
+        elif order_flow_signal == "SELL":
+            risk_score += 10
+        elif order_flow_signal == "BUY":
+            risk_score -= 10
+        elif order_flow_signal == "STRONG_BUY":
+            risk_score -= 15
+        
+        # Buy/sell ratio
+        if buy_sell_ratio < 0.5:
+            risk_score += 15
+        elif buy_sell_ratio < 0.8:
+            risk_score += 5
+        elif buy_sell_ratio > 1.5:
+            risk_score -= 10
+        elif buy_sell_ratio > 2.0:
+            risk_score -= 15
+        
+        # Clamp to 0-100
+        risk_score = max(0, min(100, risk_score))
+        
+        # Risk level label
+        if risk_score >= 70:
+            risk_level = "🔴 HIGH RISK"
+            recommendation = "⚠️ **Caution:** Only use conservative position or skip."
+        elif risk_score >= 40:
+            risk_level = "🟡 MODERATE RISK"
+            recommendation = "💡 **Suggestion:** Consider moderate position with tight stop."
+        else:
+            risk_level = "🟢 LOWER RISK"
+            recommendation = "✅ **Looks decent:** Order flow and liquidity support entry."
+        
+        positions['risk_score'] = risk_score
+        positions['risk_level'] = risk_level
+        positions['recommendation'] = recommendation
+        
+        return positions
+    
+    async def _handle_dex_add_position(self, message: discord.Message, add_data: str):
+        """
+        Handle ADD command to add a position to Fast Position Monitor.
+        
+        Format: ADD token_address,symbol,entry_price,tokens_held,investment_usd[,liquidity_usd]
+        """
+        try:
+            parts = add_data.split(",")
+            if len(parts) < 5:
+                await message.channel.send(
+                    "❌ Invalid format. Use:\n"
+                    "`ADD token_address,symbol,entry_price,tokens_held,investment_usd`"
+                )
+                return
+            
+            token_address = parts[0].strip()
+            symbol = parts[1].strip()
+            entry_price = float(parts[2].strip())
+            tokens_held = float(parts[3].strip())
+            investment_usd = float(parts[4].strip())
+            liquidity_usd = float(parts[5].strip()) if len(parts) > 5 else 10000.0
+            
+            # Add to Fast Position Monitor
+            from services.dex_fast_position_monitor import get_fast_position_monitor
+            monitor = get_fast_position_monitor()
+            
+            position = await monitor.add_position(
+                token_address=token_address,
+                symbol=symbol,
+                entry_price=entry_price,
+                tokens_held=tokens_held,
+                investment_usd=investment_usd,
+                liquidity_usd=liquidity_usd,
+                chain="solana"
+            )
+            
+            # Calculate breakeven
+            breakeven = position.breakeven_gain_needed_pct
+            
+            await message.channel.send(
+                f"✅ **Position Added to Fast Monitor!**\n\n"
+                f"🪙 **{symbol}**\n"
+                f"   📍 Token: `{token_address[:8]}...{token_address[-4:]}`\n"
+                f"   💰 Entry: ${entry_price:.8f}\n"
+                f"   📦 Tokens: {tokens_held:,.0f}\n"
+                f"   💵 Investment: ${investment_usd:.2f}\n"
+                f"   💧 Liquidity: ${liquidity_usd:,.0f}\n"
+                f"   ⚠️ Breakeven needs: **{breakeven:.0f}%+ gain**\n\n"
+                f"📊 **Monitoring Active:**\n"
+                f"   • Price updates: Every 2 seconds\n"
+                f"   • Order flow: Every 10 seconds\n"
+                f"   • Trailing stop: 12% from peak\n"
+                f"   • Hard stop: 30% from entry\n"
+                f"   • Profit target: 50%\n\n"
+                f"🔔 You'll receive Discord alerts for exit signals!"
+            )
+            
+        except ValueError as e:
+            await message.channel.send(f"❌ Invalid number format: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error adding DEX position: {e}")
+            await message.channel.send(f"❌ Error: {str(e)[:100]}")
+
     async def _handle_risk_command(self, message: discord.Message):
         """Handle RISK command - show current risk profile"""
         try:
