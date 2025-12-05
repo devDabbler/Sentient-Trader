@@ -427,7 +427,19 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
-            # 2. Check Orchestrator Alert Queue (Generic Alerts)
+            # 2.5 Check for DEX position shorthand: "$25", "25", "$50" etc when replying
+            # This lets users quickly add positions by replying with just a dollar amount
+            import re
+            original_content = message.content.strip()
+            dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+            if dollar_amount_match:
+                # User is replying with just a dollar amount - treat as ADD command for DEX
+                amount = dollar_amount_match.group(1)
+                logger.info(f"   🎯 Shorthand DEX entry detected (reply): ${amount}")
+                await self._handle_dex_add_position(message, f"${amount}")
+                return
+            
+            # 3. Check Orchestrator Alert Queue (Generic Alerts)
             await self._handle_alert_reply(message, content)
             return
             
