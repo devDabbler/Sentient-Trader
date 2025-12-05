@@ -431,7 +431,9 @@ class DiscordTradeApprovalBot(commands.Bot):
             # This lets users quickly add positions by replying with just a dollar amount
             import re
             original_content = message.content.strip()
+            logger.info(f"   🔍 Checking DEX shorthand for: '{original_content}'")
             dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+            logger.info(f"   🔍 Dollar match result: {dollar_amount_match}")
             if dollar_amount_match:
                 # User is replying with just a dollar amount - treat as ADD command for DEX
                 amount = dollar_amount_match.group(1)
