@@ -114,7 +114,7 @@ try:
     lenient_mode = os.getenv("DEX_LENIENT_MODE", "true").lower() == "true"
     discovery_mode = os.getenv("DEX_DISCOVERY_MODE", "aggressive").lower()
     min_liquidity = float(os.getenv("DEX_MIN_LIQUIDITY", "500"))
-    scan_interval = int(os.getenv("DEX_SCAN_INTERVAL", "300"))  # Default 5 min
+    scan_interval = int(os.getenv("DEX_SCAN_INTERVAL", "30"))  # Default 30 sec
     
     print(f"  📊 Scan interval: {scan_interval}s ({scan_interval/60:.1f} min)", flush=True)
     logger.info(f"  📊 Scan interval: {scan_interval}s ({scan_interval/60:.1f} min)")
