@@ -203,13 +203,14 @@ class BondingCurveMonitor:
         logger.info("=" * 60)
     
     def _get_discord_webhook(self) -> Optional[str]:
-        """Get Discord webhook URL"""
+        """Get Discord webhook URL - routes to DEX pump alerts channel"""
         if DISCORD_AVAILABLE:
-            # Try DEX fast monitor channel first, then general
-            webhook = get_discord_webhook(AlertCategory.DEX_FAST_MONITOR)
+            # Use DEX_PUMP_ALERTS for bonding curve launches (same as DEX discoveries)
+            webhook = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS)
             if webhook:
                 return webhook
-            webhook = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS)
+            # Fallback to fast monitor if pump alerts not configured
+            webhook = get_discord_webhook(AlertCategory.DEX_FAST_MONITOR)
             if webhook:
                 return webhook
         return os.getenv("DISCORD_WEBHOOK_URL")
