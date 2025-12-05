@@ -14,11 +14,13 @@ import asyncio
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Callable
+from typing import Dict, Optional, Callable, Set
 from dataclasses import dataclass, asdict
 import json
 import threading
 
+# Import channel utilities for multi-channel support
+from src.integrations.discord_channels import get_all_channel_ids
 
 from windows_services.runners.service_config_loader import queue_analysis_request
 
@@ -215,7 +217,7 @@ class DiscordTradeApprovalBot(commands.Bot):
         
         Args:
             token: Discord bot token
-            channel_id: Channel ID to send approval requests
+            channel_id: Primary channel ID to send approval requests (also loads all configured channels)
             approval_callback: Function to call when trade approved (trade_id, approved: bool)
         """
         intents = discord.Intents.default()
@@ -226,10 +228,16 @@ class DiscordTradeApprovalBot(commands.Bot):
         super().__init__(command_prefix='!', intents=intents)
         
         self.token = token
-        self.channel_id = int(channel_id)
+        self.channel_id = int(channel_id)  # Primary channel for approval messages
         self.approval_callback = approval_callback
         self.pending_approvals: Dict[str, PendingTradeApproval] = {}
         self.bot_ready = False  # Renamed from is_ready to avoid shadowing inherited method
+        
+        # 🎯 MULTI-CHANNEL SUPPORT: Load all configured channel IDs
+        # This allows the bot to listen for replies in ANY channel it monitors
+        self.monitored_channel_ids: Set[int] = get_all_channel_ids()
+        # Always include the primary channel
+        self.monitored_channel_ids.add(self.channel_id)
         
         # Message deduplication - prevent processing same message twice
         self._processed_messages: set = set()
@@ -247,18 +255,28 @@ class DiscordTradeApprovalBot(commands.Bot):
         self._processing_trades: set = set()  # {trade_key} to prevent duplicate processing
         
         logger.info(f"🤖 Discord Trade Approval Bot initialized")
-        logger.info(f"   Channel ID: {channel_id}")
+        logger.info(f"   Primary Channel ID: {channel_id}")
+        logger.info(f"   Monitoring {len(self.monitored_channel_ids)} channels: {self.monitored_channel_ids}")
     
     async def on_ready(self):
         """Called when bot is ready"""
         self.bot_ready = True
         logger.info(f'✅ Discord bot logged in as {self.user}')
         
+        # Log all monitored channels
+        logger.info(f"📡 Monitoring {len(self.monitored_channel_ids)} channels for commands:")
+        for cid in self.monitored_channel_ids:
+            channel = self.get_channel(cid)
+            if channel:
+                logger.info(f"   ✅ #{channel.name} (ID: {cid})")
+            else:
+                logger.warning(f"   ⚠️ Channel ID {cid} not accessible")
+        
         channel = self.get_channel(self.channel_id)
         if channel:
-            logger.info(f"✅ Monitoring channel: {channel.name} (ID: {self.channel_id})")
+            logger.info(f"✅ Primary channel: {channel.name} (ID: {self.channel_id})")
         else:
-            logger.error(f"❌ Could not find channel ID: {self.channel_id}")
+            logger.error(f"❌ Could not find primary channel ID: {self.channel_id}")
     
     async def on_message(self, message: discord.Message):
         """Handle incoming messages for approvals"""
@@ -270,13 +288,14 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.debug(f"   ↳ Ignoring own message")
             return
         
-        # Check if it's in our channel
-        if message.channel.id != self.channel_id:
-            logger.debug(f"   ↳ Wrong channel (expected {self.channel_id})")
+        # 🎯 MULTI-CHANNEL SUPPORT: Check if message is in ANY monitored channel
+        if message.channel.id not in self.monitored_channel_ids:
+            logger.debug(f"   ↳ Channel {message.channel.id} not in monitored channels {self.monitored_channel_ids}")
             return
         
         # Log that we're processing this message
-        logger.info(f"📩 Processing message from {message.author.name}: '{message.content}'")
+        channel_name = getattr(message.channel, 'name', 'unknown')
+        logger.info(f"📩 Processing message in #{channel_name} from {message.author.name}: '{message.content}'")
         
         # MESSAGE DEDUPLICATION: Prevent processing same message twice
         # (can happen due to Discord reconnects or network issues)
@@ -502,10 +521,10 @@ class DiscordTradeApprovalBot(commands.Bot):
         alert_match = re.match(r'(WATCH|ANALYZE|DISMISS|REMOVE|MULTI|ULTIMATE)\s+([A-Z0-9/]+)', content)
         if alert_match:
             action = alert_match.group(1)
-            symbol = alert_match.group(2).replace('/', '').upper()
+            symbol = alert_match.group(2).upper()  # Keep / for crypto pairs
             
             if action == 'WATCH':
-                await self._handle_watch_command(message, symbol)
+                await self._handle_watch_command(message, symbol.replace('/', ''))
             elif action == 'ANALYZE':
                 await self._handle_analyze_command(message, symbol, mode="standard")
             elif action == 'MULTI':
@@ -513,17 +532,28 @@ class DiscordTradeApprovalBot(commands.Bot):
             elif action == 'ULTIMATE':
                 await self._handle_analyze_command(message, symbol, mode="ultimate")
             elif action in ['DISMISS', 'REMOVE']:
-                await self._handle_dismiss_command(message, symbol)
+                await self._handle_dismiss_command(message, symbol.replace('/', ''))
             return
         
         # Standalone TRADE commands: "TRADE AAPL", "T NVDA", "BUY TSLA", "PAPER GOOG"
-        trade_match = re.match(r'(TRADE|T|BUY|ENTER|PAPER|P)\s+([A-Z0-9]+)', content)
+        # Also supports crypto: "TRADE BTC/USD", "T ETH", "BUY SOL/USD"
+        trade_match = re.match(r'(TRADE|T|BUY|ENTER|PAPER|P)\s+([A-Z0-9/]+)', content)
         if trade_match:
             action = trade_match.group(1)
             symbol = trade_match.group(2).upper()
             paper_mode = action in ['PAPER', 'P']
             logger.info(f"   🔍 Standalone TRADE command: {action} {symbol} (paper={paper_mode})")
-            await self._handle_stock_trade_execution(message, symbol, side="BUY", paper_mode=paper_mode)
+            
+            # Check if crypto symbol (contains / or is known crypto)
+            from src.integrations.discord_channels import is_crypto_symbol
+            if "/" in symbol or is_crypto_symbol(symbol):
+                # Crypto trade - ensure proper format
+                if "/" not in symbol:
+                    symbol = f"{symbol}/USD"
+                await self._handle_trade_command(message, symbol)
+            else:
+                # Stock trade
+                await self._handle_stock_trade_execution(message, symbol, side="BUY", paper_mode=paper_mode)
             return
 
         # Pattern: APPROVE/REJECT followed by number or symbol
@@ -1173,6 +1203,9 @@ class DiscordTradeApprovalBot(commands.Bot):
         """Show global help for all available commands"""
         help_text = """📋 **Sentient Trader Discord Commands**
 
+**📡 Multi-Channel Support:**
+_Commands work in all alert channels: stocks, crypto, options, and executions_
+
 **🏦 Account & Broker:**
 `BALANCE` or `BAL` - Show broker account balance
 `BROKER` - Show broker configuration
@@ -1191,6 +1224,8 @@ class DiscordTradeApprovalBot(commands.Bot):
 `ANALYZE NVDA` or `ANALYZE ETH/USD` - Run standard analysis
 `MULTI BTC/USD` - Run multi-strategy analysis
 `ULTIMATE SOL/USD` - Run ultimate analysis
+`TRADE BTC/USD` or `T ETH` - Queue crypto trade
+`TRADE AAPL` - Queue stock trade
 
 **Reply to Alerts with:**
 `1` / `2` / `3` - Standard / Multi / Ultimate analysis
@@ -2303,7 +2338,7 @@ class DiscordTradeApprovalBot(commands.Bot):
             logger.info(f"🗑️ Removed {approval.approval_id} from pending approvals after execution")
         
         if result.get('success'):
-            await message.channel.send(
+            execution_msg = (
                 f"✅ **Crypto Trade Executed:** {approval.pair}\n"
                 f"**Side:** {approval.side} | **Price:** ${result['price']:,.4f}\n"
                 f"**Volume:** {result['volume']:.6f} | **Value:** ${result['position_size']:,.2f}\n"
@@ -2311,6 +2346,20 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"**Order ID:** `{result.get('order_id', 'N/A')}`\n\n"
                 f"🤖 _AI Position Manager is now monitoring this trade_"
             )
+            # Send to the channel where the command was issued
+            await message.channel.send(execution_msg)
+            
+            # Also send to dedicated crypto executions channel if different
+            try:
+                from src.integrations.discord_channels import get_channel_id_for_category, AlertCategory
+                exec_channel_id = get_channel_id_for_category(AlertCategory.CRYPTO_EXECUTIONS)
+                if exec_channel_id and exec_channel_id != message.channel.id:
+                    exec_channel = self.get_channel(exec_channel_id)
+                    if exec_channel:
+                        await exec_channel.send(f"📊 **Trade Confirmation**\n{execution_msg}")
+                        logger.info(f"✅ Sent execution confirmation to #crypto-executions")
+            except Exception as e:
+                logger.warning(f"Could not send to executions channel: {e}")
         else:
             await message.channel.send(f"❌ **Trade Execution Failed:** {result.get('error', 'Unknown error')}")
 

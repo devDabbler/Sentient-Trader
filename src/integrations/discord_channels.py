@@ -237,6 +237,44 @@ def get_all_configured_channels() -> dict:
     return status
 
 
+def get_all_channel_ids() -> set:
+    """
+    Get all configured Discord channel IDs that the bot should listen to.
+    
+    Returns:
+        Set of channel IDs (as integers) that are configured for any alert category.
+        This includes alerts, positions, and executions channels for stocks, crypto, and options.
+    """
+    channel_ids = set()
+    
+    for category in AlertCategory:
+        env_var = CHANNEL_ID_ENV_VARS.get(category)
+        if env_var:
+            channel_id_str = os.getenv(env_var)
+            if channel_id_str:
+                try:
+                    # Handle comma-separated list (take all)
+                    for cid in channel_id_str.split(","):
+                        cid = cid.strip()
+                        if cid:
+                            channel_ids.add(int(cid))
+                except ValueError:
+                    logger.warning(f"Invalid channel ID format for {env_var}: {channel_id_str}")
+    
+    # Also include the general fallback
+    general_str = os.getenv("DISCORD_CHANNEL_IDS")
+    if general_str:
+        try:
+            for cid in general_str.split(","):
+                cid = cid.strip()
+                if cid:
+                    channel_ids.add(int(cid))
+        except ValueError:
+            pass
+    
+    return channel_ids
+
+
 def log_channel_configuration():
     """Log the current Discord channel configuration"""
     logger.info("=" * 60)
@@ -256,3 +294,7 @@ def log_channel_configuration():
             logger.warning(f"  ❌ {category.value}: Not configured")
     
     logger.info("=" * 60)
+    
+    # Also log channel IDs
+    all_ids = get_all_channel_ids()
+    logger.info(f"Bot listening to {len(all_ids)} channels: {all_ids}")
