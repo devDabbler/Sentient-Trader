@@ -71,6 +71,28 @@ AI Position Manager now provides **detailed sell vs hold analysis** for every ex
   - Clear risk/reward verdict
   - Market context summary
 
+#### Service Control Panel UX Overhaul (NEW - December 2025) ✅ PRODUCTION READY
+Redesigned control panel with better service selection and faster operations:
+* **✅ Bulk Service Selection:** Checkbox-based selection for granular control
+  - Select individual services with checkboxes
+  - "Select All" / "Clear Selection" quick buttons
+  - Visual status indicators (🟢 running / 🔴 stopped) per service
+* **🎛️ Preset Modes:** One-click configurations for common workflows
+  - 🪙 Crypto Only - All crypto services
+  - 📈 Stocks Only - All stock services
+  - 👀 Monitors Only - Scanners without AI traders
+  - 🤖 AI Traders Only - Position managers only
+  - 🛡️ Minimal - Infrastructure only
+* **⚡ Fast Batch Operations:** Start/Stop selected services with progress feedback
+  - Shows count of selected services in button labels
+  - Spinner feedback during batch operations
+  - Toast notifications for quick feedback (no blocking modals)
+* **🔄 Fixed Cache Issues:** Analysis results clear properly now
+  - Cache invalidation works correctly
+  - No more stale data after clearing results
+  - Auto-refresh every 15s for real-time updates
+* **📱 Mobile-Friendly:** Optimized for phone control of trading services
+
 #### AI Confidence Calibration & Balanced Analysis (NEW - December 2025) ✅ PRODUCTION READY
 Redesigned AI entry analysis prompts to eliminate high-confidence bias and produce realistic scores:
 * **🎯 Calibrated Confidence Thresholds:** Full 0-100 range usage with clear definitions

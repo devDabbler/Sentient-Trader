@@ -598,8 +598,16 @@ def clear_analysis_requests() -> bool:
             json.dump([], f)
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
-        # Invalidate cache after clear
-        get_analysis_requests.clear()
+        
+        # Invalidate Streamlit cache
+        try:
+            get_analysis_requests.clear()
+        except Exception:
+            pass  # Cache may not exist yet
+        
+        # Set session state flag to indicate data changed
+        st.session_state['_analysis_requests_cleared'] = time.time()
+        
         print(f"[INFO] Cleared analysis requests file: {ANALYSIS_REQUESTS_FILE}")
         return True
     except Exception as e:
@@ -622,8 +630,14 @@ def clear_analysis_results() -> bool:
             f.flush()
             os.fsync(f.fileno())  # Force write to disk
         
-        # Invalidate cache after clear
-        get_analysis_results.clear()
+        # Invalidate Streamlit cache - use try/except for robustness
+        try:
+            get_analysis_results.clear()
+        except Exception:
+            pass  # Cache may not exist yet
+        
+        # Set session state flag to indicate data changed (forces UI to re-read)
+        st.session_state['_analysis_results_cleared'] = time.time()
         
         # Verify the clear worked
         size_after = ANALYSIS_RESULTS_FILE.stat().st_size
@@ -1880,155 +1894,240 @@ def main():
     ])
     
     # ============================================================
-    # WORKFLOW TAB - New unified control center
+    # WORKFLOW TAB - Redesigned unified control center
     # ============================================================
     with tab_workflow:
-        st.markdown("### 🎯 Workflow Control Center")
-        st.caption("One-click modes to manage all services safely")
+        st.markdown("### 🎯 Service Control Center")
+        st.caption("Select services individually or use quick actions")
         
-        # Get orchestrator data
-        orch_data = get_orchestrator_dashboard()
+        # Initialize session state for selected services
+        if 'selected_services' not in st.session_state:
+            st.session_state.selected_services = set()
         
-        if orch_data:
-            current_mode = orch_data.get("mode", "stopped")
-            
-            # Mode indicator
-            mode_colors = {
-                "stopped": "🔴",
-                "safe": "🟡",
-                "discovery": "🟢",
-                "active": "🔵",
-                "aggressive": "🟣"
-            }
-            st.info(f"{mode_colors.get(current_mode, '⚪')} **Current Mode: {current_mode.upper()}**")
-            
-            # Mode buttons
-            st.markdown("#### Quick Modes")
-            mode_cols = st.columns(5)
-            
-            modes = [
-                ("stopped", "⏹️ Stop All", "All services stopped"),
-                ("safe", "🛡️ Safe", "Only AI Position Manager (monitor existing)"),
-                ("discovery", "🔍 Discovery", "Scanners ON, alerts queue for review"),
-                ("active", "🚀 Active", "Full crypto automation with approvals"),
-                ("aggressive", "⚡ Aggressive", "Fast intervals, all services")
-            ]
-            
-            for i, (mode_key, label, desc) in enumerate(modes):
-                with mode_cols[i]:
-                    is_current = current_mode == mode_key
-                    if st.button(
-                        label,
-                        key=f"mode_{mode_key}",
-                        type="primary" if is_current else "secondary",
+        # ============================================================
+        # QUICK ACTIONS ROW (Top of page for mobile)
+        # ============================================================
+        st.markdown("#### ⚡ Quick Actions")
+        quick_cols = st.columns(4)
+        
+        with quick_cols[0]:
+            if st.button("✅ Select All", key="select_all_svcs", use_container_width=True):
+                st.session_state.selected_services = set(SERVICES.keys())
+                st.toast("✅ All services selected")
+        
+        with quick_cols[1]:
+            if st.button("❌ Clear Selection", key="clear_selection", use_container_width=True):
+                st.session_state.selected_services = set()
+                st.toast("Selection cleared")
+        
+        with quick_cols[2]:
+            selected_count = len(st.session_state.selected_services)
+            if st.button(f"▶️ Start Selected ({selected_count})", key="start_selected", 
+                        use_container_width=True, type="primary",
+                        disabled=selected_count == 0):
+                with st.spinner(f"Starting {selected_count} services..."):
+                    started = 0
+                    for svc_label in st.session_state.selected_services:
+                        if svc_label in SERVICES:
+                            ok, _ = control_service(SERVICES[svc_label]["name"], "start")
+                            if ok:
+                                started += 1
+                    st.toast(f"✅ Started {started}/{selected_count} services")
+                    get_service_status.clear()  # Force status refresh
+        
+        with quick_cols[3]:
+            if st.button(f"⏹️ Stop Selected ({selected_count})", key="stop_selected", 
                         use_container_width=True,
-                        disabled=is_current
-                    ):
-                        if set_workflow_mode(mode_key):
-                            st.toast(f"✅ Switched to {label}")
-                            # Apply mode to actual services
-                            if mode_key == "stopped":
-                                for svc in SERVICES.values():
-                                    control_service(svc["name"], "stop")
-                            elif mode_key == "safe":
-                                for svc_name, svc in SERVICES.items():
-                                    if svc["name"] in ["sentient-crypto-ai-trader", "sentient-discord-approval"]:
-                                        control_service(svc["name"], "start")
+                        disabled=selected_count == 0):
+                with st.spinner(f"Stopping {selected_count} services..."):
+                    stopped = 0
+                    for svc_label in st.session_state.selected_services:
+                        if svc_label in SERVICES:
+                            ok, _ = control_service(SERVICES[svc_label]["name"], "stop")
+                            if ok:
+                                stopped += 1
+                    st.toast(f"⏹️ Stopped {stopped}/{selected_count} services")
+                    get_service_status.clear()
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # PRESET MODES (Common configurations)
+        # ============================================================
+        with st.expander("🎛️ Preset Modes (one-click configurations)", expanded=False):
+            preset_cols = st.columns(3)
+            
+            presets = {
+                "crypto_only": {
+                    "name": "🪙 Crypto Only",
+                    "services": ["DEX Launch Monitor", "Crypto Breakout Monitor", "AI Crypto Trader", "Discord Approval Bot", "Analysis Queue Processor"],
+                    "desc": "All crypto services"
+                },
+                "stocks_only": {
+                    "name": "📈 Stocks Only", 
+                    "services": ["Stock Monitor", "AI Stock Trader", "ORB FVG Scanner", "Discord Approval Bot", "Analysis Queue Processor"],
+                    "desc": "All stock services"
+                },
+                "monitors_only": {
+                    "name": "👀 Monitors Only",
+                    "services": ["DEX Launch Monitor", "Crypto Breakout Monitor", "Stock Monitor", "ORB FVG Scanner", "Analysis Queue Processor"],
+                    "desc": "Scanners without AI traders"
+                },
+                "ai_traders": {
+                    "name": "🤖 AI Traders Only",
+                    "services": ["AI Crypto Trader", "AI Stock Trader", "Discord Approval Bot"],
+                    "desc": "Position managers only"
+                },
+                "minimal": {
+                    "name": "🛡️ Minimal",
+                    "services": ["Discord Approval Bot", "Analysis Queue Processor"],
+                    "desc": "Infrastructure only"
+                }
+            }
+            
+            for i, (preset_key, preset) in enumerate(presets.items()):
+                with preset_cols[i % 3]:
+                    if st.button(preset["name"], key=f"preset_{preset_key}", use_container_width=True):
+                        st.session_state.selected_services = set(preset["services"])
+                        st.toast(f"Selected: {preset['name']}")
+                    st.caption(preset["desc"])
+        
+        # ============================================================
+        # SERVICE SELECTION GRID
+        # ============================================================
+        st.markdown("#### 📋 Select Services")
+        
+        # Group services by category
+        categories = {
+            "crypto": {"emoji": "🪙", "name": "Crypto Services", "services": []},
+            "stocks": {"emoji": "📈", "name": "Stock Services", "services": []},
+            "infrastructure": {"emoji": "⚙️", "name": "Infrastructure", "services": []}
+        }
+        
+        for svc_label, svc_info in SERVICES.items():
+            cat = svc_info.get("category", "infrastructure")
+            if cat in categories:
+                categories[cat]["services"].append((svc_label, svc_info))
+        
+        # Render each category
+        for cat_key, cat_data in categories.items():
+            if cat_data["services"]:
+                st.markdown(f"**{cat_data['emoji']} {cat_data['name']}**")
+                
+                # Create columns for this category's services
+                svc_cols = st.columns(len(cat_data["services"]))
+                
+                for i, (svc_label, svc_info) in enumerate(cat_data["services"]):
+                    with svc_cols[i]:
+                        svc_name = svc_info['name']
+                        status = get_service_status(svc_name)
+                        is_running = status['active']
+                        status_emoji = "🟢" if is_running else "🔴"
+                        
+                        # Checkbox for selection
+                        is_selected = svc_label in st.session_state.selected_services
+                        
+                        # Use a container for better layout
+                        with st.container():
+                            # Service header with status
+                            col_check, col_status = st.columns([3, 1])
+                            with col_check:
+                                if st.checkbox(
+                                    f"{svc_info['emoji']} {svc_label}",
+                                    value=is_selected,
+                                    key=f"svc_check_{svc_name}"
+                                ):
+                                    st.session_state.selected_services.add(svc_label)
+                                else:
+                                    st.session_state.selected_services.discard(svc_label)
+                            with col_status:
+                                st.markdown(f"<span style='font-size:1.2em'>{status_emoji}</span>", unsafe_allow_html=True)
+                            
+                            # Individual controls
+                            btn_col1, btn_col2 = st.columns(2)
+                            with btn_col1:
+                                if st.button("▶️", key=f"start_{svc_name}", disabled=is_running, 
+                                           help=f"Start {svc_label}"):
+                                    ok, msg = control_service(svc_name, "start")
+                                    if ok:
+                                        st.toast(f"✅ {svc_label} started")
                                     else:
-                                        control_service(svc["name"], "stop")
-                            elif mode_key == "discovery":
-                                for svc_name, svc in SERVICES.items():
-                                    if svc.get("category") == "crypto" or svc["name"] == "sentient-discord-approval":
-                                        control_service(svc["name"], "start")
+                                        st.error(f"Failed: {msg}")
+                            with btn_col2:
+                                if st.button("⏹️", key=f"stop_{svc_name}", disabled=not is_running,
+                                           help=f"Stop {svc_label}"):
+                                    ok, msg = control_service(svc_name, "stop")
+                                    if ok:
+                                        st.toast(f"⏹️ {svc_label} stopped")
                                     else:
-                                        control_service(svc["name"], "stop")
-                            elif mode_key == "active":
-                                for svc_name, svc in SERVICES.items():
-                                    if svc.get("category") in ["crypto", "infrastructure"]:
-                                        control_service(svc["name"], "start")
-                            elif mode_key == "aggressive":
-                                for svc in SERVICES.values():
-                                    control_service(svc["name"], "start")
-                            st.toast(f"✅ {label} mode activated")
-                    st.caption(desc)
-            
-            st.markdown("---")
-            
-            # ============================================================
-            # SERVICE HEALTH SUMMARY
-            # ============================================================
-            st.markdown("### 🏥 Service Health")
-            
-            svc_data = orch_data.get("services", {})
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Running", f"{svc_data.get('running', 0)}/{svc_data.get('total', 0)}")
-            with col2:
-                st.metric("Errors", svc_data.get('error', 0))
-            with col3:
-                alerts_data = orch_data.get("alerts", {})
-                st.metric("Pending Alerts", alerts_data.get('pending_total', 0))
-            
-            # Quick service status
-            with st.expander("📊 Service Details"):
-                for svc_name, svc_info in svc_data.get("details", {}).items():
-                    state = svc_info.get("state", "unknown")
-                    state_emoji = "🟢" if state == "running" else "🔴" if state == "stopped" else "🟡"
-                    health = svc_info.get("health", {})
-                    
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    with col1:
-                        st.write(f"{state_emoji} **{svc_info.get('display_name', svc_name)}**")
-                    with col2:
-                        st.caption(f"✅ {health.get('success_count', 0)} runs")
-                    with col3:
-                        st.caption(f"❌ {health.get('error_count', 0)} errors")
-            
-            # ============================================================
-            # CURRENT WATCHLISTS (Quick View) - From Supabase
-            # ============================================================
-            st.markdown("---")
-            st.markdown("### 📋 Current Watchlists (Supabase)")
-            
-            watchlist_col1, watchlist_col2 = st.columns(2)
-            
-            with watchlist_col1:
-                st.markdown("**🪙 Crypto Watchlist**")
-                try:
-                    from services.crypto_watchlist_manager import CryptoWatchlistManager
-                    cwm = CryptoWatchlistManager()
-                    crypto_watchlist = cwm.get_all_cryptos()
-                    if crypto_watchlist:
-                        symbols = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
-                        st.write(f"**{len(symbols)}** pairs: " + ", ".join(symbols[:8]) + ("..." if len(symbols) > 8 else ""))
+                                        st.error(f"Failed: {msg}")
+        
+        st.markdown("---")
+        
+        # ============================================================
+        # SERVICE HEALTH SUMMARY
+        # ============================================================
+        st.markdown("### 🏥 Service Health")
+        
+        # Calculate stats
+        running_count = sum(1 for s in SERVICES.values() if get_service_status(s["name"])["active"])
+        total_count = len(SERVICES)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Running", f"{running_count}/{total_count}")
+        with col2:
+            st.metric("Selected", len(st.session_state.selected_services))
+        with col3:
+            # Get pending alerts count
+            try:
+                pending_crypto = get_pending_alerts("crypto")
+                pending_stocks = get_pending_alerts("stock")
+                st.metric("Pending Alerts", len(pending_crypto) + len(pending_stocks))
+            except:
+                st.metric("Pending Alerts", "N/A")
+        
+        # ============================================================
+        # CURRENT WATCHLISTS (Quick View) - From Supabase
+        # ============================================================
+        st.markdown("---")
+        st.markdown("### 📋 Current Watchlists (Supabase)")
+        
+        watchlist_col1, watchlist_col2 = st.columns(2)
+        
+        with watchlist_col1:
+            st.markdown("**🪙 Crypto Watchlist**")
+            try:
+                from services.crypto_watchlist_manager import CryptoWatchlistManager
+                cwm = CryptoWatchlistManager()
+                crypto_watchlist = cwm.get_all_cryptos()
+                if crypto_watchlist:
+                    symbols = [c.get('symbol', '') for c in crypto_watchlist if c.get('symbol')]
+                    st.write(f"**{len(symbols)}** pairs: " + ", ".join(symbols[:8]) + ("..." if len(symbols) > 8 else ""))
+                else:
+                    st.caption("No crypto pairs in Supabase watchlist")
+            except Exception as e:
+                st.caption(f"⚠️ Could not load: {e}")
+        
+        with watchlist_col2:
+            st.markdown("**📈 Stock Watchlist**")
+            try:
+                from services.ticker_manager import TickerManager
+                tm = TickerManager()
+                if tm.test_connection():
+                    stock_data = tm.get_all_tickers(ticker_type='stock', limit=1000) or []
+                    penny_data = tm.get_all_tickers(ticker_type='penny_stock', limit=1000) or []
+                    all_stocks = [t['ticker'] for t in stock_data] + [t['ticker'] for t in penny_data]
+                    if all_stocks:
+                        st.write(f"**{len(all_stocks)}** tickers: " + ", ".join(all_stocks[:8]) + ("..." if len(all_stocks) > 8 else ""))
                     else:
-                        st.caption("No crypto pairs in Supabase watchlist")
-                except Exception as e:
-                    st.caption(f"⚠️ Could not load: {e}")
-            
-            with watchlist_col2:
-                st.markdown("**📈 Stock Watchlist**")
-                try:
-                    from services.ticker_manager import TickerManager
-                    tm = TickerManager()
-                    if tm.test_connection():
-                        stock_data = tm.get_all_tickers(ticker_type='stock', limit=1000) or []
-                        penny_data = tm.get_all_tickers(ticker_type='penny_stock', limit=1000) or []
-                        all_stocks = [t['ticker'] for t in stock_data] + [t['ticker'] for t in penny_data]
-                        if all_stocks:
-                            st.write(f"**{len(all_stocks)}** tickers: " + ", ".join(all_stocks[:8]) + ("..." if len(all_stocks) > 8 else ""))
-                        else:
-                            st.caption("No stocks in Supabase watchlist")
-                    else:
-                        st.caption("⚠️ Supabase not connected")
-                except Exception as e:
-                    st.caption(f"⚠️ Could not load: {e}")
-            
-            st.caption("_Manage watchlists in the **Watchlists** tab or expand services in **Service Status**_")
-            
-        else:
-            st.warning("⚠️ Orchestrator not available. Using legacy service control.")
-            st.info("The orchestrator provides unified service management. Check if `services/service_orchestrator.py` exists.")
+                        st.caption("No stocks in Supabase watchlist")
+                else:
+                    st.caption("⚠️ Supabase not connected")
+            except Exception as e:
+                st.caption(f"⚠️ Could not load: {e}")
+        
+        st.caption("_Manage watchlists in the **Watchlists** tab or expand services in **Service Status**_")
     
     with tab_watchlist:
         render_watchlist_manager()
@@ -3524,21 +3623,26 @@ def main():
         button_col1, button_col2, button_col3 = st.columns(3)
         
         with button_col1:
-            if st.button("🔄 Force Refresh Now", key="force_refresh_results"):
+            if st.button("🔄 Refresh Now", key="force_refresh_results"):
+                get_analysis_results.clear()
+                st.toast("🔄 Refreshing...")
                 st.rerun()
         
         with button_col2:
             if st.button("🗑️ Clear All Results", key="clear_all_results"):
-                with st.spinner("Clearing results..."):
-                    if clear_analysis_results():
-                        st.success("✅ Results cleared! (Note: Running services will generate new results)")
-                        time.sleep(1)  # Longer pause to show message
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to clear results - check server logs")
+                if clear_analysis_results():
+                    st.toast("✅ Results cleared!")
+                    # Force cache clear and update display immediately
+                    try:
+                        get_analysis_results.clear()
+                    except:
+                        pass
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to clear results - check server logs")
         
         with button_col3:
-            st.caption("💡 Services keep generating new results")
+            st.caption("💡 Auto-refreshes every 15s")
     else:
         st.info("📭 No analysis results yet.\n\n**To get started:**\n1. Queue an analysis from the sidebar\n2. Or wait for background services to generate results\n3. Results will appear here automatically")
     
