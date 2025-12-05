@@ -427,6 +427,14 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
+            # 1.5 Fallback: if this is a reply but didn't match a specific approval message,
+            # still treat simple dollar/number inputs as position modifications for the most
+            # recent pending approval (prevents DEX misrouting when user replies to the alert thread)
+            original_content = message.content.strip()
+            if await self._handle_standalone_position_modification(message, content, original_content):
+                logger.info("   🧭 Reply fallback applied to latest pending approval (position modification)")
+                return
+            
             # 2.5 Check for DEX position shorthand: "$25", "$50" etc when replying
             # ONLY apply this for DEX channels OR if referenced message has a token address
             # This prevents conflicts with analysis commands like "1", "2", "3"
