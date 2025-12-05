@@ -427,17 +427,52 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
-            # 2.5 Check for DEX position shorthand: "$25", "25", "$50" etc when replying
-            # This lets users quickly add positions by replying with just a dollar amount
+            # 2.5 Check for DEX position shorthand: "$25", "$50" etc when replying
+            # ONLY apply this for DEX channels OR if referenced message has a token address
+            # This prevents conflicts with analysis commands like "1", "2", "3"
             import re
             original_content = message.content.strip()
-            dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
-            if dollar_amount_match:
-                # User is replying with just a dollar amount - treat as ADD command for DEX
-                amount = dollar_amount_match.group(1)
-                logger.info(f"   🎯 Shorthand DEX entry detected (reply): ${amount}")
+            
+            # Get DEX channel IDs from environment
+            dex_pump_channel_id = int(os.getenv('DISCORD_CHANNEL_ID_DEX_PUMP_ALERTS', '0') or '0')
+            dex_fast_channel_id = int(os.getenv('DISCORD_CHANNEL_ID_DEX_FAST_MONITOR', '0') or '0')
+            is_dex_channel = message.channel.id in [dex_pump_channel_id, dex_fast_channel_id]
+            
+            # Only match dollar amounts with $ prefix OR if in DEX channel
+            # This allows "1", "2", "3" to work as analysis shortcuts in non-DEX channels
+            dollar_with_sign = re.match(r'^\$(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+            plain_number = re.match(r'^(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+            
+            if dollar_with_sign:
+                # Explicit dollar sign always triggers DEX add
+                amount = dollar_with_sign.group(1)
+                logger.info(f"   🎯 Shorthand DEX entry detected (explicit $): ${amount}")
                 await self._handle_dex_add_position(message, f"${amount}")
                 return
+            elif plain_number and is_dex_channel:
+                # Plain number only triggers DEX add in DEX-specific channels
+                amount = plain_number.group(1)
+                logger.info(f"   🎯 Shorthand DEX entry detected (DEX channel): ${amount}")
+                await self._handle_dex_add_position(message, f"${amount}")
+                return
+            elif plain_number and not is_dex_channel:
+                # In non-DEX channels, check if referenced message has a token address
+                # If so, treat as DEX add; otherwise let it fall through to analysis commands
+                # First fetch the referenced message if not cached
+                ref_msg = message.reference.cached_message
+                if not ref_msg and message.reference.message_id:
+                    try:
+                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    except Exception:
+                        ref_msg = None
+                
+                token_address = await self._extract_token_address_from_message(ref_msg) if ref_msg else None
+                if token_address:
+                    amount = plain_number.group(1)
+                    logger.info(f"   🎯 Shorthand DEX entry detected (token in reply): ${amount}")
+                    await self._handle_dex_add_position(message, f"${amount}")
+                    return
+                # Else: fall through to _handle_alert_reply for "1", "2", "3" analysis commands
             
             # 3. Check Orchestrator Alert Queue (Generic Alerts)
             await self._handle_alert_reply(message, content)
@@ -558,14 +593,15 @@ class DiscordTradeApprovalBot(commands.Bot):
             await self._handle_dex_add_position(message, add_data)
             return
         
-        # Shorthand DEX position entry: just "$25" or "25" or "$50" when replying to analysis/alert
-        # This is the simplified format for quickly adding positions after using "monitor"
+        # Shorthand DEX position entry with explicit $ sign (e.g., "$25", "$50", "$100")
+        # Only triggers for explicit dollar amounts, NOT plain numbers like "1", "2", "3"
+        # Plain numbers are reserved for analysis mode shortcuts
         original_content = message.content.strip()
-        dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
-        if dollar_amount_match and message.reference:
-            # User is replying with just a dollar amount - treat as ADD command
-            amount = dollar_amount_match.group(1)
-            logger.info(f"   🎯 Shorthand DEX entry detected: ${amount}")
+        dollar_with_sign_match = re.match(r'^\$(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+        if dollar_with_sign_match:
+            # Explicit dollar sign triggers DEX add
+            amount = dollar_with_sign_match.group(1)
+            logger.info(f"   🎯 Shorthand DEX entry detected (standalone $): ${amount}")
             await self._handle_dex_add_position(message, f"${amount}")
             return
         
