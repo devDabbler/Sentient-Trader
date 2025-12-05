@@ -427,16 +427,11 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
-            # DEBUG: Log that we exited the for loop
-            logger.info(f"   🔄 Exited approval for-loop, checking DEX shorthand...")
-            
             # 2.5 Check for DEX position shorthand: "$25", "25", "$50" etc when replying
             # This lets users quickly add positions by replying with just a dollar amount
             import re
             original_content = message.content.strip()
-            logger.info(f"   🔍 Checking DEX shorthand for: '{original_content}'")
             dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
-            logger.info(f"   🔍 Dollar match result: {dollar_amount_match}")
             if dollar_amount_match:
                 # User is replying with just a dollar amount - treat as ADD command for DEX
                 amount = dollar_amount_match.group(1)
@@ -1453,7 +1448,8 @@ class DiscordTradeApprovalBot(commands.Bot):
             except Exception as e:
                 logger.debug(f"Could not get order flow for entry timing: {e}")
             
-            await message.channel.send(
+            # Build the confirmation message
+            confirmation_msg = (
                 f"✅ **Position Added to Fast Monitor!**\n\n"
                 f"🪙 **{symbol}**\n"
                 f"   📍 Token: `{token_address[:8]}...{token_address[-4:]}`\n"
@@ -1469,8 +1465,24 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"   • Trailing stop: 12% from peak\n"
                 f"   • Hard stop: 30% from entry\n"
                 f"   • Profit target: 50%\n\n"
-                f"🔔 You'll receive Discord alerts for exit signals!"
+                f"🔔 You'll receive alerts in #crypto-positions for exit signals!"
             )
+            
+            # Send confirmation to the original channel (brief acknowledgment)
+            await message.channel.send(f"✅ **{symbol}** added to Fast Monitor! Check #crypto-positions for updates.")
+            
+            # Send detailed confirmation to crypto-positions channel
+            try:
+                from src.integrations.discord_channels import get_channel_id_for_category, AlertCategory
+                positions_channel_id = get_channel_id_for_category(AlertCategory.CRYPTO_POSITIONS)
+                if positions_channel_id:
+                    positions_channel = self.get_channel(positions_channel_id)
+                    if positions_channel:
+                        await positions_channel.send(confirmation_msg)
+                    else:
+                        logger.warning(f"Could not find crypto-positions channel {positions_channel_id}")
+            except Exception as e:
+                logger.debug(f"Could not send to positions channel: {e}")
             
         except ValueError as e:
             await message.channel.send(f"❌ Invalid number format: {str(e)}")
