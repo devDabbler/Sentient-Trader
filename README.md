@@ -105,6 +105,12 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Checkbox selection in Crypto preset
   - Configurable check interval (1-10 seconds)
   - Log file at `logs/dex_fast_monitor.log`
+* **📝 Supabase Trade Journaling (NEW - December 2025):** Automatic cloud logging of all DEX positions
+  - Entry and exit details logged to `dex_position_journal` table
+  - Tracks entry/exit prices, P&L, hold time, order flow at entry/exit
+  - Win rate, total P&L, and trade statistics via `get_journal_stats()`
+  - Historical analysis for strategy improvement
+  - Requires Supabase credentials in `.env` (SUPABASE_URL, SUPABASE_SERVICE_KEY)
 * **▶️ Standalone Usage:** `python windows_services/runners/run_dex_fast_monitor.py`
   - CLI for adding/closing positions
   - Persists positions to `data/dex_held_positions.json`

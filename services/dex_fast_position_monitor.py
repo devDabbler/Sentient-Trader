@@ -41,6 +41,14 @@ from typing import Dict, List, Optional, Tuple
 import httpx
 from loguru import logger
 
+# Supabase for trade journaling
+try:
+    from clients.supabase_client import get_supabase_client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+    logger.warning("Supabase client not available - DEX positions will not be journaled")
+
 
 class AlertType(Enum):
     """Types of position alerts"""
@@ -260,6 +268,16 @@ class FastPositionMonitor:
         self._last_order_flow_check = 0.0
         self._order_flow_enabled = bool(os.getenv("BIRDEYE_API_KEY"))
         
+        # Supabase journaling (NEW - December 2025)
+        self._supabase = None
+        self._supabase_enabled = False
+        if SUPABASE_AVAILABLE:
+            try:
+                self._supabase = get_supabase_client()
+                self._supabase_enabled = self._supabase is not None
+            except Exception as e:
+                logger.warning(f"Could not initialize Supabase client: {e}")
+        
         logger.info("=" * 60)
         logger.info("🚀 DEX FAST POSITION MONITOR INITIALIZED")
         logger.info("=" * 60)
@@ -269,6 +287,7 @@ class FastPositionMonitor:
         logger.info(f"   Profit Target: {default_profit_target_pct}%")
         logger.info(f"   Discord Alerts: {'✅ Enabled' if self.discord_webhook_url else '❌ Disabled'}")
         logger.info(f"   Order Flow: {'✅ Enabled (Birdeye)' if self._order_flow_enabled else '❌ Disabled (no API key)'}")
+        logger.info(f"   Supabase Journal: {'✅ Enabled' if self._supabase_enabled else '❌ Disabled'}")
         logger.info(f"   Loaded Positions: {len(self.held_positions)}")
         logger.info("=" * 60)
     
@@ -461,6 +480,9 @@ class FastPositionMonitor:
         logger.info(f"➕ Added position: {symbol} @ ${entry_price:.8f} ({tokens_held:.2f} tokens)")
         logger.info(f"   └─ Breakeven needs: {profitability.breakeven_gain_needed_pct:.1f}% displayed gain")
         
+        # Journal to Supabase (NEW - December 2025)
+        await self._journal_position_entry(position)
+        
         # Send Discord alert
         await self._send_alert(position, AlertType.POSITION_ADDED, 
             f"Started monitoring {symbol}")
@@ -490,6 +512,9 @@ class FastPositionMonitor:
             position.current_price = exit_price
             position.unrealized_pnl_pct = ((exit_price - position.entry_price) / position.entry_price) * 100
             position.unrealized_pnl_usd = (exit_price - position.entry_price) * position.tokens_held
+        
+        # Journal exit to Supabase (NEW - December 2025)
+        await self._journal_position_exit(position, exit_reason="MANUAL_CLOSE")
         
         # Remove from active monitoring
         del self.held_positions[token_address]
@@ -1292,6 +1317,144 @@ class FastPositionMonitor:
             logger.warning(f"Failed to load positions: {e}")
             self.held_positions = {}
     
+    # ========================================================================
+    # SUPABASE JOURNALING (NEW - December 2025)
+    # ========================================================================
+    
+    async def _journal_position_entry(self, position: HeldPosition):
+        """
+        Journal a new position entry to Supabase.
+        
+        Logs all entry details for historical tracking and analysis.
+        """
+        if not self._supabase_enabled or not self._supabase:
+            logger.debug("Supabase not enabled, skipping position entry journal")
+            return
+        
+        try:
+            data = {
+                "token_address": position.token_address,
+                "symbol": position.symbol,
+                "chain": position.chain,
+                "entry_price": float(position.entry_price),
+                "entry_time": position.entry_time.isoformat(),
+                "tokens_held": float(position.tokens_held),
+                "investment_usd": float(position.investment_usd),
+                "liquidity_usd": float(position.liquidity_usd),
+                "breakeven_gain_needed_pct": float(position.breakeven_gain_needed_pct),
+                "estimated_slippage_pct": float(position.estimated_slippage_pct),
+                "trailing_stop_pct": float(position.trailing_stop_pct),
+                "hard_stop_pct": float(position.hard_stop_pct),
+                "profit_target_pct": float(position.profit_target_pct),
+                "entry_order_flow_signal": position.order_flow_signal,
+                "entry_buy_sell_ratio": float(position.buy_sell_ratio_1m),
+                "status": "OPEN"
+            }
+            
+            result = self._supabase.table("dex_position_journal").insert(data).execute()
+            
+            if result.data:
+                logger.info(f"📝 Journaled position entry to Supabase: {position.symbol}")
+            else:
+                logger.warning(f"Supabase insert returned no data for {position.symbol}")
+                
+        except Exception as e:
+            logger.error(f"Failed to journal position entry to Supabase: {e}")
+    
+    async def _journal_position_exit(self, position: HeldPosition, exit_reason: str = "UNKNOWN"):
+        """
+        Journal a position exit to Supabase.
+        
+        Updates the existing entry with exit details and P&L.
+        """
+        if not self._supabase_enabled or not self._supabase:
+            logger.debug("Supabase not enabled, skipping position exit journal")
+            return
+        
+        try:
+            # Calculate hold time
+            hold_time_seconds = (datetime.now() - position.entry_time).total_seconds()
+            hold_time_minutes = int(hold_time_seconds / 60)
+            
+            update_data = {
+                "exit_price": float(position.current_price),
+                "exit_time": datetime.now().isoformat(),
+                "exit_reason": exit_reason,
+                "realized_pnl_usd": float(position.unrealized_pnl_usd),
+                "realized_pnl_pct": float(position.unrealized_pnl_pct),
+                "max_profit_pct": float(position.max_profit_pct),
+                "max_drawdown_pct": float(position.max_drawdown_pct),
+                "exit_order_flow_signal": position.order_flow_signal,
+                "exit_buy_sell_ratio": float(position.buy_sell_ratio_1m),
+                "partial_exit_taken": position.partial_exit_taken,
+                "status": "CLOSED"
+            }
+            
+            # Find and update the matching entry
+            result = self._supabase.table("dex_position_journal") \
+                .update(update_data) \
+                .eq("token_address", position.token_address) \
+                .eq("status", "OPEN") \
+                .execute()
+            
+            if result.data:
+                logger.info(f"📝 Journaled position exit to Supabase: {position.symbol} | P&L: {position.unrealized_pnl_pct:+.2f}%")
+            else:
+                logger.warning(f"No open position found in Supabase to update for {position.symbol}")
+                
+        except Exception as e:
+            logger.error(f"Failed to journal position exit to Supabase: {e}")
+    
+    def get_journal_stats(self) -> Optional[Dict]:
+        """
+        Get trade journal statistics from Supabase.
+        
+        Returns:
+            Dict with win rate, total P&L, trade count, etc.
+        """
+        if not self._supabase_enabled or not self._supabase:
+            return None
+        
+        try:
+            # Get all closed positions
+            result = self._supabase.table("dex_position_journal") \
+                .select("*") \
+                .eq("status", "CLOSED") \
+                .execute()
+            
+            if not result.data:
+                return {"total_trades": 0, "message": "No closed trades yet"}
+            
+            trades = result.data
+            total_trades = len(trades)
+            
+            # Calculate stats
+            winning_trades = [t for t in trades if (t.get("realized_pnl_pct") or 0) > 0]
+            losing_trades = [t for t in trades if (t.get("realized_pnl_pct") or 0) <= 0]
+            
+            total_pnl_usd = sum(t.get("realized_pnl_usd") or 0 for t in trades)
+            total_pnl_pct = sum(t.get("realized_pnl_pct") or 0 for t in trades)
+            
+            avg_win_pct = sum(t.get("realized_pnl_pct") or 0 for t in winning_trades) / len(winning_trades) if winning_trades else 0
+            avg_loss_pct = sum(t.get("realized_pnl_pct") or 0 for t in losing_trades) / len(losing_trades) if losing_trades else 0
+            
+            return {
+                "total_trades": total_trades,
+                "winning_trades": len(winning_trades),
+                "losing_trades": len(losing_trades),
+                "win_rate": (len(winning_trades) / total_trades * 100) if total_trades > 0 else 0,
+                "total_pnl_usd": total_pnl_usd,
+                "avg_pnl_pct": total_pnl_pct / total_trades if total_trades > 0 else 0,
+                "avg_win_pct": avg_win_pct,
+                "avg_loss_pct": avg_loss_pct,
+                "best_trade_pct": max((t.get("realized_pnl_pct") or 0) for t in trades) if trades else 0,
+                "worst_trade_pct": min((t.get("realized_pnl_pct") or 0) for t in trades) if trades else 0
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get journal stats from Supabase: {e}")
+            return None
+
     # ========================================================================
     # STATISTICS
     # ========================================================================
