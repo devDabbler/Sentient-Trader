@@ -205,6 +205,10 @@ class TokenLaunch:
     # Enhanced Timing Score (NEW)
     timing_advantage_score: float = 0.0  # 0-100, how early you are (100=very early)
     
+    # Entry Recommendation (NEW - December 2025)
+    # Dict with: recommendation, reason, confidence, age_status, initial_trading_passed, pump_forming
+    entry_recommendation: Optional[Dict] = None
+    
     # Profitability Analysis (NEW - December 2025)
     breakeven_gain_needed: float = 0.0  # % gain needed to break even after slippage/fees
     real_profit_potential: bool = True  # Whether trade is potentially profitable

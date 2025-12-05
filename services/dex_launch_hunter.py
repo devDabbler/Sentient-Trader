@@ -1028,6 +1028,10 @@ class DexLaunchHunter:
         
         token.timing_advantage_score = timing_score
         
+        # 5. Entry Recommendation (NEW - December 2025)
+        # Determines if this is a good entry point based on coin age and pump status
+        token.entry_recommendation = self._calculate_entry_recommendation(token)
+        
         # 4. Breakout Potential (for super fresh coins)
         breakout_score = 0.0
         
@@ -1060,6 +1064,140 @@ class DexLaunchHunter:
         token.breakout_potential = min(breakout_score, 100.0)
         
         return token
+    
+    def _calculate_entry_recommendation(self, token: TokenLaunch) -> Dict:
+        """
+        Calculate entry recommendation based on coin age and pump status.
+        
+        Philosophy:
+        - If initial trading has passed, safer to enter (fomo/rug risk reduced)
+        - If there's indication of another pump forming, good to enter
+        - Ultra-fresh coins are higher risk but higher reward
+        
+        Returns:
+            Dict with recommendation, reason, confidence, and coin age details
+        """
+        age_hours = token.age_hours
+        age_minutes = age_hours * 60
+        
+        # Calculate time-based status
+        if age_minutes < 5:
+            age_status = "🔥 BRAND NEW (< 5 min)"
+            initial_trading_passed = False
+        elif age_minutes < 15:
+            age_status = "⚡ VERY FRESH (5-15 min)"
+            initial_trading_passed = False
+        elif age_minutes < 30:
+            age_status = "🆕 FRESH (15-30 min)"
+            initial_trading_passed = True  # Initial FOMO likely settling
+        elif age_hours < 1:
+            age_status = "📊 SETTLING (30-60 min)"
+            initial_trading_passed = True
+        elif age_hours < 3:
+            age_status = "✅ ESTABLISHED (1-3 hr)"
+            initial_trading_passed = True
+        elif age_hours < 6:
+            age_status = "📈 MATURING (3-6 hr)"
+            initial_trading_passed = True
+        elif age_hours < 24:
+            age_status = "🕐 AGED (6-24 hr)"
+            initial_trading_passed = True
+        else:
+            age_status = f"⏰ OLD ({age_hours:.0f}+ hr)"
+            initial_trading_passed = True
+        
+        # Detect pump patterns for second wave entry
+        pump_forming = False
+        pump_reason = ""
+        
+        # Check for accumulation pattern (price stable, volume increasing)
+        if hasattr(token, 'pairs') and token.pairs:
+            pair = token.pairs[0]
+            volume_to_liq = token.volume_24h / max(token.liquidity_usd, 1)
+            
+            # Accumulation: price relatively stable but volume picking up
+            if -10 < token.price_change_1h < 20 and volume_to_liq > 2:
+                pump_forming = True
+                pump_reason = "Accumulation pattern - volume building while price stable"
+            
+            # Buy pressure building
+            if hasattr(pair, 'buys_5m') and hasattr(pair, 'sells_5m'):
+                if pair.buys_5m > pair.sells_5m * 1.5 and pair.buys_5m > 10:
+                    pump_forming = True
+                    pump_reason = f"Buy pressure building ({pair.buys_5m} buys vs {pair.sells_5m} sells in 5m)"
+            
+            # Recovery from dip (potential second wave)
+            if token.price_change_24h < -20 and token.price_change_1h > 10:
+                pump_forming = True
+                pump_reason = "Recovery bounce - potential second wave forming"
+            
+            # Breakout from consolidation
+            if token.price_change_5m > 5 and abs(token.price_change_1h) < 15:
+                pump_forming = True
+                pump_reason = "Breakout from consolidation detected"
+        
+        # Generate recommendation
+        if age_minutes < 5:
+            recommendation = "⚠️ HIGH RISK ENTRY"
+            reason = "Ultra-fresh coin - maximum volatility, high rug risk, but highest potential gains"
+            confidence = 40
+        elif not initial_trading_passed and not pump_forming:
+            recommendation = "⏳ WAIT FOR SETTLING"
+            reason = f"Initial trading still active ({age_minutes:.0f} min old) - wait for FOMO to cool"
+            confidence = 30
+        elif initial_trading_passed and pump_forming:
+            recommendation = "🚀 GOOD ENTRY - PUMP FORMING"
+            reason = f"Initial trading passed + {pump_reason}"
+            confidence = 75
+        elif initial_trading_passed and token.price_change_1h < -10:
+            recommendation = "💰 POTENTIAL DIP BUY"
+            reason = f"Initial trading passed, price down {token.price_change_1h:.1f}% - could be accumulation zone"
+            confidence = 60
+        elif initial_trading_passed:
+            recommendation = "✅ SAFER ENTRY"
+            reason = f"Initial trading passed ({age_minutes:.0f} min old) - reduced FOMO/rug risk"
+            confidence = 55
+        elif token.time_to_pump == "PRIME":
+            recommendation = "🎯 PRIME ENTRY"
+            reason = "Fresh coin with good liquidity, hasn't pumped yet"
+            confidence = 70
+        else:
+            recommendation = "📊 EVALUATE"
+            reason = "Mixed signals - review other metrics"
+            confidence = 45
+        
+        # Build entry details
+        entry_info = {
+            "recommendation": recommendation,
+            "reason": reason,
+            "confidence": confidence,
+            "age_status": age_status,
+            "age_minutes": round(age_minutes, 1),
+            "age_hours": round(age_hours, 2),
+            "initial_trading_passed": initial_trading_passed,
+            "pump_forming": pump_forming,
+            "pump_reason": pump_reason if pump_forming else None,
+            "timing_summary": self._get_timing_summary(token, initial_trading_passed, pump_forming)
+        }
+        
+        return entry_info
+    
+    def _get_timing_summary(self, token: TokenLaunch, initial_passed: bool, pump_forming: bool) -> str:
+        """Generate a human-readable timing summary for entry decision"""
+        age_minutes = token.age_hours * 60
+        
+        if age_minutes < 5:
+            return "⚡ ULTRA-FRESH: High risk/reward. Only for experienced degen traders."
+        elif not initial_passed:
+            return f"⏳ SETTLING: Coin is {age_minutes:.0f}m old. Wait for initial FOMO to cool (15-30m mark)."
+        elif pump_forming:
+            return "🚀 PUMP SIGNAL: Initial trading passed AND new pump indicators detected. Good entry window."
+        elif token.price_change_1h < -20:
+            return "📉 DIP OPPORTUNITY: Price down but coin survived initial phase. Potential accumulation zone."
+        elif token.price_change_1h > 30:
+            return "⚠️ ALREADY PUMPING: Consider waiting for pullback or smaller position."
+        else:
+            return "✅ STABLE: Initial chaos passed. Price action more predictable. Safer entry."
     
     def _get_launch_stage(self, age_hours: float) -> LaunchStage:
         """Determine launch stage based on age"""
@@ -1269,13 +1407,28 @@ class DexLaunchHunter:
         total_costs = getattr(token, 'total_round_trip_cost_pct', 0)
         real_profit = getattr(token, 'estimated_real_profit_pct', 0)
         
+        # Get entry recommendation (NEW - December 2025)
+        entry_rec = getattr(token, 'entry_recommendation', None) or {}
+        entry_status = entry_rec.get('recommendation', 'EVALUATE')
+        entry_reason = entry_rec.get('reason', '')
+        age_status = entry_rec.get('age_status', f"{token.age_hours:.1f} hours")
+        timing_summary = entry_rec.get('timing_summary', '')
+        initial_passed = entry_rec.get('initial_trading_passed', token.age_hours > 0.5)
+        pump_forming = entry_rec.get('pump_forming', False)
+        
         msg = (
             f"🚀 **{token.symbol}** on {token.chain.value}\n"
             f"💰 Price: ${token.price_usd:.8f}\n"
             f"💧 Liquidity: ${token.liquidity_usd:,.0f} ({liquidity_tier})\n"
             f"📊 Score: {token.composite_score:.1f}/100\n"
             f"⚠️ Risk: {token.risk_level.value}\n"
-            f"⏰ Age: {token.age_hours:.1f} hours\n"
+            f"\n"
+            f"**⏰ COIN AGE & ENTRY TIMING:**\n"
+            f"• Age: {age_status}\n"
+            f"• Initial Trading Passed: {'✅ YES' if initial_passed else '⏳ NO'}\n"
+            f"• Pump Signal: {'🚀 YES' if pump_forming else '❌ NO'}\n"
+            f"• **{entry_status}**\n"
+            f"• {timing_summary}\n"
             f"\n"
             f"**💸 REAL COST ANALYSIS ($100 trade):**\n"
             f"• Round-trip costs: ~{total_costs:.1f}%\n"

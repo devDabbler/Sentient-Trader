@@ -53,6 +53,12 @@ class AlertType(Enum):
     POSITION_ADDED = "POSITION_ADDED"  # New position tracking
     POSITION_CLOSED = "POSITION_CLOSED"  # Position closed
     SLIPPAGE_WARNING = "SLIPPAGE_WARNING"  # High slippage warning
+    # Status updates (NEW - December 2025) - Regular holding status messages
+    STATUS_HOLDING_STRONG = "STATUS_HOLDING_STRONG"  # Position looking good
+    STATUS_MOMENTUM_BUILDING = "STATUS_MOMENTUM_BUILDING"  # Momentum increasing
+    STATUS_CONSOLIDATING = "STATUS_CONSOLIDATING"  # Price consolidating
+    STATUS_WATCH_CLOSELY = "STATUS_WATCH_CLOSELY"  # Minor concern, watch
+    STATUS_RECOVERY = "STATUS_RECOVERY"  # Recovering from dip
 
 
 class PositionStatus(Enum):
@@ -121,6 +127,14 @@ class HeldPosition:
     whale_net_usd: float = 0.0  # Net whale activity (positive = accumulating)
     txn_velocity: float = 0.0  # Transactions per minute
     last_order_flow_update: Optional[datetime] = None
+    
+    # Status Tracking (NEW - December 2025) - For regular status updates
+    current_status: str = "MONITORING"  # HOLDING_STRONG, MOMENTUM_BUILDING, CONSOLIDATING, WATCH_CLOSELY, RECOVERY
+    status_reason: str = ""  # Human-readable reason for current status
+    last_status_update: Optional[datetime] = None
+    status_update_interval: int = 60  # Send status updates every 60 seconds (adjustable)
+    consecutive_up_checks: int = 0  # Number of consecutive price increases
+    consecutive_down_checks: int = 0  # Number of consecutive price decreases
     
     @property
     def current_value_usd(self) -> float:
@@ -610,8 +624,22 @@ class FastPositionMonitor:
                     if position.unrealized_pnl_pct < 0 and abs(position.unrealized_pnl_pct) > position.max_drawdown_pct:
                         position.max_drawdown_pct = abs(position.unrealized_pnl_pct)
                     
+                    # Calculate price change from last check
+                    price_change_pct = ((current_price - position.last_price) / position.last_price) * 100 if position.last_price > 0 else 0
+                    
+                    # Track consecutive up/down checks for momentum detection
+                    if price_change_pct > 0.5:
+                        position.consecutive_up_checks += 1
+                        position.consecutive_down_checks = 0
+                    elif price_change_pct < -0.5:
+                        position.consecutive_down_checks += 1
+                        position.consecutive_up_checks = 0
+                    
                     # 3. Check exit rules (PURE MATH, NO AI)
                     await self._check_exit_rules(position)
+                    
+                    # 4. Update position status and send status messages (NEW - December 2025)
+                    await self._update_position_status(position, price_change_pct)
                     
                     # Small delay between tokens to avoid rate limits
                     await asyncio.sleep(0.5)
@@ -729,6 +757,193 @@ class FastPositionMonitor:
             )
             position.partial_exit_taken = True
             return
+    
+    # ========================================================================
+    # POSITION STATUS UPDATES (NEW - December 2025)
+    # ========================================================================
+    
+    async def _update_position_status(self, position: HeldPosition, price_change_pct: float):
+        """
+        Analyze position health and send periodic status updates.
+        
+        Provides regular feedback like:
+        - "Looking active, keep holding"
+        - "Momentum building"
+        - "Consolidating, be patient"
+        - "Watch closely - some weakness"
+        - "Recovering from dip"
+        
+        Status updates are sent every 60 seconds (configurable) to avoid spam.
+        """
+        now = datetime.now()
+        
+        # Check if enough time has passed since last status update
+        time_since_last = 0
+        if position.last_status_update:
+            time_since_last = (now - position.last_status_update).total_seconds()
+            if time_since_last < position.status_update_interval:
+                return  # Too soon, skip this update
+        
+        # Analyze current position health
+        status, reason, alert_type = self._analyze_position_health(position, price_change_pct)
+        
+        # Update position status
+        old_status = position.current_status
+        position.current_status = status
+        position.status_reason = reason
+        position.last_status_update = now
+        
+        # Only send Discord alert if status changed or enough time passed (every minute)
+        should_alert = (
+            status != old_status or 
+            time_since_last >= position.status_update_interval
+        )
+        
+        if should_alert:
+            await self._send_status_alert(position, alert_type, reason)
+    
+    def _analyze_position_health(self, position: HeldPosition, price_change_pct: float) -> tuple:
+        """
+        Analyze position health and return status, reason, and alert type.
+        
+        Returns:
+            tuple: (status_string, reason_string, AlertType)
+        """
+        pnl = position.unrealized_pnl_pct
+        drawdown = position.drawdown_from_peak_pct
+        order_flow = position.order_flow_signal
+        consecutive_up = position.consecutive_up_checks
+        consecutive_down = position.consecutive_down_checks
+        buy_sell_ratio = position.buy_sell_ratio_1m
+        
+        # MOMENTUM BUILDING: Multiple consecutive price increases with good order flow
+        if consecutive_up >= 3 and order_flow in ["BUY", "STRONG_BUY"]:
+            return (
+                "MOMENTUM_BUILDING",
+                f"🚀 Momentum building! {consecutive_up} consecutive up-ticks, order flow is {order_flow}. Ride the wave!",
+                AlertType.STATUS_MOMENTUM_BUILDING
+            )
+        
+        # HOLDING STRONG: Good profit, stable price, healthy order flow
+        if pnl >= 10 and drawdown < 5 and order_flow in ["NEUTRAL", "BUY", "STRONG_BUY"]:
+            return (
+                "HOLDING_STRONG",
+                f"💪 Holding strong! +{pnl:.1f}% profit, only {drawdown:.1f}% from peak. Looking good, keep holding!",
+                AlertType.STATUS_HOLDING_STRONG
+            )
+        
+        # RECOVERY: Was down but recovering
+        if pnl > 0 and position.max_drawdown_pct > 10 and consecutive_up >= 2:
+            return (
+                "RECOVERY",
+                f"📈 Recovery mode! Back in profit (+{pnl:.1f}%) after {position.max_drawdown_pct:.1f}% max drawdown. Patience paid off!",
+                AlertType.STATUS_RECOVERY
+            )
+        
+        # CONSOLIDATING: Price stable, low volatility
+        if abs(price_change_pct) < 1 and abs(pnl) < 15 and drawdown < 8:
+            vol_msg = "low volume" if buy_sell_ratio < 1.5 else "active trading"
+            return (
+                "CONSOLIDATING",
+                f"⏸️ Consolidating with {vol_msg}. P&L: {pnl:+.1f}%. Be patient, accumulation phase.",
+                AlertType.STATUS_CONSOLIDATING
+            )
+        
+        # WATCH CLOSELY: Minor concerns but not critical
+        if consecutive_down >= 2 or (drawdown > 5 and drawdown < position.trailing_stop_pct * 0.7):
+            concern = ""
+            if consecutive_down >= 2:
+                concern = f"{consecutive_down} consecutive down-ticks"
+            elif order_flow == "SELL":
+                concern = "sell pressure building"
+            else:
+                concern = f"{drawdown:.1f}% drawdown from peak"
+            return (
+                "WATCH_CLOSELY",
+                f"👀 Watch closely! {concern}. P&L: {pnl:+.1f}%. Not critical yet, but stay alert.",
+                AlertType.STATUS_WATCH_CLOSELY
+            )
+        
+        # DEFAULT: Still monitoring, nothing notable
+        time_held = (datetime.now() - position.entry_time).total_seconds() / 60  # minutes
+        return (
+            "MONITORING",
+            f"📊 Monitoring position. P&L: {pnl:+.1f}%, held {time_held:.0f}m. Price action normal.",
+            AlertType.STATUS_HOLDING_STRONG  # Use this as default status type
+        )
+    
+    async def _send_status_alert(self, position: HeldPosition, alert_type: AlertType, message: str):
+        """
+        Send a status update alert to Discord.
+        
+        Uses a different color scheme for status updates (not exit signals).
+        """
+        # Status update colors (blues/greens for positive, yellows for caution)
+        color_map = {
+            AlertType.STATUS_HOLDING_STRONG: 0x00FF88,    # Teal/Green
+            AlertType.STATUS_MOMENTUM_BUILDING: 0x00FF00, # Bright Green
+            AlertType.STATUS_CONSOLIDATING: 0x808080,     # Gray
+            AlertType.STATUS_WATCH_CLOSELY: 0xFFAA00,     # Orange
+            AlertType.STATUS_RECOVERY: 0x00FFFF,          # Cyan
+        }
+        color = color_map.get(alert_type, 0x808080)
+        
+        # Calculate profitability for context
+        profitability = self.calculate_real_profitability(
+            liquidity_usd=position.liquidity_usd,
+            trade_size_usd=position.investment_usd,
+            displayed_gain_pct=max(position.unrealized_pnl_pct, 0)
+        )
+        
+        # Time held
+        time_held = (datetime.now() - position.entry_time).total_seconds()
+        time_held_str = f"{time_held/60:.0f}m" if time_held < 3600 else f"{time_held/3600:.1f}h"
+        
+        # Build Discord embed
+        embed = {
+            "title": f"📊 STATUS: {position.symbol}",
+            "description": message,
+            "color": color,
+            "fields": [
+                {
+                    "name": "💰 Position",
+                    "value": f"Entry: ${position.entry_price:.8f}\nCurrent: ${position.current_price:.8f}\nHeld: {time_held_str}",
+                    "inline": True
+                },
+                {
+                    "name": "📈 P&L",
+                    "value": f"Displayed: {position.unrealized_pnl_pct:+.2f}%\nReal: {profitability.real_profit_pct:+.2f}%\nPeak: {position.max_profit_pct:+.1f}%",
+                    "inline": True
+                },
+                {
+                    "name": "📊 Metrics",
+                    "value": f"Drawdown: {position.drawdown_from_peak_pct:.1f}%\nFlow: {position.order_flow_signal}\nB/S: {position.buy_sell_ratio_1m:.2f}x",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": f"Status Update | {datetime.now().strftime('%H:%M:%S')} | Next update in ~{position.status_update_interval}s"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Log the status
+        logger.info(f"📊 STATUS {position.symbol}: {position.current_status} | P&L: {position.unrealized_pnl_pct:+.2f}%")
+        print(f"[FAST_MONITOR] 📊 STATUS {position.symbol}: {position.current_status} | P&L: {position.unrealized_pnl_pct:+.2f}%", flush=True)
+        
+        # Send to Discord
+        if self.discord_webhook_url:
+            try:
+                payload = {"embeds": [embed]}
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        self.discord_webhook_url,
+                        json=payload
+                    )
+                    if response.status_code not in [200, 204]:
+                        logger.warning(f"Discord webhook returned {response.status_code}")
+            except Exception as e:
+                logger.error(f"Failed to send Discord status alert: {e}")
     
     # ========================================================================
     # ORDER FLOW MONITORING (Birdeye API)

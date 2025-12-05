@@ -41,6 +41,15 @@ The platform supports:
 * **🐦 X/Twitter Integration:** Real-time social sentiment for trending tokens
 * **📢 Multi-Source Discovery:** DexScreener API + Pump.fun integration
 * **🎣 Webhook Execution Ready:** High-level placeholders for future bundler integration (Jito, Solayer)
+* **⏰ Coin Age & Entry Recommendations (NEW - December 2025):** Smart entry timing based on coin age
+  - Tracks if initial trading has passed (FOMO/rug risk reduced after 15-30 min)
+  - Detects pump patterns for second-wave entry opportunities
+  - Age classifications: BRAND NEW (<5m), VERY FRESH (5-15m), FRESH (15-30m), SETTLING (30-60m), ESTABLISHED (1-3h), MATURING (3-6h), AGED (6-24h), OLD (24h+)
+  - Entry recommendations: HIGH RISK ENTRY (ultra-fresh), WAIT FOR SETTLING, GOOD ENTRY - PUMP FORMING, POTENTIAL DIP BUY, SAFER ENTRY, PRIME ENTRY
+  - Detects accumulation patterns (stable price + rising volume)
+  - Detects recovery bounces (down 24h but up 1h = potential second wave)
+  - Detects consolidation breakouts (5m spike after flat 1h)
+  - Human-readable timing summaries in Discord alerts
 
 #### Crypto Breakout Service (NEW - December 2025)
 * **📊 Multi-Indicator Detection:** Volume spike, EMA crossover, MACD, RSI, Bollinger Bands
@@ -58,6 +67,14 @@ Real-time monitoring for held meme coin positions with realistic profit calculat
   - Pump spike detection (+5% in 2 seconds)
   - Profit target alerts with partial exit suggestions
   - Discord webhook integration for instant notifications
+* **📣 Position Status Updates (NEW - December 2025):** Regular holding feedback instead of just exit signals
+  - **HOLDING_STRONG:** Good profit, stable price, healthy order flow - "Keep holding!"
+  - **MOMENTUM_BUILDING:** Multiple consecutive up-ticks with buy pressure - "Ride the wave!"
+  - **CONSOLIDATING:** Price stable, accumulation phase - "Be patient"
+  - **WATCH_CLOSELY:** Minor concerns (consecutive down-ticks, some sell pressure) - "Stay alert"
+  - **RECOVERY:** Bouncing back from drawdown - "Patience paid off!"
+  - Status updates every 60 seconds (configurable) to avoid spam
+  - Tracks consecutive up/down price movements for momentum detection
 * **💸 Profitability Calculator:** Shows REAL profit after slippage, fees, and price impact
   - Realistic slippage estimates by liquidity tier (MICRO: 12-15%, LOW: 8-10%, MEDIUM: 5-7%)
   - AMM price impact calculation (trade_size / 2 * liquidity)
