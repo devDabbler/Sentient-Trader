@@ -234,6 +234,16 @@ SERVICES = {
         "interval_min": 1,
         "interval_max": 10  # Max 10 seconds for fast monitoring
     },
+    "Pump.fun Gambler": {
+        "name": "sentient-pumpfun-gambler",
+        "description": "Real-time pump.fun bonding curve monitoring (new tokens, graduations)",
+        "emoji": "🎲",
+        "category": "crypto",
+        "interval_key": "scan_interval_seconds",
+        "interval_default": 5,
+        "interval_min": 2,
+        "interval_max": 60  # Max 1 minute between scans
+    },
     "Crypto Breakout Monitor": {
         "name": "sentient-crypto-breakout",
         "description": "Monitors crypto for breakout patterns and momentum",
@@ -983,6 +993,7 @@ def get_service_status(service_name: str) -> dict:
             'sentient-stock-ai-trader': 'SentientStockAI',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-dex-fast-monitor': 'SentientDEXFastMonitor',
+            'sentient-pumpfun-gambler': 'SentientPumpfunGambler',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',
             'sentient-crypto-ai-trader': 'SentientCryptoAI',
@@ -1040,6 +1051,7 @@ def control_service(service_name: str, action: str) -> tuple:
             'sentient-stock-ai-trader': 'SentientStockAI',
             'sentient-dex-launch': 'SentientDEXLaunch',
             'sentient-dex-fast-monitor': 'SentientDEXFastMonitor',
+            'sentient-pumpfun-gambler': 'SentientPumpfunGambler',
             'sentient-crypto-breakout': 'SentientCryptoBreakout',
             'sentient-discord-approval': 'SentientDiscordApproval',
             'sentient-crypto-ai-trader': 'SentientCryptoAI',
@@ -1101,6 +1113,9 @@ def get_service_logs(service_name: str, lines: int = 100) -> str:
         'sentient-dex-fast-monitor': [
             'logs/dex_fast_monitor.log',
             'logs/dex_fast_monitor_error.log'
+        ],
+        'sentient-pumpfun-gambler': [
+            'logs/pumpfun_gambler.log'
         ],
         'sentient-crypto-breakout': [
             'logs/crypto_breakout_service.log',
@@ -1202,6 +1217,9 @@ def clear_service_logs(service_name: str) -> tuple:
         'sentient-dex-fast-monitor': [
             'logs/dex_fast_monitor.log',
             'logs/dex_fast_monitor_error.log'
+        ],
+        'sentient-pumpfun-gambler': [
+            'logs/pumpfun_gambler.log'
         ],
         'sentient-crypto-breakout': [
             'logs/crypto_breakout_service.log',
@@ -2001,9 +2019,9 @@ def main():
         # ============================================================
         with st.expander("🎛️ Preset Modes", expanded=False):
             presets = [
-                ("🪙 Crypto", ["DEX Launch Monitor", "DEX Fast Position Monitor", "Crypto Breakout Monitor", "AI Crypto Trader", "Discord Approval Bot", "Analysis Queue Processor"]),
+                ("🪙 Crypto", ["DEX Launch Monitor", "DEX Fast Position Monitor", "Pump.fun Gambler", "Crypto Breakout Monitor", "AI Crypto Trader", "Discord Approval Bot", "Analysis Queue Processor"]),
                 ("📈 Stocks", ["Stock Monitor", "AI Stock Trader", "ORB FVG Scanner", "Discord Approval Bot", "Analysis Queue Processor"]),
-                ("👀 Monitors", ["DEX Launch Monitor", "DEX Fast Position Monitor", "Crypto Breakout Monitor", "Stock Monitor", "ORB FVG Scanner", "Analysis Queue Processor"]),
+                ("👀 Monitors", ["DEX Launch Monitor", "DEX Fast Position Monitor", "Pump.fun Gambler", "Crypto Breakout Monitor", "Stock Monitor", "ORB FVG Scanner", "Analysis Queue Processor"]),
                 ("🤖 AI Only", ["AI Crypto Trader", "AI Stock Trader", "Discord Approval Bot"]),
                 ("🛡️ Minimal", ["Discord Approval Bot", "Analysis Queue Processor"]),
             ]

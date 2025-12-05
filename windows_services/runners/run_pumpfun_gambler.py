@@ -10,6 +10,7 @@ Features:
 - Graduation alerts when tokens hit 100%
 - pump.fun-specific AI analysis (not DexScreener)
 - Discord alerts to dedicated #pumpfun-alerts channel
+- Supabase journaling for all gambling decisions
 - Reply commands: ANALYZE, BUY $XX, PASS, MONITOR
 
 Usage:
@@ -99,6 +100,149 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('websockets').setLevel(logging.WARNING)
 
+# ========================================================================
+# SUPABASE JOURNALING SETUP
+# ========================================================================
+_supabase = None
+_supabase_enabled = False
+
+def init_supabase():
+    """Initialize Supabase client for journaling gambling decisions."""
+    global _supabase, _supabase_enabled
+    
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_KEY")
+    
+    if supabase_url and supabase_key:
+        try:
+            from supabase import create_client
+            _supabase = create_client(supabase_url, supabase_key)
+            _supabase_enabled = True
+            logger.info("✅ Supabase journaling enabled for pump.fun gambling")
+            return True
+        except ImportError:
+            logger.warning("⚠️ Supabase package not installed - journaling disabled")
+        except Exception as e:
+            logger.warning(f"⚠️ Supabase init failed: {e} - journaling disabled")
+    else:
+        logger.info("ℹ️ Supabase not configured - journaling disabled")
+    
+    return False
+
+
+async def journal_gambling_decision(
+    token_mint: str,
+    symbol: str,
+    name: str,
+    event_type: str,  # "CREATION", "GRADUATION", "ANALYSIS"
+    analysis_score: float = 0.0,
+    recommendation: str = "SKIP",
+    risk_level: str = "HIGH",
+    max_bet_usd: float = 0.0,
+    market_cap_sol: float = 0.0,
+    market_cap_usd: float = 0.0,
+    progress_pct: float = 0.0,
+    total_trades: int = 0,
+    holder_count: int = 0,
+    buy_pressure: float = 0.5,
+    reasoning: str = "",
+    risk_factors: list = None,
+    green_flags: list = None,
+):
+    """
+    Journal a gambling decision/alert to Supabase.
+    
+    Records all token analysis and recommendations for later review
+    and strategy refinement.
+    """
+    global _supabase, _supabase_enabled
+    
+    if not _supabase_enabled or not _supabase:
+        logger.debug("Supabase not enabled, skipping gambling journal")
+        return
+    
+    try:
+        from datetime import datetime
+        
+        data = {
+            "token_mint": token_mint,
+            "symbol": symbol,
+            "name": name,
+            "event_type": event_type,
+            "event_time": datetime.now().isoformat(),
+            "analysis_score": float(analysis_score),
+            "recommendation": recommendation,
+            "risk_level": risk_level,
+            "max_bet_usd": float(max_bet_usd),
+            "market_cap_sol": float(market_cap_sol),
+            "market_cap_usd": float(market_cap_usd),
+            "progress_pct": float(progress_pct),
+            "total_trades": int(total_trades),
+            "holder_count": int(holder_count),
+            "buy_pressure": float(buy_pressure),
+            "reasoning": reasoning[:500] if reasoning else "",  # Truncate long reasoning
+            "risk_factors": risk_factors or [],
+            "green_flags": green_flags or [],
+        }
+        
+        result = _supabase.table("pumpfun_gambling_journal").insert(data).execute()
+        
+        if result.data:
+            logger.debug(f"📝 Journaled gambling decision: {symbol} ({event_type})")
+        else:
+            logger.warning(f"Supabase insert returned no data for {symbol}")
+            
+    except Exception as e:
+        logger.error(f"Failed to journal gambling decision to Supabase: {e}")
+
+
+async def journal_gambling_outcome(
+    token_mint: str,
+    action_taken: str,  # "BUY", "PASS", "IGNORED"
+    amount_usd: float = 0.0,
+    outcome: str = "",  # "WIN", "LOSS", "PENDING"
+    pnl_usd: float = 0.0,
+    pnl_pct: float = 0.0,
+    notes: str = "",
+):
+    """
+    Journal the outcome of a gambling decision.
+    
+    Updates an existing journal entry with the actual outcome.
+    """
+    global _supabase, _supabase_enabled
+    
+    if not _supabase_enabled or not _supabase:
+        return
+    
+    try:
+        from datetime import datetime
+        
+        update_data = {
+            "action_taken": action_taken,
+            "amount_usd": float(amount_usd),
+            "outcome": outcome,
+            "pnl_usd": float(pnl_usd),
+            "pnl_pct": float(pnl_pct),
+            "outcome_time": datetime.now().isoformat(),
+            "notes": notes[:500] if notes else "",
+        }
+        
+        # Find and update the most recent entry for this token
+        result = _supabase.table("pumpfun_gambling_journal") \
+            .update(update_data) \
+            .eq("token_mint", token_mint) \
+            .is_("action_taken", "null") \
+            .order("event_time", desc=True) \
+            .limit(1) \
+            .execute()
+        
+        if result.data:
+            logger.info(f"📝 Updated gambling outcome: {token_mint[:8]}... -> {action_taken}")
+            
+    except Exception as e:
+        logger.error(f"Failed to update gambling outcome: {e}")
+
 logger.info("")
 logger.info("Starting imports...")
 
@@ -113,6 +257,9 @@ async def run_pumpfun_gambler():
     """Run the pump.fun gambler monitor"""
     from services.bonding_curve_monitor import get_bonding_curve_monitor
     from services.pumpfun_analyzer import get_pumpfun_analyzer
+    
+    # Initialize Supabase journaling
+    init_supabase()
     
     # Parse configuration from environment
     max_bet = float(os.getenv("PUMPFUN_MAX_BET", "25"))
@@ -180,6 +327,19 @@ async def run_pumpfun_gambler():
         msg = f"🎰 NEW: {token.symbol} on pump.fun"
         print(f"[PUMPFUN] {msg}", flush=True)
         
+        # Journal the token creation event
+        await journal_gambling_decision(
+            token_mint=token.mint,
+            symbol=token.symbol,
+            name=token.name,
+            event_type="CREATION",
+            market_cap_sol=token.market_cap_sol,
+            market_cap_usd=token.market_cap_usd,
+            progress_pct=token.progress_pct,
+            total_trades=token.total_trades,
+            buy_pressure=token.buy_pressure,
+        )
+        
         # Auto-analyze after some initial activity (5+ trades)
         if token.total_trades >= 5 and token.mint not in analyzed_tokens:
             analyzed_tokens.add(token.mint)
@@ -189,6 +349,27 @@ async def run_pumpfun_gambler():
                     # Send analysis alert for promising tokens
                     await analyzer.send_analysis_alert(analysis)
                     logger.info(f"📊 Auto-analyzed {token.symbol}: Score={analysis.score:.0f}")
+                    
+                    # Journal the analysis
+                    await journal_gambling_decision(
+                        token_mint=token.mint,
+                        symbol=analysis.symbol,
+                        name=analysis.name,
+                        event_type="ANALYSIS",
+                        analysis_score=analysis.score,
+                        recommendation=analysis.recommendation,
+                        risk_level=analysis.risk_level.value if hasattr(analysis.risk_level, 'value') else str(analysis.risk_level),
+                        max_bet_usd=analysis.max_bet_usd,
+                        market_cap_sol=analysis.market_cap_sol,
+                        market_cap_usd=analysis.market_cap_usd,
+                        progress_pct=analysis.progress_pct,
+                        total_trades=analysis.total_trades,
+                        holder_count=analysis.holder_count,
+                        buy_pressure=analysis.buy_pressure,
+                        reasoning=analysis.reasoning,
+                        risk_factors=analysis.risk_factors,
+                        green_flags=analysis.green_flags,
+                    )
             except Exception as e:
                 logger.debug(f"Auto-analysis error: {e}")
     
@@ -207,6 +388,36 @@ async def run_pumpfun_gambler():
             if analysis:
                 await analyzer.send_analysis_alert(analysis)
                 logger.info(f"🎓 Graduation analysis for {migration.symbol}: Score={analysis.score:.0f}")
+                
+                # Journal the graduation with full analysis
+                await journal_gambling_decision(
+                    token_mint=migration.mint,
+                    symbol=analysis.symbol,
+                    name=analysis.name,
+                    event_type="GRADUATION",
+                    analysis_score=analysis.score,
+                    recommendation=analysis.recommendation,
+                    risk_level=analysis.risk_level.value if hasattr(analysis.risk_level, 'value') else str(analysis.risk_level),
+                    max_bet_usd=analysis.max_bet_usd,
+                    market_cap_sol=analysis.market_cap_sol,
+                    market_cap_usd=analysis.market_cap_usd,
+                    progress_pct=100.0,  # Graduated = 100%
+                    total_trades=analysis.total_trades,
+                    holder_count=analysis.holder_count,
+                    buy_pressure=analysis.buy_pressure,
+                    reasoning=analysis.reasoning,
+                    risk_factors=analysis.risk_factors,
+                    green_flags=analysis.green_flags,
+                )
+            else:
+                # Journal graduation even without analysis
+                await journal_gambling_decision(
+                    token_mint=migration.mint,
+                    symbol=migration.symbol,
+                    name=migration.symbol,
+                    event_type="GRADUATION",
+                    progress_pct=100.0,
+                )
         except Exception as e:
             logger.debug(f"Graduation analysis error: {e}")
         
