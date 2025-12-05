@@ -546,6 +546,17 @@ class DiscordTradeApprovalBot(commands.Bot):
             await self._handle_dex_add_position(message, add_data)
             return
         
+        # Shorthand DEX position entry: just "$25" or "25" or "$50" when replying to analysis/alert
+        # This is the simplified format for quickly adding positions after using "monitor"
+        original_content = message.content.strip()
+        dollar_amount_match = re.match(r'^\$?(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
+        if dollar_amount_match and message.reference:
+            # User is replying with just a dollar amount - treat as ADD command
+            amount = dollar_amount_match.group(1)
+            logger.info(f"   🎯 Shorthand DEX entry detected: ${amount}")
+            await self._handle_dex_add_position(message, f"${amount}")
+            return
+        
         # DEX Token MONITOR command: "MONITOR <token_address>" or "TRACK <address>"
         # Adds token to Fast Position Monitor for order flow tracking
         monitor_match = re.match(r'(MONITOR|TRACK|M)\s+([A-Za-z0-9]+)', content)
@@ -1135,10 +1146,10 @@ class DiscordTradeApprovalBot(commands.Bot):
                 'timestamp': datetime.now()
             }
             
-            # Simplified action prompt
+            # Simplified action prompt - now supports just "$25" shorthand
             action_msg = (
                 f"\n\n**🎯 To start monitoring, just reply:**\n"
-                f"`ADD $25` or `ADD 50` or `ADD $100`\n\n"
+                f"`$25` or `$50` or `$100`\n\n"
                 f"_I'll use the token info above automatically!_"
             )
             
@@ -1395,6 +1406,36 @@ class DiscordTradeApprovalBot(commands.Bot):
             # Calculate breakeven
             breakeven = position.breakeven_gain_needed_pct
             
+            # Get order flow for entry timing recommendation
+            entry_timing = ""
+            try:
+                from services.solana_transaction_monitor import SolanaTransactionMonitor
+                txn_monitor = SolanaTransactionMonitor()
+                order_flow = await txn_monitor.get_order_flow(token_address, symbol=symbol)
+                if order_flow and order_flow.metrics_5m:
+                    recommendation = txn_monitor.get_entry_exit_recommendation(order_flow)
+                    action = recommendation.get("action", "HOLD")
+                    reason = recommendation.get("reason", "")
+                    m5 = order_flow.metrics_5m
+                    
+                    action_emoji = {
+                        "ENTER_NOW": "🟢 ENTER NOW",
+                        "CONSIDER_ENTRY": "🟡 GOOD ENTRY",
+                        "HOLD": "⏸️ WAIT",
+                        "CONSIDER_EXIT": "🟠 CAUTION",
+                        "EXIT_NOW": "🔴 DON'T ENTER"
+                    }.get(action, f"⚪ {action}")
+                    
+                    entry_timing = (
+                        f"\n\n🎯 **Entry Timing:**\n"
+                        f"   Signal: **{action_emoji}**\n"
+                        f"   Reason: {reason}\n"
+                        f"   5m Flow: {m5.buy_count} buys / {m5.sell_count} sells\n"
+                        f"   Ratio: {m5.buy_sell_ratio:.2f}x"
+                    )
+            except Exception as e:
+                logger.debug(f"Could not get order flow for entry timing: {e}")
+            
             await message.channel.send(
                 f"✅ **Position Added to Fast Monitor!**\n\n"
                 f"🪙 **{symbol}**\n"
@@ -1403,7 +1444,8 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"   📦 Tokens: {tokens_held:,.0f}\n"
                 f"   💵 Investment: ${investment_usd:.2f}\n"
                 f"   💧 Liquidity: ${liquidity_usd:,.0f}\n"
-                f"   ⚠️ Breakeven needs: **{breakeven:.0f}%+ gain**\n\n"
+                f"   ⚠️ Breakeven needs: **{breakeven:.0f}%+ gain**"
+                f"{entry_timing}\n\n"
                 f"📊 **Monitoring Active:**\n"
                 f"   • Price updates: Every 2 seconds\n"
                 f"   • Order flow: Every 10 seconds\n"
