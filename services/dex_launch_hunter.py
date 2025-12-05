@@ -850,6 +850,107 @@ class DexLaunchHunter:
                 safety_score * 0.25                    # 25% safety
             )
         
+        # NEW: Calculate profitability score and penalize high-cost tokens
+        token = self._calculate_profitability_score(token)
+        
+        return token
+    
+    def _calculate_profitability_score(self, token: TokenLaunch, trade_size_usd: float = 100.0) -> TokenLaunch:
+        """
+        Calculate REAL profitability after slippage, price impact, and fees.
+        Penalizes tokens where breakeven requires extreme gains.
+        
+        Args:
+            token: TokenLaunch to analyze
+            trade_size_usd: Standard trade size for calculation
+            
+        Returns:
+            TokenLaunch with profitability data added
+        """
+        liquidity_usd = token.liquidity_usd
+        
+        # Realistic slippage for meme coins (based on liquidity tier)
+        if liquidity_usd < 5000:
+            buy_slippage_pct = 12.0  # Very low liq = brutal slippage
+            sell_slippage_pct = 15.0
+            liquidity_tier = "MICRO (High Risk)"
+        elif liquidity_usd < 20000:
+            buy_slippage_pct = 8.0
+            sell_slippage_pct = 10.0
+            liquidity_tier = "LOW"
+        elif liquidity_usd < 100000:
+            buy_slippage_pct = 5.0
+            sell_slippage_pct = 7.0
+            liquidity_tier = "MEDIUM"
+        elif liquidity_usd < 500000:
+            buy_slippage_pct = 3.0
+            sell_slippage_pct = 4.0
+            liquidity_tier = "GOOD"
+        else:
+            buy_slippage_pct = 2.0
+            sell_slippage_pct = 2.5
+            liquidity_tier = "HIGH (Safer)"
+        
+        # DEX fees (Raydium/Jupiter ~0.25-0.3%)
+        dex_fee_pct = 0.3
+        
+        # Priority fees (Solana)
+        priority_fee_usd = 0.50
+        
+        # 1. Price Impact (AMM constant product approximation)
+        buy_price_impact_pct = (trade_size_usd / (2 * max(liquidity_usd, 1))) * 100
+        
+        # 2. Total buy-side costs
+        buy_costs_pct = buy_slippage_pct + buy_price_impact_pct + dex_fee_pct
+        
+        # 3. Effective entry (what you actually paid per token)
+        effective_entry_value = trade_size_usd * (1 - buy_costs_pct / 100)
+        
+        # 4. Value after 50% displayed gain (test scenario)
+        displayed_gain_pct = 50.0
+        value_before_sell = effective_entry_value * (1 + displayed_gain_pct / 100)
+        
+        # 5. Sell-side costs (often WORSE - everyone trying to exit)
+        sell_price_impact_pct = (value_before_sell / (2 * max(liquidity_usd, 1))) * 100
+        sell_costs_pct = sell_slippage_pct + sell_price_impact_pct + dex_fee_pct
+        
+        # 6. Final value after selling
+        final_value = value_before_sell * (1 - sell_costs_pct / 100) - (priority_fee_usd * 2)
+        
+        # 7. REAL profit
+        real_profit_usd = final_value - trade_size_usd
+        real_profit_pct = (real_profit_usd / trade_size_usd) * 100
+        
+        # 8. Minimum gain needed to break even
+        breakeven_multiplier = 1 / ((1 - buy_costs_pct/100) * (1 - sell_costs_pct/100))
+        breakeven_gain_pct = (breakeven_multiplier - 1) * 100
+        
+        # Store profitability data on token
+        token.breakeven_gain_needed = round(breakeven_gain_pct, 2)
+        token.real_profit_potential = real_profit_pct > 5  # Need at least 5% REAL profit
+        token.liquidity_tier = liquidity_tier
+        token.total_round_trip_cost_pct = round(buy_costs_pct + sell_costs_pct, 2)
+        token.estimated_real_profit_pct = round(real_profit_pct, 2)
+        
+        # Apply profitability penalty to composite score
+        if breakeven_gain_pct > 30:
+            # Need 30%+ just to break even = very risky
+            old_score = token.composite_score
+            token.composite_score *= 0.5
+            token.alert_reasons.append(f"⚠️ HIGH COSTS: Need {breakeven_gain_pct:.0f}% to break even")
+            logger.warning(f"💸 {token.symbol}: Score penalty 50% (breakeven={breakeven_gain_pct:.0f}%)")
+        elif breakeven_gain_pct > 20:
+            token.composite_score *= 0.7
+            token.alert_reasons.append(f"⚠️ Need {breakeven_gain_pct:.0f}% to break even")
+            logger.info(f"💸 {token.symbol}: Score penalty 30% (breakeven={breakeven_gain_pct:.0f}%)")
+        elif breakeven_gain_pct > 15:
+            token.composite_score *= 0.85
+            token.alert_reasons.append(f"ℹ️ Need {breakeven_gain_pct:.0f}% to break even")
+        else:
+            # Good profitability - boost score slightly
+            token.composite_score = min(token.composite_score * 1.05, 100.0)
+            token.alert_reasons.append(f"✅ Good profitability (breakeven: {breakeven_gain_pct:.0f}%)")
+        
         return token
     
     def _calculate_launch_timing(self, token: TokenLaunch) -> TokenLaunch:
@@ -1147,16 +1248,32 @@ class DexLaunchHunter:
             return "LOW"
     
     def _generate_alert_message(self, token: TokenLaunch) -> str:
-        """Generate alert message"""
-        return (
-            f"New Launch Detected: {token.symbol}\n"
-            f"Chain: {token.chain.value}\n"
-            f"Price: ${token.price_usd:.8f}\n"
-            f"Liquidity: ${token.liquidity_usd:,.0f}\n"
-            f"Age: {token.age_hours:.1f} hours\n"
-            f"Score: {token.composite_score:.1f}/100\n"
-            f"Risk: {token.risk_level.value}"
+        """Generate alert message with profitability warning"""
+        # Get profitability data from token
+        breakeven = getattr(token, 'breakeven_gain_needed', 0)
+        liquidity_tier = getattr(token, 'liquidity_tier', 'UNKNOWN')
+        total_costs = getattr(token, 'total_round_trip_cost_pct', 0)
+        real_profit = getattr(token, 'estimated_real_profit_pct', 0)
+        
+        msg = (
+            f"🚀 **{token.symbol}** on {token.chain.value}\n"
+            f"💰 Price: ${token.price_usd:.8f}\n"
+            f"💧 Liquidity: ${token.liquidity_usd:,.0f} ({liquidity_tier})\n"
+            f"📊 Score: {token.composite_score:.1f}/100\n"
+            f"⚠️ Risk: {token.risk_level.value}\n"
+            f"⏰ Age: {token.age_hours:.1f} hours\n"
+            f"\n"
+            f"**💸 REAL COST ANALYSIS ($100 trade):**\n"
+            f"• Round-trip costs: ~{total_costs:.1f}%\n"
+            f"• Breakeven requires: **{breakeven:.0f}%+ gain**\n"
+            f"• If price +50%: Real profit = **{real_profit:.1f}%**\n"
         )
+        
+        # Add warning if breakeven is high
+        if breakeven > 20:
+            msg += f"\n⚠️ **WARNING**: Need {breakeven:.0f}%+ displayed gain just to break even!\n"
+        
+        return msg
     
     def _create_verification_checklist(self, token: TokenLaunch) -> VerificationChecklist:
         """Create verification checklist with research links for manual checks"""

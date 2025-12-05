@@ -205,6 +205,13 @@ class TokenLaunch:
     # Enhanced Timing Score (NEW)
     timing_advantage_score: float = 0.0  # 0-100, how early you are (100=very early)
     
+    # Profitability Analysis (NEW - December 2025)
+    breakeven_gain_needed: float = 0.0  # % gain needed to break even after slippage/fees
+    real_profit_potential: bool = True  # Whether trade is potentially profitable
+    liquidity_tier: str = "UNKNOWN"  # MICRO, LOW, MEDIUM, GOOD, HIGH
+    total_round_trip_cost_pct: float = 0.0  # Total slippage + fees + price impact
+    estimated_real_profit_pct: float = 0.0  # Real profit if +50% displayed gain
+    
     # Alerts
     alert_reasons: List[str] = field(default_factory=list)
     alert_priority: str = "MEDIUM"  # LOW, MEDIUM, HIGH, CRITICAL

@@ -49,6 +49,41 @@ The platform supports:
 * **💧 Liquidity Depth Analysis:** Validates execution viability at multiple price levels
 * **🎯 Confidence Scoring:** AI-enhanced technical analysis (when enabled)
 
+#### DEX Fast Position Monitor & Profitability Calculator (NEW - December 2025) ✅ PRODUCTION READY
+Real-time monitoring for held meme coin positions with realistic profit calculations:
+* **🎰 Fast Position Monitor:** Separate 2-second loop for held positions (not discovery)
+  - Real-time price tracking every 2 seconds
+  - Trailing stop detection (12% default, customizable)
+  - Hard stop loss (30% from entry)
+  - Pump spike detection (+5% in 2 seconds)
+  - Profit target alerts with partial exit suggestions
+  - Discord webhook integration for instant notifications
+* **💸 Profitability Calculator:** Shows REAL profit after slippage, fees, and price impact
+  - Realistic slippage estimates by liquidity tier (MICRO: 12-15%, LOW: 8-10%, MEDIUM: 5-7%)
+  - AMM price impact calculation (trade_size / 2 * liquidity)
+  - DEX fee accounting (0.25-0.3%)
+  - Solana priority fee inclusion ($0.50-2 per transaction)
+  - Breakeven gain calculation (often 15-30%+ for low liquidity tokens!)
+  - Round-trip cost display (buy + sell slippage + fees)
+* **📊 Enhanced Token Scoring:** Profitability analysis integrated into composite score
+  - Tokens needing 30%+ to break even get 50% score penalty
+  - Tokens needing 20%+ get 30% penalty
+  - Good profitability tokens get 5% boost
+  - `breakeven_gain_needed`, `liquidity_tier`, `total_round_trip_cost_pct` added to alerts
+* **📢 Enhanced Discord Alerts:** Now include real cost analysis
+  - Round-trip costs percentage
+  - Breakeven requirement warning
+  - Real profit if +50% displayed gain
+  - Liquidity tier (MICRO/LOW/MEDIUM/GOOD/HIGH)
+* **🔗 Service Control Panel Integration:** New "DEX Fast Position Monitor" service
+  - Checkbox selection in Crypto preset
+  - Configurable check interval (1-10 seconds)
+  - Log file at `logs/dex_fast_monitor.log`
+* **▶️ Standalone Usage:** `python windows_services/runners/run_dex_fast_monitor.py`
+  - CLI for adding/closing positions
+  - Persists positions to `data/dex_held_positions.json`
+  - Batch file: `START_DEX_FAST_MONITOR.bat`
+
 #### Enhanced Exit Reasoning (NEW - December 2025) ✅ PRODUCTION READY
 AI Position Manager now provides **detailed sell vs hold analysis** for every exit decision:
 * **📊 Dual-Perspective Analysis:** Every CLOSE_NOW recommendation includes both sell AND hold arguments
