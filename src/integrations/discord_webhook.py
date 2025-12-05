@@ -221,7 +221,24 @@ def _get_webhook_for_alert(alert: 'TradingAlert') -> Optional[str]:
         )
         
         # Check if this is a DEX Hunter / pump chaser alert
+        # Primary check: explicit flag from alert_system
         is_dex_alert = alert.details.get('_is_dex_alert', False) if alert.details else False
+        
+        # Secondary check: detect DEX-related content in message (backup detection)
+        if not is_dex_alert and alert.message:
+            msg_upper = alert.message.upper()
+            dex_keywords = ['DEX_DISCOVERY', 'DEX_PUMP', 'LAUNCH_DETECTED', 'TOKEN_LAUNCH', 
+                          'DEXSCREENER', 'NEW TOKEN DISCOVERED', 'HIGH SCORE LAUNCH']
+            if any(keyword in msg_upper for keyword in dex_keywords):
+                is_dex_alert = True
+        
+        # Tertiary check: source in metadata
+        if not is_dex_alert and alert.details:
+            source = alert.details.get('source', '')
+            dex_sources = ['dex_hunter', 'dex_launch', 'pump_chaser', 'dex_discovery', 'dex_fast_monitor']
+            if source in dex_sources:
+                is_dex_alert = True
+        
         if is_dex_alert:
             webhook_url = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS)
             if webhook_url:

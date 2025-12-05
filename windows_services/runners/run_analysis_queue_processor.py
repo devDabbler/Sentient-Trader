@@ -753,11 +753,27 @@ def send_discord_notification(results: list, request: dict):
             embeds.append(result_embed)
         
         # Send via webhook (Discord allows up to 10 embeds per message)
-        # Use channel routing based on asset type
+        # Use channel routing based on asset type and source
         webhook_url = DISCORD_WEBHOOK_URL
         try:
             from src.integrations.discord_channels import get_discord_webhook, AlertCategory
-            if asset_type == "CRYPTO":
+            
+            # Check if this is a DEX-related analysis (from DEX Hunter, Monitor command, etc.)
+            source = request.get("source", "").lower()
+            is_dex_request = source in ['dex_hunter', 'dex_launch', 'dex_monitor', 'pump_chaser', 'dex_fast_monitor', 'dex_discovery']
+            
+            # Also check if any ticker looks like a Solana address (32+ chars)
+            tickers = request.get("tickers", [])
+            if not is_dex_request and tickers:
+                for ticker in tickers:
+                    if len(ticker) >= 32 and ticker.isalnum():
+                        is_dex_request = True
+                        break
+            
+            # Route to appropriate channel
+            if is_dex_request:
+                webhook_url = get_discord_webhook(AlertCategory.DEX_PUMP_ALERTS) or DISCORD_WEBHOOK_URL
+            elif asset_type == "CRYPTO":
                 webhook_url = get_discord_webhook(AlertCategory.CRYPTO_ALERTS) or DISCORD_WEBHOOK_URL
             else:
                 webhook_url = get_discord_webhook(AlertCategory.STOCK_ALERTS) or DISCORD_WEBHOOK_URL

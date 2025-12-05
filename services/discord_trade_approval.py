@@ -1781,8 +1781,12 @@ _Commands work in all alert channels: stocks, crypto, options, and executions_
                 if t > cutoff
             }
             
-            # Determine asset type
+            # Determine asset type and source for channel routing
             asset_type = "crypto" if "/" in symbol or symbol in ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOGE", "XRP"] else "stock"
+            
+            # Check if this looks like a DEX token address (Solana addresses are 32-44 chars, base58)
+            is_dex_token = len(symbol) >= 32 and symbol.replace('/', '').isalnum()
+            source = "dex_monitor" if is_dex_token else ""
             
             # Updated preset map with stock-specific analysis modes
             if asset_type == "crypto":
@@ -1809,7 +1813,7 @@ _Commands work in all alert channels: stocks, crypto, options, and executions_
             }
             mode_desc = mode_descriptions.get(mode, "📊 Standard analysis")
             
-            if queue_analysis_request(preset, [symbol], asset_type=asset_type, analysis_mode=mode):
+            if queue_analysis_request(preset, [symbol], asset_type=asset_type, analysis_mode=mode, source=source):
                 await message.channel.send(
                     f"🔍 **{mode.upper()}** Analysis queued for **{symbol}** ({asset_type})\n"
                     f"   {mode_desc}\n"

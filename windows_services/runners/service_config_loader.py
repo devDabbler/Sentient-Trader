@@ -287,7 +287,8 @@ def queue_analysis_request(
     preset_key: str, 
     custom_tickers: Optional[List[str]] = None,
     asset_type: Optional[str] = None,
-    analysis_mode: Optional[str] = None
+    analysis_mode: Optional[str] = None,
+    source: Optional[str] = None
 ) -> bool:
     """
     Queue an analysis request for services to pick up.
@@ -297,6 +298,7 @@ def queue_analysis_request(
         custom_tickers: Optional list of tickers (overrides preset)
         asset_type: Optional asset type override ('crypto' or 'stock')
         analysis_mode: Optional analysis mode override ('standard', 'multi', 'ultimate')
+        source: Optional source identifier for channel routing (e.g., 'dex_hunter', 'dex_monitor')
         
     Returns:
         True if successful
@@ -340,6 +342,7 @@ def queue_analysis_request(
             "depth": preset.get("depth", "medium"),
             "asset_type": final_asset_type,
             "analysis_mode": final_analysis_mode,
+            "source": source or "",
             "status": "pending",
             "created": datetime.now().isoformat(),
         }

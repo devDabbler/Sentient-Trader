@@ -50,10 +50,15 @@ class AlertSystem:
             ticker = metadata.get('symbol', 'UNKNOWN') if metadata else 'UNKNOWN'
             
             # Check if this is a DEX Hunter / pump chaser alert
-            is_dex_alert = title in ["LAUNCH_DETECTED", "DEX_PUMP", "TOKEN_LAUNCH"] or \
-                           "LAUNCH" in title.upper() or \
-                           "PUMP" in title.upper() or \
-                           (metadata and metadata.get('source') in ['dex_hunter', 'dex_launch', 'pump_chaser'])
+            # Explicitly check for all DEX-related alert titles and sources
+            dex_titles = ["LAUNCH_DETECTED", "DEX_PUMP", "TOKEN_LAUNCH", "DEX_DISCOVERY", "DEX_ALERT"]
+            dex_sources = ['dex_hunter', 'dex_launch', 'pump_chaser', 'dex_discovery', 'dex_fast_monitor']
+            title_upper = title.upper()
+            is_dex_alert = title in dex_titles or \
+                           "LAUNCH" in title_upper or \
+                           "PUMP" in title_upper or \
+                           "DEX" in title_upper or \
+                           (metadata and metadata.get('source') in dex_sources)
             
             # Create TradingAlert (uses 'ticker' and 'details' not 'symbol' and 'metadata')
             alert = TradingAlert(
