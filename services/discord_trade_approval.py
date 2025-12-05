@@ -254,6 +254,10 @@ class DiscordTradeApprovalBot(commands.Bot):
         # 🛡️ PREVENT DUPLICATE PROCESSING - track trades currently being processed
         self._processing_trades: set = set()  # {trade_key} to prevent duplicate processing
         
+        # 🎯 DEX TOKEN CONTEXT - store last analyzed token per channel for simpler ADD commands
+        # Format: {channel_id: {'token_address': str, 'symbol': str, 'price': float, 'liquidity': float, 'timestamp': datetime}}
+        self._channel_token_context: Dict[int, dict] = {}
+        
         logger.info(f"🤖 Discord Trade Approval Bot initialized")
         logger.info(f"   Primary Channel ID: {channel_id}")
         logger.info(f"   Monitoring {len(self.monitored_channel_ids)} channels: {self.monitored_channel_ids}")
@@ -1121,14 +1125,20 @@ class DiscordTradeApprovalBot(commands.Bot):
                 f"{risk_analysis['recommendation']}"
             )
             
-            # Action prompt
+            # Store token context for simplified ADD commands
+            self._channel_token_context[message.channel.id] = {
+                'token_address': token_address,
+                'symbol': symbol,
+                'price': price,
+                'liquidity': liquidity,
+                'timestamp': datetime.now()
+            }
+            
+            # Simplified action prompt
             action_msg = (
-                f"\n\n**🎯 To start monitoring, reply with:**\n"
-                f"`ADD {token_address},{symbol},{price:.8f},<tokens>,<usd>`\n\n"
-                f"**Quick options:**\n"
-                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['conservative']['tokens']:.0f},25` (Conservative)\n"
-                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['moderate']['tokens']:.0f},50` (Moderate)\n"
-                f"• `ADD {token_address},{symbol},{price:.8f},{risk_analysis['aggressive']['tokens']:.0f},100` (Aggressive)"
+                f"\n\n**🎯 To start monitoring, just reply:**\n"
+                f"`ADD $25` or `ADD 50` or `ADD $100`\n\n"
+                f"_I'll use the token info above automatically!_"
             )
             
             await message.channel.send(analysis_msg + sizing_msg + action_msg)
@@ -1261,23 +1271,111 @@ class DiscordTradeApprovalBot(commands.Bot):
         """
         Handle ADD command to add a position to Fast Position Monitor.
         
-        Format: ADD token_address,symbol,entry_price,tokens_held,investment_usd[,liquidity_usd]
+        Simplified formats (uses last analyzed token):
+            ADD $25      - Add position with $25 investment
+            ADD 50       - Add position with $50 investment
+            ADD $100     - Add position with $100 investment
+        
+        Legacy format (still supported):
+            ADD token_address,symbol,entry_price,tokens_held,investment_usd[,liquidity_usd]
         """
+        import httpx  # For fetching token data from DexScreener
+        
         try:
-            parts = add_data.split(",")
-            if len(parts) < 5:
-                await message.channel.send(
-                    "❌ Invalid format. Use:\n"
-                    "`ADD token_address,symbol,entry_price,tokens_held,investment_usd`"
-                )
-                return
+            add_data = add_data.strip()
             
-            token_address = parts[0].strip()
-            symbol = parts[1].strip()
-            entry_price = float(parts[2].strip())
-            tokens_held = float(parts[3].strip())
-            investment_usd = float(parts[4].strip())
-            liquidity_usd = float(parts[5].strip()) if len(parts) > 5 else 10000.0
+            # Check for simplified format: just a dollar amount
+            # Matches: "$25", "25", "$50.00", "100"
+            simple_amount_match = add_data.replace('$', '').replace(',', '').strip()
+            
+            # Try to parse as simple dollar amount first
+            try:
+                investment_usd = float(simple_amount_match)
+                is_simple_format = True
+            except ValueError:
+                is_simple_format = False
+            
+            if is_simple_format:
+                # Use stored token context from last "monitor" command
+                context = self._channel_token_context.get(message.channel.id)
+                
+                # If no context, try to extract from referenced message (reply to alert)
+                if not context and message.reference:
+                    try:
+                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                        token_address = await self._extract_token_address_from_message(ref_msg)
+                        if token_address:
+                            # Fetch current price from DexScreener
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                response = await client.get(f"https://api.dexscreener.com/latest/dex/tokens/{token_address}")
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    pairs = data.get("pairs", [])
+                                    if pairs:
+                                        best_pair = max(pairs, key=lambda p: float(p.get("liquidity", {}).get("usd", 0) or 0))
+                                        price = float(best_pair.get("priceUsd", 0))
+                                        symbol = best_pair.get("baseToken", {}).get("symbol", "UNKNOWN")
+                                        liquidity = float(best_pair.get("liquidity", {}).get("usd", 0))
+                                        
+                                        if price > 0:
+                                            context = {
+                                                'token_address': token_address,
+                                                'symbol': symbol,
+                                                'price': price,
+                                                'liquidity': liquidity,
+                                                'timestamp': datetime.now()
+                                            }
+                                            # Store for future use
+                                            self._channel_token_context[message.channel.id] = context
+                                            logger.info(f"Extracted token from reply: {symbol} @ ${price:.8f}")
+                    except Exception as e:
+                        logger.debug(f"Could not extract token from reply: {e}")
+                
+                if not context:
+                    await message.channel.send(
+                        "❌ No token context found.\n\n"
+                        "**Option 1:** Reply to a DEX alert with `ADD $25`\n"
+                        "**Option 2:** Use `monitor` to analyze first, then `ADD $25`"
+                    )
+                    return
+                
+                # Check if context is stale (older than 10 minutes)
+                age_minutes = (datetime.now() - context['timestamp']).total_seconds() / 60
+                if age_minutes > 10:
+                    await message.channel.send(
+                        f"⚠️ Token context is {age_minutes:.0f} minutes old. "
+                        f"Please run `monitor` again to get fresh data before adding position."
+                    )
+                    return
+                
+                token_address = context['token_address']
+                symbol = context['symbol']
+                entry_price = context['price']
+                liquidity_usd = context['liquidity']
+                
+                # Calculate tokens from investment amount
+                tokens_held = investment_usd / entry_price if entry_price > 0 else 0
+                
+                logger.info(f"ADD simplified: ${investment_usd} -> {tokens_held:.0f} tokens of {symbol}")
+                
+            else:
+                # Legacy format: parse comma-separated values
+                parts = add_data.split(",")
+                if len(parts) < 5:
+                    await message.channel.send(
+                        "❌ Invalid format. Use simplified format:\n"
+                        "`ADD $25` or `ADD 50` or `ADD $100`\n\n"
+                        "Or legacy format:\n"
+                        "`ADD token_address,symbol,entry_price,tokens_held,investment_usd`"
+                    )
+                    return
+                
+                token_address = parts[0].strip()
+                symbol = parts[1].strip()
+                entry_price = float(parts[2].strip())
+                tokens_held = float(parts[3].strip())
+                investment_usd = float(parts[4].strip())
+                liquidity_usd = float(parts[5].strip()) if len(parts) > 5 else 10000.0
             
             # Add to Fast Position Monitor
             from services.dex_fast_position_monitor import get_fast_position_monitor

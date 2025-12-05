@@ -196,15 +196,21 @@ try:
                         
                         if token.composite_score >= 60:
                             alert_msg = (
-                                f"🚀 NEW TOKEN DISCOVERED!\n\n"
-                                f"Token: {token.symbol}\n"
-                                f"Chain: {token.chain.value}\n"
-                                f"Score: {token.composite_score:.1f}/100\n"
-                                f"Liquidity: ${token.liquidity_usd:,.0f}\n"
-                                f"Volume 24h: ${token.volume_24h:,.0f}\n"
-                                f"Age: {token.age_hours:.1f}h\n"
-                                f"Risk: {token.risk_level.value}\n\n"
-                                f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}"
+                                f"🚀 **NEW TOKEN DISCOVERED!**\n\n"
+                                f"**Token:** {token.symbol}\n"
+                                f"**Chain:** {token.chain.value}\n"
+                                f"**Score:** {token.composite_score:.1f}/100\n"
+                                f"**Liquidity:** ${token.liquidity_usd:,.0f}\n"
+                                f"**Volume 24h:** ${token.volume_24h:,.0f}\n"
+                                f"**Age:** {token.age_hours:.1f}h\n"
+                                f"**Risk:** {token.risk_level.value}\n\n"
+                                f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}\n\n"
+                                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                f"**💬 Quick Reply Commands:**\n"
+                                f"• `monitor` - Detailed analysis\n"
+                                f"• `ADD $25` - Add position ($25)\n"
+                                f"• `ADD $50` - Add position ($50)\n"
+                                f"• `ADD $100` - Add position ($100)"
                             )
                             
                             alert_system.send_alert(
@@ -243,14 +249,20 @@ try:
                             
                             if success and token and token.composite_score >= 60:
                                 alert_msg = (
-                                    f"🚨 HIGH SCORE LAUNCH!\n\n"
-                                    f"Source: {announcement.source}\n"
-                                    f"Token: {token.symbol}\n"
-                                    f"Chain: {token.chain.value}\n"
-                                    f"Score: {token.composite_score:.1f}/100\n"
-                                    f"Liquidity: ${token.liquidity_usd:,.0f}\n"
-                                    f"Risk: {token.risk_level.value}\n\n"
-                                    f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}"
+                                    f"🚨 **HIGH SCORE LAUNCH!**\n\n"
+                                    f"**Source:** {announcement.source}\n"
+                                    f"**Token:** {token.symbol}\n"
+                                    f"**Chain:** {token.chain.value}\n"
+                                    f"**Score:** {token.composite_score:.1f}/100\n"
+                                    f"**Liquidity:** ${token.liquidity_usd:,.0f}\n"
+                                    f"**Risk:** {token.risk_level.value}\n\n"
+                                    f"🔗 https://dexscreener.com/{token.chain.value}/{token.contract_address}\n\n"
+                                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                    f"**💬 Quick Reply Commands:**\n"
+                                    f"• `monitor` - Detailed analysis\n"
+                                    f"• `ADD $25` - Add position ($25)\n"
+                                    f"• `ADD $50` - Add position ($50)\n"
+                                    f"• `ADD $100` - Add position ($100)"
                                 )
                                 
                                 alert_system.send_alert(
