@@ -106,11 +106,15 @@ try:
     kraken_client = KrakenClient(api_key=api_key, api_secret=api_secret)
     logger.info("✓ Kraken client initialized")
     
+    # Check interval from environment (seconds, default 60)
+    check_interval = int(os.getenv('CRYPTO_POSITION_CHECK_INTERVAL', '60'))
+    logger.info(f"Position check interval: {check_interval}s (env: CRYPTO_POSITION_CHECK_INTERVAL)")
+    
     logger.info("Creating AI Position Manager...")
     sys.stdout.flush()
     manager = AICryptoPositionManager(
         kraken_client=kraken_client,
-        check_interval_seconds=60,         # Check positions every minute
+        check_interval_seconds=check_interval,  # Check positions (env configurable)
         enable_ai_decisions=True,          # Enable AI-powered exit decisions
         enable_trailing_stops=True,        # Enable trailing stops
         enable_breakeven_moves=True,       # Enable break-even protection

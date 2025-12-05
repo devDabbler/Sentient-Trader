@@ -145,10 +145,15 @@ try:
     status_file.write_text(f"SERVICE READY at {time.time()}")
     
     # Get settings - scan_interval is in SECONDS (default 300 = 5 min)
-    # Environment variable can override: BREAKOUT_SCAN_INTERVAL=180 for 3 minutes
-    scan_interval_seconds = getattr(monitor, 'scan_interval', 300)  # seconds
+    # Environment variable overrides: CRYPTO_SCAN_INTERVAL=60 for 1 minute
+    env_interval = os.getenv('CRYPTO_SCAN_INTERVAL')
+    if env_interval:
+        scan_interval_seconds = int(env_interval)
+        logger.info(f"Scan interval: {scan_interval_seconds}s ({scan_interval_seconds/60:.1f} min) (from env CRYPTO_SCAN_INTERVAL)")
+    else:
+        scan_interval_seconds = getattr(monitor, 'scan_interval', 300)  # seconds
+        logger.info(f"Scan interval: {scan_interval_seconds}s ({scan_interval_seconds/60:.1f} min) (default)")
     scan_interval_minutes = scan_interval_seconds / 60
-    logger.info(f"Scan interval: {scan_interval_minutes:.1f} minutes ({scan_interval_seconds}s)")
     
     # Run monitoring loop - CryptoBreakoutMonitor has start() method
     if hasattr(monitor, 'start'):

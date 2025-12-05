@@ -182,13 +182,19 @@ try:
     sys.stdout.flush()
     logger.info(f"  ✓ Watchlist: {watchlist_len} symbols")
     
-    # Get scan interval
+    # Get scan interval - environment variable overrides monitor setting
+    # STOCK_SCAN_INTERVAL: Minutes between scans (default 30)
     sys.stdout.write(f"DEBUG: About to get scan_interval\n")
     sys.stdout.flush()
-    scan_interval = getattr(monitor, 'scan_interval_minutes', 30)
+    env_interval = os.getenv('STOCK_SCAN_INTERVAL')
+    if env_interval:
+        scan_interval = int(env_interval)
+        logger.info(f"  ✓ Scan interval: {scan_interval} minutes (from env STOCK_SCAN_INTERVAL)")
+    else:
+        scan_interval = getattr(monitor, 'scan_interval_minutes', 30)
+        logger.info(f"  ✓ Scan interval: {scan_interval} minutes (default)")
     sys.stdout.write(f"DEBUG: scan_interval = {scan_interval}\n")
     sys.stdout.flush()
-    logger.info(f"  ✓ Scan interval: {scan_interval} minutes")
     
     sys.stdout.write(f"DEBUG: About to print SERVICE READY\n")
     sys.stdout.flush()

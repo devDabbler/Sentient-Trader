@@ -123,12 +123,17 @@ try:
     # CREATE AI POSITION MANAGER
     # ============================================================
     logger.info("")
+    
+    # Check interval from environment (seconds, default 60)
+    check_interval = int(os.getenv('STOCK_POSITION_CHECK_INTERVAL', '60'))
+    logger.info(f"Position check interval: {check_interval}s (env: STOCK_POSITION_CHECK_INTERVAL)")
+    
     logger.info("Creating AI Stock Position Manager...")
     sys.stdout.flush()
     
     manager = AIStockPositionManager(
         broker_adapter=broker_adapter,
-        check_interval_seconds=60,          # Check positions every minute
+        check_interval_seconds=check_interval,  # Check positions (env configurable)
         enable_trailing_stops=True,         # Enable trailing stops
         enable_breakeven_moves=True,        # Enable break-even protection
         min_confidence=70.0,                # Only act on high-confidence decisions (0-100)

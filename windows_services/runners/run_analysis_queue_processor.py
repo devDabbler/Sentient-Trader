@@ -75,8 +75,8 @@ sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, 'reconfigure'
 ANALYSIS_REQUESTS_FILE = PROJECT_ROOT / "data" / "analysis_requests.json"
 ANALYSIS_RESULTS_FILE = PROJECT_ROOT / "data" / "analysis_results.json"
 
-# Check interval
-CHECK_INTERVAL = 10  # seconds
+# Check interval - configurable via environment variable
+CHECK_INTERVAL = int(os.getenv("ANALYSIS_QUEUE_CHECK_INTERVAL", "10"))  # seconds
 
 # LLM Analysis Mode:
 # - "primary" = use AI_ANALYZER_MODEL only (default)

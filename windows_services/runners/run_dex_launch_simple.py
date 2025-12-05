@@ -110,9 +110,14 @@ try:
     # Read settings from environment variables (can be set in .env file)
     # DEX_LENIENT_MODE: "true" or "false" - Allow tokens with mint/freeze authority
     # DEX_DISCOVERY_MODE: "aggressive", "balanced", or "conservative"
+    # DEX_SCAN_INTERVAL: Seconds between scans (default 300 = 5 minutes)
     lenient_mode = os.getenv("DEX_LENIENT_MODE", "true").lower() == "true"
     discovery_mode = os.getenv("DEX_DISCOVERY_MODE", "aggressive").lower()
     min_liquidity = float(os.getenv("DEX_MIN_LIQUIDITY", "500"))
+    scan_interval = int(os.getenv("DEX_SCAN_INTERVAL", "300"))  # Default 5 min
+    
+    print(f"  📊 Scan interval: {scan_interval}s ({scan_interval/60:.1f} min)", flush=True)
+    logger.info(f"  📊 Scan interval: {scan_interval}s ({scan_interval/60:.1f} min)")
     
     config = HunterConfig(
         lenient_solana_mode=lenient_mode,
@@ -272,9 +277,9 @@ try:
                     f"{stats.get('total_announcements', 0)} announcements"
                 )
                 
-                print("💤 Sleeping 5 minutes until next scan...", flush=True)
-                logger.info(f"💤 Sleeping 5 minutes until next scan...")
-                await asyncio.sleep(300)  # 5 minutes
+                print(f"💤 Sleeping {scan_interval}s until next scan...", flush=True)
+                logger.info(f"💤 Sleeping {scan_interval}s until next scan...")
+                await asyncio.sleep(scan_interval)
                 print("⏰ Waking up for next scan cycle...", flush=True)
                 
         except Exception as e:
