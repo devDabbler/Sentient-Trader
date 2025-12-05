@@ -2,8 +2,13 @@
 
 import sys
 import os
+from datetime import datetime
 from pathlib import Path
+import pytz
 from loguru import logger
+
+# PST timezone for log timestamps
+PST = pytz.timezone('America/Los_Angeles')
 
 # Track if logging has been configured to prevent duplicate handlers
 _logging_configured = False
@@ -91,7 +96,7 @@ def setup_logging(
             "<level>{message}</level>"
         )
         file_format = (
-            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} PST | "
             "{level: <8} | "
             "{name}:{function}:{line} - "
             "{message}"

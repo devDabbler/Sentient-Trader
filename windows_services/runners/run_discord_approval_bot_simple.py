@@ -37,11 +37,13 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
 
-# Setup logging
+# Setup logging with PST timezone
 from loguru import logger
+import pytz
 
+PST = pytz.timezone('America/Los_Angeles')
 logger.remove()
-logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} | {level: <8} | {message}")
+logger.add(sys.stderr, level="INFO", format="{time:HH:mm:ss} PST | {level: <8} | {message}")
 logger.add("logs/discord_approval_bot.log", level="DEBUG", rotation="10 MB", retention="7 days")
 
 logger.info("🤖 Discord Approval Bot Service Starting...")

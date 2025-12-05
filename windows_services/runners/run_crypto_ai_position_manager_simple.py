@@ -28,9 +28,11 @@ else:
 if venv_site_packages and venv_site_packages.exists():
     sys.path.insert(0, str(venv_site_packages))
 
-# Setup logging
+# Setup logging with PST timezone
 from loguru import logger
+import pytz
 
+PST = pytz.timezone('America/Los_Angeles')
 log_dir = PROJECT_ROOT / "logs"
 log_dir.mkdir(exist_ok=True)
 
@@ -42,7 +44,7 @@ logger.remove()
 logger.add(
     sys.stderr,
     level="INFO",
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
+    format="<green>{time:HH:mm:ss}</green> PST | <level>{level: <8}</level> | <level>{message}</level>",
     colorize=True
 )
 # Add file handler with immediate flush
@@ -55,7 +57,7 @@ def file_sink(message):
 logger.add(
     file_sink,
     level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
+    format="{time:YYYY-MM-DD HH:mm:ss.SSS} PST | {level: <8} | {name}:{function}:{line} - {message}",
     backtrace=True,
     diagnose=True,
     enqueue=False
