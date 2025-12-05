@@ -7,19 +7,19 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/Sentient-Trader
-Environment="PATH=/root/Sentient-Trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+WorkingDirectory=/root/sentient-trader
+Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-EnvironmentFile=/root/Sentient-Trader/.env
+EnvironmentFile=/root/sentient-trader/.env
 
-ExecStart=/root/Sentient-Trader/venv/bin/python windows_services/runners/run_pumpfun_gambler.py
+ExecStart=/root/sentient-trader/venv/bin/python windows_services/runners/run_pumpfun_gambler.py
 
 Restart=always
 RestartSec=10
 
 # Logging
-StandardOutput=append:/root/Sentient-Trader/logs/pumpfun_gambler.log
-StandardError=append:/root/Sentient-Trader/logs/pumpfun_gambler.log
+StandardOutput=append:/root/sentient-trader/logs/pumpfun_gambler.log
+StandardError=append:/root/sentient-trader/logs/pumpfun_gambler.log
 
 # Security
 NoNewPrivileges=true
