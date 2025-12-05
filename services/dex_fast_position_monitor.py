@@ -243,6 +243,9 @@ class FastPositionMonitor:
         self.discord_webhook_url = next((url for _, url in webhook_candidates if url), None)
         selected_source = next((name for name, url in webhook_candidates if url), "none")
         logger.info(f"Discord routing source: {selected_source}")
+
+        # Exit alert suppression (optional)
+        self.suppress_exit_alerts = self._env_flag("DEX_FAST_MONITOR_SUPPRESS_EXIT_ALERTS", default=False)
         
         # Default risk parameters
         self.default_trailing_stop_pct = default_trailing_stop_pct
@@ -292,6 +295,7 @@ class FastPositionMonitor:
         logger.info(f"   Hard Stop: {default_hard_stop_pct}%")
         logger.info(f"   Profit Target: {default_profit_target_pct}%")
         logger.info(f"   Discord Alerts: {'✅ Enabled' if self.discord_webhook_url else '❌ Disabled'}")
+        logger.info(f"   Exit Alerts: {'🔕 Suppressed' if self.suppress_exit_alerts else '📢 Enabled'}")
         logger.info(f"   Order Flow: {'✅ Enabled (Birdeye)' if self._order_flow_enabled else '❌ Disabled (no API key)'}")
         logger.info(f"   Supabase Journal: {'✅ Enabled' if self._supabase_enabled else '❌ Disabled'}")
         logger.info(f"   Loaded Positions: {len(self.held_positions)}")
@@ -1146,6 +1150,17 @@ class FastPositionMonitor:
             alert_type: Type of alert
             message: Alert message
         """
+        exit_alert_types = {
+            AlertType.SELL_NOW,
+            AlertType.EMERGENCY_SELL,
+            AlertType.TAKE_PARTIAL,
+            AlertType.PROFIT_TARGET,
+            AlertType.POSITION_CLOSED,
+        }
+        if self.suppress_exit_alerts and alert_type in exit_alert_types:
+            logger.info(f"🔕 Exit alert suppressed ({alert_type.value}) for {position.symbol}")
+            return
+
         # Check cooldown (prevent spam)
         if position.last_alert_time:
             elapsed = (datetime.now() - position.last_alert_time).total_seconds()
@@ -1272,6 +1287,14 @@ class FastPositionMonitor:
                 logger.error(f"Failed to send Discord alert: {e}")
         else:
             logger.debug("Discord webhook not configured, alert logged only")
+
+    @staticmethod
+    def _env_flag(name: str, default: bool = False) -> bool:
+        """Parse boolean-like environment variable."""
+        val = os.getenv(name)
+        if val is None:
+            return default
+        return str(val).strip().lower() in ("1", "true", "yes", "y", "on")
     
     # ========================================================================
     # PERSISTENCE
