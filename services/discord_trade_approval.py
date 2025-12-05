@@ -427,6 +427,9 @@ class DiscordTradeApprovalBot(commands.Bot):
                         )
                         return
             
+            # DEBUG: Log that we exited the for loop
+            logger.info(f"   🔄 Exited approval for-loop, checking DEX shorthand...")
+            
             # 2.5 Check for DEX position shorthand: "$25", "25", "$50" etc when replying
             # This lets users quickly add positions by replying with just a dollar amount
             import re
