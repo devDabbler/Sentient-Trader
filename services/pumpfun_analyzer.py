@@ -605,7 +605,7 @@ class PumpfunAnalyzer:
                     logger.info(f"⚡ Sent creation alert for {token.symbol}")
                     return True
                 else:
-                    logger.warning(f"Discord returned {response.status_code}")
+                    logger.warning(f"Discord returned {response.status_code}: {response.text}")
                     return False
                     
         except Exception as e:
