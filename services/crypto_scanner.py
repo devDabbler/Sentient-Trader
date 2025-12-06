@@ -664,6 +664,74 @@ class CryptoOpportunityScanner:
         
         return ema
     
+    def _calculate_adx(self, highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
+        """
+        Calculate Average Directional Index (ADX) for trend strength
+        Hyperopt showed ADX threshold of 15-25 works well for crypto
+        
+        Returns:
+            ADX value (0-100), higher = stronger trend
+        """
+        if len(highs) < period + 1 or len(lows) < period + 1 or len(closes) < period + 1:
+            return 25.0  # Default moderate trend
+        
+        try:
+            # Calculate True Range and Directional Movement
+            tr_list = []
+            plus_dm_list = []
+            minus_dm_list = []
+            
+            for i in range(1, len(highs)):
+                high = highs[i]
+                low = lows[i]
+                prev_high = highs[i-1]
+                prev_low = lows[i-1]
+                prev_close = closes[i-1]
+                
+                # True Range
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+                tr_list.append(tr)
+                
+                # Directional Movement
+                plus_dm = high - prev_high if (high - prev_high) > (prev_low - low) and (high - prev_high) > 0 else 0
+                minus_dm = prev_low - low if (prev_low - low) > (high - prev_high) and (prev_low - low) > 0 else 0
+                plus_dm_list.append(plus_dm)
+                minus_dm_list.append(minus_dm)
+            
+            if len(tr_list) < period:
+                return 25.0
+            
+            # Smoothed averages (Wilder's smoothing)
+            atr = sum(tr_list[:period]) / period
+            plus_di = sum(plus_dm_list[:period]) / period
+            minus_di = sum(minus_dm_list[:period]) / period
+            
+            for i in range(period, len(tr_list)):
+                atr = (atr * (period - 1) + tr_list[i]) / period
+                plus_di = (plus_di * (period - 1) + plus_dm_list[i]) / period
+                minus_di = (minus_di * (period - 1) + minus_dm_list[i]) / period
+            
+            # Calculate +DI and -DI
+            if atr > 0:
+                plus_di_pct = (plus_di / atr) * 100
+                minus_di_pct = (minus_di / atr) * 100
+            else:
+                return 25.0
+            
+            # Calculate DX
+            di_sum = plus_di_pct + minus_di_pct
+            if di_sum > 0:
+                dx = abs(plus_di_pct - minus_di_pct) / di_sum * 100
+            else:
+                return 25.0
+            
+            # ADX is smoothed DX (simplified - just return DX for now)
+            return min(dx, 100.0)
+            
+        except Exception as e:
+            logger.debug(f"ADX calculation error: {e}")
+            return 25.0  # Default moderate trend
+    
     def get_crypto_market_overview(self) -> Dict:
         """
         Get overview of crypto market conditions
@@ -1229,22 +1297,32 @@ class CryptoOpportunityScanner:
             change_pct_24h = ((ticker['high_24h'] - ticker['low_24h']) / ticker['low_24h']) * 100 if ticker['low_24h'] > 0 else 0
             volatility_24h = self._calculate_volatility(prices[-24:]) if len(prices) >= 24 else 0
             
+            # Calculate ADX for trend strength (hyperopt showed 15-25 works well)
+            adx = self._calculate_adx(highs, lows, prices) if len(highs) >= 15 else 25.0
+            
             # ============================================
             # ENHANCED BREAKOUT DETECTION PATTERNS
+            # (Hyperopt-optimized thresholds applied)
             # ============================================
             
             breakout_type = None
             score = 0
             reason_parts = []
             
-            # Pattern 1: Classic EMA Breakout (original)
-            if current_price > ema_8 > ema_20 and volume_ratio > 1.3 and current_price > ema_50 * 1.01:
+            # ADX filter: Skip if trend is too weak (hyperopt adx_threshold ~15-25)
+            # But don't filter out oversold bounces which work in choppy markets
+            min_adx_for_trend = 15
+            
+            # Pattern 1: Classic EMA Breakout (hyperopt-optimized)
+            # Using hyperopt values: volume_factor ~1.55, ema alignment
+            if current_price > ema_8 > ema_20 and volume_ratio > 1.5 and current_price > ema_50 * 1.01:
                 breakout_type = "EMA_BREAKOUT"
                 score = 70
                 reason_parts.append(f"EMA alignment (P>{ema_8:.4f}>{ema_20:.4f})")
             
-            # Pattern 2: Volume Spike Breakout (new)
-            if volume_ratio > 2.5 and change_pct_24h > 3:
+            # Pattern 2: Volume Spike Breakout (hyperopt-tuned)
+            # Lowered volume threshold slightly for more opportunities
+            if volume_ratio > 2.0 and change_pct_24h > 3:
                 if breakout_type:
                     score += 15
                 else:
@@ -1252,8 +1330,9 @@ class CryptoOpportunityScanner:
                     score = 65
                 reason_parts.append(f"🔥 Vol spike {volume_ratio:.1f}x")
             
-            # Pattern 3: Momentum Surge (new) - catching big moves early
-            if change_pct_24h > 8 and rsi > 55 and rsi < 80:
+            # Pattern 3: Momentum Surge (hyperopt-tuned) - catching big moves early
+            # RSI cap at 62 from hyperopt (buy_rsi_high) - don't chase overbought
+            if change_pct_24h > 8 and rsi > 50 and rsi < 62:
                 if breakout_type:
                     score += 10
                 else:
@@ -1268,9 +1347,10 @@ class CryptoOpportunityScanner:
                     score = 62
                 reason_parts.append(f"📊 Oversold RSI:{rsi:.0f}")
             
-            # Pattern 5: Resistance Break (new)
+            # Pattern 5: Resistance Break (hyperopt-tuned)
+            # Volume threshold aligned with hyperopt volume_factor ~1.55
             recent_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-            if current_price > recent_high * 0.98 and volume_ratio > 1.5:
+            if current_price > recent_high * 0.98 and volume_ratio > 1.55:
                 if breakout_type:
                     score += 12
                 else:
@@ -1314,8 +1394,18 @@ class CryptoOpportunityScanner:
             if change_pct_24h > 5:
                 score += min(change_pct_24h * 0.5, 10)
             
+            # ADX trend strength bonus/penalty (hyperopt-optimized)
+            # Strong trend (ADX > 25) = bonus, weak trend (ADX < 15) = penalty
+            if adx > 30:
+                score += 8  # Strong trend bonus
+                reason_parts.append(f"📈 Strong trend ADX:{adx:.0f}")
+            elif adx > 20:
+                score += 4  # Moderate trend bonus
+            elif adx < 15 and breakout_type not in ['OVERSOLD_BOUNCE']:
+                score -= 5  # Weak trend penalty (except for bounces)
+            
             # Build reason string
-            reason = f"💥 {breakout_type}: " + " | ".join(reason_parts) + f" | Vol: {volume_ratio:.1f}x"
+            reason = f"💥 {breakout_type}: " + " | ".join(reason_parts) + f" | Vol: {volume_ratio:.1f}x | ADX:{adx:.0f}"
             
             opportunity = CryptoOpportunity(
                 symbol=normalized_symbol,
