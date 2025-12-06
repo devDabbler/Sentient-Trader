@@ -63,17 +63,17 @@ class SentientStrategy(IStrategy):
         'stoploss_on_exchange_interval': 60  # Check every 60 seconds
     }
     
-    # Hyperparameters - STRICT filters to reduce losing trades
+    # Hyperparameters - BALANCED: enough trades with quality filters
     buy_rsi = IntParameter(25, 45, default=35, space='buy')  # Moderate - not too oversold
-    buy_rsi_high = IntParameter(55, 70, default=55, space='buy')  # Stricter cap - only early entries
+    buy_rsi_high = IntParameter(55, 70, default=58, space='buy')  # Balanced cap
     sell_rsi = IntParameter(65, 80, default=72, space='sell')  # Exit at overbought
     
     ema_fast = IntParameter(8, 15, default=9, space='buy')  # Faster EMA for quicker signals
     ema_slow = IntParameter(18, 30, default=21, space='buy')  # Balanced slow EMA
     ema_trend = IntParameter(40, 100, default=50, space='buy')  # Shorter trend EMA
     
-    volume_factor = DecimalParameter(1.0, 2.0, default=1.3, space='buy')  # Require stronger volume
-    adx_threshold = IntParameter(15, 30, default=22, space='buy')  # Higher ADX = stronger trends only
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.2, space='buy')  # Moderate volume
+    adx_threshold = IntParameter(15, 30, default=20, space='buy')  # Balanced ADX threshold
     
     def informative_pairs(self):
         """
