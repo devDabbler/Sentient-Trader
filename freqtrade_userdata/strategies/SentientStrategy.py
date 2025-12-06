@@ -34,8 +34,8 @@ class SentientStrategy(IStrategy):
         "360": 0.01    # 1% after 6 hours
     }
     
-    # Stoploss - give trades room to breathe
-    stoploss = -0.03  # 3% stoploss
+    # Stoploss - tighter with exchange enforcement
+    stoploss = -0.025  # 2.5% stoploss (enforced on exchange)
     
     # Trailing stoploss - only after significant profit
     trailing_stop = True
@@ -49,18 +49,19 @@ class SentientStrategy(IStrategy):
     # Run on every new candle
     process_only_new_candles = True
     
-    # Disable custom stoploss - use simple fixed stoploss
-    use_custom_stoploss = False
+    # Enable custom stoploss for tighter control
+    use_custom_stoploss = True
     
     # Number of candles for startup
     startup_candle_count: int = 100
     
-    # Order types
+    # Order types - use exchange stoploss for tighter risk control
     order_types = {
         'entry': 'limit',
         'exit': 'limit',
         'stoploss': 'market',
-        'stoploss_on_exchange': False
+        'stoploss_on_exchange': True,
+        'stoploss_on_exchange_interval': 60  # Check every 60 seconds
     }
     
     # Hyperparameters for optimization - BALANCED for quality trades
@@ -205,6 +206,25 @@ class SentientStrategy(IStrategy):
         # Intentionally empty - rely on ROI/stoploss/trailing
         dataframe['exit_long'] = 0
         return dataframe
+    
+    def custom_stoploss(self, pair: str, trade, current_time: datetime,
+                        current_rate: float, current_profit: float,
+                        after_fill: bool, **kwargs) -> float:
+        """
+        Simple time-based stoploss tightening.
+        - Initial: -2.5%
+        - After 2 hours: -2%
+        - After 4 hours: -1.5% (cut losers faster)
+        """
+        # Calculate trade duration in minutes
+        trade_duration = (current_time - trade.open_date_utc).total_seconds() / 60
+        
+        if trade_duration > 240:  # 4+ hours
+            return -0.015  # Tighten to 1.5%
+        elif trade_duration > 120:  # 2+ hours
+            return -0.02  # Tighten to 2%
+        else:
+            return -0.025  # Initial 2.5%
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
