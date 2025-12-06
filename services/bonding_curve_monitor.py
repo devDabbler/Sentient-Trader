@@ -115,6 +115,9 @@ class BondingCurveMonitor:
     Real-time monitor for bonding curve platforms.
     
     Catches tokens at launch instead of waiting for DexScreener.
+    
+    RELAXED MODE: When enabled, uses lower thresholds to catch more tokens faster.
+    This increases noise but also catches opportunities earlier (like SAFEMARS).
     """
     
     # PumpPortal WebSocket endpoint (FREE!)
@@ -136,6 +139,8 @@ class BondingCurveMonitor:
         alert_on_creation: bool = True,
         alert_on_graduation: bool = True,
         launchlab_poll_interval: int = 10,  # seconds (fast mode for catching launches)
+        relaxed_mode: bool = False,  # NEW: Lower thresholds for more opportunities
+        creation_filter_mode: str = "all",  # "all", "with_socials", "promising_only"
     ):
         """
         Initialize Bonding Curve Monitor
@@ -148,11 +153,31 @@ class BondingCurveMonitor:
             alert_on_creation: Alert immediately on token creation
             alert_on_graduation: Alert when token graduates (100%)
             launchlab_poll_interval: How often to poll LaunchLab API
+            relaxed_mode: Enable lower thresholds to catch more opportunities faster
+            creation_filter_mode: Filter for creation alerts
+                - "all": Alert on ALL new tokens (high noise)
+                - "with_socials": Only alert if token has at least 1 social link
+                - "promising_only": Only alert if instant assessment is PROMISING or WORTH WATCHING
         """
+        # Check for relaxed mode from environment
+        self.relaxed_mode = relaxed_mode or os.getenv("PUMPFUN_RELAXED_MODE", "false").lower() == "true"
+        
+        # Creation filter mode from environment
+        self.creation_filter_mode = os.getenv("PUMPFUN_CREATION_FILTER", creation_filter_mode).lower()
+        
         self.enable_pump_fun = enable_pump_fun
         self.enable_launchlab = enable_launchlab
-        self.min_trades_to_alert = min_trades_to_alert
-        self.min_volume_sol_to_alert = min_volume_sol_to_alert
+        
+        # Apply relaxed thresholds if enabled
+        if self.relaxed_mode:
+            # Relaxed mode: Lower thresholds to catch more opportunities
+            self.min_trades_to_alert = int(os.getenv("PUMPFUN_MIN_TRADES_RELAXED", "1"))
+            self.min_volume_sol_to_alert = float(os.getenv("PUMPFUN_MIN_VOLUME_RELAXED", "0.1"))
+            logger.info("🔓 RELAXED MODE ENABLED - Lower thresholds for more opportunities!")
+        else:
+            self.min_trades_to_alert = min_trades_to_alert
+            self.min_volume_sol_to_alert = min_volume_sol_to_alert
+        
         self.alert_on_creation = alert_on_creation
         self.alert_on_graduation = alert_on_graduation
         self.launchlab_poll_interval = launchlab_poll_interval
@@ -182,6 +207,7 @@ class BondingCurveMonitor:
         self.total_tokens_seen = 0
         self.total_migrations = 0
         self.total_alerts_sent = 0
+        self.filtered_tokens = 0  # Tokens filtered out by creation_filter_mode
         
         # Ensure data directory exists
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -192,12 +218,14 @@ class BondingCurveMonitor:
         logger.info("=" * 60)
         logger.info("🎰 BONDING CURVE MONITOR INITIALIZED")
         logger.info("=" * 60)
+        logger.info(f"   🔓 RELAXED MODE: {'✅ ON (more opportunities)' if self.relaxed_mode else '❌ OFF (stricter filters)'}")
+        logger.info(f"   🎯 CREATION FILTER: {self.creation_filter_mode.upper()}")
         logger.info(f"   pump.fun: {'✅ Enabled (WebSocket)' if enable_pump_fun else '❌ Disabled'}")
         logger.info(f"   LaunchLab: {'✅ Enabled (Polling)' if enable_launchlab else '❌ Disabled'}")
         logger.info(f"   Alert on creation: {'✅' if alert_on_creation else '❌'}")
         logger.info(f"   Alert on graduation: {'✅' if alert_on_graduation else '❌'}")
-        logger.info(f"   Min trades to alert: {min_trades_to_alert}")
-        logger.info(f"   Min volume to alert: {min_volume_sol_to_alert} SOL")
+        logger.info(f"   Min trades to alert: {self.min_trades_to_alert}")
+        logger.info(f"   Min volume to alert: {self.min_volume_sol_to_alert} SOL")
         logger.info(f"   Discord alerts: {'✅ Enabled' if self.discord_webhook_url else '❌ Disabled'}")
         logger.info(f"   Tracked tokens: {len(self.tokens)}")
         logger.info("=" * 60)
@@ -437,9 +465,30 @@ class BondingCurveMonitor:
             except Exception as e:
                 logger.error(f"Callback error: {e}")
         
-        # Send Discord alert if configured
+        # Send Discord alert if configured (with filtering)
         if self.alert_on_creation:
-            await self._send_creation_alert(token)
+            should_alert = True
+            
+            # Apply creation filter
+            if self.creation_filter_mode == "with_socials":
+                # Only alert if has at least 1 social link
+                has_socials = bool(token.twitter or token.telegram or token.website)
+                if not has_socials:
+                    should_alert = False
+                    self.filtered_tokens += 1
+                    logger.debug(f"   └─ Filtered (no socials): {token.symbol}")
+                    
+            elif self.creation_filter_mode == "promising_only":
+                # Only alert if instant assessment is promising
+                trust_emoji, trust_label, _ = self._get_instant_trust_assessment(token)
+                if trust_label not in ["PROMISING", "WORTH WATCHING"]:
+                    should_alert = False
+                    self.filtered_tokens += 1
+                    logger.debug(f"   └─ Filtered ({trust_label}): {token.symbol}")
+            
+            # "all" mode alerts on everything
+            if should_alert:
+                await self._send_creation_alert(token)
     
     async def _handle_trade_pumpfun(self, data: dict):
         """Handle trade event on pump.fun"""
@@ -628,6 +677,74 @@ class BondingCurveMonitor:
     # ALERTS
     # ========================================================================
     
+    def _get_instant_trust_assessment(self, token: BondingToken) -> tuple:
+        """
+        Instant trust assessment at token CREATION - before any trades.
+        This uses only what's available at mint time: name, symbol, socials, creator.
+        
+        Returns:
+            (trust_emoji, trust_label, quick_flags)
+        """
+        score = 0
+        flags = []
+        
+        # Check social presence (biggest indicator at creation)
+        has_twitter = bool(token.twitter)
+        has_telegram = bool(token.telegram)
+        has_website = bool(token.website)
+        social_count = sum([has_twitter, has_telegram, has_website])
+        
+        if social_count >= 3:
+            score += 25
+            flags.append("✅ Full socials")
+        elif social_count == 2:
+            score += 15
+            flags.append("📱 2 socials")
+        elif social_count == 1:
+            score += 5
+            flags.append("📱 1 social")
+        else:
+            score -= 15
+            flags.append("❌ No socials")
+        
+        # Check name/symbol for rug patterns
+        name_lower = token.name.lower()
+        symbol_lower = token.symbol.lower()
+        
+        # Positive patterns (known meme formats that can pump)
+        positive_patterns = ["pepe", "doge", "shib", "cat", "dog", "elon", "trump", "ai", "gpt", "moon", "rocket"]
+        if any(p in name_lower or p in symbol_lower for p in positive_patterns):
+            score += 10
+            flags.append("🔥 Trending theme")
+        
+        # Negative patterns (common rug indicators)
+        negative_patterns = ["test", "scam", "rug", "honeypot", "fake", "copy", "clone"]
+        if any(p in name_lower or p in symbol_lower for p in negative_patterns):
+            score -= 30
+            flags.append("⚠️ Suspicious name")
+        
+        # Very short or generic symbols
+        if len(token.symbol) < 2:
+            score -= 10
+            flags.append("⚠️ Short symbol")
+        
+        # Check if has image URI (projects with art are more likely legit)
+        if token.image_uri:
+            score += 5
+            flags.append("🖼️ Has image")
+        
+        # Determine tier
+        if score >= 30:
+            return "🟢", "PROMISING", flags
+        elif score >= 10:
+            return "🔵", "WORTH WATCHING", flags
+        elif score >= -5:
+            return "🟡", "NEUTRAL", flags
+        elif score >= -15:
+            return "🟠", "RISKY", flags
+        else:
+            return "🔴", "LIKELY RUG", flags
+    
     async def _send_creation_alert(self, token: BondingToken):
         """Send Discord alert for new token creation with interactive embed"""
         if not self.discord_webhook_url:
@@ -636,6 +753,9 @@ class BondingCurveMonitor:
         try:
             platform_emoji = "🎰" if token.platform == BondingPlatform.PUMP_FUN else "🚀"
             platform_name = token.platform.value
+            
+            # Get instant trust assessment
+            trust_emoji, trust_label, trust_flags = self._get_instant_trust_assessment(token)
             
             # Build links
             if token.platform == BondingPlatform.PUMP_FUN:
@@ -649,11 +769,16 @@ class BondingCurveMonitor:
                 "title": f"{platform_emoji} NEW TOKEN: {token.symbol}",
                 "description": (
                     f"**{token.name}**\n\n"
-                    f"⚡ Caught at bonding curve launch!\n"
-                    f"_Reply with commands below to interact_"
+                    f"⚡ **INSTANT ALERT - Caught at CREATION!**\n"
+                    f"_No trades yet - you're first!_"
                 ),
-                "color": 0xFFAA00,  # Orange for new launch
+                "color": 0x00FF00 if "PROMISING" in trust_label else (0xFFAA00 if "WATCH" in trust_label else 0xFF6600),
                 "fields": [
+                    {
+                        "name": f"{trust_emoji} INSTANT ASSESSMENT",
+                        "value": f"**{trust_label}**\n{' | '.join(trust_flags[:3])}",
+                        "inline": False
+                    },
                     {
                         "name": "📈 Progress",
                         "value": f"{token.progress_pct:.1f}%",
@@ -676,7 +801,7 @@ class BondingCurveMonitor:
                     },
                 ],
                 "footer": {
-                    "text": "Reply: ANALYZE | BUY $XX | PASS | MONITOR"
+                    "text": "⚡ CREATION ALERT | Reply: BUY $XX | PASS | MONITOR"
                 },
                 "timestamp": datetime.now().isoformat()
             }
@@ -699,7 +824,7 @@ class BondingCurveMonitor:
             else:
                 embed["fields"].append({
                     "name": "⚠️ Warning",
-                    "value": "No social links found",
+                    "value": "No social links found - higher risk!",
                     "inline": False
                 })
             
@@ -709,6 +834,7 @@ class BondingCurveMonitor:
             
         except Exception as e:
             logger.error(f"Error sending creation alert: {e}")
+    
     
     async def _send_momentum_alert(self, token: BondingToken):
         """Send Discord alert when token gains momentum"""

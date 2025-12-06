@@ -43,6 +43,24 @@ except ImportError:
     logger.warning("Discord channels not available")
 
 
+class TrustTier(Enum):
+    """
+    AI Trust Tier for pump.fun tokens - from most trustworthy to most risky.
+    
+    This helps traders quickly assess token validity by tiering based on:
+    - Token age (older = more trusted IF still active)
+    - Buy/sell patterns (more buys, diverse buyers = better)
+    - Creator history (serial ruggers = avoid)
+    - Holder distribution (whale concentration = risky)
+    - Social presence (verified socials = better)
+    """
+    TIER_1_TRUSTED = "🟢 TRUSTED"           # Rare - verified project, good history
+    TIER_2_PROMISING = "🔵 PROMISING"       # Good signals, worth a gamble
+    TIER_3_NEUTRAL = "🟡 NEUTRAL"           # Mixed signals, proceed with caution
+    TIER_4_RISKY = "🟠 RISKY"               # Red flags present, small bets only
+    TIER_5_RUG_LIKELY = "🔴 RUG LIKELY"     # High probability rug pull
+
+
 class PumpfunRisk(Enum):
     """Risk level for pump.fun token"""
     EXTREME = "EXTREME"      # Don't touch - likely rug
@@ -115,6 +133,12 @@ class PumpfunTokenAnalysis:
     max_bet_usd: float = 0.0            # Suggested max bet
     reasoning: str = ""
     
+    # Trust tier (NEW - AI-based validity assessment)
+    trust_tier: TrustTier = TrustTier.TIER_4_RISKY
+    trust_reasoning: str = ""           # Why this tier was assigned
+    age_minutes: float = 0.0            # How old the token is
+    age_category: str = "UNKNOWN"       # FRESH (<5m), EARLY (<30m), SETTLING (<2h), MATURE (>2h)
+    
     # Metadata
     analyzed_at: datetime = field(default_factory=datetime.now)
     data_age_seconds: float = 0.0
@@ -124,6 +148,7 @@ class PumpfunTokenAnalysis:
         data = asdict(self)
         data['analyzed_at'] = self.analyzed_at.isoformat()
         data['risk_level'] = self.risk_level.value
+        data['trust_tier'] = self.trust_tier.value
         return data
 
 
@@ -502,6 +527,24 @@ class PumpfunAnalyzer:
             max_bet = self.max_bet_default
             reasoning = f"Good signals: {', '.join(green_flags[:3])}"
         
+        # Calculate Trust Tier (NEW - AI-based validity assessment)
+        trust_tier, trust_reasoning, age_minutes, age_category = self._calculate_trust_tier(
+            token_data=token_data,
+            progress_pct=progress_pct,
+            total_trades=total_trades,
+            buy_count=buy_count,
+            sell_count=sell_count,
+            holder_count=holder_count,
+            top_holder_pct=top_holder_pct,
+            twitter_url=twitter_url,
+            telegram_url=telegram_url,
+            website_url=website_url,
+            buy_pressure=buy_pressure,
+            risk_factors=risk_factors,
+            green_flags=green_flags,
+            score=score
+        )
+        
         # Build analysis object
         analysis = PumpfunTokenAnalysis(
             mint=mint,
@@ -539,11 +582,186 @@ class PumpfunAnalyzer:
             recommendation=recommendation,
             max_bet_usd=max_bet,
             reasoning=reasoning,
+            trust_tier=trust_tier,
+            trust_reasoning=trust_reasoning,
+            age_minutes=age_minutes,
+            age_category=age_category,
             analyzed_at=datetime.now(),
         )
         
         return analysis
     
+    def _calculate_trust_tier(
+        self,
+        token_data: dict,
+        progress_pct: float,
+        total_trades: int,
+        buy_count: int,
+        sell_count: int,
+        holder_count: int,
+        top_holder_pct: float,
+        twitter_url: str,
+        telegram_url: str,
+        website_url: str,
+        buy_pressure: float,
+        risk_factors: List[str],
+        green_flags: List[str],
+        score: float
+    ) -> tuple:
+        """
+        Calculate AI Trust Tier based on multiple validity criteria.
+        
+        This tiers tokens from most trustworthy to most likely rug pull,
+        analyzing buys, age, creator history, holder patterns, and socials.
+        
+        Returns:
+            (TrustTier, reasoning_str, age_minutes, age_category)
+        """
+        trust_score = 0
+        trust_reasons = []
+        
+        # 1. TOKEN AGE ANALYSIS
+        created_timestamp = token_data.get("created_timestamp", token_data.get("createdAt", 0))
+        if created_timestamp:
+            try:
+                if isinstance(created_timestamp, (int, float)):
+                    # Handle milliseconds
+                    if created_timestamp > 1e12:
+                        created_timestamp = created_timestamp / 1000
+                    created_dt = datetime.fromtimestamp(created_timestamp)
+                else:
+                    created_dt = datetime.fromisoformat(str(created_timestamp).replace('Z', '+00:00'))
+                age_minutes = (datetime.now() - created_dt.replace(tzinfo=None)).total_seconds() / 60
+            except:
+                age_minutes = 0
+        else:
+            age_minutes = 0
+        
+        # Age categories and scoring
+        if age_minutes < 5:
+            age_category = "ULTRA_FRESH"
+            # Ultra fresh is HIGH RISK but also HIGH REWARD potential
+            trust_score -= 10
+            trust_reasons.append(f"⚡ Ultra fresh ({age_minutes:.0f}m) - highest risk/reward")
+        elif age_minutes < 15:
+            age_category = "FRESH"
+            trust_score -= 5
+            trust_reasons.append(f"🆕 Fresh token ({age_minutes:.0f}m)")
+        elif age_minutes < 30:
+            age_category = "EARLY"
+            trust_score += 5
+            trust_reasons.append(f"⏰ Early entry window ({age_minutes:.0f}m)")
+        elif age_minutes < 120:
+            age_category = "SETTLING"
+            trust_score += 10
+            trust_reasons.append(f"📊 Settling period ({age_minutes:.0f}m) - survived initial dump")
+        else:
+            age_category = "MATURE"
+            trust_score += 15
+            trust_reasons.append(f"✅ Mature token ({age_minutes/60:.1f}h) - proven survivor")
+        
+        # 2. BUY PATTERN ANALYSIS
+        if total_trades > 0:
+            buy_ratio = buy_count / total_trades
+            if buy_ratio > 0.7:
+                trust_score += 15
+                trust_reasons.append(f"🟢 Strong buy pressure ({buy_ratio:.0%})")
+            elif buy_ratio > 0.55:
+                trust_score += 8
+                trust_reasons.append(f"🔵 Healthy buy ratio ({buy_ratio:.0%})")
+            elif buy_ratio < 0.35:
+                trust_score -= 15
+                trust_reasons.append(f"🔴 Heavy selling ({buy_ratio:.0%} buys)")
+            
+            # Trade count bonus
+            if total_trades > 200:
+                trust_score += 12
+                trust_reasons.append(f"📈 Very active ({total_trades} trades)")
+            elif total_trades > 50:
+                trust_score += 6
+                trust_reasons.append(f"📊 Active trading ({total_trades} trades)")
+            elif total_trades < 10:
+                trust_score -= 8
+                trust_reasons.append(f"⚠️ Low activity ({total_trades} trades)")
+        
+        # 3. HOLDER DISTRIBUTION ANALYSIS
+        if holder_count > 100:
+            trust_score += 15
+            trust_reasons.append(f"👥 Wide distribution ({holder_count} holders)")
+        elif holder_count > 50:
+            trust_score += 10
+            trust_reasons.append(f"👥 Good holder base ({holder_count})")
+        elif holder_count > 20:
+            trust_score += 5
+        elif holder_count < 10:
+            trust_score -= 10
+            trust_reasons.append(f"⚠️ Few holders ({holder_count})")
+        
+        # Whale concentration
+        if top_holder_pct > 50:
+            trust_score -= 20
+            trust_reasons.append(f"🐋 WHALE ALERT: Top holder owns {top_holder_pct:.0f}%")
+        elif top_holder_pct > 30:
+            trust_score -= 10
+            trust_reasons.append(f"🐋 Concentrated: Top holder {top_holder_pct:.0f}%")
+        elif top_holder_pct < 15:
+            trust_score += 8
+            trust_reasons.append(f"✅ Decentralized (top: {top_holder_pct:.0f}%)")
+        
+        # 4. SOCIAL PRESENCE ANALYSIS
+        social_count = sum([bool(twitter_url), bool(telegram_url), bool(website_url)])
+        if social_count >= 3:
+            trust_score += 15
+            trust_reasons.append("🌐 Full social presence (Twitter, TG, Website)")
+        elif social_count == 2:
+            trust_score += 8
+            trust_reasons.append("📱 Good socials (2 platforms)")
+        elif social_count == 1:
+            trust_score += 3
+        else:
+            trust_score -= 5
+            trust_reasons.append("❌ No social links")
+        
+        # 5. BONDING CURVE PROGRESS
+        if progress_pct > 80:
+            trust_score += 15
+            trust_reasons.append(f"🎓 Near graduation ({progress_pct:.0f}%)")
+        elif progress_pct > 50:
+            trust_score += 8
+            trust_reasons.append(f"📈 Good progress ({progress_pct:.0f}%)")
+        elif progress_pct < 10:
+            trust_score -= 5
+            trust_reasons.append(f"📉 Early stage ({progress_pct:.0f}%)")
+        
+        # 6. CREATOR HISTORY (if available)
+        creator_token_count = token_data.get("creator_token_count", 0)
+        if creator_token_count > 10:
+            trust_score -= 15
+            trust_reasons.append(f"⚠️ Serial creator ({creator_token_count} tokens)")
+        elif creator_token_count > 5:
+            trust_score -= 8
+            trust_reasons.append(f"📋 Multi-token creator ({creator_token_count})")
+        
+        # 7. COMBINE WITH EXISTING SCORE
+        trust_score += (score - 50) * 0.3  # Weight from existing analysis
+        
+        # Determine Trust Tier
+        if trust_score >= 40:
+            tier = TrustTier.TIER_1_TRUSTED
+        elif trust_score >= 20:
+            tier = TrustTier.TIER_2_PROMISING
+        elif trust_score >= 0:
+            tier = TrustTier.TIER_3_NEUTRAL
+        elif trust_score >= -20:
+            tier = TrustTier.TIER_4_RISKY
+        else:
+            tier = TrustTier.TIER_5_RUG_LIKELY
+        
+        # Build reasoning string
+        reasoning = " | ".join(trust_reasons[:4]) if trust_reasons else "Insufficient data"
+        
+        return tier, reasoning, age_minutes, age_category
+
     async def send_creation_alert(self, token) -> bool:
         """
         Send FAST creation alert for new token - no analysis, just detection.
@@ -742,6 +960,21 @@ class PumpfunAnalyzer:
                 "timestamp": datetime.now().isoformat()
             }
             
+            # Add Trust Tier prominently
+            embed["fields"].insert(0, {
+                "name": "🎯 AI TRUST TIER",
+                "value": f"**{analysis.trust_tier.value}**\n⏰ Age: {analysis.age_category} ({analysis.age_minutes:.0f}m)",
+                "inline": False
+            })
+            
+            # Add trust reasoning
+            if analysis.trust_reasoning:
+                embed["fields"].insert(1, {
+                    "name": "📋 Trust Analysis",
+                    "value": analysis.trust_reasoning,
+                    "inline": False
+                })
+            
             # Add risk factors if any
             if analysis.risk_factors:
                 embed["fields"].append({
@@ -782,6 +1015,10 @@ class PumpfunAnalyzer:
         """Format analysis as text for display"""
         lines = [
             f"🎰 **{analysis.symbol}** ({analysis.name})",
+            f"",
+            f"🎯 **TRUST TIER:** {analysis.trust_tier.value}",
+            f"⏰ **Age:** {analysis.age_category} ({analysis.age_minutes:.0f} min)",
+            f"📋 **Trust Analysis:** {analysis.trust_reasoning}",
             f"",
             f"**Score:** {analysis.score:.0f}/100 | **Risk:** {analysis.risk_level.value}",
             f"**Recommendation:** {analysis.recommendation} (Max: ${analysis.max_bet_usd:.0f})",

@@ -95,6 +95,19 @@ Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<
   - **WATCH:** Monitor for momentum, not ready yet
   - **GAMBLE_SMALL:** Small bet OK ($10-25 max)
   - **GAMBLE:** Decent setup for gambling ($25-50 max)
+* **🔓 RELAXED MODE (NEW - December 2025):** Catch more opportunities faster
+  - Lower thresholds to find tokens like SAFEMARS earlier
+  - Alert after just 1 trade instead of waiting for 5
+  - 0.1 SOL volume threshold instead of 1.0 SOL
+  - More noise but catches pumps before they're gone
+* **🎯 AI TRUST TIER SYSTEM (NEW - December 2025):** Quick validity assessment
+  - **🟢 TIER 1 - TRUSTED:** Rare - verified project, good history
+  - **🔵 TIER 2 - PROMISING:** Good signals, worth a gamble
+  - **🟡 TIER 3 - NEUTRAL:** Mixed signals, proceed with caution
+  - **🟠 TIER 4 - RISKY:** Red flags present, small bets only
+  - **🔴 TIER 5 - RUG LIKELY:** High probability rug pull
+  - Based on: token age, buy patterns, holder distribution, creator history, socials
+  - Age categories: ULTRA_FRESH (<5m), FRESH (<15m), EARLY (<30m), SETTLING (<2h), MATURE (>2h)
 * **💬 Discord Commands (reply to alerts in #pumpfun-alerts):**
   - `ANALYZE` - Full pump.fun analysis (holders, trades, social)
   - `BUY $25` - Gamble specified amount on token
@@ -110,7 +123,18 @@ Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<
   PUMPFUN_AUTO_ANALYZE=false                         # DISABLED - analysis useless for meme coins
   BONDING_MIN_TRADES=3                               # Lower = faster alerts
   BONDING_MIN_VOLUME_SOL=0.5                         # Lower = faster alerts
+  # RELAXED MODE - Catch MORE opportunities
+  PUMPFUN_RELAXED_MODE=true                          # ⚡ Enable relaxed mode
+  PUMPFUN_MIN_TRADES_RELAXED=1                       # Alert after just 1 trade
+  PUMPFUN_MIN_VOLUME_RELAXED=0.1                     # 0.1 SOL volume threshold
+  # CREATION FILTER - Catch tokens BEFORE first trade!
+  PUMPFUN_CREATION_FILTER=with_socials               # "all", "with_socials", "promising_only"
   ```
+* **⚡ CREATION ALERTS (NEW - December 2025):** Catch tokens BEFORE first trade!
+  - WebSocket connection to pump.fun catches tokens at the moment of creation
+  - Instant assessment based on name, symbol, social links, image
+  - Filter modes: `all` (noisy), `with_socials` (balanced), `promising_only` (quality)
+  - No waiting for trades - you're alerted within seconds of token creation!
 * **▶️ Service:** `python windows_services/runners/run_pumpfun_gambler.py`
 * **📝 Linux Service:** `deploy/sentient-pumpfun-gambler.service`
 * **⚠️ Gambling Disclaimer:** 99%+ of bonding curve tokens fail. Only bet what you can lose!
