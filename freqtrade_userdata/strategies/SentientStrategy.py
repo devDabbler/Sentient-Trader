@@ -173,7 +173,7 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # Strict entry: EMA cross + strong trend + momentum confirmation
+        # Balanced entry: EMA cross + trend + momentum (quality over quantity)
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -182,19 +182,17 @@ class SentientStrategy(IStrategy):
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # Strong trend (ADX > 25)
-                (dataframe['adx'] > 25) &
+                # Trend present (ADX > 20)
+                (dataframe['adx'] > 20) &
                 
-                # RSI in sweet spot (not too low, not overbought)
-                (dataframe['rsi'] > 40) &
-                (dataframe['rsi'] < 58) &
+                # RSI has room to run (not overbought)
+                (dataframe['rsi'] < 62) &
                 
-                # MACD histogram positive AND rising
+                # MACD histogram positive
                 (dataframe['macdhist'] > 0) &
-                (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
                 
-                # Strong volume spike (1.5x average)
-                (dataframe['volume_ratio'] > 1.5) &
+                # Volume above average (1.2x)
+                (dataframe['volume_ratio'] > 1.2) &
                 
                 # Volume exists
                 (dataframe['volume'] > 0)
