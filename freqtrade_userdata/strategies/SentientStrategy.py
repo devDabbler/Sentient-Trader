@@ -63,16 +63,16 @@ class SentientStrategy(IStrategy):
         'stoploss_on_exchange': False
     }
     
-    # Hyperparameters for optimization
-    buy_rsi = IntParameter(20, 40, default=30, space='buy')
-    buy_rsi_high = IntParameter(50, 70, default=60, space='buy')
-    sell_rsi = IntParameter(60, 85, default=70, space='sell')
+    # Hyperparameters for optimization - LOOSENED for more trades
+    buy_rsi = IntParameter(20, 50, default=40, space='buy')  # Was 30 - now triggers earlier
+    buy_rsi_high = IntParameter(60, 80, default=75, space='buy')  # Was 60 - allows higher RSI entries
+    sell_rsi = IntParameter(65, 90, default=80, space='sell')  # Was 70 - holds longer
     
-    ema_fast = IntParameter(8, 20, default=12, space='buy')
-    ema_slow = IntParameter(20, 50, default=26, space='buy')
-    ema_trend = IntParameter(50, 200, default=100, space='buy')
+    ema_fast = IntParameter(5, 15, default=9, space='buy')  # Faster EMA
+    ema_slow = IntParameter(15, 30, default=21, space='buy')  # Faster slow EMA
+    ema_trend = IntParameter(30, 100, default=50, space='buy')  # Shorter trend EMA
     
-    volume_factor = DecimalParameter(1.0, 3.0, default=1.5, space='buy')
+    volume_factor = DecimalParameter(0.8, 2.0, default=1.0, space='buy')  # Was 1.5 - less strict
     
     def informative_pairs(self):
         """
@@ -169,44 +169,53 @@ class SentientStrategy(IStrategy):
     
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate entry signals.
+        Populate entry signals - LOOSENED for more trades.
         
-        Entry conditions:
-        1. EMA fast crosses above EMA slow (bullish crossover)
-        2. Price above trend EMA
-        3. RSI not overbought (< 60)
-        4. Volume above average
-        5. Trend aligned (EMA 20 > 50 > 100)
-        6. Heikin Ashi bullish
+        Entry conditions (simplified - only need core signals):
+        1. EMA fast above EMA slow OR crossing above
+        2. RSI in buy zone (not oversold, not overbought)
+        3. Volume decent
+        4. MACD or trend confirmation
         """
+        # Primary entry: EMA crossover with momentum
         dataframe.loc[
             (
-                # EMA crossover
-                (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) &
+                # EMA crossover OR fast above slow
+                (
+                    (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) |
+                    (dataframe['ema_fast'] > dataframe['ema_slow'])
+                ) &
                 
-                # Price above trend EMA
-                (dataframe['close'] > dataframe['ema_trend']) &
-                
-                # RSI conditions
+                # RSI in buy zone
                 (dataframe['rsi'] > self.buy_rsi.value) &
                 (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
-                # Volume confirmation
+                # Volume decent (loosened)
                 (dataframe['volume_ratio'] > self.volume_factor.value) &
                 
-                # Trend alignment
-                (dataframe['trend_bullish']) &
-                
-                # MACD positive momentum
-                (dataframe['macdhist'] > 0) &
-                
-                # Heikin Ashi bullish
-                (dataframe['ha_bullish']) &
-                
-                # ADX showing trend
-                (dataframe['adx'] > 20) &
+                # At least one momentum confirmation (OR instead of AND)
+                (
+                    (dataframe['macdhist'] > 0) |
+                    (dataframe['ha_bullish']) |
+                    (dataframe['close'] > dataframe['ema_trend'])
+                ) &
                 
                 # Volume check
+                (dataframe['volume'] > 0)
+            ),
+            'enter_long'] = 1
+        
+        # Secondary entry: RSI bounce from oversold
+        dataframe.loc[
+            (
+                # RSI bouncing from oversold
+                (dataframe['rsi'] < 35) &
+                (dataframe['rsi'] > dataframe['rsi'].shift(1)) &
+                
+                # Price near lower bollinger
+                (dataframe['close'] < dataframe['bb_middle']) &
+                
+                # Some volume
                 (dataframe['volume'] > 0)
             ),
             'enter_long'] = 1
