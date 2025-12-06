@@ -230,17 +230,12 @@ class SentientStrategy(IStrategy):
         elif current_profit >= 0.006:  # 0.6%+ profit
             return -0.015  # Tighten to 1.5%
         
-        # LOSS MANAGEMENT - cut losers faster if deeply underwater
-        if current_profit < -0.01:  # Already down 1%+
-            if trade_duration > 60:  # 1+ hour underwater = cut it
-                return -0.012  # Tight stop at 1.2%
-            else:
-                return -0.015  # Give 30 min to recover
-        
-        # Normal loss management for trades near breakeven
-        if trade_duration > 360:  # 6+ hours
-            return -0.015  # Cut at 1.5%
+        # LOSS MANAGEMENT - give trades room to recover
+        if trade_duration > 360:  # 6+ hours - cut losses
+            return -0.012  # Cut at 1.2%
         elif trade_duration > 180:  # 3+ hours
+            return -0.015  # Tighten to 1.5%
+        elif trade_duration > 60:  # 1+ hour
             return -0.018  # Tighten to 1.8%
         else:
             return -0.02  # Initial 2% - standard stop
