@@ -544,6 +544,134 @@ class PumpfunAnalyzer:
         
         return analysis
     
+    async def send_creation_alert(self, token) -> bool:
+        """
+        Send FAST creation alert for new token - no analysis, just detection.
+        Use this for immediate alerts when PUMPFUN_ALERT_ON_CREATION=true.
+        
+        Args:
+            token: BondingToken from bonding_curve_monitor
+            
+        Returns:
+            True if alert sent successfully
+        """
+        if not self.discord_webhook_url:
+            return False
+        
+        try:
+            # Quick creation alert - minimal API calls for speed
+            embed = {
+                "title": f"🆕 NEW TOKEN DETECTED: {token.symbol}",
+                "description": f"**{token.name}**\n\n🚀 Just launched on pump.fun!",
+                "color": 0x00FFFF,  # Cyan for new token
+                "fields": [
+                    {
+                        "name": "📊 Early Stats",
+                        "value": f"Trades: {token.total_trades}\nVolume: {token.total_volume_sol:.2f} SOL",
+                        "inline": True
+                    },
+                    {
+                        "name": "📈 Bonding",
+                        "value": f"Progress: {token.progress_pct:.1f}%\nMcap: ~${token.market_cap_usd:,.0f}",
+                        "inline": True
+                    },
+                    {
+                        "name": "💡 Action",
+                        "value": "Reply `ANALYZE` for full analysis\nor jump in early!",
+                        "inline": True
+                    },
+                ],
+                "footer": {
+                    "text": f"⚡ FAST ALERT | pump.fun | {datetime.now().strftime('%H:%M:%S')}"
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add trade link
+            embed["fields"].append({
+                "name": "🔗 Quick Links",
+                "value": f"[pump.fun](https://pump.fun/{token.mint}) | [DexScreener](https://dexscreener.com/solana/{token.mint})",
+                "inline": False
+            })
+            
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {"embeds": [embed]}
+                response = await client.post(self.discord_webhook_url, json=payload)
+                
+                if response.status_code in [200, 204]:
+                    logger.info(f"⚡ Sent creation alert for {token.symbol}")
+                    return True
+                else:
+                    logger.warning(f"Discord returned {response.status_code}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error sending creation alert: {e}")
+            return False
+    
+    async def send_graduation_alert(self, migration) -> bool:
+        """
+        Send FAST graduation alert - token hit 100% and is now on DEX.
+        
+        Args:
+            migration: MigrationEvent from bonding_curve_monitor
+            
+        Returns:
+            True if alert sent successfully
+        """
+        if not self.discord_webhook_url:
+            return False
+        
+        try:
+            embed = {
+                "title": f"🎓 GRADUATED: {migration.symbol}",
+                "description": f"**Token hit 100% bonding curve!**\n\nNow tradeable on Raydium/DEX - liquidity is live!",
+                "color": 0xFFD700,  # Gold for graduation
+                "fields": [
+                    {
+                        "name": "🏆 Status",
+                        "value": "✅ Graduated\n✅ On DEX\n✅ Liquidity Added",
+                        "inline": True
+                    },
+                    {
+                        "name": "💰 Initial Liquidity",
+                        "value": f"~{migration.initial_liquidity_sol:.1f} SOL" if migration.initial_liquidity_sol > 0 else "Check DEX",
+                        "inline": True
+                    },
+                    {
+                        "name": "⏰ Timing",
+                        "value": "🔥 Early entry moment!\nVolume usually spikes after grad",
+                        "inline": True
+                    },
+                ],
+                "footer": {
+                    "text": f"🎓 GRADUATION ALERT | {datetime.now().strftime('%H:%M:%S')}"
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Add trade links
+            embed["fields"].append({
+                "name": "🔗 Trade Now",
+                "value": f"[DexScreener](https://dexscreener.com/solana/{migration.mint}) | [Raydium](https://raydium.io/swap/?inputCurrency=sol&outputCurrency={migration.mint})",
+                "inline": False
+            })
+            
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                payload = {"embeds": [embed]}
+                response = await client.post(self.discord_webhook_url, json=payload)
+                
+                if response.status_code in [200, 204]:
+                    logger.info(f"🎓 Sent graduation alert for {migration.symbol}")
+                    return True
+                else:
+                    logger.warning(f"Discord returned {response.status_code}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error sending graduation alert: {e}")
+            return False
+
     async def send_analysis_alert(self, analysis: PumpfunTokenAnalysis):
         """Send analysis result to Discord"""
         if not self.discord_webhook_url:

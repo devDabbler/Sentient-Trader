@@ -323,12 +323,21 @@ async def run_pumpfun_gambler():
     
     # Track tokens for auto-analysis
     analyzed_tokens = set()
+    alerted_tokens = set()  # Track tokens we've already sent creation alerts for
     
     # Set up callback to auto-analyze promising tokens
     async def on_new_token_async(token):
-        """Called when new token is detected - auto-analyze if promising"""
+        """Called when new token is detected - alert immediately if enabled"""
         msg = f"🎰 NEW: {token.symbol} on pump.fun"
         print(f"[PUMPFUN] {msg}", flush=True)
+        
+        # FAST CREATION ALERT - send immediately when enabled!
+        if alert_on_creation and token.mint not in alerted_tokens:
+            alerted_tokens.add(token.mint)
+            try:
+                await analyzer.send_creation_alert(token)
+            except Exception as e:
+                logger.debug(f"Creation alert error: {e}")
         
         # Journal the token creation event
         await journal_gambling_decision(
@@ -343,8 +352,10 @@ async def run_pumpfun_gambler():
             buy_pressure=token.buy_pressure,
         )
         
-        # Auto-analyze after some initial activity (5+ trades)
-        if token.total_trades >= 5 and token.mint not in analyzed_tokens:
+        # Auto-analyze is DISABLED by default for speed - analysis is useless for fast meme plays
+        # Enable with PUMPFUN_AUTO_ANALYZE=true if you want scoring (adds delay)
+        auto_analyze = parse_bool_env("PUMPFUN_AUTO_ANALYZE", False)
+        if auto_analyze and token.total_trades >= min_trades and token.mint not in analyzed_tokens:
             analyzed_tokens.add(token.mint)
             try:
                 analysis = await analyzer.analyze_token(token.mint)
@@ -385,44 +396,33 @@ async def run_pumpfun_gambler():
         msg = f"🎓 GRADUATED: {migration.symbol} - Now on DEX!"
         print(f"[PUMPFUN] {msg}", flush=True)
         
-        # Graduation is a key moment - run fresh analysis
-        try:
-            analysis = await analyzer.analyze_token(migration.mint)
-            if analysis:
-                await analyzer.send_analysis_alert(analysis)
-                logger.info(f"🎓 Graduation analysis for {migration.symbol}: Score={analysis.score:.0f}")
-                
-                # Journal the graduation with full analysis
-                await journal_gambling_decision(
-                    token_mint=migration.mint,
-                    symbol=analysis.symbol,
-                    name=analysis.name,
-                    event_type="GRADUATION",
-                    analysis_score=analysis.score,
-                    recommendation=analysis.recommendation,
-                    risk_level=analysis.risk_level.value if hasattr(analysis.risk_level, 'value') else str(analysis.risk_level),
-                    max_bet_usd=analysis.max_bet_usd,
-                    market_cap_sol=analysis.market_cap_sol,
-                    market_cap_usd=analysis.market_cap_usd,
-                    progress_pct=100.0,  # Graduated = 100%
-                    total_trades=analysis.total_trades,
-                    holder_count=analysis.holder_count,
-                    buy_pressure=analysis.buy_pressure,
-                    reasoning=analysis.reasoning,
-                    risk_factors=analysis.risk_factors,
-                    green_flags=analysis.green_flags,
-                )
-            else:
-                # Journal graduation even without analysis
-                await journal_gambling_decision(
-                    token_mint=migration.mint,
-                    symbol=migration.symbol,
-                    name=migration.symbol,
-                    event_type="GRADUATION",
-                    progress_pct=100.0,
-                )
-        except Exception as e:
-            logger.debug(f"Graduation analysis error: {e}")
+        # FAST GRADUATION ALERT - send immediately when enabled!
+        if alert_on_graduation:
+            try:
+                await analyzer.send_graduation_alert(migration)
+            except Exception as e:
+                logger.debug(f"Graduation alert error: {e}")
+        
+        # Journal graduation (no analysis - speed is key)
+        await journal_gambling_decision(
+            token_mint=migration.mint,
+            symbol=migration.symbol,
+            name=migration.symbol,
+            event_type="GRADUATION",
+            progress_pct=100.0,
+        )
+        
+        # Auto-analyze graduation is DISABLED by default - analysis is useless for fast meme plays
+        # Enable with PUMPFUN_AUTO_ANALYZE=true if you want scoring (adds delay)
+        auto_analyze = parse_bool_env("PUMPFUN_AUTO_ANALYZE", False)
+        if auto_analyze:
+            try:
+                analysis = await analyzer.analyze_token(migration.mint)
+                if analysis:
+                    await analyzer.send_analysis_alert(analysis)
+                    logger.info(f"🎓 Graduation analysis for {migration.symbol}: Score={analysis.score:.0f}")
+            except Exception as e:
+                logger.debug(f"Graduation analysis error: {e}")
         
         # Graduation alert is sent by analyzer.send_analysis_alert() above
         # No need for duplicate alert_system call

@@ -135,7 +135,7 @@ class BondingCurveMonitor:
         min_volume_sol_to_alert: float = 1.0,
         alert_on_creation: bool = True,
         alert_on_graduation: bool = True,
-        launchlab_poll_interval: int = 30,  # seconds
+        launchlab_poll_interval: int = 10,  # seconds (fast mode for catching launches)
     ):
         """
         Initialize Bonding Curve Monitor

@@ -41,6 +41,13 @@ except ImportError:
     logger.warning("X Sentiment Service not available")
 
 
+def parse_bool_env(key: str, default: bool = True) -> bool:
+    """Parse boolean from environment variable"""
+    import os
+    val = os.getenv(key, str(default)).lower()
+    return val in ("true", "1", "yes", "on")
+
+
 class DexLaunchHunter:
     """Main orchestrator for DEX launch hunting"""
     
@@ -52,6 +59,9 @@ class DexLaunchHunter:
             config: Configuration settings (uses defaults if not provided)
         """
         self.config = config or HunterConfig()
+        
+        # Fast mode - skip slow analysis for meme coins
+        self.skip_analysis = parse_bool_env("DEX_SKIP_ANALYSIS", False)
         
         # Initialize services
         self.dex_client = DexScreenerClient()
@@ -95,14 +105,17 @@ class DexLaunchHunter:
         logger.info(f"  ├─ Liquidity: ${self.config.min_liquidity_usd:,.0f} - ${self.config.max_liquidity_usd:,.0f}")
         logger.info(f"  ├─ Max age: {self.config.max_age_hours}h")
         logger.info(f"  ├─ Lenient Solana mode: {getattr(self.config, 'lenient_solana_mode', True)}")
-        logger.info(f"  └─ Discovery mode: {getattr(self.config, 'discovery_mode', 'aggressive')}")
+        logger.info(f"  ├─ Discovery mode: {getattr(self.config, 'discovery_mode', 'aggressive')}")
+        logger.info(f"  └─ Skip analysis (fast mode): {self.skip_analysis}")
         
         # Print config summary
         lenient = getattr(self.config, 'lenient_solana_mode', True)
         discovery = getattr(self.config, 'discovery_mode', 'aggressive')
-        print(f"[DEX] Config: lenient_solana_mode={lenient}, discovery_mode={discovery}", flush=True)
+        print(f"[DEX] Config: lenient_solana_mode={lenient}, discovery_mode={discovery}, skip_analysis={self.skip_analysis}", flush=True)
         if lenient:
             print("[DEX] ⚠️ LENIENT MODE ON: Allowing tokens with mint/freeze authority (higher risk)", flush=True)
+        if self.skip_analysis:
+            print("[DEX] ⚡ FAST MODE: Skipping slow analysis - raw detection alerts only", flush=True)
     
     async def start_monitoring(self, continuous: bool = True):
         """
@@ -203,6 +216,26 @@ class DexLaunchHunter:
                     
                     self.total_scanned += 1
                     analyzed_count += 1
+                    
+                    # FAST MODE: Skip slow analysis, just alert on raw detection
+                    if self.skip_analysis:
+                        print(f"[DEX] ⚡ DETECTED: {pair.base_token_symbol} ({pair.chain.value}) - ${pair.liquidity_usd:,.0f} liq", flush=True)
+                        logger.info(f"[DEX] ⚡ DETECTED: {pair.base_token_symbol} ({pair.chain.value}) - ${pair.liquidity_usd:,.0f} liq")
+                        
+                        # Add to discovered to avoid duplicates
+                        self.discovered_tokens[pair.base_token_address.lower()] = None
+                        
+                        # Add to results for panel (minimal info)
+                        results_for_panel.append({
+                            'ticker': pair.base_token_symbol,
+                            'signal': f"LAUNCH (RAW)",
+                            'confidence': 50,  # Default since no analysis
+                            'price': pair.price_usd,
+                            'change_24h': pair.price_change_24h,
+                            'volume_24h': pair.volume_24h,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        continue  # Skip slow analysis
                     
                     logger.info(f"[DEX] Analyzing: {pair.base_token_symbol} ({pair.chain.value})...")
                     print(f"[DEX] Analyzing: {pair.base_token_symbol} ({pair.chain.value})...", flush=True)

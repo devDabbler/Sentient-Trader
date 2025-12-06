@@ -43,41 +43,53 @@ The platform supports:
 * **🎣 Webhook Execution Ready:** High-level placeholders for future bundler integration (Jito, Solayer)
 * **⏰ Coin Age & Entry Recommendations:** Smart entry timing based on coin age
 
-#### Bonding Curve Monitor (NEW - December 2025) ✅ PRODUCTION READY
+#### Bonding Curve Monitor (UPDATED - December 2025) ✅ PRODUCTION READY - FAST MODE
 Real-time monitoring for pump.fun and LaunchLab token launches - catches tokens at creation, not hours later from DexScreener:
 * **🎰 PumpPortal WebSocket (FREE):** Real-time token creation events from pump.fun
   - Instant notification when new tokens are created (seconds, not minutes)
   - Trade activity monitoring with volume and buy/sell counts
   - Migration events when tokens graduate (hit 100% bonding curve)
 * **🚀 LaunchLab Polling:** Monitors Raydium LaunchLab for new token launches
-  - Configurable polling interval (default 30s)
+  - **⚡ FAST MODE: 10-second polling interval (was 30s)**
   - Detects tokens before they appear on DexScreener
 * **🎓 Graduation Alerts:** Notified immediately when tokens complete bonding curve
-  - Auto-analysis via DEX Hunter when tokens graduate
   - Discord alerts with DexScreener and Raydium links
+  - Analysis disabled by default (too slow for meme coins)
 * **📊 Early Detection Benefits:**
   - **Before:** DexScreener shows token 1-2 hours after launch (after graduation)
   - **After:** Caught at creation on bonding curve (within seconds)
   - Example: TRUTHAI would have been detected at launch, not after 100% graduation
 * **⚙️ Configuration (Environment Variables):**
   ```bash
+  # Fast Mode Settings (December 2025) - Skip useless analysis!
   DEX_ENABLE_BONDING_MONITOR=true    # Enable bonding curve monitoring
-  BONDING_ALERT_ON_CREATION=true     # Alert on new token creation
-  BONDING_ALERT_ON_GRADUATION=true   # Alert on token graduation
-  BONDING_MIN_TRADES=5               # Min trades for momentum alert
-  BONDING_MIN_VOLUME_SOL=1.0         # Min volume for momentum alert
+  DEX_SCAN_INTERVAL=15               # DEX Hunter scan interval (seconds) - default 15s
+  DEX_SKIP_ANALYSIS=true             # ⚡ Skip slow scoring - raw detection only!
+  BONDING_ENABLE_PUMPFUN=true        # pump.fun WebSocket (real-time)
+  BONDING_ENABLE_LAUNCHLAB=true      # LaunchLab/Raydium polling
+  BONDING_ALERT_ON_CREATION=true     # Alert IMMEDIATELY on new token creation
+  BONDING_ALERT_ON_GRADUATION=true   # Alert IMMEDIATELY on token graduation
+  BONDING_MIN_TRADES=3               # Lower = faster alerts (default 3)
+  BONDING_MIN_VOLUME_SOL=0.5         # Lower = faster alerts (default 0.5)
+  BONDING_LAUNCHLAB_INTERVAL=10      # LaunchLab poll interval (seconds) - FAST!
   ```
 * **▶️ Standalone Service:** `python windows_services/runners/run_bonding_curve_monitor.py`
 * **🔗 Integrated Mode:** Runs alongside DEX Launch service when `DEX_ENABLE_BONDING_MONITOR=true`
 * **📝 Linux Service:** `deploy/sentient-bonding-curve-monitor.service`
+* **🚀 NEW DEX Launch Service:** `deploy/sentient-dex-launch.service` (fast mode enabled)
 
-#### Pump.fun Gambler Monitor (NEW - December 2025) 🎰
+#### Pump.fun Gambler Monitor (UPDATED - December 2025) 🎰 FAST ALERTS
 Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<$50 bets):
 * **🎯 Direct pump.fun API Analysis:** Analyzes tokens BEFORE they graduate to DexScreener
   - Holder count and distribution analysis
   - Trading activity and momentum tracking
   - Creator history and rug risk detection
   - Bonding curve progress monitoring
+* **⚡ FAST CREATION ALERTS:** Instant Discord alerts when new tokens are created
+  - No delay waiting for trades - alert immediately on creation!
+  - Quick links to pump.fun and DexScreener
+* **🎓 FAST GRADUATION ALERTS:** Instant Discord alerts when tokens hit 100%
+  - Catch the liquidity moment before others
 * **📊 Risk-Based Scoring:** 0-100 score with recommendations:
   - **SKIP:** Too risky, don't touch
   - **WATCH:** Monitor for momentum, not ready yet
@@ -93,10 +105,14 @@ Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<
   DISCORD_WEBHOOK_PUMPFUN_ALERTS=https://discord...  # Webhook for alerts
   DISCORD_CHANNEL_ID_PUMPFUN_ALERTS=123456789        # Channel ID for commands
   PUMPFUN_MAX_BET=25                                 # Default max bet
-  PUMPFUN_ALERT_ON_CREATION=true                     # Alert on new tokens
-  PUMPFUN_ALERT_ON_GRADUATION=true                   # Alert on graduation
+  PUMPFUN_ALERT_ON_CREATION=true                     # ⚡ FAST alert on new tokens
+  PUMPFUN_ALERT_ON_GRADUATION=true                   # ⚡ FAST alert on graduation
+  PUMPFUN_AUTO_ANALYZE=false                         # DISABLED - analysis useless for meme coins
+  BONDING_MIN_TRADES=3                               # Lower = faster alerts
+  BONDING_MIN_VOLUME_SOL=0.5                         # Lower = faster alerts
   ```
 * **▶️ Service:** `python windows_services/runners/run_pumpfun_gambler.py`
+* **📝 Linux Service:** `deploy/sentient-pumpfun-gambler.service`
 * **⚠️ Gambling Disclaimer:** 99%+ of bonding curve tokens fail. Only bet what you can lose!
 
 #### Crypto Breakout Service (NEW - December 2025)

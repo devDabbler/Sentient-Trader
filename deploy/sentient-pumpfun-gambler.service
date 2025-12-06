@@ -10,6 +10,14 @@ User=root
 WorkingDirectory=/root/sentient-trader
 Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONPATH=/root/sentient-trader"
+
+# Fast mode for catching tokens quickly!
+Environment="PUMPFUN_ALERT_ON_CREATION=true"
+Environment="PUMPFUN_ALERT_ON_GRADUATION=true"
+Environment="BONDING_MIN_TRADES=3"
+Environment="BONDING_MIN_VOLUME_SOL=0.5"
+
 EnvironmentFile=/root/sentient-trader/.env
 
 ExecStart=/root/sentient-trader/venv/bin/python windows_services/runners/run_pumpfun_gambler.py

@@ -1,0 +1,39 @@
+[Unit]
+Description=Sentient Trader - DEX Launch Hunter (Fast Mode)
+Documentation=https://github.com/devDabbler/Sentient-Trader
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/sentient-trader
+Environment="PATH=/root/sentient-trader/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONPATH=/root/sentient-trader"
+
+# Fast Mode Configuration - Catch pumps quickly!
+Environment="DEX_SCAN_INTERVAL=15"
+Environment="DEX_LENIENT_MODE=true"
+Environment="DEX_DISCOVERY_MODE=aggressive"
+Environment="DEX_MIN_LIQUIDITY=500"
+Environment="DEX_ENABLE_BONDING_MONITOR=true"
+Environment="BONDING_LAUNCHLAB_INTERVAL=10"
+
+EnvironmentFile=/root/sentient-trader/.env
+
+ExecStart=/root/sentient-trader/venv/bin/python windows_services/runners/run_dex_launch_simple.py
+
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=append:/root/sentient-trader/logs/dex_launch.log
+StandardError=append:/root/sentient-trader/logs/dex_launch.log
+
+# Resource limits (higher for fast mode)
+MemoryMax=1G
+CPUQuota=75%
+
+[Install]
+WantedBy=multi-user.target

@@ -327,7 +327,7 @@ class HunterConfig:
     min_composite_score: float = 20.0  # Much lower - let users decide quality
     
     # Monitoring
-    scan_interval_seconds: int = 60  # Check every 60 seconds
+    scan_interval_seconds: int = 15  # Check every 15 seconds (fast mode for catching pumps)
     enable_discord_alerts: bool = True
     enable_telegram_alerts: bool = False
     
