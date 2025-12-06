@@ -556,7 +556,10 @@ class PumpfunAnalyzer:
             True if alert sent successfully
         """
         if not self.discord_webhook_url:
+            logger.warning(f"No webhook URL configured, cannot send creation alert for {token.symbol}")
             return False
+        
+        logger.info(f"📤 Sending creation alert for {token.symbol} to Discord...")
         
         try:
             # Quick creation alert - minimal API calls for speed

@@ -332,10 +332,13 @@ async def run_pumpfun_gambler():
         print(f"[PUMPFUN] {msg}", flush=True)
         
         # FAST CREATION ALERT - send immediately when enabled!
+        logger.info(f"🔔 Alert check: creation={alert_on_creation}, already_alerted={token.mint in alerted_tokens}")
         if alert_on_creation and token.mint not in alerted_tokens:
             alerted_tokens.add(token.mint)
+            logger.info(f"📤 Attempting to send creation alert for {token.symbol}...")
             try:
-                await analyzer.send_creation_alert(token)
+                result = await analyzer.send_creation_alert(token)
+                logger.info(f"📤 Creation alert result: {result}")
             except Exception as e:
                 logger.error(f"Creation alert error: {e}")
         
