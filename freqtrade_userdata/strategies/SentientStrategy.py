@@ -173,7 +173,7 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # Quality entry: EMA cross + trend filter + momentum (balanced filters)
+        # Quality entry: EMA cross + trend alignment + momentum
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -181,6 +181,9 @@ class SentientStrategy(IStrategy):
                 
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
+                
+                # TREND ALIGNMENT: EMA 20 > EMA 50 (confirmed uptrend)
+                (dataframe['ema_20'] > dataframe['ema_50']) &
                 
                 # ADX shows some trend (avoid pure chop)
                 (dataframe['adx'] > self.adx_threshold.value) &
