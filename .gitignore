@@ -52,6 +52,7 @@ env/
 venv/
 ENV/
 *.json
+!freqtrade_userdata/config.json
 *.bat
 *.ps1   
 
