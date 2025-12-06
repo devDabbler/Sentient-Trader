@@ -74,11 +74,12 @@ trading_signals.log
 locks/*.pid
 *.sqlite
 
-# Freqtrade artifacts
-freqtrade_userdata/
+# Freqtrade artifacts (keep config and strategies, ignore results)
 freqtrade_userdata/backtest_results/
 freqtrade_userdata/hyperopt_results/
 freqtrade_userdata/hyperopt.lock
+freqtrade_userdata/data/
+tradesv3.dryrun.sqlite
 
 # Misc stray files
 =12.0
