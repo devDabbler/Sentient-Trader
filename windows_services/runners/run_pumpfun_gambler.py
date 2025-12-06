@@ -337,7 +337,7 @@ async def run_pumpfun_gambler():
             try:
                 await analyzer.send_creation_alert(token)
             except Exception as e:
-                logger.debug(f"Creation alert error: {e}")
+                logger.error(f"Creation alert error: {e}")
         
         # Journal the token creation event
         await journal_gambling_decision(
@@ -401,7 +401,7 @@ async def run_pumpfun_gambler():
             try:
                 await analyzer.send_graduation_alert(migration)
             except Exception as e:
-                logger.debug(f"Graduation alert error: {e}")
+                logger.error(f"Graduation alert error: {e}")
         
         # Journal graduation (no analysis - speed is key)
         await journal_gambling_decision(
