@@ -89,11 +89,13 @@ tests/
 documentation/
 examples/
 demos/
-scripts/
 archive/
 migrations/
 .windsurf/
 
+# Ignore everything in scripts except .sh files
+scripts/*
+!scripts/*.sh
 
 # Cursor
 # .cursorignore  # Keep this file in git so Cursor settings are shared

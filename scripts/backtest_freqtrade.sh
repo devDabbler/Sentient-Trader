@@ -4,7 +4,7 @@
 # Example: ./backtest_freqtrade.sh SentientStrategy 30
 # Example: ./backtest_freqtrade.sh SentientFreqAIStrategy 60
 
-cd /root/Sentient-Trader
+cd /root/sentient-trader
 
 # Activate virtual environment
 source venv/bin/activate

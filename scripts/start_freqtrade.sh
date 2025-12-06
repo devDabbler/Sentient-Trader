@@ -4,7 +4,7 @@
 # Example: ./start_freqtrade.sh SentientStrategy
 # Example: ./start_freqtrade.sh SentientFreqAIStrategy
 
-cd /root/Sentient-Trader
+cd /root/sentient-trader
 
 # Activate virtual environment
 source venv/bin/activate

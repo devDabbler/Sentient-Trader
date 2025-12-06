@@ -1511,6 +1511,25 @@ manager.set_auto_execute_adjustments(False)  # Require approval for ALL actions
 - ✅ **Synced Position Journaling:** Positions imported from broker are automatically journaled for tracking
 - ✅ **Position Status Logging:** Each check cycle logs P&L, current price, and stop/target for all positions
 
+### Freqtrade + FreqAI Integration (December 6, 2025)
+- ✅ **Freqtrade Installed:** Production-ready trading bot with native Kraken support
+- ✅ **FreqAI Module:** ML/RL-enhanced trading signals with LightGBM
+- ✅ **Custom Strategy:** `SentientStrategy.py` wrapping existing technical indicators
+- ✅ **Shell Scripts:** `scripts/download_freqtrade_data.sh`, `scripts/backtest_freqtrade.sh`, `scripts/start_freqtrade.sh`
+- ✅ **Kraken Data Download:** Uses `--dl-trades` flag (Kraken doesn't support klines)
+- ✅ **Systemd Service:** `deploy/freqtrade.service` for DigitalOcean deployment
+- **Usage:**
+  ```bash
+  # Download 30 days of historical data
+  ./scripts/download_freqtrade_data.sh 30
+  
+  # Backtest strategy
+  ./scripts/backtest_freqtrade.sh SentientStrategy 30
+  
+  # Start paper trading
+  ./scripts/start_freqtrade.sh SentientStrategy
+  ```
+
 ### AI Stock Position Manager (December 2, 2025)
 - ✅ **Broker Sync:** New `sync_with_broker()` method syncs positions from Tradier/IBKR on startup and periodically
 - ✅ **Position Monitoring:** Monitors all open stock positions (paper and live) with stop loss/take profit management
@@ -1552,6 +1571,6 @@ manager.set_auto_execute_adjustments(False)  # Require approval for ALL actions
 
 ---
 
-**Last Updated**: December 3, 2025  
+**Last Updated**: December 6, 2025  
 **Status**: ✅ Production Ready  
 **Phases Completed**: 1, 2, 3 ✅

@@ -3,7 +3,7 @@
 # Usage: ./download_freqtrade_data.sh [days]
 # Example: ./download_freqtrade_data.sh 60
 
-cd /root/Sentient-Trader
+cd /root/sentient-trader
 
 # Activate virtual environment
 source venv/bin/activate
@@ -27,7 +27,8 @@ freqtrade download-data \
     --pairs BTC/USD ETH/USD SOL/USD XRP/USD ADA/USD AVAX/USD DOT/USD LINK/USD MATIC/USD ATOM/USD \
     --timeframes 5m 15m 1h 4h \
     --userdir freqtrade_userdata \
-    --timerange "${START_DATE}-${END_DATE}"
+    --timerange "${START_DATE}-${END_DATE}" \
+    --dl-trades
 
 echo ""
 echo "Download complete. Data saved to freqtrade_userdata/data/kraken/"
