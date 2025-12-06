@@ -35,8 +35,8 @@ class SentientStrategy(IStrategy):
         "180": 0.008,  # 0.8% after 3 hours (take small profit)
     }
     
-    # Stoploss - tighter initial stop, custom_stoploss manages dynamically
-    stoploss = -0.02  # 2% max loss (custom_stoploss tightens further)
+    # Stoploss - give crypto room to breathe
+    stoploss = -0.03  # 3% max loss (custom_stoploss manages dynamically)
     
     # Trailing stoploss - DISABLED (was causing losses)
     # The custom_stoploss handles profit protection better
@@ -230,15 +230,15 @@ class SentientStrategy(IStrategy):
         elif current_profit >= 0.006:  # 0.6%+ profit
             return -0.015  # Tighten to 1.5%
         
-        # LOSS MANAGEMENT - faster exit on losers
-        if trade_duration > 120:  # 2+ hours - cut losses
-            return -0.01  # Cut at 1%
-        elif trade_duration > 60:  # 1+ hour
-            return -0.012  # Tighten to 1.2%
-        elif trade_duration > 30:  # 30+ min
-            return -0.015  # Tighten to 1.5%
+        # LOSS MANAGEMENT - give trades room to breathe
+        if trade_duration > 360:  # 6+ hours - cut losses
+            return -0.015  # Cut at 1.5%
+        elif trade_duration > 240:  # 4+ hours
+            return -0.018  # Tighten to 1.8%
+        elif trade_duration > 120:  # 2+ hours
+            return -0.02  # Tighten to 2%
         else:
-            return -0.018  # Initial 1.8% - tighter start
+            return -0.025  # Initial 2.5% - room to breathe
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
