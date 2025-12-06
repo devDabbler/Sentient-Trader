@@ -26,18 +26,17 @@ class SentientStrategy(IStrategy):
     # Strategy interface version
     INTERFACE_VERSION = 3
     
-    # Minimal ROI - slightly higher targets for better R:R
+    # Minimal ROI - tighter targets for faster profit capture
     minimal_roi = {
-        "0": 0.05,     # 5% immediate (rare but take it)
-        "30": 0.03,    # 3% after 30 min
-        "60": 0.025,   # 2.5% after 1 hour
-        "120": 0.02,   # 2% after 2 hours
-        "240": 0.015,  # 1.5% after 4 hours
-        "360": 0.01    # 1% after 6 hours (take small profit)
+        "0": 0.04,     # 4% immediate (rare but take it)
+        "20": 0.025,   # 2.5% after 20 min
+        "45": 0.018,   # 1.8% after 45 min
+        "90": 0.012,   # 1.2% after 1.5 hours
+        "180": 0.008,  # 0.8% after 3 hours (take small profit)
     }
     
-    # Stoploss - give trades room to work
-    stoploss = -0.025  # 2.5% stoploss (custom_stoploss tightens over time)
+    # Stoploss - tighter initial stop, custom_stoploss manages dynamically
+    stoploss = -0.02  # 2% max loss (custom_stoploss tightens further)
     
     # Trailing stoploss - DISABLED (was causing losses)
     # The custom_stoploss handles profit protection better
@@ -66,14 +65,15 @@ class SentientStrategy(IStrategy):
     
     # Hyperparameters for optimization - BALANCED for quality trades
     buy_rsi = IntParameter(25, 45, default=35, space='buy')  # Moderate - not too oversold
-    buy_rsi_high = IntParameter(55, 70, default=65, space='buy')  # Cap before overbought
+    buy_rsi_high = IntParameter(55, 70, default=60, space='buy')  # Tighter cap - avoid late entries
     sell_rsi = IntParameter(65, 80, default=72, space='sell')  # Exit at overbought
     
-    ema_fast = IntParameter(8, 15, default=10, space='buy')  # Balanced fast EMA
+    ema_fast = IntParameter(8, 15, default=9, space='buy')  # Faster EMA for quicker signals
     ema_slow = IntParameter(18, 30, default=21, space='buy')  # Balanced slow EMA
-    ema_trend = IntParameter(40, 100, default=55, space='buy')  # Medium trend EMA
+    ema_trend = IntParameter(40, 100, default=50, space='buy')  # Shorter trend EMA
     
-    volume_factor = DecimalParameter(1.0, 2.0, default=1.2, space='buy')  # Require some volume confirmation
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.3, space='buy')  # Stronger volume confirmation
+    adx_threshold = IntParameter(18, 30, default=22, space='buy')  # ADX trend strength
     
     def informative_pairs(self):
         """
@@ -173,7 +173,7 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # High-quality entry: EMA cross + ADX trend filter + momentum
+        # High-quality entry: EMA cross + ADX trend filter + momentum + trend alignment
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -182,19 +182,28 @@ class SentientStrategy(IStrategy):
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
+                # Trend alignment: EMA stack bullish (20 > 50)
+                (dataframe['ema_20'] > dataframe['ema_50']) &
+                
                 # ADX shows trending market (avoid chop)
-                (dataframe['adx'] > 20) &
+                (dataframe['adx'] > self.adx_threshold.value) &
                 
                 # RSI in sweet spot (not oversold, not overbought)
-                (dataframe['rsi'] > 40) &
-                (dataframe['rsi'] < 65) &
+                (dataframe['rsi'] > self.buy_rsi.value) &
+                (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
                 # MACD histogram positive AND rising (strong momentum)
                 (dataframe['macdhist'] > 0) &
                 (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
                 
+                # MACD line above signal (bullish)
+                (dataframe['macd'] > dataframe['macdsignal']) &
+                
                 # Volume spike (interest confirmation)
-                (dataframe['volume_ratio'] > 1.2) &
+                (dataframe['volume_ratio'] > self.volume_factor.value) &
+                
+                # Heikin Ashi bullish (trend confirmation)
+                (dataframe['ha_bullish']) &
                 
                 # Volume exists
                 (dataframe['volume'] > 0)
@@ -216,20 +225,31 @@ class SentientStrategy(IStrategy):
                         current_rate: float, current_profit: float,
                         after_fill: bool, **kwargs) -> float:
         """
-        Simple stoploss: time-based tightening only.
-        Let ROI handle profit-taking, stoploss handles risk.
+        Dynamic stoploss with profit protection.
+        - In profit: trail to lock gains
+        - In loss: time-based tightening
         """
-        # Time-based loss cutting (don't hold losers forever)
         trade_duration = (current_time - trade.open_date_utc).total_seconds() / 60
         
-        if trade_duration > 240:  # 4+ hours
+        # PROFIT PROTECTION - lock in gains with trailing
+        if current_profit >= 0.025:  # 2.5%+ profit
+            return -0.008  # Trail tight at 0.8% (lock 1.7%+ profit)
+        elif current_profit >= 0.018:  # 1.8%+ profit
+            return -0.01  # Trail at 1% (lock 0.8%+ profit)
+        elif current_profit >= 0.012:  # 1.2%+ profit
+            return -0.012  # Trail at 1.2% (breakeven protection)
+        elif current_profit >= 0.006:  # 0.6%+ profit
+            return -0.015  # Tighten to 1.5%
+        
+        # LOSS MANAGEMENT - time-based tightening
+        if trade_duration > 180:  # 3+ hours in loss
             return -0.012  # Cut at 1.2%
-        elif trade_duration > 180:  # 3+ hours
-            return -0.015  # Cut at 1.5%
         elif trade_duration > 120:  # 2+ hours
+            return -0.015  # Tighten to 1.5%
+        elif trade_duration > 60:  # 1+ hour
             return -0.018  # Tighten to 1.8%
         else:
-            return -0.025  # Initial 2.5% - give room to breathe
+            return -0.02  # Initial 2% - give room to breathe
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
