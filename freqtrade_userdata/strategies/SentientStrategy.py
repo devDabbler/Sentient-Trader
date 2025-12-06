@@ -179,55 +179,76 @@ class SentientStrategy(IStrategy):
         3. Volume confirmation
         4. At least 2 momentum confirmations
         """
-        # Primary entry: EMA crossover with multiple confirmations
+        # Primary entry: EMA crossover with momentum confirmation
         dataframe.loc[
             (
                 # EMA crossover (must be fresh cross)
                 (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) &
                 
-                # RSI in buy zone
+                # RSI in buy zone (not overbought)
                 (dataframe['rsi'] > self.buy_rsi.value) &
                 (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
-                # Volume confirmation
-                (dataframe['volume_ratio'] > self.volume_factor.value) &
+                # Volume confirmation (relaxed)
+                (dataframe['volume_ratio'] > 1.0) &
                 
-                # Price above trend AND MACD positive (need both)
-                (dataframe['close'] > dataframe['ema_trend']) &
-                (dataframe['macdhist'] > 0) &
-                
-                # ADX showing trend (avoid choppy markets)
-                (dataframe['adx'] > 20) &
+                # Price above trend OR MACD positive (need one)
+                (
+                    (dataframe['close'] > dataframe['ema_trend']) |
+                    (dataframe['macdhist'] > 0)
+                ) &
                 
                 # Volume check
                 (dataframe['volume'] > 0)
             ),
             'enter_long'] = 1
         
-        # Secondary entry: Strong RSI bounce - ONLY in uptrend (avoid falling knives)
+        # Secondary entry: Momentum continuation (price above all EMAs)
         dataframe.loc[
             (
-                # Must be in uptrend (EMA alignment)
-                (dataframe['trend_bullish']) &
+                # Strong uptrend: price above all key EMAs
+                (dataframe['close'] > dataframe['ema_fast']) &
+                (dataframe['close'] > dataframe['ema_slow']) &
+                (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # RSI bouncing from oversold
-                (dataframe['rsi'] < 35) &
-                (dataframe['rsi'] > dataframe['rsi'].shift(1)) &
-                (dataframe['rsi'].shift(1) < dataframe['rsi'].shift(2)) &  # Confirmed reversal
+                # RSI showing strength but not overbought
+                (dataframe['rsi'] > 50) &
+                (dataframe['rsi'] < 70) &
                 
-                # Price near lower bollinger but above EMA trend
-                (dataframe['close'] <= dataframe['bb_lower'] * 1.02) &
-                (dataframe['close'] > dataframe['ema_trend']) &  # Must be above trend
-                
-                # MACD turning up AND positive
+                # MACD positive and rising
+                (dataframe['macdhist'] > 0) &
                 (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
-                (dataframe['macd'] > dataframe['macdsignal']) &  # MACD above signal
                 
-                # Volume spike
-                (dataframe['volume_ratio'] > 1.5) &
+                # Heikin Ashi bullish
+                (dataframe['ha_bullish']) &
                 
-                # ADX showing trend strength
-                (dataframe['adx'] > 20) &
+                # Volume above average
+                (dataframe['volume_ratio'] > 1.0) &
+                
+                # Volume check
+                (dataframe['volume'] > 0)
+            ),
+            'enter_long'] = 1
+        
+        # Tertiary entry: Pullback to support in uptrend
+        dataframe.loc[
+            (
+                # Price pulled back to EMA support
+                (dataframe['close'] <= dataframe['ema_slow'] * 1.01) &
+                (dataframe['close'] >= dataframe['ema_slow'] * 0.99) &
+                
+                # Still in uptrend (fast > slow)
+                (dataframe['ema_fast'] > dataframe['ema_slow']) &
+                
+                # RSI not oversold (healthy pullback)
+                (dataframe['rsi'] > 40) &
+                (dataframe['rsi'] < 60) &
+                
+                # MACD still positive
+                (dataframe['macd'] > dataframe['macdsignal']) &
+                
+                # Bullish candle (buyers stepping in)
+                (dataframe['close'] > dataframe['open']) &
                 
                 # Volume check
                 (dataframe['volume'] > 0)
