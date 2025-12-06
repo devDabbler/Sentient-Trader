@@ -139,12 +139,43 @@ Specialized monitor for small-money gambling on pump.fun bonding curve tokens (<
 * **📝 Linux Service:** `deploy/sentient-pumpfun-gambler.service`
 * **⚠️ Gambling Disclaimer:** 99%+ of bonding curve tokens fail. Only bet what you can lose!
 
-#### Crypto Breakout Service (NEW - December 2025)
-* **📊 Multi-Indicator Detection:** Volume spike, EMA crossover, MACD, RSI, Bollinger Bands
+#### Crypto Breakout Service (ENHANCED - December 2025) 🚀 MORE OPPORTUNITIES
+Production-grade crypto breakout detection with significantly improved coin coverage:
+* **📊 Multi-Pattern Breakout Detection (NEW):**
+  - **EMA_BREAKOUT:** Classic Price > EMA8 > EMA20 with volume confirmation
+  - **VOLUME_SPIKE:** 2.5x+ volume surge with 3%+ price movement
+  - **MOMENTUM_SURGE:** Strong 8%+ 24h moves with healthy RSI (55-80)
+  - **OVERSOLD_BOUNCE:** RSI < 35 bouncing above EMA8 - reversal plays
+  - **RESISTANCE_BREAK:** Breaking recent highs with volume
+  - **CONSOLIDATION_BREAK:** Low volatility period followed by expansion
+  - **MEME_MOMENTUM:** Special handling for meme coins with volume surges
+* **🔥 Dynamic Trending Detection (NEW):**
+  - CoinGecko trending API integration
+  - Auto-discovers hot coins every 15 minutes
+  - Top gainers (>5% moves) automatically added to scan
+* **📈 Expanded Watchlist (130+ Coins):**
+  - Layer 1: BTC, ETH, SOL, ADA, AVAX, TON, SEI, INJ, TIA, KASPA...
+  - Layer 2: ARB, OP, MATIC, MANTA, BLAST, ZK, MODE, BASE, TAIKO...
+  - AI/Data (HOT): RENDER, FET, TAO, AKT, VIRTUAL, AI16Z, GOAT...
+  - RWA: ONDO, CPOOL, MAPLE, CENTRI, PROPC
+  - Meme Coins: PEPE, WIF, BONK, POPCAT, MEW, BRETT, TURBO, NEIRO...
+  - Gaming: GALA, PRIME, BEAM, PORTAL, PIXEL, XAI, RONIN...
+  - New Launches: JUP, W, ETHFI, ALT, ENA, ZRO, NOT, DOGS, CATI, HMSTR...
+* **⚙️ Enhanced Configuration:**
+  ```bash
+  # ENHANCED DEFAULTS - December 2025
+  BREAKOUT_SCAN_INTERVAL=180      # 3 minutes (was 75 min!)
+  BREAKOUT_MIN_SCORE=55.0         # Lower threshold for more catches (was 70)
+  BREAKOUT_MIN_CONFIDENCE=MEDIUM  # More opportunities (was HIGH)
+  BREAKOUT_ALERT_COOLDOWN=30      # Faster re-alerts (was 60 min)
+  BREAKOUT_USE_AI=false           # Disable for speed (enable for accuracy)
+  BREAKOUT_AUTO_ADD_WATCHLIST=true
+  ```
 * **🪙 Jupiter DEX Cross-Validation:** Real-time price confirmation across Solana DEXs
 * **⚡ Arbitrage Detection:** Identifies price spreads between Jupiter and Kraken
 * **💧 Liquidity Depth Analysis:** Validates execution viability at multiple price levels
-* **🎯 Confidence Scoring:** AI-enhanced technical analysis (when enabled)
+* **▶️ Service:** `python services/crypto_breakout_monitor.py`
+* **📝 Linux Service:** `deploy/sentient-crypto-breakout.service`
 
 #### DEX Fast Position Monitor & Profitability Calculator (NEW - December 2025) ✅ PRODUCTION READY
 Real-time monitoring for held meme coin positions with realistic profit calculations:

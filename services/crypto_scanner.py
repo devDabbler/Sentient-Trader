@@ -64,41 +64,156 @@ class CryptoOpportunityScanner:
                 # Major Layer 1 Blockchains
                 'BTC/USD', 'ETH/USD', 'SOL/USD', 'ADA/USD', 'AVAX/USD',
                 'DOT/USD', 'ATOM/USD', 'NEAR/USD', 'APT/USD', 'SUI/USD',
+                'TON/USD', 'SEI/USD', 'INJ/USD', 'TIA/USD', 'KASPA/USD',
                 
                 # Layer 2 & Scaling
                 'MATIC/USD', 'ARB/USD', 'OP/USD', 'LINEA/USD', 'SCROLL/USD',
-                'STX/USD', 'RSK/USD',
+                'STX/USD', 'RSK/USD', 'MANTA/USD', 'BLAST/USD', 'ZK/USD',
+                'MODE/USD', 'BASE/USD', 'TAIKO/USD',
                 
                 # DeFi Leaders
                 'LINK/USD', 'UNI/USD', 'AAVE/USD', 'CURVE/USD', 'LIDO/USD',
                 'COMPOUND/USD', 'MAKER/USD', 'SNX/USD', 'DYDX/USD', 'GMX/USD',
+                'PENDLE/USD', 'EIGEN/USD', 'ETHENA/USD', 'MORPHO/USD',
                 
-                # Emerging & High Potential
+                # AI & Data (HOT Sector)
                 'RENDER/USD', 'FET/USD', 'AGIX/USD', 'OCEAN/USD', 'ARKM/USD',
-                'JTO/USD', 'PYTH/USD', 'ONDO/USD', 'STRK/USD', 'BLUR/USD',
+                'TAO/USD', 'AKT/USD', 'RNDR/USD', 'AIOZ/USD', 'NMR/USD',
+                'VIRTUAL/USD', 'AI16Z/USD', 'GOAT/USD', 'GRIFFAIN/USD',
+                
+                # RWA & Tokenization (Hot Sector)
+                'ONDO/USD', 'CPOOL/USD', 'MAPLE/USD', 'CENTRI/USD', 'PROPC/USD',
+                
+                # New Launches & High Potential
+                'JTO/USD', 'PYTH/USD', 'STRK/USD', 'BLUR/USD', 'JUP/USD',
+                'W/USD', 'ETHFI/USD', 'ALT/USD', 'AEVO/USD', 'ENA/USD',
+                'ZRO/USD', 'LISTA/USD', 'NOT/USD', 'DOGS/USD', 'CATI/USD',
+                'HMSTR/USD', 'NEIRO/USD', 'TURBO/USD', 'BRETT/USD',
                 
                 # Gaming & Metaverse
                 'GALA/USD', 'SAND/USD', 'MANA/USD', 'ENJ/USD', 'THETA/USD',
-                'AXIE/USD', 'FLOW/USD', 'ILV/USD',
+                'AXIE/USD', 'FLOW/USD', 'ILV/USD', 'PRIME/USD', 'BEAM/USD',
+                'PORTAL/USD', 'PIXEL/USD', 'XAI/USD', 'RONIN/USD',
                 
                 # Privacy & Security
-                'MONERO/USD', 'ZCASH/USD', 'DASH/USD',
+                'MONERO/USD', 'ZCASH/USD', 'DASH/USD', 'SCRT/USD',
                 
                 # Solana Ecosystem
-                'MARINADE/USD', 'MAGIC/USD', 'COPE/USD',
+                'MARINADE/USD', 'MAGIC/USD', 'COPE/USD', 'RAY/USD', 'ORCA/USD',
+                'JITO/USD', 'DRIFT/USD', 'TENSOR/USD', 'PARCL/USD',
                 
                 # Cosmos Ecosystem
-                'OSMO/USD', 'JUNO/USD', 'STARS/USD', 'EVMOS/USD',
+                'OSMO/USD', 'JUNO/USD', 'STARS/USD', 'EVMOS/USD', 'DYM/USD',
                 
-                # Meme Coins (high volatility)
+                # Meme Coins (high volatility - major opportunities)
                 'SHIB/USD', 'DOGE/USD', 'PEPE/USD', 'FLOKI/USD', 'BONK/USD',
+                'WIF/USD', 'POPCAT/USD', 'MEW/USD', 'BOME/USD', 'SLERF/USD',
+                'PONKE/USD', 'MYRO/USD', 'MICHI/USD', 'GIGA/USD', 'SPX/USD',
+                'MOG/USD', 'LADYS/USD', 'WOJAK/USD', 'MUMU/USD',
+                
+                # Infrastructure & Utilities
+                'FIL/USD', 'AR/USD', 'GRT/USD', 'LPT/USD', 'ANKR/USD',
+                'POKT/USD', 'FLUX/USD', 'HNT/USD', 'MOBILE/USD', 'IOT/USD',
+                
+                # Exchange Tokens
+                'BNB/USD', 'CRO/USD', 'OKB/USD', 'LEO/USD', 'KCS/USD',
                 
                 # Additional Emerging
-                'VET/USD', 'TRX/USD', 'ALGO/USD', 'HBAR/USD', 'PERP/USD', 'GNS/USD'
+                'VET/USD', 'TRX/USD', 'ALGO/USD', 'HBAR/USD', 'PERP/USD', 'GNS/USD',
+                'XLM/USD', 'XRP/USD', 'LTC/USD', 'BCH/USD', 'ETC/USD'
             ]
+        
+        # Track dynamic trending coins (populated by fetch_trending_coins)
+        self.trending_coins: List[str] = []
+        self.last_trending_fetch = None
         
         logger.info(f"Crypto Scanner initialized with {len(self.watchlist)} pairs")
         logger.info("   • Multi-source data: CoinGecko, CoinMarketCap, Kraken")
+        logger.info("   • Dynamic trending coin detection enabled")
+    
+    def fetch_trending_coins(self, force_refresh: bool = False) -> List[str]:
+        """
+        Fetch trending coins from CoinGecko trending API.
+        Caches results for 15 minutes to avoid rate limits.
+        
+        Returns:
+            List of trending coin symbols (e.g., ['WIF/USD', 'PEPE/USD'])
+        """
+        import requests
+        from datetime import datetime, timedelta
+        
+        # Check cache (15 minute TTL)
+        if not force_refresh and self.last_trending_fetch:
+            if datetime.now() - self.last_trending_fetch < timedelta(minutes=15):
+                return self.trending_coins
+        
+        try:
+            logger.info("🔥 Fetching trending coins from CoinGecko...")
+            
+            # CoinGecko trending API
+            response = requests.get(
+                "https://api.coingecko.com/api/v3/search/trending",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                trending = []
+                
+                # Extract trending coins
+                for item in data.get('coins', []):
+                    coin = item.get('item', {})
+                    symbol = coin.get('symbol', '').upper()
+                    if symbol:
+                        trending.append(f"{symbol}/USD")
+                
+                # Also fetch top gainers for more opportunities
+                gainers_response = requests.get(
+                    "https://api.coingecko.com/api/v3/coins/markets",
+                    params={
+                        'vs_currency': 'usd',
+                        'order': 'percent_change_24h_desc',
+                        'per_page': 50,
+                        'page': 1,
+                        'sparkline': False
+                    },
+                    timeout=10
+                )
+                
+                if gainers_response.status_code == 200:
+                    gainers = gainers_response.json()
+                    for coin in gainers:
+                        symbol = coin.get('symbol', '').upper()
+                        change = coin.get('price_change_percentage_24h', 0)
+                        # Only add if significant move (>5%)
+                        if symbol and abs(change or 0) > 5:
+                            pair = f"{symbol}/USD"
+                            if pair not in trending:
+                                trending.append(pair)
+                
+                self.trending_coins = trending
+                self.last_trending_fetch = datetime.now()
+                logger.info(f"✅ Found {len(trending)} trending/moving coins")
+                return trending
+            else:
+                logger.warning(f"CoinGecko trending API returned {response.status_code}")
+                return self.trending_coins
+                
+        except Exception as e:
+            logger.warning(f"Failed to fetch trending coins: {e}")
+            return self.trending_coins
+    
+    def get_combined_watchlist(self) -> List[str]:
+        """
+        Get combined watchlist including static watchlist + trending coins.
+        Removes duplicates.
+        """
+        # Fetch trending if needed
+        trending = self.fetch_trending_coins()
+        
+        # Combine and deduplicate
+        combined = list(set(self.watchlist + trending))
+        return combined
     
     def scan_opportunities(
         self,
@@ -682,19 +797,22 @@ class CryptoOpportunityScanner:
     ) -> List[CryptoOpportunity]:
         """
         Scan for buzzing cryptos using multiple sources
-        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        Fetches from CoinGecko, CoinMarketCap, Kraken + trending
         """
-        logger.info(f"🔍 Scanning buzzing cryptos from multiple sources...")
+        logger.info(f"🔍 Scanning buzzing cryptos from multiple sources + trending...")
         start_time = time.time()
         
-        # Fetch from CoinGecko and CoinMarketCap
+        # Fetch trending coins first
+        trending_symbols = self.fetch_trending_coins()
+        
+        # Fetch from CoinGecko and CoinMarketCap with LOWER thresholds
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             aggregated_coins = loop.run_until_complete(
                 self.aggregator.fetch_all_coins(
-                    min_volume_24h=100000,  # Minimum $100k volume for buzzing
-                    max_coins=300  # Get up to 300 coins
+                    min_volume_24h=25000,  # LOWERED: $25k volume (was $100k)
+                    max_coins=500  # INCREASED: 500 coins (was 300)
                 )
             )
             loop.close()
@@ -707,15 +825,15 @@ class CryptoOpportunityScanner:
         # Create symbol list from aggregated coins
         symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
         
-        # Combine with watchlist (remove duplicates)
-        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        # Combine watchlist + trending + aggregated (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist + trending_symbols))
         
-        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for buzzing cryptos...")
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for buzzing cryptos (incl. {len(trending_symbols)} trending)...")
         
         buzzing_opportunities = []
         
         if use_parallel:
-            max_workers = 8
+            max_workers = 12  # INCREASED
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_symbol = {
                     executor.submit(self._analyze_crypto_pair_multi_source, symbol, 'MOMENTUM', aggregated_coins): symbol
@@ -727,7 +845,8 @@ class CryptoOpportunityScanner:
                     try:
                         opportunity = future.result()
                         
-                        if opportunity and opportunity.volume_ratio >= min_volume_ratio:
+                        # LOWERED: min_volume_ratio * 0.75 for more catches
+                        if opportunity and opportunity.volume_ratio >= (min_volume_ratio * 0.75):
                             buzz_bonus = min((opportunity.volume_ratio - 1.0) * 10, 30)
                             opportunity.score += buzz_bonus
                             opportunity.reason += f" | 🔥 BUZZING (Vol: {opportunity.volume_ratio:.1f}x)"
@@ -845,19 +964,22 @@ class CryptoOpportunityScanner:
     ) -> List[CryptoOpportunity]:
         """
         Scan for hottest cryptos using multiple sources
-        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        Fetches from CoinGecko, CoinMarketCap, Kraken + trending
         """
-        logger.info(f"🔍 Scanning hottest cryptos from multiple sources...")
+        logger.info(f"🔍 Scanning hottest cryptos from multiple sources + trending...")
         start_time = time.time()
         
-        # Fetch from CoinGecko and CoinMarketCap
+        # Fetch trending coins first
+        trending_symbols = self.fetch_trending_coins()
+        
+        # Fetch from CoinGecko and CoinMarketCap with LOWER thresholds
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             aggregated_coins = loop.run_until_complete(
                 self.aggregator.fetch_all_coins(
-                    min_volume_24h=50000,  # Minimum $50k volume
-                    max_coins=300  # Get up to 300 coins
+                    min_volume_24h=15000,  # LOWERED: $15k volume (was $50k)
+                    max_coins=500  # INCREASED: 500 coins (was 300)
                 )
             )
             loop.close()
@@ -870,15 +992,15 @@ class CryptoOpportunityScanner:
         # Create symbol list from aggregated coins
         symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
         
-        # Combine with watchlist (remove duplicates)
-        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        # Combine watchlist + trending + aggregated (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist + trending_symbols))
         
-        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for hottest cryptos...")
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for hottest cryptos (incl. {len(trending_symbols)} trending)...")
         
         hot_opportunities = []
         
         if use_parallel:
-            max_workers = 8
+            max_workers = 12  # INCREASED
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_symbol = {
                     executor.submit(self._analyze_crypto_pair_multi_source, symbol, 'MOMENTUM', aggregated_coins): symbol
@@ -996,19 +1118,23 @@ class CryptoOpportunityScanner:
     ) -> List[CryptoOpportunity]:
         """
         Scan for breakout cryptos using multiple sources
-        Fetches from CoinGecko, CoinMarketCap, and Kraken
+        Fetches from CoinGecko, CoinMarketCap, Kraken + trending coins
+        Enhanced with lower thresholds for more opportunities
         """
-        logger.info(f"🔍 Scanning breakout cryptos from multiple sources...")
+        logger.info(f"🔍 Scanning breakout cryptos from multiple sources + trending...")
         start_time = time.time()
         
-        # Fetch from CoinGecko and CoinMarketCap
+        # Fetch trending coins first
+        trending_symbols = self.fetch_trending_coins()
+        
+        # Fetch from CoinGecko and CoinMarketCap with LOWER thresholds
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             aggregated_coins = loop.run_until_complete(
                 self.aggregator.fetch_all_coins(
-                    min_volume_24h=50000,  # Minimum $50k volume
-                    max_coins=300  # Get up to 300 coins
+                    min_volume_24h=10000,  # LOWERED: $10k volume (was $50k)
+                    max_coins=500  # INCREASED: up to 500 coins (was 300)
                 )
             )
             loop.close()
@@ -1021,15 +1147,15 @@ class CryptoOpportunityScanner:
         # Create symbol list from aggregated coins
         symbols_from_sources = [f"{coin.symbol}/USD" for coin in aggregated_coins]
         
-        # Combine with watchlist (remove duplicates)
-        all_symbols = list(set(symbols_from_sources + self.watchlist))
+        # Combine watchlist + trending + aggregated (remove duplicates)
+        all_symbols = list(set(symbols_from_sources + self.watchlist + trending_symbols))
         
-        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for breakout cryptos...")
+        logger.info(f"📊 Analyzing {len(all_symbols)} total symbols for breakout cryptos (incl. {len(trending_symbols)} trending)...")
         
         breakout_opportunities = []
         
         if use_parallel:
-            max_workers = 8
+            max_workers = 12  # INCREASED: more workers for faster scanning
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_symbol = {
                     executor.submit(self._analyze_breakout_single, symbol): symbol
@@ -1065,7 +1191,10 @@ class CryptoOpportunityScanner:
         return breakout_opportunities[:top_n]
     
     def _analyze_breakout_single(self, symbol: str) -> Optional[CryptoOpportunity]:
-        """Analyze a single symbol for breakout pattern"""
+        """
+        Analyze a single symbol for breakout patterns.
+        Enhanced with MULTIPLE breakout detection patterns for more opportunities.
+        """
         try:
             # Normalize pair format globally (handles BTC/USD, BTCUSD, btcusd, btc/usd)
             normalized_symbol = normalize_crypto_pair(symbol)
@@ -1076,88 +1205,168 @@ class CryptoOpportunityScanner:
                 return None
             
             ohlc_1h = self.client.get_ohlc_data(normalized_symbol, interval=60)
-            if not ohlc_1h or len(ohlc_1h) < 40:
+            if not ohlc_1h or len(ohlc_1h) < 20:  # LOWERED: 20 candles (was 40)
                 return None
             
             current_price = ticker['last_price']
             prices = [candle['close'] for candle in ohlc_1h]
+            highs = [candle['high'] for candle in ohlc_1h]
+            lows = [candle['low'] for candle in ohlc_1h]
+            volumes = [candle['volume'] for candle in ohlc_1h]
             
             # Calculate EMAs
             ema_8 = self._calculate_ema(prices, 8)
             ema_20 = self._calculate_ema(prices, 20)
-            ema_50 = self._calculate_ema(prices, 50) if len(prices) >= 50 else ema_20
+            ema_50 = self._calculate_ema(prices, min(50, len(prices))) if len(prices) >= 20 else ema_20
             
-            # Breakout conditions:
-            # 1. Price > EMA8 > EMA20
-            # 2. Volume surge
-            # 3. Recent consolidation (low volatility before breakout)
+            # Calculate RSI
+            rsi = self._calculate_rsi(prices[-14:]) if len(prices) >= 14 else 50.0
             
             volume_24h = ticker['volume_24h']
-            avg_volume = sum([candle['volume'] for candle in ohlc_1h[-24:]]) / 24 if len(ohlc_1h) >= 24 else volume_24h
+            avg_volume = sum(volumes[-24:]) / len(volumes[-24:]) if len(volumes) >= 24 else volume_24h
             volume_ratio = volume_24h / avg_volume if avg_volume > 0 else 1.0
             
-            # Check for breakout pattern
-            is_breakout = (
-                current_price > ema_8 > ema_20 and  # Bullish alignment
-                volume_ratio > 1.5 and  # Volume confirmation
-                current_price > ema_50 * 1.02  # Breaking key resistance
+            change_pct_24h = ((ticker['high_24h'] - ticker['low_24h']) / ticker['low_24h']) * 100 if ticker['low_24h'] > 0 else 0
+            volatility_24h = self._calculate_volatility(prices[-24:]) if len(prices) >= 24 else 0
+            
+            # ============================================
+            # ENHANCED BREAKOUT DETECTION PATTERNS
+            # ============================================
+            
+            breakout_type = None
+            score = 0
+            reason_parts = []
+            
+            # Pattern 1: Classic EMA Breakout (original)
+            if current_price > ema_8 > ema_20 and volume_ratio > 1.3 and current_price > ema_50 * 1.01:
+                breakout_type = "EMA_BREAKOUT"
+                score = 70
+                reason_parts.append(f"EMA alignment (P>{ema_8:.4f}>{ema_20:.4f})")
+            
+            # Pattern 2: Volume Spike Breakout (new)
+            if volume_ratio > 2.5 and change_pct_24h > 3:
+                if breakout_type:
+                    score += 15
+                else:
+                    breakout_type = "VOLUME_SPIKE"
+                    score = 65
+                reason_parts.append(f"🔥 Vol spike {volume_ratio:.1f}x")
+            
+            # Pattern 3: Momentum Surge (new) - catching big moves early
+            if change_pct_24h > 8 and rsi > 55 and rsi < 80:
+                if breakout_type:
+                    score += 10
+                else:
+                    breakout_type = "MOMENTUM_SURGE"
+                    score = 68
+                reason_parts.append(f"📈 Momentum +{change_pct_24h:.1f}%")
+            
+            # Pattern 4: Oversold Bounce (new) - catching reversals
+            if rsi < 35 and current_price > ema_8 and volume_ratio > 1.2:
+                if not breakout_type:
+                    breakout_type = "OVERSOLD_BOUNCE"
+                    score = 62
+                reason_parts.append(f"📊 Oversold RSI:{rsi:.0f}")
+            
+            # Pattern 5: Resistance Break (new)
+            recent_high = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+            if current_price > recent_high * 0.98 and volume_ratio > 1.5:
+                if breakout_type:
+                    score += 12
+                else:
+                    breakout_type = "RESISTANCE_BREAK"
+                    score = 72
+                reason_parts.append(f"🚀 Breaking ${recent_high:.4f} resistance")
+            
+            # Pattern 6: Consolidation Breakout (new) - low volatility -> surge
+            if len(prices) >= 48:
+                recent_volatility = self._calculate_volatility(prices[-12:])
+                prior_volatility = self._calculate_volatility(prices[-48:-12])
+                if prior_volatility > 0 and recent_volatility > prior_volatility * 1.5 and change_pct_24h > 0:
+                    if breakout_type:
+                        score += 8
+                    else:
+                        breakout_type = "CONSOLIDATION_BREAK"
+                        score = 66
+                    reason_parts.append("⚡ Volatility expansion")
+            
+            # Pattern 7: Meme/Trending Coin Boost (new)
+            base_asset = extract_base_asset(normalized_symbol)
+            meme_coins = ['PEPE', 'DOGE', 'SHIB', 'WIF', 'BONK', 'FLOKI', 'POPCAT', 'MEW', 'BRETT', 'TURBO', 'NEIRO', 'MOG']
+            if base_asset in meme_coins and volume_ratio > 1.5:
+                if breakout_type:
+                    score += 5
+                else:
+                    if change_pct_24h > 5:
+                        breakout_type = "MEME_MOMENTUM"
+                        score = 60
+                        reason_parts.append("🐸 Meme momentum")
+            
+            # If no breakout pattern detected, return None
+            if not breakout_type:
+                return None
+            
+            # Add volume bonus
+            if volume_ratio > 2.0:
+                score += min((volume_ratio - 1.0) * 10, 15)
+            
+            # Add momentum bonus
+            if change_pct_24h > 5:
+                score += min(change_pct_24h * 0.5, 10)
+            
+            # Build reason string
+            reason = f"💥 {breakout_type}: " + " | ".join(reason_parts) + f" | Vol: {volume_ratio:.1f}x"
+            
+            opportunity = CryptoOpportunity(
+                symbol=normalized_symbol,
+                base_asset=base_asset,
+                score=min(score, 100),  # Cap at 100
+                current_price=current_price,
+                change_pct_24h=change_pct_24h,
+                volume_24h=volume_24h,
+                volume_ratio=volume_ratio,
+                volatility_24h=volatility_24h,
+                reason=reason,
+                strategy='momentum' if change_pct_24h > 5 else 'scalp',
+                confidence='HIGH' if score >= 80 else 'MEDIUM' if score >= 65 else 'LOW',
+                risk_level='HIGH' if volatility_24h > 10 else 'MEDIUM' if volatility_24h > 5 else 'LOW'
             )
             
-            if is_breakout:
-                # Create opportunity
-                change_pct_24h = ((ticker['high_24h'] - ticker['low_24h']) / ticker['low_24h']) * 100
-                volatility_24h = self._calculate_volatility(prices[-24:])
-                
-                # Calculate score
-                score = 70  # Base breakout score
-                score += min((volume_ratio - 1.0) * 15, 20)  # Volume bonus
-                score += min(((current_price / ema_50) - 1.0) * 200, 10)  # Strength bonus
-                
-                # Parse base asset
-                base_asset = extract_base_asset(normalized_symbol)
-                
-                opportunity = CryptoOpportunity(
-                    symbol=normalized_symbol,
-                    base_asset=base_asset,
-                    score=score,
-                    current_price=current_price,
-                    change_pct_24h=change_pct_24h,
-                    volume_24h=volume_24h,
-                    volume_ratio=volume_ratio,
-                    volatility_24h=volatility_24h,
-                    reason=f"💥 BREAKOUT: Price > EMA8 > EMA20 | Vol: {volume_ratio:.1f}x | Above EMA50",
-                    strategy='momentum',
-                    confidence='HIGH' if score >= 85 else 'MEDIUM',
-                    risk_level='MEDIUM'
-                )
-                
-                return opportunity
-            
-            return None
+            return opportunity
             
         except Exception as e:
-            logger.error(f"Error analyzing {symbol} for breakout: {e}")
+            logger.debug(f"Error analyzing {symbol} for breakout: {e}")
             return None
     
     def get_scanner_stats(self) -> Dict:
         """Get scanner statistics and coverage info"""
         return {
             'total_coins_scanned': len(self.watchlist),
+            'trending_coins': len(self.trending_coins),
             'categories': {
-                'layer_1_blockchains': 10,
-                'layer_2_scaling': 7,
-                'defi_leaders': 10,
-                'emerging_high_potential': 10,
-                'gaming_metaverse': 8,
-                'privacy_security': 3,
-                'solana_ecosystem': 3,
-                'cosmos_ecosystem': 4,
-                'meme_coins': 5,
-                'additional_emerging': 6
+                'layer_1_blockchains': 14,
+                'layer_2_scaling': 13,
+                'defi_leaders': 14,
+                'ai_data': 14,
+                'rwa_tokenization': 5,
+                'new_launches': 19,
+                'gaming_metaverse': 14,
+                'privacy_security': 4,
+                'solana_ecosystem': 9,
+                'cosmos_ecosystem': 5,
+                'meme_coins': 19,
+                'infrastructure': 10,
+                'exchange_tokens': 5,
+                'additional_emerging': 11
             },
-            'scan_method': 'Technical Analysis + Volume + Momentum',
-            'update_frequency': 'Real-time (Kraken API)',
+            'breakout_patterns': [
+                'EMA_BREAKOUT', 'VOLUME_SPIKE', 'MOMENTUM_SURGE', 
+                'OVERSOLD_BOUNCE', 'RESISTANCE_BREAK', 'CONSOLIDATION_BREAK',
+                'MEME_MOMENTUM'
+            ],
+            'scan_method': 'Multi-Pattern Technical Analysis + Volume + Momentum + Trending',
+            'update_frequency': 'Real-time (Kraken API + CoinGecko Trending)',
             'strategies': ['SCALP', 'MOMENTUM', 'SWING', 'ALL'],
-            'note': 'Comprehensive crypto market coverage with 69+ coins across all major categories'
+            'note': 'Enhanced crypto market coverage with 130+ coins + dynamic trending detection'
         }
 

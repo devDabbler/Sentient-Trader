@@ -382,21 +382,21 @@ class CryptoBreakoutMonitor:
         return results_for_panel
     
     def _detect_breakouts(self) -> List[BreakoutAlert]:
-        """Detect breakout opportunities using scanner"""
+        """Detect breakout opportunities using scanner - ENHANCED with more aggressive scanning"""
         breakouts = []
         
         try:
-            # Scan for different types
+            # ENHANCED: Scan for MORE types with HIGHER top_n values
             scan_types = [
-                ('BREAKOUT', 'scan_breakout_cryptos', 10),
-                ('BUZZING', 'scan_buzzing_cryptos', 5),
-                ('HOTTEST', 'scan_hottest_cryptos', 5),
-                ('PRE_LISTING', 'scan_new_listings', 5),  # NEW: Pre-listing scanner
-                ('PRE_IPO_BUZZ', 'scan_pre_ipo_buzz', 3)  # NEW: Pre-IPO buzz
+                ('BREAKOUT', 'scan_breakout_cryptos', 20),  # INCREASED: was 10
+                ('BUZZING', 'scan_buzzing_cryptos', 15),    # INCREASED: was 5
+                ('HOTTEST', 'scan_hottest_cryptos', 15),    # INCREASED: was 5
+                ('PRE_LISTING', 'scan_new_listings', 10),   # INCREASED: was 5
+                ('PRE_IPO_BUZZ', 'scan_pre_ipo_buzz', 5)
             ]
             
             for alert_type, method_name, top_n in scan_types:
-                logger.info(f"   Scanning for {alert_type} opportunities...")
+                logger.info(f"   🔍 Scanning for {alert_type} opportunities (top {top_n})...")
                 scan_type_start = time.time()
                 
                 opportunities = []
@@ -1188,13 +1188,24 @@ def main():
     
     # Configuration from environment variables or defaults
     # Strip commas from numeric values to handle formatting like '1,800'
-    scan_interval = int(os.getenv('BREAKOUT_SCAN_INTERVAL', '300').replace(',', ''))  # 5 minutes
-    min_score = float(os.getenv('BREAKOUT_MIN_SCORE', '70.0').replace(',', ''))
-    min_confidence = os.getenv('BREAKOUT_MIN_CONFIDENCE', 'HIGH')
-    use_ai = os.getenv('BREAKOUT_USE_AI', 'true').lower() == 'true'
+    # ENHANCED DEFAULTS: Lower thresholds for more opportunity detection
+    scan_interval = int(os.getenv('BREAKOUT_SCAN_INTERVAL', '180').replace(',', ''))  # DEFAULT: 3 minutes (was 5)
+    min_score = float(os.getenv('BREAKOUT_MIN_SCORE', '55.0').replace(',', ''))  # DEFAULT: 55 (was 70)
+    min_confidence = os.getenv('BREAKOUT_MIN_CONFIDENCE', 'MEDIUM')  # DEFAULT: MEDIUM (was HIGH)
+    use_ai = os.getenv('BREAKOUT_USE_AI', 'false').lower() == 'true'  # DEFAULT: false (AI adds latency)
     use_watchlist = os.getenv('BREAKOUT_USE_WATCHLIST', 'true').lower() == 'true'
     auto_add_watchlist = os.getenv('BREAKOUT_AUTO_ADD_WATCHLIST', 'true').lower() == 'true'
-    alert_cooldown = int(os.getenv('BREAKOUT_ALERT_COOLDOWN', '60').replace(',', ''))
+    alert_cooldown = int(os.getenv('BREAKOUT_ALERT_COOLDOWN', '30').replace(',', ''))  # DEFAULT: 30 min (was 60)
+    
+    logger.info("=" * 80)
+    logger.info("🚀 CRYPTO BREAKOUT MONITOR - ENHANCED EDITION")
+    logger.info("=" * 80)
+    logger.info(f"   Scan Interval: {scan_interval}s ({scan_interval/60:.1f} minutes)")
+    logger.info(f"   Min Score: {min_score} (lower = more opportunities)")
+    logger.info(f"   Min Confidence: {min_confidence}")
+    logger.info(f"   AI Analysis: {'Enabled' if use_ai else 'Disabled (faster)'}")
+    logger.info(f"   Alert Cooldown: {alert_cooldown} minutes")
+    logger.info("=" * 80)
     
     try:
         # Initialize monitor
