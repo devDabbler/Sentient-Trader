@@ -11,7 +11,6 @@ from typing import Optional, Union
 
 from freqtrade.strategy import IStrategy, merge_informative_pair
 from freqtrade.strategy.parameters import IntParameter, DecimalParameter, BooleanParameter
-from freqtrade.persistence import Trade
 import talib.abstract as ta
 from technical import qtpylib
 
@@ -27,22 +26,21 @@ class SentientStrategy(IStrategy):
     # Strategy interface version
     INTERFACE_VERSION = 3
     
-    # Minimal ROI - more realistic targets for 5m scalping
+    # Minimal ROI - let winners run longer
     minimal_roi = {
-        "0": 0.03,    # 3% profit target immediately
-        "20": 0.02,   # 2% after 20 minutes
-        "40": 0.015,  # 1.5% after 40 minutes
-        "60": 0.01,   # 1% after 1 hour
-        "120": 0.005  # 0.5% after 2 hours (take small profit)
+        "0": 0.05,     # 5% immediate target
+        "60": 0.03,    # 3% after 1 hour
+        "180": 0.02,   # 2% after 3 hours
+        "360": 0.01    # 1% after 6 hours
     }
     
-    # Stoploss - tighter for scalping
-    stoploss = -0.02  # 2% stoploss (tighter risk management)
+    # Stoploss - give trades room to breathe
+    stoploss = -0.03  # 3% stoploss
     
-    # Trailing stoploss
+    # Trailing stoploss - only after significant profit
     trailing_stop = True
-    trailing_stop_positive = 0.01
-    trailing_stop_positive_offset = 0.02
+    trailing_stop_positive = 0.015  # Trail at 1.5% below peak
+    trailing_stop_positive_offset = 0.03  # Only activate after 3% profit
     trailing_only_offset_is_reached = True
     
     # Timeframe
@@ -51,8 +49,8 @@ class SentientStrategy(IStrategy):
     # Run on every new candle
     process_only_new_candles = True
     
-    # Use custom stoploss for dynamic risk management
-    use_custom_stoploss = True
+    # Disable custom stoploss - use simple fixed stoploss
+    use_custom_stoploss = False
     
     # Number of candles for startup
     startup_candle_count: int = 100
@@ -171,86 +169,28 @@ class SentientStrategy(IStrategy):
     
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate entry signals - BALANCED for quality trades.
-        
-        Entry conditions:
-        1. EMA crossover (actual cross, not just above)
-        2. RSI in buy zone
-        3. Volume confirmation
-        4. At least 2 momentum confirmations
+        Simple entry: EMA crossover in uptrend with confirmation.
+        Only ONE entry type to avoid overtrading.
         """
-        # Primary entry: EMA crossover with momentum confirmation
         dataframe.loc[
             (
-                # EMA crossover (must be fresh cross)
+                # EMA golden cross (fresh crossover only)
                 (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) &
                 
-                # RSI in buy zone (not overbought)
-                (dataframe['rsi'] > self.buy_rsi.value) &
-                (dataframe['rsi'] < self.buy_rsi_high.value) &
-                
-                # Volume confirmation (relaxed)
-                (dataframe['volume_ratio'] > 1.0) &
-                
-                # Price above trend OR MACD positive (need one)
-                (
-                    (dataframe['close'] > dataframe['ema_trend']) |
-                    (dataframe['macdhist'] > 0)
-                ) &
-                
-                # Volume check
-                (dataframe['volume'] > 0)
-            ),
-            'enter_long'] = 1
-        
-        # Secondary entry: Momentum continuation (price above all EMAs)
-        dataframe.loc[
-            (
-                # Strong uptrend: price above all key EMAs
-                (dataframe['close'] > dataframe['ema_fast']) &
-                (dataframe['close'] > dataframe['ema_slow']) &
+                # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # RSI showing strength but not overbought
-                (dataframe['rsi'] > 50) &
-                (dataframe['rsi'] < 70) &
+                # RSI not overbought (room to run)
+                (dataframe['rsi'] > 30) &
+                (dataframe['rsi'] < 65) &
                 
-                # MACD positive and rising
+                # MACD histogram positive (momentum confirmation)
                 (dataframe['macdhist'] > 0) &
-                (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
                 
-                # Heikin Ashi bullish
-                (dataframe['ha_bullish']) &
+                # Volume spike (interest confirmation)
+                (dataframe['volume_ratio'] > 1.2) &
                 
-                # Volume above average
-                (dataframe['volume_ratio'] > 1.0) &
-                
-                # Volume check
-                (dataframe['volume'] > 0)
-            ),
-            'enter_long'] = 1
-        
-        # Tertiary entry: Pullback to support in uptrend
-        dataframe.loc[
-            (
-                # Price pulled back to EMA support
-                (dataframe['close'] <= dataframe['ema_slow'] * 1.01) &
-                (dataframe['close'] >= dataframe['ema_slow'] * 0.99) &
-                
-                # Still in uptrend (fast > slow)
-                (dataframe['ema_fast'] > dataframe['ema_slow']) &
-                
-                # RSI not oversold (healthy pullback)
-                (dataframe['rsi'] > 40) &
-                (dataframe['rsi'] < 60) &
-                
-                # MACD still positive
-                (dataframe['macd'] > dataframe['macdsignal']) &
-                
-                # Bullish candle (buyers stepping in)
-                (dataframe['close'] > dataframe['open']) &
-                
-                # Volume check
+                # Volume exists
                 (dataframe['volume'] > 0)
             ),
             'enter_long'] = 1
@@ -259,69 +199,24 @@ class SentientStrategy(IStrategy):
     
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate exit signals - HYBRID approach.
-        
-        Signal exits only trigger on STRONG reversals.
-        Stoploss handles loss cutting, ROI handles profit taking.
-        Signals protect profits on major trend changes.
+        Simple exit: Death cross or extreme overbought.
+        Let ROI and stoploss handle most exits.
         """
-        # Only exit on very strong reversal signals
         dataframe.loc[
             (
-                # Major reversal: RSI extreme overbought + multiple bearish confirmations
-                (
-                    (dataframe['rsi'] > 80) &
-                    (dataframe['ha_bearish']) &
-                    (dataframe['macdhist'] < dataframe['macdhist'].shift(1)) &  # MACD declining
-                    (dataframe['close'] < dataframe['open'])  # Red candle
-                ) |
-                
-                # Trend breakdown: Price crashed through all support
-                (
-                    (dataframe['close'] < dataframe['bb_lower']) &  # Below lower BB
-                    (dataframe['rsi'] < 25) &  # Extremely oversold
-                    (dataframe['ha_bearish']) &
-                    (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow']))  # Death cross
-                )
-            ) &
-            (dataframe['volume'] > 0),
+                # Death cross (trend reversal)
+                (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow'])) &
+                (dataframe['volume'] > 0)
+            ) |
+            (
+                # Extreme overbought with reversal candle
+                (dataframe['rsi'] > 75) &
+                (dataframe['close'] < dataframe['open']) &  # Red candle
+                (dataframe['volume'] > 0)
+            ),
             'exit_long'] = 1
         
         return dataframe
-    
-    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
-                         current_rate: float, current_profit: float,
-                         after_fill: bool, **kwargs) -> Optional[float]:
-        """
-        Dynamic stoploss that:
-        1. Uses tight initial stop (-2%)
-        2. Moves to breakeven after 1% profit
-        3. Trails aggressively after 2% profit
-        """
-        # Get dataframe for ATR
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        
-        if len(dataframe) < 1:
-            return self.stoploss  # Default -2%
-        
-        last_candle = dataframe.iloc[-1]
-        
-        # Calculate ATR-based stop (1.5x ATR)
-        atr_pct = (last_candle['atr'] / current_rate) if current_rate > 0 else 0.02
-        atr_stop = -min(atr_pct * 1.5, 0.03)  # Cap at -3%
-        
-        # Profit-based stop adjustment
-        if current_profit >= 0.03:  # 3%+ profit: trail at 1.5%
-            return -0.015
-        elif current_profit >= 0.02:  # 2%+ profit: trail at 1%
-            return -0.01
-        elif current_profit >= 0.01:  # 1%+ profit: move to breakeven + small buffer
-            return -0.003  # -0.3% (basically breakeven with fees)
-        elif current_profit >= 0.005:  # 0.5%+ profit: tighten stop
-            return max(atr_stop, -0.015)  # Tighter of ATR or -1.5%
-        else:
-            # Use ATR-based stop, but never worse than -2.5%
-            return max(atr_stop, -0.025)
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
