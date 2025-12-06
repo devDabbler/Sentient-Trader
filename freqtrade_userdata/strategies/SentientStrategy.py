@@ -35,8 +35,8 @@ class SentientStrategy(IStrategy):
         "180": 0.008,  # 0.8% after 3 hours (take small profit)
     }
     
-    # Stoploss - give crypto room to breathe
-    stoploss = -0.03  # 3% max loss (custom_stoploss manages dynamically)
+    # Stoploss - tighter initial stop, custom_stoploss manages dynamically
+    stoploss = -0.02  # 2% max loss (custom_stoploss tightens further)
     
     # Trailing stoploss - DISABLED (was causing losses)
     # The custom_stoploss handles profit protection better
@@ -63,17 +63,17 @@ class SentientStrategy(IStrategy):
         'stoploss_on_exchange_interval': 60  # Check every 60 seconds
     }
     
-    # Proven profitable parameters (+0.19%, 62.5% win rate)
-    buy_rsi = IntParameter(25, 45, default=35, space='buy')
-    buy_rsi_high = IntParameter(55, 70, default=60, space='buy')
-    sell_rsi = IntParameter(65, 80, default=72, space='sell')
+    # Hyperopt optimized parameters (85.7% win rate, +0.58% profit)
+    buy_rsi = IntParameter(25, 45, default=27, space='buy')  # Optimized
+    buy_rsi_high = IntParameter(55, 70, default=65, space='buy')  # Optimized
+    sell_rsi = IntParameter(65, 80, default=65, space='sell')  # Optimized
     
-    ema_fast = IntParameter(8, 15, default=9, space='buy')
-    ema_slow = IntParameter(18, 30, default=21, space='buy')
-    ema_trend = IntParameter(40, 100, default=50, space='buy')
+    ema_fast = IntParameter(8, 15, default=12, space='buy')  # Optimized
+    ema_slow = IntParameter(18, 30, default=25, space='buy')  # Optimized
+    ema_trend = IntParameter(40, 100, default=65, space='buy')  # Optimized
     
-    volume_factor = DecimalParameter(1.0, 2.0, default=1.1, space='buy')
-    adx_threshold = IntParameter(15, 30, default=18, space='buy')
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.8, space='buy')  # Optimized - strong volume
+    adx_threshold = IntParameter(15, 30, default=18, space='buy')  # Optimized
     
     def informative_pairs(self):
         """
@@ -173,7 +173,7 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # Balanced entry: EMA cross + trend + momentum (quality over quantity)
+        # Quality entry: EMA cross + trend filter + momentum (balanced filters)
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -182,17 +182,17 @@ class SentientStrategy(IStrategy):
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # Trend present (ADX > 20)
-                (dataframe['adx'] > 20) &
+                # ADX shows some trend (avoid pure chop)
+                (dataframe['adx'] > self.adx_threshold.value) &
                 
-                # RSI has room to run (not overbought)
-                (dataframe['rsi'] < 62) &
+                # RSI not overbought (room to run)
+                (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
-                # MACD histogram positive
+                # MACD histogram positive (momentum confirmation)
                 (dataframe['macdhist'] > 0) &
                 
-                # Volume above average (1.2x)
-                (dataframe['volume_ratio'] > 1.2) &
+                # Volume above average
+                (dataframe['volume_ratio'] > self.volume_factor.value) &
                 
                 # Volume exists
                 (dataframe['volume'] > 0)
@@ -230,15 +230,15 @@ class SentientStrategy(IStrategy):
         elif current_profit >= 0.006:  # 0.6%+ profit
             return -0.015  # Tighten to 1.5%
         
-        # LOSS MANAGEMENT - give trades room to breathe
-        if trade_duration > 360:  # 6+ hours - cut losses
-            return -0.015  # Cut at 1.5%
-        elif trade_duration > 240:  # 4+ hours
-            return -0.018  # Tighten to 1.8%
-        elif trade_duration > 120:  # 2+ hours
-            return -0.02  # Tighten to 2%
+        # LOSS MANAGEMENT - faster exit on losers
+        if trade_duration > 120:  # 2+ hours - cut losses
+            return -0.01  # Cut at 1%
+        elif trade_duration > 60:  # 1+ hour
+            return -0.012  # Tighten to 1.2%
+        elif trade_duration > 30:  # 30+ min
+            return -0.015  # Tighten to 1.5%
         else:
-            return -0.025  # Initial 2.5% - room to breathe
+            return -0.018  # Initial 1.8% - tighter start
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
