@@ -70,6 +70,19 @@ trading_signals.log
 *.bat.log
 *log*.bat
 *.bat.out
+# Runtime locks and temp files
+locks/*.pid
+*.sqlite
+
+# Freqtrade artifacts
+freqtrade_userdata/
+freqtrade_userdata/backtest_results/
+freqtrade_userdata/hyperopt_results/
+freqtrade_userdata/hyperopt.lock
+
+# Misc stray files
+=12.0
+=2024.1
 
 # Data folder and all contents
 data/
