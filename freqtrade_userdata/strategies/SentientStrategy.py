@@ -79,12 +79,17 @@ class SentientStrategy(IStrategy):
         """
         Define additional, informative pair/interval combinations.
         Used for correlation analysis with BTC/ETH.
+        Supports both USD (Kraken) and USDT (Binance) pairs.
         """
         pairs = self.dp.current_whitelist()
         informative_pairs = []
         
+        # Detect quote currency from whitelist (USD for Kraken, USDT for Binance)
+        quote = 'USDT' if any('/USDT' in p for p in pairs) else 'USD'
+        
         # Add BTC and ETH as informative for correlation
-        for pair in ['BTC/USD', 'ETH/USD']:
+        for base in ['BTC', 'ETH']:
+            pair = f"{base}/{quote}"
             if pair not in pairs:
                 informative_pairs.append((pair, self.timeframe))
                 informative_pairs.append((pair, '1h'))  # Higher timeframe
