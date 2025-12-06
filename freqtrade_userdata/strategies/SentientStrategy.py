@@ -199,23 +199,11 @@ class SentientStrategy(IStrategy):
     
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Simple exit: Death cross or extreme overbought.
-        Let ROI and stoploss handle most exits.
+        No signal exits - let ROI and stoploss handle all exits.
+        Signal exits were cutting winners too early.
         """
-        dataframe.loc[
-            (
-                # Death cross (trend reversal)
-                (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow'])) &
-                (dataframe['volume'] > 0)
-            ) |
-            (
-                # Extreme overbought with reversal candle
-                (dataframe['rsi'] > 75) &
-                (dataframe['close'] < dataframe['open']) &  # Red candle
-                (dataframe['volume'] > 0)
-            ),
-            'exit_long'] = 1
-        
+        # Intentionally empty - rely on ROI/stoploss/trailing
+        dataframe['exit_long'] = 0
         return dataframe
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
