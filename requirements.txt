@@ -54,3 +54,7 @@ qrcode[pil]>=7.4.0  # QR code generation for 2FA setup
 # Uses Ollama (local, FREE) by default. Set SIGNAL_MEMORY_EMBEDDING_PROVIDER=openai for cloud.
 # For Ollama local embeddings: ollama pull nomic-embed-text
 sentence-transformers>=2.2.0  # Optional: Local embeddings (alternative to Ollama)
+
+# Freqtrade + FreqAI - ML-enhanced crypto trading
+# Includes: LightGBM, XGBoost, CatBoost, scikit-learn
+freqtrade[freqai]>=2025.11

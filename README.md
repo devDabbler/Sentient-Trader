@@ -513,6 +513,58 @@ Complete cloud persistence for all crypto and stock positions with full audit tr
   3. Compares confidence scores, uses the BEST result
   4. Logs both results with which model "won" for transparency
 
+#### Freqtrade + FreqAI Integration (NEW - December 2025) ✅ PRODUCTION READY
+ML-enhanced crypto trading via Freqtrade with native Kraken support:
+* **🤖 Freqtrade Integration:** Production-ready algorithmic trading framework (45k+ GitHub stars)
+  - Native Kraken exchange support (matches existing setup)
+  - Paper trading (dry-run) and live trading modes
+  - Built-in backtesting, hyperparameter optimization
+  - REST API server for external integrations
+* **🧠 FreqAI Module:** Machine learning predictions for crypto trading
+  - LightGBM Regressor for price prediction (fast, efficient)
+  - Multi-timeframe feature engineering (5m, 15m, 1h)
+  - Correlation analysis with BTC/ETH
+  - 30-day rolling training window with weekly retraining
+  - Walk-forward validation to prevent overfitting
+* **📈 Included Strategies:**
+  - **SentientStrategy:** EMA crossovers, RSI, MACD, Heikin Ashi confirmation
+  - **SentientFreqAIStrategy:** ML-enhanced with LightGBM predictions + technical confirmation
+* **🔗 Signal Bridge:** FreqAI predictions forwarded to Sentient Trader
+  - Webhook receiver converts Freqtrade signals to TradingSignal format
+  - Discord alerts via existing `DISCORD_WEBHOOK_CRYPTO_ALERTS` channel
+  - Integrates with existing `crypto_trading_signals.py` pipeline
+* **⚙️ Quick Start:**
+  ```bash
+  # Install (already in requirements.txt)
+  pip install freqtrade[freqai]
+  
+  # Download historical data
+  ./scripts/download_freqtrade_data.sh 30
+  
+  # Backtest strategy
+  ./scripts/backtest_freqtrade.sh SentientStrategy 30
+  
+  # Paper trading
+  ./scripts/start_freqtrade.sh SentientStrategy
+  
+  # FreqAI paper trading
+  ./scripts/start_freqtrade.sh SentientFreqAIStrategy
+  ```
+* **📊 Pair Whitelist:** BTC/USD, ETH/USD, SOL/USD, XRP/USD, ADA/USD, AVAX/USD, DOT/USD, LINK/USD, MATIC/USD, ATOM/USD
+* **📝 Linux Services:**
+  - `deploy/freqtrade.service` - Basic strategy trading
+  - `deploy/freqtrade-freqai.service` - ML-enhanced trading
+* **📁 Directory Structure:**
+  ```
+  freqtrade_userdata/
+  ├── config.json           # Kraken + FreqAI config
+  ├── strategies/
+  │   ├── SentientStrategy.py        # EMA/RSI/MACD strategy
+  │   └── SentientFreqAIStrategy.py  # ML-enhanced strategy
+  ├── data/                 # Historical data cache
+  └── models/               # Trained FreqAI models
+  ```
+
 ---
 
 ## 🚀 Quick Start

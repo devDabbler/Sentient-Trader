@@ -1,0 +1,39 @@
+[Unit]
+Description=Sentient Trader FreqAI Bot (ML-Enhanced)
+Documentation=https://www.freqtrade.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/Sentient-Trader
+Environment="PATH=/root/Sentient-Trader/venv/bin"
+
+# Load environment variables from .env file
+EnvironmentFile=-/root/Sentient-Trader/.env
+
+# Run freqtrade with FreqAI strategy in dry-run (paper trading) mode
+# Change --dry-run to remove it for live trading
+ExecStart=/root/Sentient-Trader/venv/bin/freqtrade trade \
+    --config /root/Sentient-Trader/freqtrade_userdata/config.json \
+    --strategy SentientFreqAIStrategy \
+    --userdir /root/Sentient-Trader/freqtrade_userdata \
+    --freqaimodel LightGBMRegressor \
+    --dry-run
+
+# Restart policy
+Restart=always
+RestartSec=30
+
+# Logging
+StandardOutput=append:/root/Sentient-Trader/logs/freqtrade-freqai.log
+StandardError=append:/root/Sentient-Trader/logs/freqtrade-freqai.log
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
