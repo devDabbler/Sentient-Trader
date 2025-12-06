@@ -230,15 +230,15 @@ class SentientStrategy(IStrategy):
         elif current_profit >= 0.006:  # 0.6%+ profit
             return -0.015  # Tighten to 1.5%
         
-        # LOSS MANAGEMENT - time-based tightening
-        if trade_duration > 180:  # 3+ hours in loss
-            return -0.012  # Cut at 1.2%
-        elif trade_duration > 120:  # 2+ hours
-            return -0.015  # Tighten to 1.5%
+        # LOSS MANAGEMENT - faster exit on losers
+        if trade_duration > 120:  # 2+ hours - cut losses
+            return -0.01  # Cut at 1%
         elif trade_duration > 60:  # 1+ hour
-            return -0.018  # Tighten to 1.8%
+            return -0.012  # Tighten to 1.2%
+        elif trade_duration > 30:  # 30+ min
+            return -0.015  # Tighten to 1.5%
         else:
-            return -0.02  # Initial 2% - give room to breathe
+            return -0.018  # Initial 1.8% - tighter start
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
