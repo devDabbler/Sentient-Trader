@@ -228,37 +228,13 @@ class SentientStrategy(IStrategy):
     
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate exit signals - TIGHTER to let winners run.
+        Populate exit signals - DISABLED.
         
-        Exit only on strong reversal signals, not weak ones.
-        Let ROI and stoploss handle most exits.
+        Let ROI, stoploss, and trailing stop handle all exits.
+        Signal-based exits were killing profitable trades.
         """
-        dataframe.loc[
-            (
-                # Strong exit: RSI very overbought AND bearish candle
-                (
-                    (dataframe['rsi'] > 78) &
-                    (dataframe['ha_bearish'])
-                ) |
-                
-                # Strong exit: EMA death cross with momentum confirmation
-                (
-                    (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow'])) &
-                    (dataframe['macdhist'] < 0) &
-                    (dataframe['rsi'] > 50)  # Only exit if we had gains
-                ) |
-                
-                # Emergency exit: Price crashed below all EMAs
-                (
-                    (dataframe['close'] < dataframe['ema_trend']) &
-                    (dataframe['close'] < dataframe['ema_slow']) &
-                    (dataframe['close'] < dataframe['ema_fast']) &
-                    (dataframe['ha_bearish']) &
-                    (dataframe['rsi'] < 40)  # Momentum lost
-                )
-            ) &
-            (dataframe['volume'] > 0),
-            'exit_long'] = 1
+        # No signal-based exits - rely on ROI/stoploss/trailing
+        # This prevents premature exits on minor pullbacks
         
         return dataframe
     
