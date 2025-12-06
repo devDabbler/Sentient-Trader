@@ -451,12 +451,19 @@ class DiscordTradeApprovalBot(commands.Bot):
             dollar_with_sign = re.match(r'^\$(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
             plain_number = re.match(r'^(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
             
-            if dollar_with_sign:
-                # Explicit dollar sign always triggers DEX add
+            # Check if there's DEX token context available before routing to DEX handler
+            has_dex_context = message.channel.id in self._channel_token_context
+            
+            if dollar_with_sign and (is_dex_channel or has_dex_context):
+                # Only trigger DEX add if we have token context or are in a DEX channel
                 amount = dollar_with_sign.group(1)
                 logger.info(f"   🎯 Shorthand DEX entry detected (explicit $): ${amount}")
                 await self._handle_dex_add_position(message, f"${amount}")
                 return
+            elif dollar_with_sign:
+                # No DEX context - fall through to _handle_alert_reply for potential crypto trade modification
+                logger.debug(f"   📋 ${dollar_with_sign.group(1)} - No DEX context, checking for trade approval")
+                pass  # Let it fall through to _handle_alert_reply
             elif plain_number and is_dex_channel:
                 # Plain number only triggers DEX add in DEX-specific channels
                 amount = plain_number.group(1)
@@ -611,14 +618,23 @@ class DiscordTradeApprovalBot(commands.Bot):
         # Shorthand DEX position entry with explicit $ sign (e.g., "$25", "$50", "$100")
         # Only triggers for explicit dollar amounts, NOT plain numbers like "1", "2", "3"
         # Plain numbers are reserved for analysis mode shortcuts
+        # IMPORTANT: Only route to DEX if we have token context, otherwise ignore
         original_content = message.content.strip()
         dollar_with_sign_match = re.match(r'^\$(\d+(?:\.\d{2})?)$', original_content.replace(',', ''))
         if dollar_with_sign_match:
-            # Explicit dollar sign triggers DEX add
-            amount = dollar_with_sign_match.group(1)
-            logger.info(f"   🎯 Shorthand DEX entry detected (standalone $): ${amount}")
-            await self._handle_dex_add_position(message, f"${amount}")
-            return
+            # Check for DEX token context before routing to DEX handler
+            has_dex_context = message.channel.id in self._channel_token_context
+            if has_dex_context:
+                amount = dollar_with_sign_match.group(1)
+                logger.info(f"   🎯 Shorthand DEX entry detected (standalone $): ${amount}")
+                await self._handle_dex_add_position(message, f"${amount}")
+                return
+            else:
+                # No DEX context - this might be a stray $ command with no pending approval
+                # Log and silently ignore to avoid confusing error messages
+                logger.debug(f"   📋 ${dollar_with_sign_match.group(1)} - No DEX context and no pending approval, ignoring")
+                # Don't send an error message - user may have mistyped or the approval expired
+                return
         
         # DEX Token MONITOR command: "MONITOR <token_address>" or "TRACK <address>"
         # Adds token to Fast Position Monitor for order flow tracking
