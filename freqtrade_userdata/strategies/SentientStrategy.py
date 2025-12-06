@@ -63,17 +63,17 @@ class SentientStrategy(IStrategy):
         'stoploss_on_exchange_interval': 60  # Check every 60 seconds
     }
     
-    # Hyperopt optimized parameters (85.7% win rate, +0.58% profit)
-    buy_rsi = IntParameter(25, 45, default=27, space='buy')  # Optimized
-    buy_rsi_high = IntParameter(55, 70, default=65, space='buy')  # Optimized
-    sell_rsi = IntParameter(65, 80, default=65, space='sell')  # Optimized
+    # Proven profitable parameters (+0.19%, 62.5% win rate)
+    buy_rsi = IntParameter(25, 45, default=35, space='buy')
+    buy_rsi_high = IntParameter(55, 70, default=60, space='buy')
+    sell_rsi = IntParameter(65, 80, default=72, space='sell')
     
-    ema_fast = IntParameter(8, 15, default=12, space='buy')  # Optimized
-    ema_slow = IntParameter(18, 30, default=25, space='buy')  # Optimized
-    ema_trend = IntParameter(40, 100, default=65, space='buy')  # Optimized
+    ema_fast = IntParameter(8, 15, default=9, space='buy')
+    ema_slow = IntParameter(18, 30, default=21, space='buy')
+    ema_trend = IntParameter(40, 100, default=50, space='buy')
     
-    volume_factor = DecimalParameter(1.0, 2.0, default=1.8, space='buy')  # Optimized - strong volume
-    adx_threshold = IntParameter(15, 30, default=18, space='buy')  # Optimized
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.1, space='buy')
+    adx_threshold = IntParameter(15, 30, default=18, space='buy')
     
     def informative_pairs(self):
         """
