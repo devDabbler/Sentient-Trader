@@ -63,16 +63,16 @@ class SentientStrategy(IStrategy):
         'stoploss_on_exchange': False
     }
     
-    # Hyperparameters for optimization - LOOSENED for more trades
-    buy_rsi = IntParameter(20, 50, default=40, space='buy')  # Was 30 - now triggers earlier
-    buy_rsi_high = IntParameter(60, 80, default=75, space='buy')  # Was 60 - allows higher RSI entries
-    sell_rsi = IntParameter(65, 90, default=80, space='sell')  # Was 70 - holds longer
+    # Hyperparameters for optimization - BALANCED for quality trades
+    buy_rsi = IntParameter(25, 45, default=35, space='buy')  # Moderate - not too oversold
+    buy_rsi_high = IntParameter(55, 70, default=65, space='buy')  # Cap before overbought
+    sell_rsi = IntParameter(65, 80, default=72, space='sell')  # Exit at overbought
     
-    ema_fast = IntParameter(5, 15, default=9, space='buy')  # Faster EMA
-    ema_slow = IntParameter(15, 30, default=21, space='buy')  # Faster slow EMA
-    ema_trend = IntParameter(30, 100, default=50, space='buy')  # Shorter trend EMA
+    ema_fast = IntParameter(8, 15, default=10, space='buy')  # Balanced fast EMA
+    ema_slow = IntParameter(18, 30, default=21, space='buy')  # Balanced slow EMA
+    ema_trend = IntParameter(40, 100, default=55, space='buy')  # Medium trend EMA
     
-    volume_factor = DecimalParameter(0.8, 2.0, default=1.0, space='buy')  # Was 1.5 - less strict
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.2, space='buy')  # Require some volume confirmation
     
     def informative_pairs(self):
         """
@@ -169,35 +169,31 @@ class SentientStrategy(IStrategy):
     
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate entry signals - LOOSENED for more trades.
+        Populate entry signals - BALANCED for quality trades.
         
-        Entry conditions (simplified - only need core signals):
-        1. EMA fast above EMA slow OR crossing above
-        2. RSI in buy zone (not oversold, not overbought)
-        3. Volume decent
-        4. MACD or trend confirmation
+        Entry conditions:
+        1. EMA crossover (actual cross, not just above)
+        2. RSI in buy zone
+        3. Volume confirmation
+        4. At least 2 momentum confirmations
         """
-        # Primary entry: EMA crossover with momentum
+        # Primary entry: EMA crossover with multiple confirmations
         dataframe.loc[
             (
-                # EMA crossover OR fast above slow
-                (
-                    (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) |
-                    (dataframe['ema_fast'] > dataframe['ema_slow'])
-                ) &
+                # EMA crossover (must be fresh cross)
+                (qtpylib.crossed_above(dataframe['ema_fast'], dataframe['ema_slow'])) &
                 
                 # RSI in buy zone
                 (dataframe['rsi'] > self.buy_rsi.value) &
                 (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
-                # Volume decent (loosened)
+                # Volume confirmation
                 (dataframe['volume_ratio'] > self.volume_factor.value) &
                 
-                # At least one momentum confirmation (OR instead of AND)
+                # Price above trend OR MACD positive (need one)
                 (
-                    (dataframe['macdhist'] > 0) |
-                    (dataframe['ha_bullish']) |
-                    (dataframe['close'] > dataframe['ema_trend'])
+                    (dataframe['close'] > dataframe['ema_trend']) |
+                    (dataframe['macdhist'] > 0)
                 ) &
                 
                 # Volume check
@@ -205,17 +201,24 @@ class SentientStrategy(IStrategy):
             ),
             'enter_long'] = 1
         
-        # Secondary entry: RSI bounce from oversold
+        # Secondary entry: Strong RSI bounce from oversold with trend support
         dataframe.loc[
             (
                 # RSI bouncing from oversold
-                (dataframe['rsi'] < 35) &
+                (dataframe['rsi'] < 30) &
                 (dataframe['rsi'] > dataframe['rsi'].shift(1)) &
+                (dataframe['rsi'].shift(1) < dataframe['rsi'].shift(2)) &  # Confirmed reversal
                 
                 # Price near lower bollinger
-                (dataframe['close'] < dataframe['bb_middle']) &
+                (dataframe['close'] <= dataframe['bb_lower'] * 1.02) &
                 
-                # Some volume
+                # MACD turning up
+                (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
+                
+                # Volume spike
+                (dataframe['volume_ratio'] > 1.5) &
+                
+                # Volume check
                 (dataframe['volume'] > 0)
             ),
             'enter_long'] = 1
