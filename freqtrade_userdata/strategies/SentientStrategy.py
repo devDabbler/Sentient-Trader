@@ -26,16 +26,17 @@ class SentientStrategy(IStrategy):
     # Strategy interface version
     INTERFACE_VERSION = 3
     
-    # Minimal ROI designed for the strategy
+    # Minimal ROI - more realistic targets for 5m scalping
     minimal_roi = {
-        "0": 0.10,    # 10% profit target
-        "30": 0.05,   # 5% after 30 minutes
-        "60": 0.03,   # 3% after 1 hour
-        "120": 0.01   # 1% after 2 hours
+        "0": 0.03,    # 3% profit target immediately
+        "20": 0.02,   # 2% after 20 minutes
+        "40": 0.015,  # 1.5% after 40 minutes
+        "60": 0.01,   # 1% after 1 hour
+        "120": 0.005  # 0.5% after 2 hours (take small profit)
     }
     
-    # Stoploss
-    stoploss = -0.05  # 5% stoploss
+    # Stoploss - tighter for scalping
+    stoploss = -0.02  # 2% stoploss (tighter risk management)
     
     # Trailing stoploss
     trailing_stop = True
@@ -227,32 +228,33 @@ class SentientStrategy(IStrategy):
     
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate exit signals.
+        Populate exit signals - TIGHTER to let winners run.
         
-        Exit conditions:
-        1. RSI overbought
-        2. EMA fast crosses below EMA slow
-        3. MACD histogram turns negative
-        4. Heikin Ashi bearish
+        Exit only on strong reversal signals, not weak ones.
+        Let ROI and stoploss handle most exits.
         """
         dataframe.loc[
             (
-                # RSI overbought
-                (dataframe['rsi'] > self.sell_rsi.value) |
-                
-                # EMA bearish crossover
-                (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow'])) |
-                
-                # MACD turns negative with momentum loss
+                # Strong exit: RSI very overbought AND bearish candle
                 (
-                    (dataframe['macdhist'] < 0) & 
-                    (dataframe['macdhist'].shift(1) > 0)
+                    (dataframe['rsi'] > 78) &
+                    (dataframe['ha_bearish'])
                 ) |
                 
-                # Price breaks below trend
+                # Strong exit: EMA death cross with momentum confirmation
+                (
+                    (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow'])) &
+                    (dataframe['macdhist'] < 0) &
+                    (dataframe['rsi'] > 50)  # Only exit if we had gains
+                ) |
+                
+                # Emergency exit: Price crashed below all EMAs
                 (
                     (dataframe['close'] < dataframe['ema_trend']) &
-                    (dataframe['ha_bearish'])
+                    (dataframe['close'] < dataframe['ema_slow']) &
+                    (dataframe['close'] < dataframe['ema_fast']) &
+                    (dataframe['ha_bearish']) &
+                    (dataframe['rsi'] < 40)  # Momentum lost
                 )
             ) &
             (dataframe['volume'] > 0),
