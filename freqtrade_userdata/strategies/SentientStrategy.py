@@ -72,8 +72,8 @@ class SentientStrategy(IStrategy):
     ema_slow = IntParameter(18, 30, default=21, space='buy')  # Balanced slow EMA
     ema_trend = IntParameter(40, 100, default=50, space='buy')  # Shorter trend EMA
     
-    volume_factor = DecimalParameter(1.0, 2.0, default=1.3, space='buy')  # Stronger volume confirmation
-    adx_threshold = IntParameter(18, 30, default=22, space='buy')  # ADX trend strength
+    volume_factor = DecimalParameter(1.0, 2.0, default=1.1, space='buy')  # Light volume confirmation
+    adx_threshold = IntParameter(15, 30, default=18, space='buy')  # ADX trend strength (lower = more trades)
     
     def informative_pairs(self):
         """
@@ -173,7 +173,7 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # High-quality entry: EMA cross + ADX trend filter + momentum + trend alignment
+        # Quality entry: EMA cross + trend filter + momentum (balanced filters)
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -182,28 +182,17 @@ class SentientStrategy(IStrategy):
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # Trend alignment: EMA stack bullish (20 > 50)
-                (dataframe['ema_20'] > dataframe['ema_50']) &
-                
-                # ADX shows trending market (avoid chop)
+                # ADX shows some trend (avoid pure chop)
                 (dataframe['adx'] > self.adx_threshold.value) &
                 
-                # RSI in sweet spot (not oversold, not overbought)
-                (dataframe['rsi'] > self.buy_rsi.value) &
+                # RSI not overbought (room to run)
                 (dataframe['rsi'] < self.buy_rsi_high.value) &
                 
-                # MACD histogram positive AND rising (strong momentum)
+                # MACD histogram positive (momentum confirmation)
                 (dataframe['macdhist'] > 0) &
-                (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
                 
-                # MACD line above signal (bullish)
-                (dataframe['macd'] > dataframe['macdsignal']) &
-                
-                # Volume spike (interest confirmation)
+                # Volume above average
                 (dataframe['volume_ratio'] > self.volume_factor.value) &
-                
-                # Heikin Ashi bullish (trend confirmation)
-                (dataframe['ha_bullish']) &
                 
                 # Volume exists
                 (dataframe['volume'] > 0)
