@@ -228,13 +228,33 @@ class SentientStrategy(IStrategy):
     
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        Populate exit signals - DISABLED.
+        Populate exit signals - HYBRID approach.
         
-        Let ROI, stoploss, and trailing stop handle all exits.
-        Signal-based exits were killing profitable trades.
+        Signal exits only trigger on STRONG reversals.
+        Stoploss handles loss cutting, ROI handles profit taking.
+        Signals protect profits on major trend changes.
         """
-        # No signal-based exits - rely on ROI/stoploss/trailing
-        # This prevents premature exits on minor pullbacks
+        # Only exit on very strong reversal signals
+        dataframe.loc[
+            (
+                # Major reversal: RSI extreme overbought + multiple bearish confirmations
+                (
+                    (dataframe['rsi'] > 80) &
+                    (dataframe['ha_bearish']) &
+                    (dataframe['macdhist'] < dataframe['macdhist'].shift(1)) &  # MACD declining
+                    (dataframe['close'] < dataframe['open'])  # Red candle
+                ) |
+                
+                # Trend breakdown: Price crashed through all support
+                (
+                    (dataframe['close'] < dataframe['bb_lower']) &  # Below lower BB
+                    (dataframe['rsi'] < 25) &  # Extremely oversold
+                    (dataframe['ha_bearish']) &
+                    (qtpylib.crossed_below(dataframe['ema_fast'], dataframe['ema_slow']))  # Death cross
+                )
+            ) &
+            (dataframe['volume'] > 0),
+            'exit_long'] = 1
         
         return dataframe
     
