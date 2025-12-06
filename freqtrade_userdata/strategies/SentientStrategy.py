@@ -11,6 +11,7 @@ from typing import Optional, Union
 
 from freqtrade.strategy import IStrategy, merge_informative_pair
 from freqtrade.strategy.parameters import IntParameter, DecimalParameter, BooleanParameter
+from freqtrade.persistence import Trade
 import talib.abstract as ta
 from technical import qtpylib
 
@@ -50,8 +51,8 @@ class SentientStrategy(IStrategy):
     # Run on every new candle
     process_only_new_candles = True
     
-    # Use custom stoploss
-    use_custom_stoploss = False
+    # Use custom stoploss for dynamic risk management
+    use_custom_stoploss = True
     
     # Number of candles for startup
     startup_candle_count: int = 100
@@ -191,33 +192,42 @@ class SentientStrategy(IStrategy):
                 # Volume confirmation
                 (dataframe['volume_ratio'] > self.volume_factor.value) &
                 
-                # Price above trend OR MACD positive (need one)
-                (
-                    (dataframe['close'] > dataframe['ema_trend']) |
-                    (dataframe['macdhist'] > 0)
-                ) &
+                # Price above trend AND MACD positive (need both)
+                (dataframe['close'] > dataframe['ema_trend']) &
+                (dataframe['macdhist'] > 0) &
+                
+                # ADX showing trend (avoid choppy markets)
+                (dataframe['adx'] > 20) &
                 
                 # Volume check
                 (dataframe['volume'] > 0)
             ),
             'enter_long'] = 1
         
-        # Secondary entry: Strong RSI bounce from oversold with trend support
+        # Secondary entry: Strong RSI bounce - ONLY in uptrend (avoid falling knives)
         dataframe.loc[
             (
+                # Must be in uptrend (EMA alignment)
+                (dataframe['trend_bullish']) &
+                
                 # RSI bouncing from oversold
-                (dataframe['rsi'] < 30) &
+                (dataframe['rsi'] < 35) &
                 (dataframe['rsi'] > dataframe['rsi'].shift(1)) &
                 (dataframe['rsi'].shift(1) < dataframe['rsi'].shift(2)) &  # Confirmed reversal
                 
-                # Price near lower bollinger
+                # Price near lower bollinger but above EMA trend
                 (dataframe['close'] <= dataframe['bb_lower'] * 1.02) &
+                (dataframe['close'] > dataframe['ema_trend']) &  # Must be above trend
                 
-                # MACD turning up
+                # MACD turning up AND positive
                 (dataframe['macdhist'] > dataframe['macdhist'].shift(1)) &
+                (dataframe['macd'] > dataframe['macdsignal']) &  # MACD above signal
                 
                 # Volume spike
                 (dataframe['volume_ratio'] > 1.5) &
+                
+                # ADX showing trend strength
+                (dataframe['adx'] > 20) &
                 
                 # Volume check
                 (dataframe['volume'] > 0)
@@ -257,6 +267,40 @@ class SentientStrategy(IStrategy):
             'exit_long'] = 1
         
         return dataframe
+    
+    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime,
+                         current_rate: float, current_profit: float,
+                         after_fill: bool, **kwargs) -> Optional[float]:
+        """
+        Dynamic stoploss that:
+        1. Uses tight initial stop (-2%)
+        2. Moves to breakeven after 1% profit
+        3. Trails aggressively after 2% profit
+        """
+        # Get dataframe for ATR
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        
+        if len(dataframe) < 1:
+            return self.stoploss  # Default -2%
+        
+        last_candle = dataframe.iloc[-1]
+        
+        # Calculate ATR-based stop (1.5x ATR)
+        atr_pct = (last_candle['atr'] / current_rate) if current_rate > 0 else 0.02
+        atr_stop = -min(atr_pct * 1.5, 0.03)  # Cap at -3%
+        
+        # Profit-based stop adjustment
+        if current_profit >= 0.03:  # 3%+ profit: trail at 1.5%
+            return -0.015
+        elif current_profit >= 0.02:  # 2%+ profit: trail at 1%
+            return -0.01
+        elif current_profit >= 0.01:  # 1%+ profit: move to breakeven + small buffer
+            return -0.003  # -0.3% (basically breakeven with fees)
+        elif current_profit >= 0.005:  # 0.5%+ profit: tighten stop
+            return max(atr_stop, -0.015)  # Tighter of ATR or -1.5%
+        else:
+            # Use ATR-based stop, but never worse than -2.5%
+            return max(atr_stop, -0.025)
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
