@@ -35,8 +35,8 @@ class SentientStrategy(IStrategy):
         "240": 0.01    # 1% after 4 hours
     }
     
-    # Stoploss - balanced risk
-    stoploss = -0.02  # 2% stoploss
+    # Stoploss - give trades room to work
+    stoploss = -0.025  # 2.5% stoploss (custom_stoploss tightens over time)
     
     # Trailing stoploss - DISABLED (was causing losses)
     # The custom_stoploss handles profit protection better
@@ -172,7 +172,8 @@ class SentientStrategy(IStrategy):
         Simple entry: EMA crossover in uptrend with confirmation.
         Only ONE entry type to avoid overtrading.
         """
-        # Entry 1: EMA golden cross with trend confirmation
+        # Single entry: EMA golden cross with strong confirmation
+        # Keep it simple - one high-quality entry signal
         dataframe.loc[
             (
                 # EMA golden cross (fresh crossover only)
@@ -181,42 +182,15 @@ class SentientStrategy(IStrategy):
                 # Price above longer-term trend
                 (dataframe['close'] > dataframe['ema_trend']) &
                 
-                # RSI not overbought (room to run)
-                (dataframe['rsi'] > 35) &
+                # RSI in sweet spot (not oversold, not overbought)
+                (dataframe['rsi'] > 40) &
                 (dataframe['rsi'] < 60) &
                 
                 # MACD histogram positive (momentum confirmation)
                 (dataframe['macdhist'] > 0) &
                 
                 # Volume spike (interest confirmation)
-                (dataframe['volume_ratio'] > 1.1) &
-                
-                # Volume exists
-                (dataframe['volume'] > 0)
-            ),
-            'enter_long'] = 1
-        
-        # Entry 2: Strong trend continuation (buy dips in uptrend)
-        dataframe.loc[
-            (
-                # Already in uptrend (EMA alignment)
-                (dataframe['ema_fast'] > dataframe['ema_slow']) &
-                (dataframe['ema_slow'] > dataframe['ema_trend']) &
-                
-                # RSI pulled back but not oversold (healthy dip)
-                (dataframe['rsi'] > 40) &
-                (dataframe['rsi'] < 55) &
-                (dataframe['rsi'] > dataframe['rsi'].shift(1)) &  # RSI turning up
-                
-                # Price bouncing off EMA support
-                (dataframe['low'] <= dataframe['ema_fast'] * 1.005) &
-                (dataframe['close'] > dataframe['ema_fast']) &
-                
-                # MACD still positive
-                (dataframe['macd'] > dataframe['macdsignal']) &
-                
-                # Bullish candle
-                (dataframe['close'] > dataframe['open']) &
+                (dataframe['volume_ratio'] > 1.2) &
                 
                 # Volume exists
                 (dataframe['volume'] > 0)
@@ -238,33 +212,20 @@ class SentientStrategy(IStrategy):
                         current_rate: float, current_profit: float,
                         after_fill: bool, **kwargs) -> float:
         """
-        Profit-protecting stoploss:
-        - In profit: protect gains with tighter stop
-        - In loss: time-based tightening to cut losers
+        Simple stoploss: time-based tightening only.
+        Let ROI handle profit-taking, stoploss handles risk.
         """
-        # PROFIT PROTECTION - most important
-        if current_profit >= 0.025:  # 2.5%+ profit
-            return -0.01  # Lock in at least 1.5% profit
-        elif current_profit >= 0.02:  # 2%+ profit
-            return -0.012  # Lock in at least 0.8% profit
-        elif current_profit >= 0.015:  # 1.5%+ profit
-            return -0.01  # Lock in at least 0.5% profit
-        elif current_profit >= 0.01:  # 1%+ profit
-            return -0.008  # Move to ~breakeven
-        elif current_profit >= 0.005:  # 0.5%+ profit
-            return -0.01  # Tighter stop
-        
-        # LOSS MANAGEMENT - time-based tightening
+        # Time-based loss cutting (don't hold losers forever)
         trade_duration = (current_time - trade.open_date_utc).total_seconds() / 60
         
-        if trade_duration > 180:  # 3+ hours in loss
+        if trade_duration > 240:  # 4+ hours
             return -0.012  # Cut at 1.2%
-        elif trade_duration > 120:  # 2+ hours
+        elif trade_duration > 180:  # 3+ hours
             return -0.015  # Cut at 1.5%
-        elif trade_duration > 60:  # 1+ hour
+        elif trade_duration > 120:  # 2+ hours
             return -0.018  # Tighten to 1.8%
         else:
-            return -0.02  # Initial 2%
+            return -0.025  # Initial 2.5% - give room to breathe
     
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
