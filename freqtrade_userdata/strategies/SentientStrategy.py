@@ -26,13 +26,14 @@ class SentientStrategy(IStrategy):
     # Strategy interface version
     INTERFACE_VERSION = 3
     
-    # Minimal ROI - take profits at key levels
+    # Minimal ROI - slightly higher targets for better R:R
     minimal_roi = {
-        "0": 0.04,     # 4% immediate (rare but take it)
-        "30": 0.025,   # 2.5% after 30 min
-        "60": 0.02,    # 2% after 1 hour
-        "120": 0.015,  # 1.5% after 2 hours
-        "240": 0.01    # 1% after 4 hours
+        "0": 0.05,     # 5% immediate (rare but take it)
+        "30": 0.03,    # 3% after 30 min
+        "60": 0.025,   # 2.5% after 1 hour
+        "120": 0.02,   # 2% after 2 hours
+        "240": 0.015,  # 1.5% after 4 hours
+        "360": 0.01    # 1% after 6 hours (take small profit)
     }
     
     # Stoploss - give trades room to work
