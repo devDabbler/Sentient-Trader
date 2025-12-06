@@ -392,7 +392,14 @@ async def run_pumpfun_gambler():
     
     def on_new_token(token):
         """Sync wrapper for async callback"""
-        asyncio.create_task(on_new_token_async(token))
+        print(f"[CALLBACK] on_new_token called for {token.symbol}", flush=True)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(on_new_token_async(token))
+        except RuntimeError as e:
+            logger.error(f"No running event loop for callback: {e}")
+        except Exception as e:
+            logger.error(f"Callback wrapper error: {e}")
     
     async def on_migration_async(migration):
         """Called when token graduates - this is the key gambling moment"""
@@ -432,7 +439,13 @@ async def run_pumpfun_gambler():
     
     def on_migration(migration):
         """Sync wrapper for async callback"""
-        asyncio.create_task(on_migration_async(migration))
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(on_migration_async(migration))
+        except RuntimeError as e:
+            logger.error(f"No running event loop for migration callback: {e}")
+        except Exception as e:
+            logger.error(f"Migration callback wrapper error: {e}")
     
     monitor.set_callbacks(
         on_new_token=on_new_token,
