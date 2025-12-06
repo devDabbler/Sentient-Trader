@@ -58,3 +58,4 @@ sentence-transformers>=2.2.0  # Optional: Local embeddings (alternative to Ollam
 # Freqtrade + FreqAI - ML-enhanced crypto trading
 # Includes: LightGBM, XGBoost, CatBoost, scikit-learn
 freqtrade[freqai]>=2025.11
+optuna>=3.2.0  # Hyperparameter optimization for FreqAI
